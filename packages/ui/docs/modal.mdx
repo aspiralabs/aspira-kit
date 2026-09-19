@@ -1,0 +1,113 @@
+---
+eyebrow: Modal
+title: Modal
+group: Overlays
+description: The app uses @ebay/nice-modal-react to decouple modal definition from invocation. Wrap a component with NiceModal.create once, then open it imperatively from anywhere via NiceModal.show(YourModal, props). The <Modal> core component (@aspiralabs/ui) provides the chrome — animated backdrop, centered panel, close button, title / description / icon slot.
+---
+
+export const PlaygroundDemoModal = NiceModal.create(({ title, message }) => {
+    const modal = useModal();
+    return (
+        <Modal className="max-w-[420px]" title={title} description={message} icon="info" modal={modal}>
+            <footer className="justify-center gap-2 flex w-full mt-4">
+                <Button type="button" variant="secondary" onClick={() => modal.hide()}>
+                    Close
+                </Button>
+                <Button type="button" onClick={() => modal.hide()}>
+                    Got it
+                </Button>
+            </footer>
+        </Modal>
+    );
+});
+
+## Live demo
+
+Click to open a modal via `NiceModal.show()`.
+
+<Demo>
+    <div>
+        <Button
+            onClick={() =>
+                NiceModal.show(PlaygroundDemoModal, {
+                    title: 'Hello from the playground',
+                    message:
+                        'This modal was registered with NiceModal.create and opened by NiceModal.show — same pattern every modal in this app uses.',
+                })
+            }
+        >
+            Open demo modal
+        </Button>
+    </div>
+</Demo>
+
+## 1. Define the modal
+
+Wrap the component with `NiceModal.create`. Use the `useModal()` hook to get a handle, and pass it as the `modal` prop to `<Modal>`. Default-export so callers can reference it by path. See `components/modals/general-confirmation.tsx`.
+
+```tsx
+import NiceModal, { useModal } from '@ebay/nice-modal-react';
+import { Modal } from '@aspiralabs/ui';
+import { Button } from '@aspiralabs/ui';
+
+export default NiceModal.create(
+    ({ title, message, onConfirm }: { title: string; message: string; onConfirm: (modal: any) => void }) => {
+        const modal = useModal();
+
+        return (
+            <Modal className="max-w-[400px]" title={title} description={message} icon="error" modal={modal}>
+                <footer className="justify-center gap-2 flex w-full mt-4">
+                    <Button variant="secondary" onClick={() => modal.hide()}>Cancel</Button>
+                    <Button onClick={() => onConfirm(modal)}>Confirm</Button>
+                </footer>
+            </Modal>
+        );
+    },
+);
+```
+
+## 2. Invoke it from anywhere
+
+Import the modal module and call `NiceModal.show()`. Props passed to `show` become the component's props (without `modal`, which the provider injects via `useModal()`).
+
+```tsx
+import NiceModal from '@ebay/nice-modal-react';
+import GeneralConfirmationModal from '@/components/modals/general-confirmation';
+
+// Open the modal imperatively from anywhere:
+NiceModal.show(GeneralConfirmationModal, {
+    title: 'Delete this item?',
+    message: 'This cannot be undone.',
+    onConfirm: (modal) => {
+        // …do the work, then:
+        modal.hide();
+    },
+});
+```
+
+## Requires the ModalProvider
+
+NiceModal needs a provider at the app root. This project already wraps the app in `<ModalProvider>` inside `app/providers.tsx` — you don't need to add it again.
+
+## `<Modal>` props
+
+| Prop             | Type                  | Default | Description                                                            |
+| ---------------- | --------------------- | ------- | ---------------------------------------------------------------------- |
+| `modal`          | `NiceModalHandler`    | —       | Required. Result of `useModal()` — drives visibility and cleanup.      |
+| `children`       | `ReactNode`           | —       | Body content.                                                          |
+| `title`          | `string`              | —       | When present, renders the header (with description + icon if passed). |
+| `description`   | `string`              | —       | Sub-title under the title.                                             |
+| `icon`           | `string`              | —       | Material icon name shown above the title.                              |
+| `width`          | `number \| string`    | `500`   | Panel width. Pass a number (px) or a CSS value.                        |
+| `onOutsideClick` | `() => void`          | —       | Fires before the modal hides on backdrop click.                        |
+| `className`      | `string`              | —       | Merged onto the panel.                                                 |
+
+## NiceModal APIs
+
+| API                            | Purpose                                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `NiceModal.create(Component)`  | Wraps a component so it can be opened imperatively. Call once per modal file.                          |
+| `NiceModal.show(M, props)`     | Mounts the modal with the given props and sets visibility to true.                                     |
+| `useModal()`                   | Hook inside a created modal. Gives you `visible`, `hide()`, `remove()`.                                |
+| `modal.hide()`                 | Animate out. Panel stays mounted briefly so exit transitions can play.                                 |
+| `modal.remove()`               | Unmount from the tree. The core Modal auto-calls this ~300ms after hide.                               |

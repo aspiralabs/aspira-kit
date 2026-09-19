@@ -1,0 +1,140 @@
+---
+eyebrow: Toast
+title: Toast
+group: Overlays
+description: Transient notification triggered imperatively — no component to render, just call toast(…) from anywhere. Built on Sonner. The <ToasterPrimitive /> host lives in app/providers.tsx — already wired, no need to mount it again. Import the toast function directly from sonner.
+---
+
+export const NeutralToastButton = () => (
+    <Button
+        variant="secondary"
+        onClick={() => toast('Heads up — your session expires in 5 minutes')}
+    >
+        toast(…)
+    </Button>
+);
+
+export const SuccessToastButton = () => (
+    <Button variant="secondary" onClick={() => toast.success('Profile updated')}>
+        toast.success(…)
+    </Button>
+);
+
+export const ErrorToastButton = () => (
+    <Button variant="secondary" onClick={() => toast.error('Something went wrong')}>
+        toast.error(…)
+    </Button>
+);
+
+export const DescriptionToastButton = () => (
+    <Button
+        variant="secondary"
+        onClick={() =>
+            toast.error('Something went wrong', {
+                description: 'Check your connection and try again.',
+            })
+        }
+    >
+        With description
+    </Button>
+);
+
+export const ActionToastButton = () => (
+    <Button
+        variant="secondary"
+        onClick={() =>
+            toast('Item archived', {
+                action: {
+                    label: 'Undo',
+                    onClick: () => toast.success('Restored'),
+                },
+            })
+        }
+    >
+        With action
+    </Button>
+);
+
+export const PromiseToastButton = () => (
+    <Button
+        variant="secondary"
+        onClick={() =>
+            toast.promise(new Promise((resolve) => setTimeout(resolve, 1500)), {
+                loading: 'Saving…',
+                success: 'Saved',
+                error: 'Failed to save',
+            })
+        }
+    >
+        toast.promise(…)
+    </Button>
+);
+
+## Usage
+
+```tsx
+import { toast } from 'sonner';
+
+// Success
+toast.success('Profile updated');
+
+// Error
+toast.error('Something went wrong', {
+    description: 'Check your connection and try again.',
+});
+
+// Neutral
+toast('Heads up — your session expires in 5 minutes');
+
+// With an action
+toast('Item archived', {
+    action: {
+        label: 'Undo',
+        onClick: () => restore(),
+    },
+});
+
+// Promise — auto-resolves to success/error with a loading state
+toast.promise(saveChanges(), {
+    loading: 'Saving…',
+    success: 'Saved',
+    error: 'Failed to save',
+});
+```
+
+## Fire a toast
+
+Click any button. Toasts land at bottom-center (defined in the `ToasterPrimitive` defaults).
+
+<Demo>
+    <div className="flex flex-wrap gap-3">
+        <NeutralToastButton />
+        <SuccessToastButton />
+        <ErrorToastButton />
+        <DescriptionToastButton />
+        <ActionToastButton />
+        <PromiseToastButton />
+    </div>
+</Demo>
+
+## Common APIs
+
+| Call                              | Purpose                                                                          |
+| --------------------------------- | -------------------------------------------------------------------------------- |
+| `toast(message, options?)`        | Neutral toast.                                                                   |
+| `toast.success(message, options?)`| Positive feedback after a successful action.                                     |
+| `toast.error(message, options?)`  | Failure state — the most common pattern in error handlers.                       |
+| `toast.info / toast.warning`      | Informational / warning variants when you need to distinguish from neutral/error.|
+| `toast.loading(message)`          | Spinner toast — returns an id you can update via toast.success/error later.      |
+| `toast.promise(p, states)`        | Shortcut for loading → success/error from a promise.                             |
+| `toast.dismiss(id?)`              | Dismiss a specific toast (by id) or all toasts.                                  |
+
+## Common options
+
+| Option                   | Type                       | Description                                                                                              |
+| ------------------------ | -------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `description`            | `string \| ReactNode`      | Sub-line under the title.                                                                                |
+| `action`                 | `{ label, onClick }`       | Renders a button inside the toast (e.g. Undo).                                                           |
+| `duration`               | `number`                   | Milliseconds before auto-dismiss. Default: 4000.                                                         |
+| `id`                     | `string \| number`         | Stable id — reuse to update an existing toast (e.g. promote a loading toast to success).                 |
+| `onDismiss / onAutoClose`| `(t) => void`              | Fires when the toast closes (manually / automatically).                                                  |

@@ -72,6 +72,10 @@
     --color-brand-foreground: var(--brand-foreground);
     --color-muted: var(--muted);
     --color-primary-hover: var(--primary-hover);
+    --color-alert-blue: var(--alert-blue);
+    --color-alert-blue-foreground: var(--alert-blue-foreground);
+    --color-alert-success: var(--alert-success);
+    --color-alert-success-foreground: var(--alert-success-foreground);
     --color-brand-blue: var(--brand-blue);
     --color-brand-blue-foreground: var(--brand-blue-foreground);
     --color-input-alt: var(--input-alt);
@@ -176,6 +180,12 @@
 
     --brand: #b5d99c;
     --brand-foreground: #263635;
+
+    /* Alert variants. Formerly Tailwind blue-50/600 and teal-50/700 in the component; now tokens (2026-09-19). */
+    --alert-blue: #eff6ff;
+    --alert-blue-foreground: #2563eb;
+    --alert-success: #f0fdfa;
+    --alert-success-foreground: #0f766e;
 
     --brand-blue: #2b65f6;
     --brand-blue-foreground: #ffffff;

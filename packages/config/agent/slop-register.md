@@ -4,7 +4,7 @@ Every review comment that repeats is a guardrail nobody wrote yet. Log the patte
 
 ## Open
 
-(none yet)
+- **JSX ternaries in @aspiralabs/ui** (49 across 17 files, migrated from SAAS_BOILER 2026-09-19). `packages/ui/eslint.config.mjs` turns `no-restricted-syntax` off for `src/**/*.tsx` until they are rewritten. Files: choice-box, input-select, toggle-box, option-picker-primitive, page-header, data-table, standard-toolbar, data-infinite-table, form-demo, tooltip, textarea, slider, menu, input, input-otp, form, editable-text.
 
 ## Promoted
 

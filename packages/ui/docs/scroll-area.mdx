@@ -1,0 +1,109 @@
+---
+eyebrow: Scroll Area
+title: ScrollArea
+group: Layout
+description: Styled scrollable container built on Radix ScrollArea — cross-platform custom scrollbars that don't eat layout width. Takes arbitrary children. For a data-driven, list-virtualized version, see VirtualizedScrollArea. Import from @aspiralabs/ui.
+---
+
+## Usage
+
+```tsx
+import { ScrollArea } from '@aspiralabs/ui';
+
+<ScrollArea className="h-64 rounded-md border">
+    <div className="p-4">{/* any content */}</div>
+</ScrollArea>
+```
+
+## Vertical (default)
+
+Scroll the list below.
+
+<Demo>
+    <ScrollArea className="h-64 max-w-md rounded-md border border-border">
+        <div className="p-4 space-y-2">
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 1</span><span className="text-foreground-subtext">Row 1 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 2</span><span className="text-foreground-subtext">Row 2 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 3</span><span className="text-foreground-subtext">Row 3 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 4</span><span className="text-foreground-subtext">Row 4 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 5</span><span className="text-foreground-subtext">Row 5 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 6</span><span className="text-foreground-subtext">Row 6 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 7</span><span className="text-foreground-subtext">Row 7 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 8</span><span className="text-foreground-subtext">Row 8 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 9</span><span className="text-foreground-subtext">Row 9 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 10</span><span className="text-foreground-subtext">Row 10 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 11</span><span className="text-foreground-subtext">Row 11 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 12</span><span className="text-foreground-subtext">Row 12 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 13</span><span className="text-foreground-subtext">Row 13 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 14</span><span className="text-foreground-subtext">Row 14 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 15</span><span className="text-foreground-subtext">Row 15 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 16</span><span className="text-foreground-subtext">Row 16 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 17</span><span className="text-foreground-subtext">Row 17 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 18</span><span className="text-foreground-subtext">Row 18 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 19</span><span className="text-foreground-subtext">Row 19 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 20</span><span className="text-foreground-subtext">Row 20 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 21</span><span className="text-foreground-subtext">Row 21 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 22</span><span className="text-foreground-subtext">Row 22 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 23</span><span className="text-foreground-subtext">Row 23 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 24</span><span className="text-foreground-subtext">Row 24 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 25</span><span className="text-foreground-subtext">Row 25 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 26</span><span className="text-foreground-subtext">Row 26 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 27</span><span className="text-foreground-subtext">Row 27 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 28</span><span className="text-foreground-subtext">Row 28 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 29</span><span className="text-foreground-subtext">Row 29 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 30</span><span className="text-foreground-subtext">Row 30 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 31</span><span className="text-foreground-subtext">Row 31 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 32</span><span className="text-foreground-subtext">Row 32 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 33</span><span className="text-foreground-subtext">Row 33 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 34</span><span className="text-foreground-subtext">Row 34 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 35</span><span className="text-foreground-subtext">Row 35 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 36</span><span className="text-foreground-subtext">Row 36 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 37</span><span className="text-foreground-subtext">Row 37 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 38</span><span className="text-foreground-subtext">Row 38 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 39</span><span className="text-foreground-subtext">Row 39 of 40</span></div>
+            <div className="flex items-center justify-between text-sm"><span className="text-foreground">Item 40</span><span className="text-foreground-subtext">Row 40 of 40</span></div>
+        </div>
+    </ScrollArea>
+</Demo>
+
+## Horizontal
+
+Pass `orientation="horizontal"`.
+
+<Demo>
+    <ScrollArea orientation="horizontal" className="max-w-md rounded-md border border-border">
+        <div className="flex gap-3 p-4 whitespace-nowrap">
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 1</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 2</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 3</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 4</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 5</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 6</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 7</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 8</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 9</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 10</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 11</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 12</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 13</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 14</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 15</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 16</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 17</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 18</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 19</div>
+            <div className="size-24 shrink-0 rounded-md bg-surface flex items-center justify-center text-sm text-foreground-subtext">Tile 20</div>
+        </div>
+    </ScrollArea>
+</Demo>
+
+## Props
+
+Accepts every Radix ScrollArea Root prop plus the additions below.
+
+| Prop                | Type                       | Default    | Description                                                                            |
+| ------------------- | -------------------------- | ---------- | -------------------------------------------------------------------------------------- |
+| `orientation`       | `vertical \| horizontal`   | `vertical` | Which axis the scrollbar tracks.                                                       |
+| `className`         | `string`                   | —          | Applied to the root — commonly sets height.                                            |
+| `viewPortClassName` | `string`                   | —          | Applied to the Radix Viewport. Use when the inner scroll surface needs custom styling. |
+| `viewPortRef`       | `Ref<HTMLDivElement>`      | —          | Ref to the Viewport — used by VirtualizedScrollArea for virtual list anchoring.        |

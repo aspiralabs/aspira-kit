@@ -1,0 +1,97 @@
+---
+eyebrow: Card
+title: Card
+group: Surfaces
+description: Layout container with matched sub-components for header, title, description, action, content, and footer. Grid-based header supports an optional action slot on the right. Import from @aspiralabs/ui.
+---
+
+## Usage
+
+```tsx
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@aspiralabs/ui';
+
+<Card>
+    <CardHeader>
+        <CardTitle>Title</CardTitle>
+        <CardDescription>Supporting copy.</CardDescription>
+    </CardHeader>
+    <CardContent>Body content.</CardContent>
+    <CardFooter>Actions</CardFooter>
+</Card>
+```
+
+## Basic
+
+Header (title + description) over content.
+
+<Demo>
+    <div className="max-w-md">
+        <Card>
+            <CardHeader>
+                <CardTitle>Weekly report</CardTitle>
+                <CardDescription>A summary of activity across your workspace.</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <p className="text-sm text-foreground-subtext">Card content goes here. Any children — plain text, lists, metrics, charts.</p>
+            </CardContent>
+        </Card>
+    </div>
+</Demo>
+
+## With header action
+
+`CardAction` inside a `CardHeader` pins to the top-right via the header's grid.
+
+<Demo>
+    <div className="max-w-md">
+        <Card>
+            <CardHeader>
+                <CardTitle>Billing</CardTitle>
+                <CardDescription>Manage your subscription and invoices.</CardDescription>
+                <CardAction>
+                    <Button size="sm" variant="secondary">
+                        Manage
+                    </Button>
+                </CardAction>
+            </CardHeader>
+            <CardContent>
+                <p className="text-sm text-foreground-subtext">Plan: Pro · renews in 12 days</p>
+            </CardContent>
+        </Card>
+    </div>
+</Demo>
+
+## With footer
+
+Footer sits below content — typical home for primary actions.
+
+<Demo>
+    <div className="max-w-md">
+        <Card>
+            <CardHeader>
+                <CardTitle>Invite teammates</CardTitle>
+                <CardDescription>Send an invite link by email.</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <p className="text-sm text-foreground-subtext">You can invite up to 10 people on your current plan.</p>
+            </CardContent>
+            <CardFooter className="gap-2">
+                <Button variant="secondary">Cancel</Button>
+                <div className="flex-1" />
+                <Button>Send invite</Button>
+            </CardFooter>
+        </Card>
+    </div>
+</Demo>
+
+## Sub-components
+
+| Export            | Slot               | Notes                                                                          |
+| ----------------- | ------------------ | ------------------------------------------------------------------------------ |
+| `Card`            | `card`             | Root container. Border, rounded, padded, flex-column.                          |
+| `CardHeader`      | `card-header`      | Grid wrapper — title/description stacked, optional action on the right.        |
+| `CardTitle`       | `card-title`       | text-2xl, semibold.                                                            |
+| `CardDescription` | `card-description` | text-sm, muted.                                                                |
+| `CardAction`      | `card-action`      | Self-ends to the top-right of the header grid.                                 |
+| `CardContent`     | `card-content`     | Unstyled body slot.                                                            |
+| `CardFooter`      | `card-footer`      | Flex row. Use `[.border-t]` to opt into a top border.                          |

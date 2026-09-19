@@ -1,0 +1,164 @@
+---
+eyebrow: Segmented Control
+title: SegmentedControl
+group: Actionable
+description: Inline toggle group for mutually-exclusive choices — grid/list views, month/year billing, etc. Items are passed declaratively with `value`, `label`, optional `icon`, and `tooltip` (icon-only items). Fully generic over the value type. Import from @aspiralabs/ui.
+---
+
+export const LabelIconDemo = () => {
+    const [view, setView] = useState('grid');
+    return (
+        <SegmentedControl
+            value={view}
+            onChange={setView}
+            items={[
+                { value: 'grid', label: 'Grid', icon: 'grid_view' },
+                { value: 'list', label: 'List', icon: 'view_list' },
+                { value: 'board', label: 'Board', icon: 'view_kanban' },
+            ]}
+        />
+    );
+};
+
+export const LabelOnlyDemo = () => {
+    const [interval, setInterval] = useState('monthly');
+    return (
+        <SegmentedControl
+            value={interval}
+            onChange={setInterval}
+            items={[
+                { value: 'monthly', label: 'Monthly' },
+                { value: 'yearly', label: 'Yearly' },
+            ]}
+        />
+    );
+};
+
+export const IconOnlyDemo = () => {
+    const [view, setView] = useState('grid');
+    return (
+        <SegmentedControl
+            value={view}
+            onChange={setView}
+            items={[
+                { value: 'grid', icon: 'grid_view', tooltip: 'Grid view', ariaLabel: 'Grid' },
+                { value: 'list', icon: 'view_list', tooltip: 'List view', ariaLabel: 'List' },
+                { value: 'board', icon: 'view_kanban', tooltip: 'Kanban board', ariaLabel: 'Board' },
+            ]}
+        />
+    );
+};
+
+export const SizesDemo = () => {
+    const [interval, setInterval] = useState('monthly');
+    return (
+        <div className="flex flex-col gap-3">
+            <SegmentedControl
+                size="default"
+                value={interval}
+                onChange={setInterval}
+                items={[
+                    { value: 'monthly', label: 'Monthly' },
+                    { value: 'yearly', label: 'Yearly' },
+                ]}
+            />
+            <SegmentedControl
+                size="sm"
+                value={interval}
+                onChange={setInterval}
+                items={[
+                    { value: 'monthly', label: 'Monthly' },
+                    { value: 'yearly', label: 'Yearly' },
+                ]}
+            />
+        </div>
+    );
+};
+
+export const BadgeDemo = () => {
+    const [interval, setInterval] = useState('monthly');
+    return (
+        <SegmentedControl
+            value={interval}
+            onChange={setInterval}
+            items={[
+                { value: 'monthly', label: 'Monthly' },
+                { value: 'yearly', label: 'Yearly', badge: '20% Off' },
+            ]}
+        />
+    );
+};
+
+## Usage
+
+```tsx
+import { SegmentedControl } from '@aspiralabs/ui';
+
+<SegmentedControl
+    value={view}
+    onChange={setView}
+    items={[
+        { value: 'grid', label: 'Grid', icon: 'grid_view' },
+        { value: 'list', label: 'List', icon: 'view_list' },
+    ]}
+/>
+```
+
+## Label + icon items
+
+Mix icons and labels. Click to switch.
+
+<Demo>
+    <LabelIconDemo />
+</Demo>
+
+## Label-only
+
+Omit `icon` for pure-text segments.
+
+<Demo>
+    <LabelOnlyDemo />
+</Demo>
+
+## Icon-only with tooltip
+
+Omit `label` for compact icon-only segments. Pass a `tooltip` so users still know what each icon means.
+
+<Demo>
+    <IconOnlyDemo />
+</Demo>
+
+## Sizes
+
+<Demo>
+    <SizesDemo />
+</Demo>
+
+## Badge
+
+Attach an optional pill `badge` to a segment — handy for promos like a yearly-billing discount.
+
+<Demo>
+    <BadgeDemo />
+</Demo>
+
+## Props
+
+| Prop        | Type                    | Default   | Description                              |
+| ----------- | ----------------------- | --------- | ---------------------------------------- |
+| `items`     | `SegmentedControlItem[]`| —         | See item shape below.                    |
+| `value`     | `T`                     | —         | Controlled selection.                    |
+| `onChange`  | `(value: T) => void`    | —         | Fires on segment click with the new value.|
+| `size`      | `sm \| default`         | `default` | Height tier.                             |
+| `className` | `string`                | —         | Applied to the root group wrapper.       |
+
+## SegmentedControlItem shape
+
+| Key         | Type        | Required | Description                                                      |
+| ----------- | ----------- | -------- | ---------------------------------------------------------------- |
+| `value`     | `T`         | yes      | Passed back via onChange.                                        |
+| `label`     | `ReactNode` | —        | Visible text. Omit for icon-only segments.                       |
+| `icon`      | `string`    | —        | Material icon name.                                              |
+| `tooltip`   | `string`    | —        | Shown only on icon-only segments (when no `label`).              |
+| `ariaLabel` | `string`    | —        | Accessible label for the button. Recommended for icon-only items.|
+| `badge`     | `ReactNode` | —        | Optional pill badge shown beside the label (e.g. a "20% Off" promo).|

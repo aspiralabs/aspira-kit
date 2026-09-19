@@ -1,0 +1,106 @@
+---
+eyebrow: Block UI
+title: Block UI
+group: Overlays
+description: Full-screen blocking overlay triggered imperatively — no component to render, just call BlockUI(true) from anywhere. Renders a centered spinner over a translucent backdrop with optional reason text. The <Overlays /> host lives in app/providers.tsx — already wired, no need to mount it again. Import BlockUI from @aspiralabs/ui.
+---
+
+export const BlockButton = () => (
+    <Button
+        variant="secondary"
+        onClick={() => {
+            BlockUI(true);
+            setTimeout(() => BlockUI(false), 1500);
+        }}
+    >
+        BlockUI(true)
+    </Button>
+);
+
+export const BlockWithReasonButton = () => (
+    <Button
+        variant="secondary"
+        onClick={() => {
+            BlockUI(true, 'Saving changes…');
+            setTimeout(() => BlockUI(false), 1500);
+        }}
+    >
+        With reason
+    </Button>
+);
+
+export const BlockAroundPromiseButton = () => (
+    <Button
+        variant="secondary"
+        onClick={async () => {
+            BlockUI(true, 'Activating subscription');
+            try {
+                await new Promise((resolve) => setTimeout(resolve, 1500));
+            } finally {
+                BlockUI(false);
+            }
+        }}
+    >
+        Wrap a promise
+    </Button>
+);
+
+## Usage
+
+```tsx
+import { BlockUI } from '@aspiralabs/ui';
+
+// Block — optionally with a reason shown under the spinner
+BlockUI(true, 'Saving changes…');
+
+// Always pair with an unblock — typically in a `finally` so errors don't strand the UI
+try {
+    await saveChanges();
+} finally {
+    BlockUI(false);
+}
+```
+
+## When to use
+
+Reach for `BlockUI` when an action must complete before the user can do anything
+else — a redirect is imminent, a payment is being retried, a subscription is
+being activated. For inline async feedback (form submits, button loading
+states), prefer a button spinner or `toast.promise(…)` instead.
+
+## Fire the overlay
+
+Each demo blocks the entire UI for ~1.5 seconds, then auto-unblocks.
+
+<Demo>
+    <div className="flex flex-wrap gap-3">
+        <BlockButton />
+        <BlockWithReasonButton />
+        <BlockAroundPromiseButton />
+    </div>
+</Demo>
+
+## Reading the state
+
+`useBlockUIState()` is a `useSyncExternalStore` hook — subscribe from a client
+component if you need to react to the blocked state (e.g. disable a hotkey
+handler while blocked).
+
+```tsx
+import { useBlockUIState } from '@aspiralabs/ui';
+
+const { blocked, reason } = useBlockUIState();
+```
+
+## API
+
+| Symbol                   | Signature                                                  | Description                                                                                                  |
+| ------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `BlockUI`                | `(value: boolean, reason?: string \| null) => void`        | Toggle the overlay. Pass `true` (with optional reason) to block; pass `false` to unblock. No-op if unchanged.|
+| `useBlockUIState`        | `() => { blocked: boolean; reason: string \| null }`       | Subscribe to the current overlay state from a client component.                                              |
+
+## Notes
+
+-   The overlay is `pointer-events-none` — it visually blocks but doesn't trap focus or intercept events. Pair with a redirect or modal flow if you need true input capture.
+-   Always unblock in a `finally` (or equivalent). A thrown error between `BlockUI(true)` and `BlockUI(false)` will leave the app stuck behind the overlay until the next call.
+-   The `<Overlays />` host portals into `document.body` and uses `z-index: 2147483649` so it sits above modals, drawers, and toasts.

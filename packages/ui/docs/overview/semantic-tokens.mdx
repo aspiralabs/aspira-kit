@@ -1,0 +1,74 @@
+---
+eyebrow: Overview
+title: Semantic Tokens
+group: Foundations
+description: The semantic token layer maps meaningful names to the grayscale palette. Every surface, border, and text color in the app should reference these tokens — never raw Tailwind grays.
+---
+
+## Tokens
+
+<div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+    <SemanticSwatch
+        label="surface"
+        token="--surface"
+        hex="#f9f9fc"
+        className="bg-surface text-foreground border border-border"
+        description="Sidebars, secondary panels"
+    />
+    <SemanticSwatch
+        label="input"
+        token="--input"
+        hex="#f1f2f8"
+        className="bg-surface text-foreground border border-border"
+        description="Input/select backgrounds (use bg-surface)"
+    />
+    <SemanticSwatch
+        label="muted"
+        token="--muted"
+        hex="#edeff7"
+        className="bg-muted text-foreground border border-border"
+        description="Card hover, disabled, subtle fills"
+    />
+    <SemanticSwatch
+        label="border"
+        token="--border"
+        hex="#d3d6e0"
+        className="bg-border text-foreground"
+        description="All borders"
+    />
+    <SemanticSwatch
+        label="foreground-subtext"
+        token="--foreground-subtext"
+        hex="#677083"
+        className="bg-background text-foreground-subtext border border-border"
+        description="Secondary text, descriptions"
+    />
+    <SemanticSwatch
+        label="muted-foreground"
+        token="--muted-foreground"
+        hex="#9da2b3"
+        className="bg-background text-muted-foreground border border-border"
+        description="Placeholders, disabled, tertiary"
+    />
+    <SemanticSwatch
+        label="foreground"
+        token="--foreground"
+        hex="#1e1e24"
+        className="bg-foreground text-white"
+        description="Primary text, headings"
+    />
+</div>
+
+## Text hierarchy (3 levels)
+
+<div className="space-y-3 rounded-lg border border-border p-6">
+    <p className="text-lg text-foreground">
+        text-foreground — primary text (~gray-phantom)
+    </p>
+    <p className="text-lg text-foreground-subtext">
+        text-foreground-subtext — secondary text, descriptions (~gray-graphite)
+    </p>
+    <p className="text-lg text-muted-foreground">
+        text-muted-foreground — placeholders, disabled, tertiary (~gray-space)
+    </p>
+</div>

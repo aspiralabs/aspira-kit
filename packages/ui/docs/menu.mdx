@@ -1,0 +1,172 @@
+---
+eyebrow: Menu
+title: Menu
+group: Actionable
+description: Declarative dropdown menu — pass an `options` array and a trigger as children. Each option is a plain object with `key`, `label`, optional `icon`, `action`, `variant`, `disabled`, and `children` (for sub-menus). Import from @aspiralabs/ui. For custom composition (separators, group labels, asChild items, controlled open state), drop to the primitive at @aspiralabs/ui.
+---
+
+## Usage
+
+```tsx
+import { Menu } from '@aspiralabs/ui';
+import { Button } from '@aspiralabs/ui';
+
+<Menu
+    options={[
+        { key: 'edit', label: 'Edit', icon: 'edit', action: () => doEdit() },
+        { key: 'duplicate', label: 'Duplicate', icon: 'content_copy', action: () => doDuplicate() },
+        { key: 'delete', label: 'Delete', icon: 'delete', variant: 'danger', action: () => doDelete() },
+    ]}
+>
+    <Button variant="secondary">Actions</Button>
+</Menu>
+```
+
+## Basic
+
+Standard row-actions pattern. Danger variants get destructive styling (red text + icon).
+
+<Demo>
+    <Menu
+        options={[
+            { key: 'edit', label: 'Edit', icon: 'edit', action: () => {} },
+            { key: 'duplicate', label: 'Duplicate', icon: 'content_copy', action: () => {} },
+            { key: 'delete', label: 'Delete', icon: 'delete', variant: 'danger', action: () => {} },
+        ]}
+    >
+        <Button variant="secondary">Actions</Button>
+    </Menu>
+</Demo>
+
+## Without icons
+
+Icons are optional — omit to show label-only rows.
+
+<Demo>
+    <Menu
+        options={[
+            { key: 'rename', label: 'Rename', action: () => {} },
+            { key: 'archive', label: 'Archive', action: () => {} },
+            { key: 'move', label: 'Move…', action: () => {} },
+        ]}
+    >
+        <Button variant="secondary">More</Button>
+    </Menu>
+</Demo>
+
+## Disabled items
+
+Pass `disabled: true` to prevent click and dim the row.
+
+<Demo>
+    <Menu
+        options={[
+            { key: 'a', label: 'Enabled', icon: 'check', action: () => {} },
+            { key: 'b', label: 'Disabled', icon: 'lock', disabled: true, action: () => {} },
+            { key: 'c', label: 'Also disabled', icon: 'block', disabled: true, action: () => {} },
+        ]}
+    >
+        <Button variant="secondary">Open</Button>
+    </Menu>
+</Demo>
+
+## Sub-menus
+
+Pass `children` on an option to nest a sub-menu. Hover the option to open the nested panel.
+
+```tsx
+<Menu
+    options={[
+        { key: 'open', label: 'Open', icon: 'open_in_new', action: () => open() },
+        {
+            key: 'share',
+            label: 'Share',
+            icon: 'share',
+            children: [
+                { key: 'link', label: 'Copy link', icon: 'link', action: () => copyLink() },
+                { key: 'email', label: 'Email', icon: 'mail', action: () => sendEmail() },
+            ],
+        },
+        { key: 'delete', label: 'Delete', icon: 'delete', variant: 'danger', action: () => del() },
+    ]}
+>
+    <Button variant="secondary">Options</Button>
+</Menu>
+```
+
+<Demo>
+    <Menu
+        options={[
+            { key: 'open', label: 'Open', icon: 'open_in_new', action: () => {} },
+            {
+                key: 'share',
+                label: 'Share',
+                icon: 'share',
+                children: [
+                    { key: 'link', label: 'Copy link', icon: 'link', action: () => {} },
+                    { key: 'email', label: 'Email', icon: 'mail', action: () => {} },
+                ],
+            },
+            { key: 'delete', label: 'Delete', icon: 'delete', variant: 'danger', action: () => {} },
+        ]}
+    >
+        <Button variant="secondary">Options</Button>
+    </Menu>
+</Demo>
+
+## Alignment
+
+`align` controls horizontal positioning relative to the trigger. Default is `end`.
+
+<Demo>
+    <div className="flex flex-wrap gap-3">
+        <Menu
+            align="start"
+            options={[
+                { key: 'a', label: 'Option A', action: () => {} },
+                { key: 'b', label: 'Option B', action: () => {} },
+            ]}
+        >
+            <Button variant="secondary">align="start"</Button>
+        </Menu>
+        <Menu
+            align="center"
+            options={[
+                { key: 'a', label: 'Option A', action: () => {} },
+                { key: 'b', label: 'Option B', action: () => {} },
+            ]}
+        >
+            <Button variant="secondary">align="center"</Button>
+        </Menu>
+        <Menu
+            align="end"
+            options={[
+                { key: 'a', label: 'Option A', action: () => {} },
+                { key: 'b', label: 'Option B', action: () => {} },
+            ]}
+        >
+            <Button variant="secondary">align="end" (default)</Button>
+        </Menu>
+    </div>
+</Demo>
+
+## `<Menu>` props
+
+| Prop        | Type                      | Default | Description                                                                                                       |
+| ----------- | ------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
+| `options`   | `MenuOption[]`            | —       | See shape below.                                                                                                  |
+| `children`  | `ReactNode`               | —       | The trigger. Wrapped in `asChild` — should render a single element that can accept event props (e.g. Button).     |
+| `align`     | `start \| center \| end`  | `end`   | Panel horizontal alignment.                                                                                       |
+| `className` | `string`                  | —       | Forwarded to the content panel.                                                                                   |
+
+## MenuOption shape
+
+| Key        | Type             | Required | Description                                                              |
+| ---------- | ---------------- | -------- | ------------------------------------------------------------------------ |
+| `key`      | `string`         | yes      | React key — must be unique per menu.                                     |
+| `label`    | `string`         | yes      | Display text.                                                            |
+| `icon`     | `string`         | —        | Material icon name, rendered at size 16 before the label.                |
+| `action`   | `() => void`     | —        | Fires on click. Omit for a non-interactive sub-menu parent.              |
+| `variant`  | `info \| danger` | `info`   | `danger` paints text + icon red.                                         |
+| `disabled` | `boolean`        | `false`  | Blocks click, renders at 50% opacity.                                    |
+| `children` | `MenuOption[]`   | —        | Nested options — renders as a sub-menu. Parent option's `action` is ignored. |

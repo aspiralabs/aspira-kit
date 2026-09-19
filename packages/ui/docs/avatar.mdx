@@ -1,0 +1,77 @@
+---
+eyebrow: Avatar
+title: Avatar
+group: Misc
+description: Circular user/org portrait. Renders the image when provided, otherwise initials derived from `name` over a pastel gradient. Import from @aspiralabs/ui.
+---
+
+## Usage
+
+```tsx
+import { Avatar } from '@aspiralabs/ui';
+
+<Avatar name="Jane Doe" image={user.image} />
+
+// With fallback when no name
+<Avatar fallback="ORG" image={organization.image} />
+```
+
+## With image
+
+Pass `image` and it wins over initials.
+
+<Demo>
+    <div className="flex items-center gap-4">
+        <Avatar name="Ada Lovelace" image="https://i.pravatar.cc/150?img=47" />
+        <Avatar name="Tim Berners-Lee" image="https://i.pravatar.cc/150?img=12" />
+        <Avatar name="Grace Hopper" image="https://i.pravatar.cc/150?img=5" />
+    </div>
+</Demo>
+
+## Initials fallback
+
+When no image is provided, initials render over a pastel gradient. Initials are generated from each word's first character.
+
+<Demo>
+    <div className="flex items-center gap-4">
+        <Avatar name="Jane Doe" />
+        <Avatar name="John Smith" />
+        <Avatar name="Alex Chen" />
+        <Avatar name="Mary Anne Jenkins" />
+    </div>
+</Demo>
+
+## Literal fallback
+
+When no `name` (or name is empty), fall back to the `fallback` string literally.
+
+<Demo>
+    <div className="flex items-center gap-4">
+        <Avatar fallback="ORG" />
+        <Avatar fallback="?" />
+        <Avatar name="" fallback="—" />
+    </div>
+</Demo>
+
+## Sizes
+
+Size via `className` — pass any Tailwind `size-*` utility.
+
+<Demo>
+    <div className="flex items-center gap-4">
+        <Avatar name="Jane Doe" className="size-6" />
+        <Avatar name="Jane Doe" className="size-8" />
+        <Avatar name="Jane Doe" />
+        <Avatar name="Jane Doe" className="size-14 text-lg" />
+        <Avatar name="Jane Doe" className="size-20 text-2xl" />
+    </div>
+</Demo>
+
+## Props
+
+| Prop        | Type              | Default   | Description                                                                |
+| ----------- | ----------------- | --------- | -------------------------------------------------------------------------- |
+| `name`      | `string \| null`  | —         | Source for initials (first char of each space-separated word, uppercased). |
+| `image`     | `string \| null`  | —         | Image URL. Renders instead of initials when provided.                      |
+| `fallback`  | `string`          | —         | Literal text when name produces no initials (e.g. "ORG").                  |
+| `className` | `string`          | `size-10` | Root wrapper styles. Override for size and custom tweaks.                  |

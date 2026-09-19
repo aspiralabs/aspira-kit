@@ -11,14 +11,21 @@
   },
   "dependencies": {
     "@aspiralabs/ui": "workspace:*",
+    "@ebay/nice-modal-react": "^1.2.13",
+    "@mdx-js/mdx": "^3.1.1",
+    "@mdx-js/react": "^3.1.1",
+    "@tanstack/react-query": "^5.103.1",
+    "@tanstack/react-table": "^9.2.4",
+    "dayjs": "^1.11.23",
     "next": "16.3.5",
-    "next-mdx-remote": "^6.0.0",
     "next-themes": "^0.4.6",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "rehype-slug": "^6.0.0",
     "remark-gfm": "^4.0.1",
-    "sugar-high": "^2.4.1"
+    "sonner": "^2.0.8",
+    "sugar-high": "^2.4.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@aspiralabs/config": "workspace:*",

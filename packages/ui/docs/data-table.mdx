@@ -1,0 +1,58 @@
+---
+eyebrow: Data Table
+title: DataTable
+group: Tables
+description: Client-side paginated + sortable table. Pass columns (TanStack ColumnDef<T>[]) and data. Row click navigation is declarative — pass a URL template like /users/<id> and row values interpolate automatically. Import from @aspiralabs/ui.
+---
+
+export const DATA_TABLE_DEMO_DATA = [
+    { id: '1', name: 'Alice Smith', email: 'alice@example.com', role: 'Admin' },
+    { id: '2', name: 'Bob Jones', email: 'bob@example.com', role: 'Member' },
+    { id: '3', name: 'Carol Davis', email: 'carol@example.com', role: 'Member' },
+    { id: '4', name: 'Dan Park', email: 'dan@example.com', role: 'Admin' },
+];
+
+export const DATA_TABLE_DEMO_COLUMNS = [
+    { accessorKey: 'name', header: 'Name' },
+    { accessorKey: 'email', header: 'Email' },
+    { accessorKey: 'role', header: 'Role' },
+];
+
+Lives in `components/ui/tables/` — a dedicated tier for heavy, feature-rich composites built on top of primitives and core components. Separate from `core/` because data tables carry substantial business logic.
+
+## Usage
+
+```tsx
+import { DataTable } from '@aspiralabs/ui';
+import { ColumnDef } from '@tanstack/react-table';
+
+type User = { id: string; name: string; email: string };
+
+const columns: ColumnDef<User>[] = [
+    { accessorKey: 'name', header: 'Name' },
+    { accessorKey: 'email', header: 'Email' },
+];
+
+<DataTable
+    columns={columns}
+    data={users}
+    onRowClick="/users/<id>"  // optional — URL template with <field> tokens
+/>
+```
+
+## Live
+
+4 rows, no pagination shown (kicks in at >10 rows by default).
+
+<Demo>
+    <DataTable columns={DATA_TABLE_DEMO_COLUMNS} data={DATA_TABLE_DEMO_DATA} />
+</Demo>
+
+## Props
+
+| Prop         | Type                | Default | Description                                                                                                                |
+| ------------ | ------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `columns`    | `ColumnDef<T>[]`    | —       | TanStack Table column definitions. Set `size` on a column to give it a fixed width.                                        |
+| `data`       | `T[]`               | —       | Full dataset. Pagination is client-side.                                                                                   |
+| `onRowClick` | `string`            | —       | URL template. Tokens `<fieldName>` are replaced from the row's data. Clicks on buttons / links inside the row are ignored. |
+| `hideHeader` | `boolean`           | `false` | Skips the table header row.                                                                                                |

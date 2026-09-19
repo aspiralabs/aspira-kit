@@ -1,0 +1,82 @@
+---
+eyebrow: Alert
+title: Alert
+group: Surfaces
+description: Inline banner for status messages. Five variants, each with a sensible default icon (overridable). Slot sub-components for title and description. Import from @aspiralabs/ui.
+---
+
+## Usage
+
+```tsx
+import { Alert, AlertTitle, AlertDescription } from '@aspiralabs/ui';
+
+<Alert variant="blue">
+    <AlertTitle>Heads up!</AlertTitle>
+    <AlertDescription>You can use this however you want.</AlertDescription>
+</Alert>
+```
+
+## Variants
+
+Default icon maps to variant (info / error / check_circle).
+
+<Demo>
+    <Alert variant="default">
+        <AlertTitle>Default</AlertTitle>
+        <AlertDescription>Neutral informational message.</AlertDescription>
+    </Alert>
+    <Alert variant="muted">
+        <AlertTitle>Muted</AlertTitle>
+        <AlertDescription>Lower-emphasis. Use when the message is secondary.</AlertDescription>
+    </Alert>
+    <Alert variant="blue">
+        <AlertTitle>Blue</AlertTitle>
+        <AlertDescription>Informational with stronger presence.</AlertDescription>
+    </Alert>
+    <Alert variant="success">
+        <AlertTitle>Success</AlertTitle>
+        <AlertDescription>Something worked as expected.</AlertDescription>
+    </Alert>
+    <Alert variant="destructive">
+        <AlertTitle>Destructive</AlertTitle>
+        <AlertDescription>Something broke or needs attention.</AlertDescription>
+    </Alert>
+</Demo>
+
+## Custom icon
+
+Pass any Material icon name via the `icon` prop to override the variant default.
+
+<Demo>
+    <Alert variant="blue" icon="schedule">
+        <AlertTitle>Scheduled</AlertTitle>
+        <AlertDescription>Task will run in 15 minutes.</AlertDescription>
+    </Alert>
+    <Alert variant="default" icon="bolt">
+        <AlertTitle>Tip</AlertTitle>
+        <AlertDescription>Keyboard shortcut: ⌘K to open search.</AlertDescription>
+    </Alert>
+</Demo>
+
+## Partial content
+
+Title and description are independent — either is optional.
+
+<Demo>
+    <Alert variant="muted">
+        <AlertTitle>Title only</AlertTitle>
+    </Alert>
+    <Alert variant="success">
+        <AlertDescription>Description only, no title.</AlertDescription>
+    </Alert>
+</Demo>
+
+## Props
+
+| Component          | Prop        | Type                                                   | Default       | Description                                       |
+| ------------------ | ----------- | ------------------------------------------------------ | ------------- | ------------------------------------------------- |
+| `Alert`            | `variant`   | `default \| muted \| blue \| destructive \| success`   | `default`     | Color / tone.                                     |
+| `Alert`            | `icon`      | `string`                                               | per-variant   | Material icon name — overrides variant default.   |
+| `Alert`            | `className` | `string`                                               | —             | Merged onto the root div.                         |
+| `AlertTitle`       | `className` | `string`                                               | —             | Title slot styling.                               |
+| `AlertDescription` | `className` | `string`                                               | —             | Description slot styling.                         |

@@ -1,0 +1,259 @@
+---
+eyebrow: Input - Text
+title: Input
+group: Form
+description: Text input with optional label, error, icon, and IMask-based input masking. Three size tiers matching Select and Button. Import from @aspiralabs/ui.
+---
+
+export const DefaultDemo = () => {
+    const [value, setValue] = useState('');
+    return (
+        <div className="max-w-sm">
+            <Input
+                placeholder="Type something…"
+                value={value}
+                onValueChange={({ value }) => setValue(value)}
+            />
+        </div>
+    );
+};
+
+export const LabeledDemo = () => {
+    const [value, setValue] = useState('');
+    return (
+        <div className="max-w-sm">
+            <Input
+                label="Email"
+                placeholder="you@example.com"
+                value={value}
+                onValueChange={({ value }) => setValue(value)}
+            />
+        </div>
+    );
+};
+
+export const ControlledStateDemo = () => {
+    const [value, setValue] = useState('');
+    return (
+        <>
+            <p className="text-sm text-foreground-subtext">
+                Caller owns the string. Pass <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">value</code> + <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">onValueChange</code> — React drives the field and the mask stays in sync. Current value: <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">{value || '—'}</code>
+            </p>
+            <div className="max-w-sm">
+                <Input label="Name" placeholder="Type something…" value={value} onValueChange={({ value }) => setValue(value)} />
+            </div>
+            <div className="flex gap-2">
+                <Button size="sm" variant="secondary" onClick={() => setValue('Jane Doe')}>Set to "Jane Doe"</Button>
+                <Button size="sm" variant="ghost" onClick={() => setValue('')}>Clear</Button>
+            </div>
+        </>
+    );
+};
+
+export const UncontrolledStateDemo = () => {
+    const [captured, setCaptured] = useState('');
+    return (
+        <>
+            <p className="text-sm text-foreground-subtext">
+                The field owns its own state. Seed it with <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">defaultValue</code> and read the final value on blur (or submit). Last blurred value: <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">{captured || '—'}</code>
+            </p>
+            <div className="max-w-sm">
+                <Input label="Name" defaultValue="Jane Doe" onBlur={(e, { unmaskedValue }) => setCaptured(unmaskedValue)} />
+            </div>
+        </>
+    );
+};
+
+export const inputFormSchema = z.object({
+    email: z.string().email('Enter a valid email'),
+});
+
+export const FormStateDemo = () => {
+    const [submitted, setSubmitted] = useState('');
+    return (
+        <div className="border border-border rounded-lg p-6 max-w-sm">
+            <Form
+                schema={inputFormSchema}
+                onSubmit={(data) => setSubmitted(data.email)}
+                className="flex flex-col gap-4 items-start"
+            >
+                <Input name="email" label="Email" placeholder="you@example.com" />
+                <Button type="submit">Submit</Button>
+            </Form>
+            {submitted && (
+                <p className="mt-4 text-sm text-foreground-subtext">
+                    Submitted: <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">{submitted}</code>
+                </p>
+            )}
+        </div>
+    );
+};
+
+## Usage
+
+```tsx
+import { Input } from '@aspiralabs/ui';
+
+<Input
+    label="Email"
+    placeholder="you@example.com"
+    value={email}
+    onValueChange={({ value }) => setEmail(value)}
+/>
+```
+
+## Default
+
+No label, no icon. 56px height.
+
+<Demo>
+    <DefaultDemo />
+</Demo>
+
+## With label
+
+Label renders above the input.
+
+<Demo>
+    <LabeledDemo />
+</Demo>
+
+## With icon
+
+Pass any Material icon name via `icon`. Renders on the left; input text auto-pads.
+
+<Demo>
+    <div className="max-w-sm">
+        <Input
+            icon="search"
+            label="Search"
+            placeholder="Search anything…"
+        />
+    </div>
+</Demo>
+
+## With error
+
+Error message renders inline to the right of the label. Input border turns destructive.
+
+<Demo>
+    <div className="max-w-sm">
+        <Input
+            label="Email"
+            placeholder="you@example.com"
+            error={{ message: 'Not a valid email', type: 'validate', ref: null }}
+        />
+    </div>
+</Demo>
+
+## Sizes
+
+Matches Select and Button size tiers.
+
+<Demo>
+    <div className="max-w-sm space-y-3">
+        <Input size="default" label="Default (56px)" placeholder="Default" />
+        <Input size="sm" label="sm (40px)" placeholder="Small" />
+        <Input size="xs" label="xs (32px)" placeholder="Extra small" />
+    </div>
+</Demo>
+
+## Disabled
+
+<Demo>
+    <div className="max-w-sm">
+        <Input label="Read-only field" defaultValue="Locked" disabled />
+    </div>
+</Demo>
+
+## State management
+
+The input works in three modes. Reach for whichever matches who should own the value.
+
+| Mode              | Who owns state | You pass                          | You read via                       |
+| ----------------- | -------------- | --------------------------------- | ---------------------------------- |
+| Controlled        | React          | `value` + `onValueChange`         | your state                         |
+| Uncontrolled      | The field      | `defaultValue`                    | `onBlur` / `onValueChange`         |
+| Form-controlled   | `<Form>`       | `name`                            | Form's `onSubmit` payload          |
+
+### Controlled
+
+Supply a `value` prop and the field mirrors it. The value is synced imperatively through
+iMask (not by binding `value` on the native element), so React and the mask never fight
+over the DOM value. Drive state with `onValueChange` (masked/typed values) or the native
+`onChange` event — whichever you prefer. Because React owns the value, you can set it from
+anywhere (note the buttons below).
+
+```tsx
+const [name, setName] = useState('');
+
+// Using onValueChange (recommended for masked fields)
+<Input label="Name" value={name} onValueChange={({ value }) => setName(value)} />
+
+// Or with a plain native onChange
+<Input label="Name" value={name} onChange={(e) => setName(e.target.value)} />
+```
+
+<Demo>
+    <ControlledStateDemo />
+</Demo>
+
+### Uncontrolled
+
+Omit `value` and the field owns its own state. Seed it with `defaultValue` and read the
+final value when you need it — on blur (with the unmasked/typed values) or on submit.
+
+```tsx
+<Input
+    label="Name"
+    defaultValue="Jane Doe"
+    onBlur={(e, { unmaskedValue }) => save(unmaskedValue)}
+/>
+```
+
+<Demo>
+    <UncontrolledStateDemo />
+</Demo>
+
+### Form-controlled
+
+Inside a `<Form>`, wiring is automatic — pass a `name` matching a zod schema key and Form
+threads the input through a react-hook-form `Controller`. You don't pass `value`,
+`onValueChange`, `defaultValue`, or `error` yourself; Form injects them, paints validation
+errors inline, and hands you the parsed payload on submit. Submit empty to see the zod
+error paint.
+
+```tsx
+import { Form } from '@aspiralabs/ui';
+import { Input } from '@aspiralabs/ui';
+import { Button } from '@aspiralabs/ui';
+import { z } from 'zod/v3';
+
+const schema = z.object({
+    email: z.string().email('Enter a valid email'),
+});
+
+<Form schema={schema} onSubmit={({ email }) => save(email)}>
+    <Input name="email" label="Email" placeholder="you@example.com" />
+    <Button type="submit">Submit</Button>
+</Form>
+```
+
+<Demo>
+    <FormStateDemo />
+</Demo>
+
+## Props
+
+Accepts all native `input` attributes plus the props below.
+
+| Prop            | Type                                                       | Default   | Description                                                                                          |
+| --------------- | ---------------------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------- |
+| `value`         | `string \| number`                                         | —         | Controlled value, synced into the mask imperatively. Omit for uncontrolled (use `defaultValue`).     |
+| `label`         | `string`                                                   | —         | Label rendered above the input.                                                                      |
+| `error`         | `FormError`                                                | —         | react-hook-form error object. Shows message + destructive border.                                    |
+| `icon`          | `string`                                                   | —         | Material icon name rendered inside the input on the left.                                            |
+| `size`          | `default \| sm \| xs`                                      | `default` | Height tier (56 / 40 / 32 px).                                                                       |
+| `mask`          | `FactoryOpts`                                              | —         | IMask mask config. See `imask`'s FactoryOpts docs.                                                   |
+| `onValueChange` | `({ value, typedValue }) => void`                          | —         | Fires on value change with masked `value` and coerced `typedValue`.                                  |
+| `onBlur`        | `(event, { unmaskedValue, typedValue }) => void`           | —         | Fires on blur with the event + unmasked / typed values.                                              |

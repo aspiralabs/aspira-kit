@@ -1,0 +1,73 @@
+---
+eyebrow: Layout Pattern
+title: Table Actions Column
+group: Tables
+description: The exact pattern every table with an actions column must use. One vertical-ellipsis button that opens a DropdownMenuPrimitive. No standalone buttons, no inline actions, no visibility toggles.
+---
+
+## Rules
+
+- **Column header:** `Action`
+- **Column width:** `size: 80`
+- **Cell wrapper:** `<div className="flex justify-center">` to center the button
+- **Trigger:** `Button variant="ghost" size="icon" className="size-8"` with the `more_vert` icon
+- **Menu:** `DropdownMenuContentPrimitive align="end"`
+- **Items:** `DropdownMenuItemPrimitive`, text only — no icons in the actions menu
+- **Destructive:** use `variant="destructive"` on the item, separated by `DropdownMenuSeparatorPrimitive`
+- **No applicable actions:** when a row has no actions available (e.g. an OWNER row that can't be removed), still render the trigger but show a single disabled `DropdownMenuItemPrimitive disabled` reading **No actions available**. Never render an empty dropdown.
+
+## Live example
+
+<Demo>
+    <div className="rounded-lg border border-border overflow-hidden p-5">
+        <DropdownMenuPrimitive>
+            <DropdownMenuTriggerPrimitive asChild>
+                <Button variant="ghost" size="icon" className="size-8">
+                    <Icon icon="more_vert" size={16} />
+                </Button>
+            </DropdownMenuTriggerPrimitive>
+            <DropdownMenuContentPrimitive align="end">
+                <DropdownMenuItemPrimitive>View</DropdownMenuItemPrimitive>
+                <DropdownMenuItemPrimitive>Edit</DropdownMenuItemPrimitive>
+                <DropdownMenuSeparatorPrimitive />
+                <DropdownMenuItemPrimitive variant="destructive">
+                    Delete
+                </DropdownMenuItemPrimitive>
+            </DropdownMenuContentPrimitive>
+        </DropdownMenuPrimitive>
+    </div>
+</Demo>
+
+## Column definition
+
+```tsx
+{
+    accessorKey: 'actions',
+    header: 'Action',
+    size: 80,
+    cell: ({ row }) => (
+        <div className="flex justify-center">
+            <DropdownMenuPrimitive>
+                <DropdownMenuTriggerPrimitive asChild>
+                    <Button variant="ghost" size="icon" className="size-8">
+                        <Icon icon="more_vert" size={16} />
+                    </Button>
+                </DropdownMenuTriggerPrimitive>
+                <DropdownMenuContentPrimitive align="end">
+                    <Link href={`/items/${row.original.id}`}>
+                        <DropdownMenuItemPrimitive>View</DropdownMenuItemPrimitive>
+                    </Link>
+                    <DropdownMenuSeparatorPrimitive />
+                    <DropdownMenuItemPrimitive variant="destructive">
+                        Delete
+                    </DropdownMenuItemPrimitive>
+                </DropdownMenuContentPrimitive>
+            </DropdownMenuPrimitive>
+        </div>
+    ),
+}
+```
+
+## Why one pattern only
+
+Tables get noisy fast when each row sprouts its own buttons, links, or icon affordances. Forcing every row-level action through a single trigger keeps the eye line at the leftmost columns (which is the data) and makes destructive actions consistently one extra click away. If a row needs a primary action visible without a click, that action probably belongs in a detail view, not a table.

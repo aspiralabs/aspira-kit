@@ -1,0 +1,84 @@
+---
+eyebrow: Layout Pattern
+title: Section
+group: Page Chrome
+description: The canonical in-page grouping. A serif `Section.Header` (with an optional sans-serif description and a right-aligned `Section.Actions` slot) above a `Section.Content` body. Replaces the old SettingSection / SectionTitle / SectionHeading trio so every section header looks the same.
+---
+
+## Usage
+
+```tsx
+import { Section } from '@aspiralabs/ui';
+
+export function SecuritySettings() {
+    return (
+        <div className="space-y-12">
+            <Section>
+                <Section.Header
+                    config={{
+                        title: 'Passkeys',
+                        description:
+                            'Sign in with Touch ID, Windows Hello, your phone, or a security key.',
+                    }}
+                >
+                    <Section.Actions>
+                        <Button variant="secondary">Add passkey</Button>
+                    </Section.Actions>
+                </Section.Header>
+
+                <Section.Content>
+                    <PasskeyList />
+                </Section.Content>
+            </Section>
+        </div>
+    );
+}
+```
+
+## Anatomy
+
+- **`Section`** — vertical wrapper (`flex flex-col gap-6`). Stack multiple `Section`s with `space-y-12`. Accepts an optional `className` (e.g. `pb-12 border-b border-border` for a divider).
+- **`Section.Header`** — serif `title` + optional sans-serif `description`, passed via `config`.
+- **`Section.Actions`** — right-aligned action slot inside `Section.Header` (buttons, menus, badges).
+- **`Section.Content`** — the section body (forms, tables, empty states).
+
+## Why it exists
+
+Three near-duplicate components previously rendered section headers — one serif, one sans, one serif-with-a-single-action — so identical screens looked inconsistent. `Section` is the single source of truth: **serif title, sans-serif description**, everywhere.
+
+## Visual
+
+<Demo>
+    <Section>
+        <Section.Header
+            config={{
+                title: 'Personalization',
+                description: 'Customize the look and feel of your workspace.',
+            }}
+        >
+            <Section.Actions>
+                <Button variant="secondary">Reset</Button>
+            </Section.Actions>
+        </Section.Header>
+        <Section.Content>
+            <div className="border border-dashed border-border p-6 text-center text-foreground-subtext text-sm">
+                Section body (form, table, etc.)
+            </div>
+        </Section.Content>
+    </Section>
+</Demo>
+
+## Props
+
+### `Section.Header` — `config`
+
+| Key           | Type     | Default | Description                          |
+| ------------- | -------- | ------- | ------------------------------------ |
+| `title`       | `string` | —       | Serif section title.                 |
+| `description` | `string` | —       | Optional sans-serif subheader.       |
+
+### `Section` / `Section.Content`
+
+| Prop        | Type     | Default | Description                       |
+| ----------- | -------- | ------- | --------------------------------- |
+| `className` | `string` | —       | Wrapper class (dividers, spacing). |

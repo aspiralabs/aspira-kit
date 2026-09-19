@@ -1,0 +1,113 @@
+---
+eyebrow: Layout Pattern
+title: Page
+group: Page Chrome
+description: The canonical screen shell. A full-height flex column that hosts a config-driven `Page.Header` (title, tabs, actions) over one or more `Page.Content` bodies (scroll + max-width). Use it for every authenticated product surface.
+---
+
+## Usage
+
+```tsx
+import { Page } from '@aspiralabs/ui';
+import { useStandardPage } from '@aspiralabs/ui';
+
+type TabType = 'profile' | 'members' | 'branding';
+
+const MENU_ITEMS = [
+    { label: 'Organization Profile', paramKey: 'profile' },
+    { label: 'Members', paramKey: 'members' },
+    { label: 'Branding', paramKey: 'branding' },
+] as const;
+
+export default function OrganizationPage() {
+    const { activeTab, handleTabChange } = useStandardPage<TabType>(MENU_ITEMS);
+
+    return (
+        <Page>
+            <Page.Header
+                config={{
+                    title: 'Organization',
+                    menu: MENU_ITEMS,
+                    activeTab,
+                    onTabChange: handleTabChange,
+                }}
+            >
+                <Page.Actions>
+                    <Button>Invite member</Button>
+                </Page.Actions>
+            </Page.Header>
+
+            {activeTab === 'profile' && (
+                <Page.Content maxWidth="sm" scroll>
+                    <ProfileView />
+                </Page.Content>
+            )}
+            {activeTab === 'members' && (
+                <Page.Content maxWidth="sm" scroll>
+                    <MembersView />
+                </Page.Content>
+            )}
+        </Page>
+    );
+}
+```
+
+## Anatomy
+
+- **`Page`** — full-height flex column shell. Replaces the old `w-full h-full flex flex-col` wrapper. Accepts an optional `className`.
+- **`Page.Header`** — top chrome. Everything is passed through the `config` object: `title`, and optionally `menu`, `activeTab`, `onTabChange`, `tooltip`, `backHref`.
+- **`Page.Actions`** — right-floated action slot inside `Page.Header`. Holds buttons, inputs, text, etc.
+- **`Page.Content`** — the body. `maxWidth` (`'sm' | 'default' | 'full'`, default `'default'`), `scroll` (wraps in a `ScrollArea`), and `className`. Render one `Page.Content` per tab as siblings.
+
+## What it does
+
+- **Tab state via `useStandardPage`** — auto-syncs the active tab to `?view=` so deep links and back/forward just work. Type-safe against the menu's `paramKey` literals.
+- **`backHref`** renders a back button (query strings supported, e.g. `/admin/enterprise?tab=inquiries`).
+- **Responsive** — the header collapses tabs + actions into a mobile menu automatically.
+
+## When to use
+
+Any authenticated product surface: Settings, Organization, Admin sub-pages, this Design System page. Don't use it on marketing pages — those have their own header chrome.
+
+## Visual
+
+<Demo>
+    <div className="border border-border rounded-lg overflow-hidden bg-background">
+        <Page.Header
+            config={{
+                title: 'Organization',
+                menu: [
+                    { label: 'Organization Profile', paramKey: 'profile' },
+                    { label: 'Members', paramKey: 'members' },
+                    { label: 'Branding', paramKey: 'branding' },
+                ],
+                activeTab: 'profile',
+                onTabChange: () => {},
+            }}
+        />
+        <div className="p-6 text-center text-foreground-subtext text-sm">
+            Content area (dynamic based on tab)
+        </div>
+    </div>
+</Demo>
+
+## Props
+
+### `Page.Header` — `config`
+
+| Key           | Type                          | Default | Description                                              |
+| ------------- | ----------------------------- | ------- | -------------------------------------------------------- |
+| `title`       | `string`                      | —       | Page title shown on the left.                            |
+| `menu`        | `readonly MenuItem[]`         | —       | Array of `{ label, paramKey, badge? }`. `paramKey` becomes the URL value. |
+| `activeTab`   | `string`                      | —       | Current tab key. Pair with `useStandardPage<T>`.         |
+| `onTabChange` | `(paramKey: string) => void`  | —       | Fires on tab click. Hook returns one wired to `?view=`.  |
+| `tooltip`     | `string`                      | —       | Optional help tooltip next to the title.                 |
+| `backHref`    | `string`                      | —       | Renders a back button linking here (query strings ok).   |
+
+### `Page.Content`
+
+| Prop        | Type                              | Default     | Description                          |
+| ----------- | --------------------------------- | ----------- | ------------------------------------ |
+| `maxWidth`  | `'sm' \| 'default' \| 'full'`     | `'default'` | Centered max width of the body.      |
+| `scroll`    | `boolean`                         | `false`     | Wrap the body in a `ScrollArea`.     |
+| `className` | `string`                          | —           | Escape hatch for padding tweaks.     |

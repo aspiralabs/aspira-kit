@@ -1,0 +1,111 @@
+---
+eyebrow: Slider
+title: Slider
+group: Form
+description: Styled slider over Radix Slider. Pass one value for a single-thumb slider, two for a range. Forwards every Radix Slider.Root prop (`min`, `max`, `step`, `value`, `onValueChange`, `orientation`, etc.). Import from @aspiralabs/ui.
+---
+
+export const SingleThumbDemo = () => {
+    const [volume, setVolume] = useState(50);
+    return (
+        <>
+            <p className="text-sm text-foreground-subtext">
+                Current value: <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">{volume}</code>
+            </p>
+            <div className="max-w-md">
+                <Slider
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={[volume]}
+                    onValueChange={([v]) => setVolume(v)}
+                />
+            </div>
+        </>
+    );
+};
+
+export const RangeDemo = () => {
+    const [range, setRange] = useState([20, 80]);
+    return (
+        <>
+            <p className="text-sm text-foreground-subtext">
+                Pass two values. Current: <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">[{range[0]}, {range[1]}]</code>
+            </p>
+            <div className="max-w-md">
+                <Slider
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={range}
+                    onValueChange={(v) => setRange([v[0], v[1]])}
+                />
+            </div>
+        </>
+    );
+};
+
+## Usage
+
+```tsx
+import { Slider } from '@aspiralabs/ui';
+
+<Slider min={0} max={100} step={1} value={[volume]} onValueChange={([v]) => setVolume(v)} />
+
+// Range slider — pass two values
+<Slider min={0} max={100} value={[low, high]} onValueChange={([lo, hi]) => setRange([lo, hi])} />
+```
+
+## Single thumb
+
+<Demo>
+    <SingleThumbDemo />
+</Demo>
+
+## Range (two thumbs)
+
+<Demo>
+    <RangeDemo />
+</Demo>
+
+## Step
+
+`step` controls value granularity. Below: step=10.
+
+<Demo>
+    <div className="max-w-md">
+        <Slider defaultValue={[50]} min={0} max={100} step={10} />
+    </div>
+</Demo>
+
+## Disabled
+
+<Demo>
+    <div className="max-w-md">
+        <Slider defaultValue={[30]} min={0} max={100} disabled />
+    </div>
+</Demo>
+
+## Vertical orientation
+
+`orientation="vertical"` stands the slider up.
+
+<Demo>
+    <div className="h-44">
+        <Slider orientation="vertical" defaultValue={[60]} min={0} max={100} />
+    </div>
+</Demo>
+
+## Props
+
+Forwards every Radix `Slider.Root` prop — common ones listed here.
+
+| Prop            | Type                            | Default     | Description                                                |
+| --------------- | ------------------------------- | ----------- | ---------------------------------------------------------- |
+| `value`         | `number[]`                      | —           | Controlled. One entry = single thumb, two = range.         |
+| `defaultValue`  | `number[]`                      | `[min, max]`| Uncontrolled initial value(s).                             |
+| `onValueChange` | `(values: number[]) => void`    | —           | Fires on every change.                                     |
+| `min` / `max`   | `number`                        | `0` / `100` | Range bounds.                                              |
+| `step`          | `number`                        | `1`         | Increment granularity.                                     |
+| `orientation`   | `horizontal \| vertical`        | `horizontal`| Vertical sliders need a parent with explicit height.       |
+| `disabled`      | `boolean`                       | `false`     | Blocks interaction, dims to 50% opacity.                   |

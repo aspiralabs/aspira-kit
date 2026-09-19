@@ -1,0 +1,31 @@
+---
+eyebrow: Layout Pattern
+title: Marketing Section Wrapper
+group: Marketing
+description: The standard outer shell for marketing-page sections — full-bleed background, centered max-width container, generous vertical rhythm. Use this whenever you add a new section to the public site.
+---
+
+## Usage
+
+```tsx
+<section className="bg-white py-24">
+    <div className="container max-w-7xl mx-auto px-6">
+        <h2 className="text-5xl md:text-7xl text-foreground">
+            Section headline
+        </h2>
+        <p className="text-2xl text-foreground-subtext">
+            Supporting copy
+        </p>
+    </div>
+</section>
+```
+
+## What it does
+
+- **`bg-white py-24`** sits flush against the next section. Vary the background per-section to break up the page; keep `py-24` consistent for vertical rhythm.
+- **`container max-w-7xl mx-auto px-6`** anchors content to the page grid: a centered 1280px max width with 24px gutters on small screens.
+- **Heading scale** — display headlines step from `text-5xl` on mobile up to `text-7xl` on `md`. Body copy stays `text-2xl` so the contrast between headline and supporting prose stays sharp.
+
+## When to use
+
+Reach for this pattern on **public marketing pages** under `app/(website)/`. Authenticated product pages use `Page.Header` + `Page.Content` instead — different rules of engagement (denser, no `py-24`).

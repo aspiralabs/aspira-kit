@@ -1,0 +1,110 @@
+---
+eyebrow: Overview
+title: Foundations
+group: Foundations
+description: The product uses a soft editorial layout with a modern, rounded surface language and high-contrast typography. Reference colors through CSS variables (not hard-coded grays) so you can evolve the palette centrally.
+---
+
+## Color tokens (CSS variables)
+
+<div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+    <TokenSwatch
+        label="Primary"
+        name="primary"
+        hex="#1E1E24"
+        className="bg-primary text-primary-foreground"
+    />
+    <TokenSwatch
+        label="Brand"
+        name="brand"
+        hex="#B5D99C"
+        className="bg-brand text-brand-foreground"
+    />
+    <TokenSwatch
+        label="Marketing"
+        name="marketing"
+        hex="#A7CAB1"
+        className="bg-marketing text-marketing-foreground"
+    />
+    <TokenSwatch
+        label="Accent"
+        name="accent"
+        hex="#F4ECD6"
+        className="bg-accent text-accent-foreground"
+    />
+    <TokenSwatch
+        label="Surface"
+        name="surface"
+        hex="#F7F7FB"
+        className="bg-surface text-foreground border border-border"
+    />
+    <TokenSwatch
+        label="Muted"
+        name="muted"
+        hex="#EDEFF7"
+        className="bg-muted text-foreground border border-border"
+    />
+    <TokenSwatch
+        label="Foreground Subtext"
+        name="foreground-subtext"
+        hex="#677083"
+        className="bg-background text-foreground-subtext border border-border"
+    />
+</div>
+
+Rule of thumb: use **`brand`** as the "success / positivity" tint, **`marketing`** as the large background wash, and reserve **`primary`** for CTAs + key emphasis.
+
+## Grayscale palette
+
+<div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+    <TokenSwatch
+        label="Cloud"
+        name="gray-cloud"
+        hex="#EDEFF7"
+        className="bg-gray-cloud text-foreground"
+    />
+    <TokenSwatch
+        label="Smoke"
+        name="gray-smoke"
+        hex="#D3D6E0"
+        className="bg-gray-smoke text-foreground"
+    />
+    <TokenSwatch
+        label="Steel"
+        name="gray-steel"
+        hex="#BCBFCC"
+        className="bg-gray-steel text-foreground"
+    />
+    <TokenSwatch
+        label="Space"
+        name="gray-space"
+        hex="#9DA2B3"
+        className="bg-gray-space text-white"
+    />
+    <TokenSwatch
+        label="Graphite"
+        name="gray-graphite"
+        hex="#5E7180"
+        className="bg-gray-graphite text-white"
+    />
+    <TokenSwatch
+        label="Arsenic"
+        name="gray-arsenic"
+        hex="#40424D"
+        className="bg-gray-arsenic text-white"
+    />
+    <TokenSwatch
+        label="Phantom"
+        name="gray-phantom"
+        hex="#1E1E24"
+        className="bg-gray-phantom text-white"
+    />
+    <TokenSwatch
+        label="Black"
+        name="gray-black"
+        hex="#000000"
+        className="bg-gray-black text-white"
+    />
+</div>
+
+A grayscale palette of varying shades, ranging from pure black to white. Use **`gray-cloud`** for subtle backgrounds, **`gray-graphite`** for secondary text, and **`gray-phantom`** or **`gray-black`** for high-contrast elements.

@@ -1,0 +1,134 @@
+---
+eyebrow: Form
+title: Form
+group: Form
+description: Opinionated wrapper around react-hook-form + zod. Walks its children, finds any element with a `name` prop (or a known `displayName` like `Input`, `Checkbox`, `ColorPicker`), and wires it into a RHF `Controller` for you. No manual `register()` boilerplate. Import from @aspiralabs/ui.
+---
+
+## Usage
+
+```tsx
+import { Form } from '@aspiralabs/ui';
+import { Input } from '@aspiralabs/ui';
+import { InputSelect } from '@aspiralabs/ui';
+import { InputDate } from '@aspiralabs/ui';
+import { InputOTP } from '@aspiralabs/ui';
+import { Textarea } from '@aspiralabs/ui';
+import { Checkbox } from '@aspiralabs/ui';
+import { ChoiceBox } from '@aspiralabs/ui';
+import { Slider } from '@aspiralabs/ui';
+import { Switch } from '@aspiralabs/ui';
+import { ToggleBox } from '@aspiralabs/ui';
+import { Button } from '@aspiralabs/ui';
+import { z } from 'zod/v3';
+
+const schema = z.object({
+    name: z.string().min(1),
+    email: z.string().email(),
+    role: z.string().min(1),                              // select → string
+    code: z.string().length(6),                           // OTP    → string
+    tone: z.enum(['professional', 'friendly']),           // single → string
+    channels: z.array(z.string()).min(1),                 // multi  → string[]
+    volume: z.number().min(0).max(100),                   // slider → number (single-thumb)
+    acceptTerms: z.boolean().refine((v) => v === true),
+});
+
+<Form
+    schema={schema}
+    defaultValues={defaults}
+    pending={pending}
+    onSubmit={onSubmit}
+    className="grid grid-cols-4 gap-x-4 gap-y-5"
+>
+    {/* Half-width inputs (col-span-2) → 2 per row */}
+    <div className="col-span-2"><Input name="name" label="Name" /></div>
+    <div className="col-span-2"><Input name="email" label="Email" /></div>
+    <div className="col-span-2"><InputSelect name="role" label="Role" options={ROLE_OPTIONS} /></div>
+    <div className="col-span-2"><InputDate name="birthdate" label="Birthday" /></div>
+
+    {/* Section divider with mt + pt + border-t for visual grouping */}
+    <div className="col-span-4 mt-2 pt-5 border-t border-border">
+        {/* OTP one-liner — Form auto-wires + slots auto-render from `length` */}
+        <InputOTP name="code" label="Verification code" length={6} />
+    </div>
+
+    <div className="col-span-4">
+        <Textarea name="bio" label="Bio" rows={3} />
+    </div>
+
+    <div className="col-span-4 mt-2 pt-5 border-t border-border space-y-1.5">
+        <p className="text-sm font-medium">Tone</p>
+        <ChoiceBox name="tone" options={TONE_OPTIONS} className="grid-cols-2" />
+    </div>
+    <div className="col-span-4 space-y-1.5">
+        <p className="text-sm font-medium">Channels</p>
+        <ChoiceBox name="channels" mode="multi" options={CHANNEL_OPTIONS} className="grid-cols-2" />
+    </div>
+    <div className="col-span-4 space-y-1.5">
+        <p className="text-sm font-medium">Volume</p>
+        <Slider name="volume" min={0} max={100} step={1} />
+    </div>
+
+    <div className="col-span-4 mt-2 pt-5 border-t border-border">
+        <ToggleBox name="digest" title="Weekly digest" description="…" />
+    </div>
+    <div className="col-span-4 flex items-center justify-end gap-6">
+        <Switch name="newsletter" label="Subscribe" />
+        <Checkbox name="acceptTerms" label="I accept the terms" />
+    </div>
+
+    <div className="col-span-4 mt-2 pt-5 border-t border-border flex justify-end">
+        <Button type="submit">Save</Button>
+    </div>
+</Form>
+```
+
+## Live demo
+
+Submit empty to see zod errors paint inline. **Quick fill** resets `defaultValues` and re-hydrates the form. **Save** awaits a 500ms void function — the `pending` prop auto-disables every input + button for the duration, then the submitted payload is shown below.
+
+<Demo className="max-w-none">
+    <FormDemo />
+</Demo>
+
+## What gets auto-wired
+
+Form walks the child tree and wraps recognized elements in a RHF `Controller`. Elements are recognized by their `displayName`, or by having a `name` prop for anything else.
+
+| Child component            | Behavior                                                                                                                                                                                                              |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Input`                    | Controlled via Controller. Zod `z.number()` fields auto-apply a maskito number mask (min/max honored).                                                                                                                |
+| `Textarea`                 | Controlled via Controller. Native change events feed RHF directly; undefined values coerce to `''` so the field stays controlled from first paint.                                                                    |
+| `Checkbox`                 | Wired to RHF field (value, onChange, error, defaultChecked).                                                                                                                                                          |
+| `ChoiceBox`                | Wired to RHF field. Payload shape matches `mode`: string for single, string[] for multi.                                                                                                                              |
+| `InputSelect`              | Wired to RHF field. Preserves typed option values (string \| number \| boolean) through the Radix stringified-value boundary.                                                                                         |
+| `InputDate`                | Wired to RHF field. Payload is a `Date` (works with `z.date()`); typing a valid date or picking from the Calendar both update the field.                                                                              |
+| `InputOTP`                 | Wired to RHF field. Payload is the typed string (use `z.string().length(n)`); coerces undefined → `''` so the field stays controlled from first paint. `label` and `error` chrome render automatically.              |
+| `Slider`                   | Wired to RHF field with shape coercion — single-thumb schemas (`z.number()`) stay `number`; range schemas (`z.array(z.number())`) stay `number[]`.                                                                    |
+| `RadioGroup`               | Wired via Controller. `RadioGroupItem` children are passed through untouched.                                                                                                                                         |
+| `Switch`                   | Wired to RHF field (value, onChange, error, defaultChecked). Payload is a plain `boolean`.                                                                                                                            |
+| `ToggleBox`                | Wired to RHF field. Click-anywhere-on-card toggles the embedded Switch; payload is a plain `boolean`.                                                                                                                 |
+| `ColorPicker`              | Controlled via Controller; field error forwarded.                                                                                                                                                                     |
+| `SimpleSelect`             | Receives `register`, `control`, value, and field error.                                                                                                                                                               |
+| `Button`                   | Auto-disabled while `pending` is true. Non-submit buttons get click propagation stopped.                                                                                                                              |
+| Any element with `name`    | Falls through to a generic Controller wrap. Text-type by default.                                                                                                                                                     |
+
+## Props
+
+| Prop            | Type                       | Default     | Description                                                                                                            |
+| --------------- | -------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `schema`        | `z.ZodType`                | —           | Zod schema used with `zodResolver`. Drives validation + type inference for `onSubmit`.                                 |
+| `onSubmit`      | `(data) => void`           | —           | Fires on valid submit. Data is typed as `z.infer<typeof schema>`.                                                      |
+| `defaultValues` | `DefaultValues<T>`         | `undefined` | Initial values. Re-applied via `reset()` if they change (useful for async-loaded edit forms).                          |
+| `pending`       | `boolean`                  | `false`     | When true, disables every wired input and every Button child.                                                          |
+| `onValueChange` | `(data) => void`           | —           | Fires on every watched-value change (pre-validation). Number fields are coerced from string to Number before delivery. |
+| `initializing` | `boolean`                  | `false`     | When true and `skeleton` is provided, renders the skeleton instead of the form.                                        |
+| `skeleton`      | `ReactNode`                | —           | Loading state rendered in place of the form.                                                                           |
+| `className`     | `string`                   | —           | Forwarded to the underlying `<form>` element.                                                                          |
+
+## Gotchas
+
+- Inputs must have a `name` that matches a key in the zod schema — otherwise they fall through unwired.
+- Define the schema at module scope (or memoize it) — redefining inline each render rebuilds the resolver and can cause unexpected remounts.
+- `onValueChange` fires on every keystroke; debounce if you use it for side effects.
+- Submit `Button` must have `type="submit"`; any other Button is auto-converted to `type="button"` with click propagation stopped.

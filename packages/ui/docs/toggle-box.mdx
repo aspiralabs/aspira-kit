@@ -1,0 +1,78 @@
+---
+eyebrow: Toggle Box
+title: ToggleBox
+group: Form
+description: Card-style wrapper around a Switch with a title and description on the left. The whole card is clickable — visual relative of `ChoiceBox`, but for boolean (on/off) options rather than mutually exclusive picks. Import from @aspiralabs/ui.
+---
+
+export const InteractiveToggleBox = () => {
+    const [on, setOn] = useState(true);
+    return (
+        <div className="max-w-xl">
+            <ToggleBox
+                title="Marketing emails"
+                description="Receive emails about new products, features, and more."
+                checked={on}
+                onCheckedChange={setOn}
+            />
+        </div>
+    );
+};
+
+## Usage
+
+```tsx
+import { ToggleBox } from '@aspiralabs/ui';
+
+<ToggleBox
+    title="Marketing emails"
+    description="Receive product news and announcements."
+    checked={value}
+    onCheckedChange={setValue}
+/>
+```
+
+## Interactive
+
+Click anywhere on the card to toggle.
+
+<Demo>
+    <InteractiveToggleBox />
+</Demo>
+
+## States
+
+On / off / disabled variants.
+
+<Demo>
+    <div className="max-w-xl space-y-3">
+        <ToggleBox
+            title="On"
+            description="Controlled to always be checked."
+            checked
+            onCheckedChange={() => {}}
+        />
+        <ToggleBox
+            title="Off"
+            description="Controlled to always be unchecked."
+            checked={false}
+            onCheckedChange={() => {}}
+        />
+        <ToggleBox
+            disabled
+            title="Disabled"
+            description="Non-interactive. Card renders at 50% opacity and the cursor shows not-allowed."
+            checked={false}
+        />
+    </div>
+</Demo>
+
+## Props
+
+| Prop              | Type                         | Default | Description                                |
+| ----------------- | ---------------------------- | ------- | ------------------------------------------ |
+| `title`           | `string`                     | —       | Primary label (bold).                      |
+| `description`    | `string`                     | —       | Supporting copy below the title.           |
+| `checked`         | `boolean`                    | `false` | Controlled on/off state.                   |
+| `onCheckedChange` | `(checked: boolean) => void` | —       | Fires on card click with the new value.    |
+| `disabled`        | `boolean`                    | `false` | Blocks click + paints 50% opacity.         |

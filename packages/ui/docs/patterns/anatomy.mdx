@@ -1,0 +1,191 @@
+---
+eyebrow: Layout Pattern
+title: Anatomy
+group: Page Chrome
+description: How the layout primitives fit together. Two families — `Page` (the screen shell) and `Section` (in-page groupings) — compose into every authenticated product screen. Start here, then drill into the individual Page / Section / Toolbar docs.
+---
+
+## The mental model
+
+Every product screen is built from **two** families of primitives:
+
+- **`Page`** — the screen *shell*. Owns the top chrome (title, tabs, page-level actions) and the scrollable body. There is exactly **one** `Page` per screen.
+- **`Section`** — an in-page *grouping* inside the body. A serif heading, an optional actions slot, and a block of content. A screen has **zero or more** `Section`s.
+
+Everything else (forms, tables, cards, empty states) lives *inside* a `Section.Content` or directly inside `Page.Content`.
+
+## How it nests
+
+```text
+<Page>                          ← screen shell: full-height flex column
+│
+├── <Page.Header config={…}>    ← top chrome: title + optional tabs
+│     └── <Page.Actions>        ← right-floated page actions (search, primary CTA)
+│
+└── <Page.Content>              ← the body: max-width + optional scroll
+      │                           (render one per tab)
+      ├── <Section>             ← a logical grouping
+      │     ├── <Section.Header config={…}>   ← serif title + sans description
+      │     │     └── <Section.Actions>       ← right-aligned section actions
+      │     └── <Section.Content>             ← the form / table / content
+      │
+      └── <Section> … </Section>              ← as many as the screen needs
+</Page>
+```
+
+Read it top-down: **shell → chrome → body → groupings → content.** If you can name where a piece of UI belongs in that tree, you know which primitive to reach for.
+
+## Who owns what
+
+| Concern | Primitive | Notes |
+| --- | --- | --- |
+| Full-height page frame | `Page` | Replaces the old `w-full h-full flex flex-col` wrapper. |
+| Title, tabs, back button | `Page.Header` | All via the `config` object. Pair tabs with `useStandardPage`. |
+| Page-level actions | `Page.Actions` | Right side of the header — search, a primary CTA, contextual text. |
+| Scroll + max width | `Page.Content` | `maxWidth` (`sm`/`default`/`full`) + `scroll`. One per tab. |
+| A labelled group | `Section` | Stack multiple with `space-y-12`. |
+| Group heading | `Section.Header` | Serif title, optional sans description. |
+| Group-level actions | `Section.Actions` | A button, a menu, a badge. |
+| Group body | `Section.Content` | The actual form/table/list. |
+
+## End-to-end example
+
+A tabbed screen with page-level actions and two sections in the active tab:
+
+```tsx
+import { Page, Section } from '@aspiralabs/ui';
+import { useStandardPage } from '@aspiralabs/ui';
+import { Button } from '@aspiralabs/ui';
+
+const MENU = [
+    { label: 'General', paramKey: 'general' },
+    { label: 'Security', paramKey: 'security' },
+] as const;
+
+type Tab = 'general' | 'security';
+
+export default function AccountSettings() {
+    const { activeTab, handleTabChange } = useStandardPage<Tab>(MENU);
+
+    return (
+        <Page>
+            {/* 1. Chrome — title, tabs, and a page-level action */}
+            <Page.Header
+                config={{
+                    title: 'Account',
+                    menu: MENU,
+                    activeTab,
+                    onTabChange: handleTabChange,
+                }}
+            >
+                <Page.Actions>
+                    <Button variant="secondary">Invite teammate</Button>
+                </Page.Actions>
+            </Page.Header>
+
+            {/* 2. Body — one Page.Content per tab, narrow + scrollable */}
+            {activeTab === 'general' && (
+                <Page.Content maxWidth="sm" scroll>
+                    <div className="space-y-12">
+                        {/* 3. A grouping with its own heading + action */}
+                        <Section>
+                            <Section.Header
+                                config={{
+                                    title: 'Profile',
+                                    description: 'Your name and how others see you.',
+                                }}
+                            >
+                                <Section.Actions>
+                                    <Button size="sm">Edit</Button>
+                                </Section.Actions>
+                            </Section.Header>
+                            <Section.Content>
+                                <ProfileForm />
+                            </Section.Content>
+                        </Section>
+
+                        {/* 4. A second grouping, no actions */}
+                        <Section>
+                            <Section.Header
+                                config={{
+                                    title: 'Danger zone',
+                                    description: 'Irreversible account actions.',
+                                }}
+                            />
+                            <Section.Content>
+                                <DeleteAccountPanel />
+                            </Section.Content>
+                        </Section>
+                    </div>
+                </Page.Content>
+            )}
+
+            {activeTab === 'security' && (
+                <Page.Content maxWidth="sm" scroll>
+                    <SecuritySettings />
+                </Page.Content>
+            )}
+        </Page>
+    );
+}
+```
+
+## Live example
+
+The header chrome and a section body rendered together — the top two layers of the tree above.
+
+<Demo className="max-w-none">
+    <div className="border border-border rounded-lg overflow-hidden bg-background">
+        <Page.Header
+            config={{
+                title: 'Account',
+                menu: [
+                    { label: 'General', paramKey: 'general' },
+                    { label: 'Security', paramKey: 'security' },
+                ],
+                activeTab: 'general',
+                onTabChange: () => {},
+            }}
+        >
+            <Page.Actions>
+                <Button variant="secondary">Invite teammate</Button>
+            </Page.Actions>
+        </Page.Header>
+
+        <div className="p-8">
+            <Section>
+                <Section.Header
+                    config={{
+                        title: 'Profile',
+                        description: 'Your name and how others see you.',
+                    }}
+                >
+                    <Section.Actions>
+                        <Button size="sm">Edit</Button>
+                    </Section.Actions>
+                </Section.Header>
+                <Section.Content>
+                    <div className="border border-dashed border-border p-6 text-center text-foreground-subtext text-sm">
+                        Section body — a form, table, or list
+                    </div>
+                </Section.Content>
+            </Section>
+        </div>
+    </div>
+</Demo>
+
+## Rules of thumb
+
+- **One `Page` per screen.** If you're nesting a `Page` inside a `Page`, you want a `Section` instead.
+- **One `Page.Content` per tab.** Render them as siblings and gate each on `activeTab`; don't wrap all tabs in a single `Page.Content`.
+- **Group with `Section`, don't hand-roll headings.** Any `<h2>` + description in the body should be a `Section.Header` so the serif/sans styling stays consistent everywhere.
+- **Actions go in the nearest slot.** Page-wide actions → `Page.Actions`; a control that belongs to one group → `Section.Actions`.
+- **Tabs come from `useStandardPage`.** It syncs `activeTab` to `?view=` and hands you a typed `handleTabChange`.
+
+## Next
+
+Drill into the individual references in the sidebar:
+
+- **Page** — full `Page` / `Page.Header` / `Page.Content` prop reference.
+- **Section** — `Section` heading + content reference.
+- **Standard Toolbar** — the filter/search bar that sits flush under `Page.Header`.

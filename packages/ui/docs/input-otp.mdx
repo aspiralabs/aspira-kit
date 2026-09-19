@@ -1,0 +1,129 @@
+---
+eyebrow: Input - OTP
+title: InputOTP
+group: Form
+description: One-time-code input composed of fixed-width slots. Thin wrapper over input-otp with InputOTPGroup, InputOTPSlot, and InputOTPSeparator for composition. Import from @aspiralabs/ui.
+---
+
+export const UncontrolledDemo = () => {
+    const [result, setResult] = useState('');
+    return (
+        <>
+            <p className="text-sm text-foreground-subtext">
+                Library owns the state. Read the final value via <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">onComplete</code>. Last completed code: <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">{result || '—'}</code>
+            </p>
+            <InputOTP length={6} onComplete={setResult} />
+        </>
+    );
+};
+
+export const ControlledDemo = () => {
+    const [code, setCode] = useState('');
+    return (
+        <>
+            <p className="text-sm text-foreground-subtext">
+                Caller owns the string. Pass <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">value</code> + <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">onChange</code>. Current value: <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">{code || '—'}</code>
+            </p>
+            <InputOTP length={6} value={code} onChange={setCode} />
+        </>
+    );
+};
+
+export const otpFormSchema = z.object({
+    code: z.string().length(6, 'Enter all 6 digits'),
+});
+
+export const FormDemo = () => {
+    const [submitted, setSubmitted] = useState('');
+    return (
+        <div className="border border-border rounded-lg p-6">
+            <Form
+                schema={otpFormSchema}
+                onSubmit={(data) => setSubmitted(data.code)}
+                className="flex flex-col gap-4 items-start"
+            >
+                <InputOTP name="code" label="Verification code" length={6} />
+                <Button type="submit">Verify</Button>
+            </Form>
+            {submitted && (
+                <p className="mt-4 text-sm text-foreground-subtext">
+                    Submitted: <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">{submitted}</code>
+                </p>
+            )}
+        </div>
+    );
+};
+
+## Usage
+
+```tsx
+import { InputOTP } from '@aspiralabs/ui';
+
+// 1. Uncontrolled — library owns state; read via onComplete
+<InputOTP length={6} onComplete={(code) => verify(code)} />
+
+// 2. Controlled — caller owns the string
+<InputOTP length={6} value={code} onChange={setCode} />
+
+// Need a separator (e.g. 3-3 format)? Drop in the composition API.
+// import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from '@aspiralabs/ui';
+<InputOTP maxLength={6} value={code} onChange={setCode}>
+    <InputOTPGroup>
+        <InputOTPSlot index={0} />
+        <InputOTPSlot index={1} />
+        <InputOTPSlot index={2} />
+    </InputOTPGroup>
+    <InputOTPSeparator />
+    <InputOTPGroup>
+        <InputOTPSlot index={3} />
+        <InputOTPSlot index={4} />
+        <InputOTPSlot index={5} />
+    </InputOTPGroup>
+</InputOTP>
+```
+
+## Uncontrolled
+
+<Demo>
+    <UncontrolledDemo />
+</Demo>
+
+## Controlled
+
+<Demo>
+    <ControlledDemo />
+</Demo>
+
+## Form-controlled
+
+Drop into `<Form>` with a `name` — Form wires it through a RHF `Controller`. Submit empty to see the zod error paint inline.
+
+```tsx
+import { Form } from '@aspiralabs/ui';
+import { InputOTP } from '@aspiralabs/ui';
+import { Button } from '@aspiralabs/ui';
+import { z } from 'zod/v3';
+
+const schema = z.object({
+    code: z.string().length(6, 'Enter all 6 digits'),
+});
+
+// 3. Form-controlled — Form auto-wires via the `name` prop
+<Form schema={schema} onSubmit={({ code }) => verify(code)}>
+    <InputOTP name="code" label="Verification code" length={6} />
+    <Button type="submit">Verify</Button>
+</Form>
+```
+
+<Demo>
+    <FormDemo />
+</Demo>
+
+## Sub-components
+
+| Export              | Purpose                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `InputOTP`          | Root. Pass `length` for the one-liner — auto-renders an `InputOTPGroup` with `length` sequential slots. Or pass `children` (group + slots + optional separator) for advanced layouts. Also accepts `value`, `onChange`, `onComplete`, `label`, `error` (FormError), and `name` for Form auto-wiring — slot borders flip to destructive when error is present. |
+| `InputOTPGroup`     | Wrapper for a contiguous group of slots. Use multiple to visually separate segments.                                                                                                                                                                                                                                                                                                     |
+| `InputOTPSlot`      | One character cell. Takes `index` — required and sequential.                                                                                                                                                                                                                                                                                                                             |
+| `InputOTPSeparator` | Visual dash between groups (e.g. 3-3 formats).                                                                                                                                                                                                                                                                                                                                           |

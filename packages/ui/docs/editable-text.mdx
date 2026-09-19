@@ -1,0 +1,72 @@
+---
+eyebrow: Editable Text
+title: EditableText
+group: Misc
+description: Inline text that becomes an input on double-click. Commits on `Enter` or blur, cancels on `Escape`. Inherits font, color, and letter-spacing from the parent so it drops into headings, table cells, etc. without extra styling. Import from @aspiralabs/ui.
+---
+
+export const InteractiveEditableText = () => {
+    const [editableTitle, setEditableTitle] = useState('Double-click to edit me');
+    return (
+        <EditableText
+            value={editableTitle}
+            onSave={setEditableTitle}
+            className="text-2xl font-semibold text-foreground"
+        />
+    );
+};
+
+export const InheritEditableText = () => {
+    const [editableName, setEditableName] = useState('Inherits parent styling');
+    return (
+        <div className="space-y-4">
+            <EditableText
+                value={editableName}
+                onSave={setEditableName}
+                className="text-4xl font-bold text-foreground"
+            />
+            <EditableText
+                value={editableName}
+                onSave={setEditableName}
+                className="text-base text-foreground"
+            />
+            <EditableText
+                value={editableName}
+                onSave={setEditableName}
+                className="text-xs text-foreground-subtext uppercase tracking-widest"
+            />
+        </div>
+    );
+};
+
+## Usage
+
+```tsx
+import { EditableText } from '@aspiralabs/ui';
+
+<EditableText value={name} onSave={setName} />
+```
+
+## Interactive
+
+Double-click the text. Press <kbd className="text-xs bg-surface px-1 rounded">Enter</kbd> or click away to save, <kbd className="text-xs bg-surface px-1 rounded">Esc</kbd> to cancel. Empty / whitespace-only values are rejected.
+
+<Demo>
+    <InteractiveEditableText />
+</Demo>
+
+## Inherits parent styling
+
+The input copies `font`, `color`, and `letter-spacing` from its container — so the same component renders cleanly as a title, a body cell, or inside a data table.
+
+<Demo>
+    <InheritEditableText />
+</Demo>
+
+## Props
+
+| Prop        | Type                       | Default | Description                                                                                                  |
+| ----------- | -------------------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| `value`     | `string`                   | —       | Display text and initial editable value.                                                                     |
+| `onSave`    | `(value: string) => void`  | —       | Fires on commit. Called with the trimmed value — only if it's non-empty and actually changed.                |
+| `className` | `string`                   | —       | Applied to the wrapper. Style here and the input inherits via `font` / `color` inheritance.                  |

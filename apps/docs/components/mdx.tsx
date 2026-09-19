@@ -1,9 +1,19 @@
-// The component map for rendering a doc. Ported from SAAS_BOILER's
-// design-system-mdx.tsx: markdown elements get the design-system page styling,
-// and the ui components are in scope so MDX bodies render real demos.
+'use client'
+
+// The component map and the scope for rendering a doc. Ported from
+// SAAS_BOILER's design-system-mdx.tsx: markdown elements get the page styling,
+// every @aspiralabs/ui export is in scope so MDX bodies and their exported
+// demos can render real components, plus the handful of libraries the demos use.
+import * as React from 'react'
 import type { ComponentProps, ReactNode } from 'react'
+import dayjs from 'dayjs'
+import NiceModal, { useModal } from '@ebay/nice-modal-react'
+import { toast } from 'sonner'
+import { z } from 'zod/v3'
 import { highlight } from 'sugar-high'
-import { Button, cn } from '@aspiralabs/ui'
+import * as UI from '@aspiralabs/ui'
+
+const { cn } = UI
 
 function Demo({ className, children }: { className?: string; children: ReactNode }) {
   return <div className={cn('mt-3 max-w-2xl space-y-3', className)}>{children}</div>
@@ -24,7 +34,7 @@ function codeText(children: ReactNode): string | undefined {
   return undefined
 }
 
-export const mdxComponents = {
+const markdown = {
   h2: ({ className, ...props }: ComponentProps<'h2'>) => (
     <h2 className={cn('mt-12 mb-3 scroll-m-20 text-2xl font-semibold text-foreground first:mt-0', className)} {...props} />
   ),
@@ -65,10 +75,25 @@ export const mdxComponents = {
   tr: ({ className, ...props }: ComponentProps<'tr'>) => <tr className={cn('border-b border-border last:border-b-0', className)} {...props} />,
   th: ({ className, ...props }: ComponentProps<'th'>) => <th className={cn('px-4 py-2 text-left font-semibold', className)} {...props} />,
   td: ({ className, ...props }: ComponentProps<'td'>) => <td className={cn('px-4 py-2 align-top text-foreground-subtext', className)} {...props} />,
+}
 
+// Everything a doc body or an exported demo may reference by bare name.
+export const mdxScope: Record<string, unknown> = {
+  ...UI,
   Demo,
   Lead,
-
-  // ui components in scope for demos. Grows as components migrate into the package.
-  Button,
+  React,
+  useState: React.useState,
+  useEffect: React.useEffect,
+  useMemo: React.useMemo,
+  useRef: React.useRef,
+  useCallback: React.useCallback,
+  dayjs,
+  NiceModal,
+  useModal,
+  toast,
+  z,
 }
+
+// Markdown element overrides plus the same components, for tags inside the body.
+export const mdxComponents = { ...markdown, ...UI, Demo, Lead } as Record<string, unknown>

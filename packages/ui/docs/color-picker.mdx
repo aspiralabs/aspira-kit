@@ -1,0 +1,52 @@
+---
+eyebrow: Color Picker
+title: ColorPicker
+group: Actionable
+description: Hex color picker built on react-colorful, with a hex input and a browser-native eyedropper button (when supported). Controlled via a hex string (e.g. #3B82F6). Import from @aspiralabs/ui.
+---
+
+export const InteractiveDemo = () => {
+    const [colorValue, setColorValue] = useState('#3B82F6');
+    return (
+        <>
+            <p className="text-sm text-foreground-subtext">
+                Drag the hue / saturation area, type in the hex input, or use the eyedropper (Chrome
+                / Edge). Current:{' '}
+                <span className="font-mono text-xs bg-surface px-1.5 py-0.5 rounded">
+                    {colorValue.toUpperCase()}
+                </span>
+            </p>
+            <div className="max-w-sm">
+                <ColorPicker value={colorValue} onChange={setColorValue} />
+            </div>
+        </>
+    );
+};
+
+## Usage
+
+```tsx
+import { ColorPicker } from '@aspiralabs/ui';
+
+<ColorPicker value={hex} onChange={setHex} />
+```
+
+## Interactive
+
+<Demo>
+    <InteractiveDemo />
+</Demo>
+
+## Eyedropper support
+
+The eyedropper button appears only when the browser's `EyeDropper` API is available
+(Chromium-based browsers as of early 2026). In Safari / Firefox it's hidden — hex input
++ picker still work.
+
+## Props
+
+| Prop        | Type                       | Description                                                          |
+| ----------- | -------------------------- | -------------------------------------------------------------------- |
+| `value`     | `string`                   | Hex color (e.g. `#3B82F6`).                                          |
+| `onChange`  | `(color: string) => void`  | Fires on any change — drag, hex input edit, or eyedropper pick.      |
+| `className` | `string`                   | Applied to the root container.                                       |

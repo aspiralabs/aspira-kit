@@ -1,0 +1,129 @@
+---
+eyebrow: Drawer
+title: Drawer
+group: Overlays
+description: Sliding panel variant of Modal — same @ebay/nice-modal-react pattern as Modal. Wrap a component with NiceModal.create, pass the result of useModal() as the modal prop, open via NiceModal.show(). Compound sub-components Drawer.Content (scrollable body) and Drawer.Actions (sticky footer). Import from @aspiralabs/ui.
+---
+
+export const DemoDrawer = NiceModal.create(
+    ({ title, direction, size }) => {
+        const modal = useModal();
+        return (
+            <Drawer modal={modal} title={title} direction={direction} size={size}>
+                <Drawer.Content>
+                    <div className="space-y-4">
+                        <p className="text-sm text-foreground-subtext">
+                            Drawers follow the exact same NiceModal pattern as modals — wrap with{' '}
+                            <code className="text-xs bg-surface px-1 rounded">NiceModal.create</code>, get a
+                            handle via <code className="text-xs bg-surface px-1 rounded">useModal()</code>, pass{' '}
+                            <code className="text-xs bg-surface px-1 rounded">modal</code> to{' '}
+                            <code className="text-xs bg-surface px-1 rounded">&lt;Drawer&gt;</code>.
+                        </p>
+                        <p className="text-sm text-foreground-subtext">
+                            Use <code className="text-xs bg-surface px-1 rounded">Drawer.Content</code> for the
+                            scrollable body and <code className="text-xs bg-surface px-1 rounded">Drawer.Actions</code>{' '}
+                            for a sticky footer.
+                        </p>
+                    </div>
+                </Drawer.Content>
+                <Drawer.Actions>
+                    <Button variant="secondary" onClick={() => modal.hide()}>
+                        Close
+                    </Button>
+                    <Button onClick={() => modal.hide()}>Done</Button>
+                </Drawer.Actions>
+            </Drawer>
+        );
+    },
+);
+
+export const OpenDrawerButton = ({ label, title, direction = 'right', size = 420 }) => (
+    <Button onClick={() => NiceModal.show(DemoDrawer, { title, direction, size })}>
+        {label}
+    </Button>
+);
+
+## Live demo
+
+Opens a right-side drawer via `NiceModal.show()`.
+
+<Demo>
+    <div className="flex flex-wrap gap-3">
+        <OpenDrawerButton label="Open demo drawer" title="Asset details" direction="right" size={420} />
+    </div>
+</Demo>
+
+## Direction
+
+The `direction` prop controls which edge the drawer slides in from. Defaults to `right`.
+
+<Demo>
+    <div className="flex flex-wrap gap-3">
+        <OpenDrawerButton label="Right (default)" title="Right drawer" direction="right" size={420} />
+        <OpenDrawerButton label="Left" title="Left drawer" direction="left" size={420} />
+        <OpenDrawerButton label="Top" title="Top drawer" direction="top" size={320} />
+        <OpenDrawerButton label="Bottom" title="Bottom drawer" direction="bottom" size={320} />
+    </div>
+</Demo>
+
+## Size
+
+`size` is a number (px) or any CSS string. Width applies on `left`/`right`; height applies on `top`/`bottom`.
+
+<Demo>
+    <div className="flex flex-wrap gap-3">
+        <OpenDrawerButton label="Small (320px)" title="Small drawer" direction="right" size={320} />
+        <OpenDrawerButton label="Default (500px)" title="Default drawer" direction="right" size={500} />
+        <OpenDrawerButton label="Large (720px)" title="Large drawer" direction="right" size={720} />
+        <OpenDrawerButton label="CSS string (40vw)" title="Viewport-relative" direction="right" size="40vw" />
+    </div>
+</Demo>
+
+## 1. Define the drawer
+
+Same shape as defining a Modal. Compose the scrollable body with `Drawer.Content` and the sticky footer with `Drawer.Actions`.
+
+```tsx
+import NiceModal, { useModal } from '@ebay/nice-modal-react';
+import { Drawer } from '@aspiralabs/ui';
+import { Button } from '@aspiralabs/ui';
+
+export default NiceModal.create(
+    ({ assetId }: { assetId: string }) => {
+        const modal = useModal();
+
+        return (
+            <Drawer modal={modal} title="Asset details" direction="right" size={420}>
+                <Drawer.Content>
+                    {/* scrollable body */}
+                </Drawer.Content>
+                <Drawer.Actions>
+                    <Button variant="secondary" onClick={() => modal.hide()}>Cancel</Button>
+                    <Button onClick={() => modal.hide()}>Save</Button>
+                </Drawer.Actions>
+            </Drawer>
+        );
+    },
+);
+```
+
+## 2. Invoke it from anywhere
+
+```tsx
+import NiceModal from '@ebay/nice-modal-react';
+import AssetDetailsDrawer from '@/components/drawers/asset-details-drawer';
+
+NiceModal.show(AssetDetailsDrawer, { assetId: 'abc123' });
+```
+
+## Props
+
+| Prop             | Type                              | Default | Description                                                                                |
+| ---------------- | --------------------------------- | ------- | ------------------------------------------------------------------------------------------ |
+| `modal`          | `NiceModalHandler`                | —       | Required. Result of `useModal()`.                                                          |
+| `children`       | `ReactNode`                       | —       | Usually `Drawer.Content` + `Drawer.Actions`.                                               |
+| `title`          | `string`                          | —       | Renders a header with title + close button when present.                                   |
+| `direction`      | `top \| bottom \| left \| right`  | `right` | Which edge the drawer slides in from.                                                      |
+| `size`           | `number \| string`                | `500`   | Width for left/right, height for top/bottom. Number = px; string = any CSS value.          |
+| `onOutsideClick` | `() => void`                      | —       | Fires before the drawer hides on backdrop click / ESC.                                     |
+| `className`      | `string`                          | —       | Merged onto the panel.                                                                     |

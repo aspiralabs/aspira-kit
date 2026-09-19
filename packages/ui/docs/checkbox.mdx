@@ -1,0 +1,47 @@
+---
+eyebrow: Checkbox
+title: Checkbox
+group: Form
+description: Boolean form control. Thin wrapper over Radix Checkbox — forwards every Radix prop (`checked`, `onCheckedChange`, `disabled`, etc.). Import from @aspiralabs/ui.
+---
+
+## Usage
+
+```tsx
+import { Checkbox } from '@aspiralabs/ui';
+
+<Checkbox id="terms" checked={checked} onCheckedChange={setChecked} />
+```
+
+## States
+
+Unchecked, checked, disabled (each combination).
+
+<Demo>
+    <div className="flex items-center gap-6">
+        <label className="flex items-center gap-2 text-sm">
+            <Checkbox /> Unchecked
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+            <Checkbox defaultChecked /> Checked
+        </label>
+        <label className="flex items-center gap-2 text-sm text-foreground-subtext">
+            <Checkbox disabled /> Disabled
+        </label>
+        <label className="flex items-center gap-2 text-sm text-foreground-subtext">
+            <Checkbox defaultChecked disabled /> Checked & disabled
+        </label>
+    </div>
+</Demo>
+
+## Props
+
+All props from Radix `Checkbox.Root` pass through — only common ones listed here.
+
+| Prop              | Type                            | Default | Description                                  |
+| ----------------- | ------------------------------- | ------- | -------------------------------------------- |
+| `checked`         | `boolean \| "indeterminate"`    | —       | Controlled state.                            |
+| `defaultChecked`  | `boolean`                       | `false` | Uncontrolled initial state.                  |
+| `onCheckedChange` | `(checked) => void`             | —       | Fires on toggle with the new checked value.  |
+| `disabled`        | `boolean`                       | `false` | Disables interaction.                        |
+| `className`       | `string`                        | —       | Merged onto the root.                        |

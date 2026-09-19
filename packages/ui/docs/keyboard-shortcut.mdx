@@ -1,0 +1,84 @@
+---
+eyebrow: Keyboard Shortcut
+title: KeyboardShortcut
+group: Surfaces
+description: Styled `<kbd>` element for inline keyboard hints. Auto-adapts inside a Tooltip (the content-scoped selector flips to light-on-dark). Compose multiple keys with `KeyboardShortcutGroup`. Import from @aspiralabs/ui.
+---
+
+## Usage
+
+```tsx
+import { KeyboardShortcut, KeyboardShortcutGroup } from '@aspiralabs/ui';
+
+<KeyboardShortcut>⌘K</KeyboardShortcut>
+
+// Compose multiple keys
+<KeyboardShortcutGroup>
+    <KeyboardShortcut>⌘</KeyboardShortcut>
+    <KeyboardShortcut>⇧</KeyboardShortcut>
+    <KeyboardShortcut>P</KeyboardShortcut>
+</KeyboardShortcutGroup>
+```
+
+## Single key
+
+Drop in a single key label.
+
+<Demo>
+    <div className="flex items-center gap-3 text-sm text-foreground">
+        <span>Press</span>
+        <KeyboardShortcut>⌘K</KeyboardShortcut>
+        <span>to open search.</span>
+    </div>
+</Demo>
+
+## Grouped
+
+Wrap multiple `KeyboardShortcut`s in a `KeyboardShortcutGroup` to render a combo (e.g. cmd-shift-p).
+
+<Demo>
+    <div className="flex items-center gap-3 text-sm text-foreground">
+        <span>Command palette:</span>
+        <KeyboardShortcutGroup>
+            <KeyboardShortcut>⌘</KeyboardShortcut>
+            <KeyboardShortcut>⇧</KeyboardShortcut>
+            <KeyboardShortcut>P</KeyboardShortcut>
+        </KeyboardShortcutGroup>
+    </div>
+</Demo>
+
+## Inside a Tooltip
+
+Automatically flips contrast when nested inside a Tooltip. Hover the button.
+
+<Demo>
+    <div>
+        <Tooltip
+            render={() => (
+                <span className="flex items-center gap-2">
+                    Save
+                    <KeyboardShortcutGroup>
+                        <KeyboardShortcut>⌘</KeyboardShortcut>
+                        <KeyboardShortcut>S</KeyboardShortcut>
+                    </KeyboardShortcutGroup>
+                </span>
+            )}
+        >
+            <Button variant="secondary">Hover me</Button>
+        </Tooltip>
+    </div>
+</Demo>
+
+## Exports
+
+| Export                  | Renders            | Purpose                                                                    |
+| ----------------------- | ------------------ | -------------------------------------------------------------------------- |
+| `KeyboardShortcut`      | `<kbd>`            | One styled key cell. Accepts all native kbd attributes + `className`.      |
+| `KeyboardShortcutGroup` | `<kbd>` (wrapper)  | Inline-flex container that spaces nested keys. Use for combos.             |
+
+## Props
+
+| Component               | Prop        | Type     | Default | Description                                                          |
+| ----------------------- | ----------- | -------- | ------- | -------------------------------------------------------------------- |
+| `KeyboardShortcut`      | `className` | `string` | —       | Merged onto the rendered `<kbd>`. Inherits all native `<kbd>` attrs. |
+| `KeyboardShortcutGroup` | `className` | `string` | —       | Merged onto the wrapper `<kbd>`. Inherits all native `<div>` attrs.  |

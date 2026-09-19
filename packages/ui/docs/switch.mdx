@@ -1,0 +1,79 @@
+---
+eyebrow: Switch
+title: Switch
+group: Form
+description: Compact toggle for an on/off boolean. Thin wrapper over Radix Switch — forwards every Radix prop (`checked`, `defaultChecked`, `onCheckedChange`, `disabled`). For the card-style variant with title + description, see `ToggleBox`. Import from @aspiralabs/ui.
+---
+
+export const InteractiveSwitch = () => {
+    const [on, setOn] = useState(false);
+    return (
+        <>
+            <p className="text-sm text-foreground-subtext">
+                Click to toggle. Current: <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">{on ? 'true' : 'false'}</code>
+            </p>
+            <Switch checked={on} onCheckedChange={setOn} />
+        </>
+    );
+};
+
+## Usage
+
+```tsx
+import { Switch } from '@aspiralabs/ui';
+
+<Switch checked={enabled} onCheckedChange={setEnabled} />
+```
+
+## Interactive
+
+<Demo>
+    <InteractiveSwitch />
+</Demo>
+
+## States
+
+<Demo>
+    <div className="flex items-center gap-6">
+        <label className="flex items-center gap-2 text-sm">
+            <Switch /> Off (default)
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+            <Switch defaultChecked /> On
+        </label>
+        <label className="flex items-center gap-2 text-sm text-foreground-subtext">
+            <Switch disabled /> Disabled off
+        </label>
+        <label className="flex items-center gap-2 text-sm text-foreground-subtext">
+            <Switch defaultChecked disabled /> Disabled on
+        </label>
+    </div>
+</Demo>
+
+## Paired with a label
+
+Typical form pattern — a row with a label/description on the left and the switch on the right. For the full card-style version use `ToggleBox`.
+
+<Demo>
+    <div className="max-w-md flex items-center justify-between py-3 border-b border-border">
+        <div className="flex flex-col">
+            <span className="text-sm font-medium text-foreground">Marketing emails</span>
+            <span className="text-xs text-foreground-subtext">
+                Monthly product updates and feature announcements.
+            </span>
+        </div>
+        <Switch defaultChecked />
+    </div>
+</Demo>
+
+## Props
+
+All props from Radix `Switch.Root` pass through — common ones listed here.
+
+| Prop              | Type                         | Default | Description                                  |
+| ----------------- | ---------------------------- | ------- | -------------------------------------------- |
+| `checked`         | `boolean`                    | —       | Controlled state.                            |
+| `defaultChecked`  | `boolean`                    | `false` | Uncontrolled initial state.                  |
+| `onCheckedChange` | `(checked: boolean) => void` | —       | Fires on toggle with the new value.          |
+| `disabled`        | `boolean`                    | `false` | Blocks interaction, dims to 50% opacity.     |
+| `className`       | `string`                     | —       | Merged onto the root.                        |

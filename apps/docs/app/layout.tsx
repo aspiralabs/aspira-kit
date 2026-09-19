@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import localFont from 'next/font/local'
 import { Hedvig_Letters_Serif, JetBrains_Mono } from 'next/font/google'
 import type { ReactNode } from 'react'
+import { Providers } from '@/components/providers'
 import { ThemeProvider } from '@/components/theme-provider'
 import './globals.css'
 
@@ -39,7 +40,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         />
       </head>
       <body className={`${gtStandard.className} ${jetbrainsMono.variable} ${hedvigLettersSerif.variable} antialiased`}>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <Providers>{children}</Providers>
+        </ThemeProvider>
       </body>
     </html>
   )

@@ -1,0 +1,464 @@
+---
+eyebrow: Input - Select
+title: Input - Select
+group: Form
+description: The opinionated form select — label + error slot, typed option values, three sizes. Supports uncontrolled, controlled, and Form-controlled usage. Default mode wraps the Radix Select primitive. Pass `searchable` or `dataMode="remote"` to switch to a Popover variant with a top search input, debounced remote fetching, and a ScrollArea result list. When a value is set, the chevron is replaced by an inline X button (tooltip "Clear Value") that fires `onValueChange(undefined)`. Pass `triggerVariant="badge"` to swap the input-shaped trigger for a compact pill with a double-arrow indicator — handy for quick-filter chips above tables. Import from @aspiralabs/ui.
+---
+
+export const ROLE_OPTIONS = [
+    { label: 'Owner', value: 'owner' },
+    { label: 'Admin', value: 'admin' },
+    { label: 'Member', value: 'member' },
+];
+
+export const US_STATES = [
+    'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut',
+    'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa',
+    'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts', 'Michigan',
+    'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada', 'New Hampshire',
+    'New Jersey', 'New Mexico', 'New York', 'North Carolina', 'North Dakota', 'Ohio',
+    'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota',
+    'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington', 'West Virginia',
+    'Wisconsin', 'Wyoming',
+].map((s) => ({ label: s, value: s.toLowerCase().replace(/\s+/g, '-') }));
+
+export const DefaultDemo = () => {
+    const [value, setValue] = useState();
+    return (
+        <div className="max-w-sm">
+            <InputSelect
+                placeholder="Select a role"
+                options={ROLE_OPTIONS}
+                value={value}
+                onValueChange={setValue}
+            />
+        </div>
+    );
+};
+
+export const WithLabelDemo = () => {
+    const [value, setValue] = useState('admin');
+    return (
+        <div className="max-w-sm">
+            <InputSelect
+                label="Role"
+                placeholder="Select a role"
+                options={ROLE_OPTIONS}
+                value={value}
+                onValueChange={setValue}
+            />
+        </div>
+    );
+};
+
+export const WithErrorDemo = () => {
+    const [value, setValue] = useState();
+    return (
+        <div className="max-w-sm">
+            <InputSelect
+                label="Role"
+                placeholder="Select a role"
+                options={ROLE_OPTIONS}
+                value={value}
+                onValueChange={setValue}
+                error={{ message: 'Required', type: 'required', ref: null }}
+            />
+        </div>
+    );
+};
+
+export const SizeSmDemo = () => {
+    const [value, setValue] = useState();
+    return (
+        <div className="max-w-sm">
+            <InputSelect
+                size="sm"
+                label="Role"
+                placeholder="Select a role"
+                options={ROLE_OPTIONS}
+                value={value}
+                onValueChange={setValue}
+            />
+        </div>
+    );
+};
+
+export const SizeXsDemo = () => {
+    const [value, setValue] = useState();
+    return (
+        <div className="max-w-sm">
+            <InputSelect
+                size="xs"
+                label="Role"
+                placeholder="Select a role"
+                options={ROLE_OPTIONS}
+                value={value}
+                onValueChange={setValue}
+            />
+        </div>
+    );
+};
+
+export const STATUS_OPTIONS = [
+    { label: 'Active (10)', value: 'active' },
+    { label: 'Closed (33)', value: 'closed' },
+    { label: 'Archived (0)', value: 'archived' },
+    { label: 'Change Requests (0)', value: 'change-requests' },
+    { label: 'Not Registered (1)', value: 'not-registered' },
+];
+
+export const BadgeSingleDemo = () => {
+    const [value, setValue] = useState('active');
+    return (
+        <InputSelect
+            triggerVariant="badge"
+            headerLabel="Status"
+            options={STATUS_OPTIONS}
+            value={value}
+            onValueChange={setValue}
+        />
+    );
+};
+
+export const BadgeMultiDemo = () => {
+    const [values, setValues] = useState(['active', 'closed']);
+    return (
+        <InputSelect
+            multi
+            triggerVariant="badge"
+            placeholder="Status"
+            headerLabel="Status"
+            options={STATUS_OPTIONS}
+            value={values}
+            onValueChange={setValues}
+        />
+    );
+};
+
+export const BadgeSearchableLocalDemo = () => {
+    const [value, setValue] = useState();
+    return (
+        <InputSelect
+            triggerVariant="badge"
+            placeholder="State"
+            headerLabel="State"
+            searchable
+            options={US_STATES}
+            value={value}
+            onValueChange={setValue}
+        />
+    );
+};
+
+export const BadgeSearchableRemoteDemo = () => {
+    const [values, setValues] = useState([]);
+    return (
+        <InputSelect
+            multi
+            triggerVariant="badge"
+            placeholder="City"
+            headerLabel="City"
+            searchable
+            dataMode="remote"
+            baseEndpoint="/api/design-system/cities"
+            labelKey="name"
+            valueKey="id"
+            value={values}
+            onValueChange={setValues}
+        />
+    );
+};
+
+export const SearchableLocalDemo = () => {
+    const [value, setValue] = useState();
+    return (
+        <>
+            <p className="text-sm text-foreground-subtext mb-3">
+                Picked value: <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">{String(value ?? '—')}</code>
+            </p>
+            <div className="max-w-sm">
+                <InputSelect
+                    label="State"
+                    placeholder="Pick a state"
+                    searchable
+                    options={US_STATES}
+                    value={value}
+                    onValueChange={setValue}
+                />
+            </div>
+        </>
+    );
+};
+
+export const SearchableRemoteDemo = () => {
+    const [value, setValue] = useState();
+    return (
+        <>
+            <p className="text-sm text-foreground-subtext mb-3">
+                Picked id: <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">{String(value ?? '—')}</code>
+            </p>
+            <div className="max-w-sm">
+                <InputSelect
+                    label="City"
+                    placeholder="Search for a city"
+                    headerLabel="City"
+                    searchable
+                    dataMode="remote"
+                    baseEndpoint="/api/design-system/cities"
+                    labelKey="name"
+                    valueKey="id"
+                    value={value}
+                    onValueChange={setValue}
+                />
+            </div>
+        </>
+    );
+};
+
+export const CityEntry = ({ data }) => (
+    <span className="flex min-w-0 flex-col">
+        <span className="truncate text-sm font-medium text-foreground">{data.name}</span>
+        <span className="truncate text-xs text-foreground-subtext">{data.country}</span>
+    </span>
+);
+
+export const CustomEntryDemo = () => {
+    const [value, setValue] = useState();
+    return (
+        <>
+            <p className="text-sm text-foreground-subtext mb-3">
+                Picked id: <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">{String(value ?? '—')}</code>
+            </p>
+            <div className="max-w-sm">
+                <InputSelect
+                    label="City"
+                    placeholder="Search for a city"
+                    headerLabel="City"
+                    searchable
+                    dataMode="remote"
+                    baseEndpoint="/api/design-system/cities"
+                    labelKey="name"
+                    valueKey="id"
+                    entryRender={CityEntry}
+                    value={value}
+                    onValueChange={setValue}
+                />
+            </div>
+        </>
+    );
+};
+
+## Usage
+
+```tsx
+import { InputSelect } from '@aspiralabs/ui';
+
+<InputSelect
+    name="role"
+    label="Role"
+    placeholder="Select a role"
+    options={[
+        { label: 'Owner', value: 'owner' },
+        { label: 'Admin', value: 'admin' },
+        { label: 'Member', value: 'member' },
+    ]}
+    value={value}
+    onValueChange={setValue}
+/>
+```
+
+## Default
+
+No label, no error. Trigger height is 56px.
+
+<Demo>
+    <DefaultDemo />
+</Demo>
+
+## With label
+
+Label renders above the trigger. Initial value pre-selected.
+
+<Demo>
+    <WithLabelDemo />
+</Demo>
+
+## With error
+
+Error message renders inline to the right of the label. Trigger turns destructive.
+
+<Demo>
+    <WithErrorDemo />
+</Demo>
+
+## Size: sm
+
+`size="sm"` — 40px trigger, text-sm.
+
+<Demo>
+    <SizeSmDemo />
+</Demo>
+
+## Size: xs
+
+`size="xs"` — 32px trigger, text-xs.
+
+<Demo>
+    <SizeXsDemo />
+</Demo>
+
+## Trigger variant: badge
+
+`triggerVariant="badge"` swaps the full-width input trigger for a compact pill with a double-arrow (`unfold_more`) indicator. The popover, search, options, and selection plumbing are unchanged — only the trigger visual swaps. The inline clear X is suppressed in badge mode so the double-arrow stays visible; to clear in badge mode, reopen the picker and pick another value (single) or untick all (multi). Works in both single and `multi` modes.
+
+```tsx
+// Single — quick status filter chip
+<InputSelect
+    triggerVariant="badge"
+    headerLabel="Status"
+    options={STATUS_OPTIONS}
+    value={status}
+    onValueChange={setStatus}
+/>
+
+// Multi — count summary shown inside the pill ("3 selected")
+<InputSelect
+    multi
+    triggerVariant="badge"
+    headerLabel="Status"
+    options={STATUS_OPTIONS}
+    value={statuses}
+    onValueChange={setStatuses}
+/>
+```
+
+<Demo>
+    <div className="flex items-center gap-3">
+        <BadgeSingleDemo />
+        <BadgeMultiDemo />
+    </div>
+</Demo>
+
+### Badge + searchable (local)
+
+`triggerVariant="badge"` composes with `searchable`. The popover gets its standard search header — the only thing that changed is the trigger.
+
+<Demo>
+    <BadgeSearchableLocalDemo />
+</Demo>
+
+### Badge + searchable (remote)
+
+Same with `dataMode="remote"` — debounced fetch against `/api/design-system/cities`. Shown here as a multi badge filter, the typical real-world shape.
+
+<Demo>
+    <BadgeSearchableRemoteDemo />
+</Demo>
+
+## Searchable + remote
+
+Pass `searchable` to render a search input at the top of the dropdown. Set `dataMode="remote"` to skip the local `options` array and instead fetch debounced, paginated results from `baseEndpoint`. The popover content auto-mirrors the trigger's rendered width via a ref measurement so the dropdown lines up with the trigger regardless of size or container.
+
+```tsx
+// 1. Searchable local — full-text filter on the options array
+<InputSelect
+    label="State"
+    placeholder="Pick a state"
+    searchable
+    options={US_STATES}
+    value={state}
+    onValueChange={setState}
+/>
+
+// 2. Remote — fetches from baseEndpoint, debounced search, paginated response
+//    Endpoint must return PaginatedResponse<T>; labelKey/valueKey extract the option.
+<InputSelect
+    label="Account owner"
+    placeholder="Pick a teammate"
+    searchable
+    dataMode="remote"
+    baseEndpoint="/api/users"
+    labelKey="name"        // default 'name'
+    valueKey="id"          // default 'id'
+    limit={20}             // default 20
+    debounceMs={300}       // default 300
+    listHeight={240}       // default 240
+    value={ownerId}
+    onValueChange={setOwnerId}
+/>
+```
+
+## Searchable (local)
+
+`searchable` with `dataMode="local"` (the default). Type to filter the 50 US states client-side.
+
+<Demo>
+    <SearchableLocalDemo />
+</Demo>
+
+## Searchable (remote)
+
+Live against `/api/design-system/cities` — a self-contained mock route in this repo that returns a `PaginatedResponse<City>` with `?q=` + `?limit=` filtering and a 250 ms artificial delay so the loading spinner is actually visible. Open the dropdown, type _tokyo_, _USA_, _brazil_ — each keystroke debounces (300 ms) then refetches.
+
+<Demo>
+    <SearchableRemoteDemo />
+</Demo>
+
+## Custom option rendering (entryRender)
+
+By default each option renders a single-line label. Pass `entryRender` — a React component that receives `{ data }` (the raw item from your remote endpoint, or the local option object) — to render a custom row in the dropdown "entry slot". Because it's a component, it may use hooks. The trigger keeps showing the plain text `label`; the custom JSX appears only in the dropdown rows.
+
+```tsx
+// `data` is the raw row from baseEndpoint — here { id, name, country }
+const CityEntry = ({ data }) => (
+    <span className="flex flex-col">
+        <span className="text-sm font-medium text-foreground">{data.name}</span>
+        <span className="text-xs text-foreground-subtext">{data.country}</span>
+    </span>
+);
+
+<InputSelect
+    label="City"
+    searchable
+    dataMode="remote"
+    baseEndpoint="/api/design-system/cities"
+    labelKey="name"
+    valueKey="id"
+    entryRender={CityEntry}
+    value={value}
+    onValueChange={setValue}
+/>
+```
+
+<Demo>
+    <CustomEntryDemo />
+</Demo>
+
+## Props
+
+| Prop              | Type                                | Default                         | Description                                                                                                                |
+| ----------------- | ----------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `options`         | `SelectOption[]`                    | —                               | Array of `{ label, value }` entries. Values may be string, number, or boolean.                                             |
+| `value`           | `string \| number \| boolean`       | —                               | Selected option value (typed).                                                                                             |
+| `onValueChange`   | `(value \| undefined) => void`      | —                               | Fires on selection (typed value) or on inline-X clear (`undefined`).                                                       |
+| `label`           | `string`                            | —                               | Optional label above the trigger.                                                                                          |
+| `error`           | `FormError`                         | —                               | React-hook-form error object. Paints destructive border and shows message.                                                 |
+| `placeholder`     | `string`                            | —                               | Shown when no value is selected.                                                                                           |
+| `size`            | `'default' \| 'sm' \| 'xs'`         | `'default'`                     | Trigger size tier.                                                                                                         |
+| `triggerVariant`  | `'input' \| 'badge'`                | `'input'`                       | `input` renders the full-width input-shaped trigger with chevron + inline clear X. `badge` renders a compact gray pill with a double-arrow (`unfold_more`) indicator; clear X is suppressed. |
+| `disabled`        | `boolean`                           | `false`                         | Disables the trigger.                                                                                                      |
+| `className`       | `string`                            | —                               | Outer wrapper className.                                                                                                   |
+| `triggerClassName`| `string`                            | —                               | className forwarded to the trigger.                                                                                        |
+| `searchable`      | `boolean`                           | `false`                         | Renders a search input pinned above the items inside the same Radix Select content tree.                                   |
+| `headerLabel`     | `string`                            | `'Select Value'`                | Semibold caption rendered above the search input when `searchable` is true. Use it to tell the reader what they're selecting (e.g. "Tag", "Owner", "City"). |
+| `dataMode`        | `'local' \| 'remote'`               | `'local'`                       | `local` filters `options` client-side. `remote` ignores `options` and fetches paginated results from `baseEndpoint`.       |
+| `baseEndpoint`    | `string`                            | —                               | Required when `dataMode="remote"`. Receives `?q=&limit=` and must return `PaginatedResponse<T>`.                           |
+| `defaultParams`   | `Record<string, string>`            | —                               | Extra query params merged in when the search box is empty (e.g. default sort).                                             |
+| `labelKey`        | `string`                            | `'name'`                        | Property read off each remote item to populate the option label.                                                           |
+| `valueKey`        | `string`                            | `'id'`                          | Property read off each remote item to populate the option value.                                                           |
+| `limit`           | `number`                            | `20`                            | Page size sent as `?limit=`.                                                                                               |
+| `debounceMs`      | `number`                            | `300`                           | Debounce applied to the search query before firing a remote fetch.                                                         |
+| `listHeight`      | `number`                            | `240`                           | Pixel height of the scrollable result list inside the popover.                                                             |
+| `emptyMessage`    | `string`                            | `'No results found'`            | Copy shown when the visible list is empty.                                                                                 |
+| `errorMessage`    | `string`                            | `'Failed to load results'`      | Copy shown when a remote fetch errors (network failure, non-OK status).                                                    |
+| `entryRender`     | `React.ComponentType<{ data }>`     | —                               | Custom option-row renderer. Receives the raw source item (`data`) — the remote row or local option — and renders custom JSX in the dropdown entry slot. The trigger still shows the plain `label`. |

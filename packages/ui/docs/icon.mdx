@@ -1,0 +1,136 @@
+---
+eyebrow: Icon
+title: Icon
+group: Misc
+description: Thin wrapper over Google Material Symbols, with a project-local SVG registry for custom glyphs. Pass the icon name from the Material Symbols catalog as the `icon` prop. Size, weight, fill, and grade are all adjustable per-call via `font-variation-settings`. Import from @aspiralabs/ui.
+---
+
+## Usage
+
+```tsx
+import { Icon } from '@aspiralabs/ui';
+
+<Icon icon="home" />
+<Icon icon="favorite" fill />
+<Icon icon="settings" size={32} weight={700} />
+```
+
+The Material Symbols name comes from the [Material Symbols catalog](https://fonts.google.com/icons). Custom SVG icons live in `components/ui/core/icon/custom-icons.tsx` and shadow Material names when present.
+
+## Default
+
+24px, weight 400, unfilled.
+
+<Demo>
+    <div className="flex flex-wrap items-center gap-6 text-foreground">
+        <Icon icon="home" />
+        <Icon icon="search" />
+        <Icon icon="settings" />
+        <Icon icon="person" />
+        <Icon icon="notifications" />
+    </div>
+</Demo>
+
+## Sizes
+
+Any pixel value. The container also sizes to match (width + height).
+
+<Demo>
+    <div className="flex flex-wrap items-center gap-6 text-foreground">
+        <Icon icon="star" size={12} />
+        <Icon icon="star" size={16} />
+        <Icon icon="star" size={20} />
+        <Icon icon="star" size={24} />
+        <Icon icon="star" size={32} />
+        <Icon icon="star" size={48} />
+    </div>
+</Demo>
+
+## Fill
+
+Toggle between outlined (default) and filled variants.
+
+<Demo>
+    <div className="flex flex-wrap items-center gap-6 text-foreground">
+        <Icon icon="favorite" size={32} />
+        <Icon icon="favorite" size={32} fill />
+        <Icon icon="star" size={32} />
+        <Icon icon="star" size={32} fill />
+        <Icon icon="home" size={32} />
+        <Icon icon="home" size={32} fill />
+    </div>
+</Demo>
+
+## Weight
+
+Stroke thickness: 100 to 700 in steps of 100. Default is 400.
+
+<Demo>
+    <div className="flex flex-wrap items-center gap-6 text-foreground">
+        <div className="flex flex-col items-center gap-1">
+            <Icon icon="add" size={32} weight={100} />
+            <span className="text-xs text-foreground-subtext">100</span>
+        </div>
+        <div className="flex flex-col items-center gap-1">
+            <Icon icon="add" size={32} weight={300} />
+            <span className="text-xs text-foreground-subtext">300</span>
+        </div>
+        <div className="flex flex-col items-center gap-1">
+            <Icon icon="add" size={32} weight={400} />
+            <span className="text-xs text-foreground-subtext">400</span>
+        </div>
+        <div className="flex flex-col items-center gap-1">
+            <Icon icon="add" size={32} weight={500} />
+            <span className="text-xs text-foreground-subtext">500</span>
+        </div>
+        <div className="flex flex-col items-center gap-1">
+            <Icon icon="add" size={32} weight={700} />
+            <span className="text-xs text-foreground-subtext">700</span>
+        </div>
+    </div>
+</Demo>
+
+## Color
+
+Inherits `currentColor` — set color via the parent or `className`.
+
+<Demo>
+    <div className="flex flex-wrap items-center gap-6">
+        <Icon icon="check_circle" size={28} className="text-foreground" />
+        <Icon icon="check_circle" size={28} className="text-primary" />
+        <Icon icon="warning" size={28} className="text-[color:var(--warning)]" />
+        <Icon icon="error" size={28} className="text-destructive" />
+        <Icon icon="info" size={28} className="text-muted-foreground" />
+    </div>
+</Demo>
+
+## Custom icons
+
+Project-local SVGs live in `components/ui/core/icon/custom-icons.tsx` under the `CUSTOM_ICONS` registry. Reference them by their registry key — `<Icon>` resolves the SVG before falling through to Material Symbols, so a custom name will shadow a Material name if both exist. Material-Symbols-only props (`fill`, `weight`, `grade`) are ignored for SVG icons since they have no analog outside the variable font.
+
+Add an entry to the registry, then use it the same way:
+
+```tsx
+<Icon icon="magnify-alt" size={20} className="text-foreground-subtext" />
+```
+
+<Demo>
+    <div className="flex flex-wrap items-center gap-6 text-foreground">
+        <Icon icon="magnify-alt" size={16} />
+        <Icon icon="magnify-alt" size={20} />
+        <Icon icon="magnify-alt" size={24} />
+        <Icon icon="magnify-alt" size={32} className="text-primary" />
+        <Icon icon="magnify-alt" size={48} className="text-foreground-subtext" />
+    </div>
+</Demo>
+
+## Props
+
+| Prop        | Type                  | Default | Description                                                                                |
+| ----------- | --------------------- | ------- | ------------------------------------------------------------------------------------------ |
+| `icon`      | `string`              | —       | Material Symbols name (e.g. `home`, `more_vert`) or a custom registry key (e.g. `magnify-alt`). |
+| `size`      | `number`              | `24`    | Pixel size. Sets font-size, width, height, and `opsz` together.                            |
+| `fill`      | `boolean`             | `false` | Switches to the filled variant. Material Symbols only.                                     |
+| `weight`    | `100–700 (step 100)`  | `400`   | Stroke weight. Material Symbols only.                                                      |
+| `grade`     | `number`              | `0`     | Grade variation (negative thins, positive thickens). Use subtle values. Material Symbols only. |
+| `className` | `string`              | —       | Applied to the wrapper span; use for color.                                                |

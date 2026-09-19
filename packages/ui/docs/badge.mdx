@@ -1,0 +1,68 @@
+---
+eyebrow: Badge
+title: Badge
+group: Surfaces
+description: Pill-shaped status indicator. Seven named color variants plus semantic aliases (default / secondary / destructive / warning / brand / accent / outline). Four sizes. Import from @aspiralabs/ui.
+---
+
+## Usage
+
+```tsx
+import { Badge } from '@aspiralabs/ui';
+
+<Badge variant="blue">New</Badge>
+```
+
+## Color variants
+
+Named colors — pick by semantic meaning, or see aliases below.
+
+<Demo>
+    <div className="flex flex-wrap gap-2">
+        <Badge variant="gray">Gray</Badge>
+        <Badge variant="blue">Blue</Badge>
+        <Badge variant="green">Green</Badge>
+        <Badge variant="orange">Orange</Badge>
+        <Badge variant="pink">Pink</Badge>
+        <Badge variant="purple">Purple</Badge>
+        <Badge variant="indigo">Indigo</Badge>
+    </div>
+</Demo>
+
+## Semantic aliases
+
+Use these when the meaning matters more than the color — they map to the named colors but make intent explicit at call sites.
+
+<Demo>
+    <div className="flex flex-wrap gap-2">
+        <Badge variant="default">Default</Badge>
+        <Badge variant="secondary">Secondary</Badge>
+        <Badge variant="destructive">Destructive</Badge>
+        <Badge variant="warning">Warning</Badge>
+        <Badge variant="brand">Brand</Badge>
+        <Badge variant="accent">Accent</Badge>
+        <Badge variant="outline">Outline</Badge>
+    </div>
+</Demo>
+
+## Sizes
+
+Four sizes from 10px → 14px text.
+
+<Demo>
+    <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="blue" size="sm">Small</Badge>
+        <Badge variant="blue" size="default">Default</Badge>
+        <Badge variant="blue" size="lg">Large</Badge>
+        <Badge variant="blue" size="xl">XL</Badge>
+    </div>
+</Demo>
+
+## Props
+
+| Prop        | Type                                                                                                                  | Default   | Description                                                              |
+| ----------- | --------------------------------------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------ |
+| `variant`   | `gray \| blue \| green \| orange \| pink \| purple \| indigo \| default \| secondary \| destructive \| warning \| brand \| accent \| outline` | `gray`    | Color / tone.                                                            |
+| `size`      | `sm \| default \| lg \| xl`                                                                                            | `default` | Padding + font-size tier.                                                |
+| `asChild`   | `boolean`                                                                                                              | `false`   | Render as the single child (via Radix Slot) — use to style an `<a>` or `<button>`. |
+| `className` | `string`                                                                                                               | —         | Merged after variants.                                                   |

@@ -1,0 +1,134 @@
+---
+eyebrow: Layout Pattern
+title: Standard Toolbar
+group: Page Chrome
+description: A reusable filter + search bar that sits flush against the Page header. Use it on list pages that need multi-dimensional filters, search, or view-mode toggles.
+---
+
+export const ToolbarDemo = () => {
+    const [filterValues, setFilterValues] = useState({});
+    const [search, setSearch] = useState('');
+    return (
+        <StandardToolbar
+            filters={[
+                {
+                    key: 'role',
+                    label: 'Role',
+                    options: [
+                        { value: 'SUPER_ADMIN', label: 'Super Admin' },
+                        { value: 'AGENCY_ADMIN', label: 'Agency Admin' },
+                        { value: 'USER', label: 'User' },
+                    ],
+                },
+                {
+                    key: 'status',
+                    label: 'Status',
+                    options: [
+                        { value: 'active', label: 'Active' },
+                        { value: 'pending', label: 'Pending' },
+                    ],
+                },
+            ]}
+            filterValues={filterValues}
+            onFilterChange={setFilterValues}
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search by name or email..."
+        />
+    );
+};
+
+## When to use
+
+List/table views with **3+ filter axes** or a **heavy search flow**. Don't add it just because a page has search — a small page can use a plain `Input` with `icon="search"` instead. Reserve the toolbar for the dense list pages.
+
+## Live example
+
+<Demo className="max-w-none">
+    <div className="border border-border rounded-lg overflow-hidden bg-background">
+        <ToolbarDemo />
+    </div>
+</Demo>
+
+## Usage with URL sync
+
+The most common form: `useToolbarUrlState` syncs filter selections + search to `?q=`/`?role=` and gives you back debounced search + values. Pair it with `useInfiniteFetcher` to drive a data table.
+
+```tsx
+import { Page } from '@aspiralabs/ui';
+import { StandardToolbar } from '@/components/standard-toolbar';
+import { useToolbarUrlState } from '@/hooks/use-toolbar-url-state';
+
+export default function AccountsPage() {
+    const { filterValues, setFilterValues, search, setSearch, debouncedSearch } =
+        useToolbarUrlState({ filterKeys: ['role'] });
+
+    const { queryFn } = useInfiniteFetcher('/api/users', {
+        params: {
+            q: debouncedSearch,
+            role: filterValues.role?.join(',') || undefined,
+        },
+    });
+
+    return (
+        <Page>
+            <Page.Header config={{ title: 'Accounts' }}>
+                <Page.Actions>{/* actions */}</Page.Actions>
+            </Page.Header>
+
+            <StandardToolbar
+                filters={[{ key: 'role', label: 'Role', options: ROLE_OPTIONS }]}
+                filterValues={filterValues}
+                onFilterChange={setFilterValues}
+                search={search}
+                onSearchChange={setSearch}
+                searchPlaceholder="Search by name or email..."
+            />
+
+            <Page.Content className="pt-0 sm:pt-0">
+                <DataInfiniteTable columns={columns} queryFn={queryFn} />
+            </Page.Content>
+        </Page>
+    );
+}
+```
+
+## Local state only
+
+Skip `useToolbarUrlState` if the page doesn't need shareable URLs:
+
+```tsx
+const [filterValues, setFilterValues] = useState({});
+const [search, setSearch] = useState('');
+
+<StandardToolbar
+    filters={[/* ... */]}
+    filterValues={filterValues}
+    onFilterChange={setFilterValues}
+    search={search}
+    onSearchChange={setSearch}
+    rightSlot={<SegmentedControl /* ... */ />}
+/>
+```
+
+## Rules
+
+- **Layout:** full-width bar, `h-18`, `px-8`, `bg-background`. Sits directly below `Page.Header`.
+- **Flush content:** the page's `Page.Content` must drop its top padding with `className="pt-0 sm:pt-0"`.
+- **Left side:** filter dropdown with active filter chips (Badge + close button).
+- **Right side:** `rightSlot` (segmented toggles, secondary actions) followed by the search input.
+- **Responsive:** desktop-only — hidden on mobile. A filter sheet for mobile is a future follow-up.
+- **State:** controlled component. Opt into URL sync with `useToolbarUrlState`.
+- **URL params:** `?q=foo` for search, repeatable keys for multi-value filters (`?role=ADMIN&role=OWNER`). Updates via `window.history.replaceState` — does not trigger a Next.js navigation.
+
+## Props
+
+| Prop                | Type                                | Default | Description                                                         |
+| ------------------- | ----------------------------------- | ------- | ------------------------------------------------------------------- |
+| `filters`           | `ToolbarFilterDimension[]`          | —       | Each entry produces one filter dropdown with chip(s) for selection. |
+| `filterValues`      | `Record<string, string[]>`          | —       | Controlled value: arrays keyed by filter `key`.                     |
+| `onFilterChange`    | `(values) => void`                  | —       | Fires when the user adds/removes a filter chip.                     |
+| `search`            | `string`                            | —       | Controlled search input value.                                      |
+| `onSearchChange`    | `(value: string) => void`           | —       | Fires on each keystroke.                                            |
+| `searchPlaceholder` | `string`                            | —       | Placeholder for the search input.                                   |
+| `rightSlot`         | `React.ReactNode`                   | —       | Slot rendered before the search input — segmented toggles, etc.     |

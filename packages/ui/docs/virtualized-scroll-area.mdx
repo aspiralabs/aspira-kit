@@ -1,0 +1,56 @@
+---
+eyebrow: Virtualized Scroll Area
+title: VirtualizedScrollArea
+group: Layout
+description: Windowed list renderer for long arrays — only renders the items currently in view plus a small overscan. Built on @tanstack/react-virtual and composes the core ScrollArea. Data-driven — takes items[] + renderItem. Import from @aspiralabs/ui.
+---
+
+export const demoItems = Array.from({ length: 10000 }, (_, i) => i);
+
+## Usage
+
+```tsx
+import { VirtualizedScrollArea } from '@aspiralabs/ui';
+
+<VirtualizedScrollArea
+    items={rows}
+    listHeight={400}
+    estimateSize={() => 44}
+    getItemKey={(i) => rows[i].id}
+    renderItem={(row) => <Row data={row} />}
+/>
+```
+
+## 10,000-row demo
+
+Ten thousand items rendered in a 400px viewport. Only the visible slice is in the DOM —
+inspect the element to see the window.
+
+<Demo>
+    <div className="max-w-md rounded-md border border-border">
+        <VirtualizedScrollArea
+            items={demoItems}
+            listHeight={400}
+            estimateSize={() => 40}
+            getItemKey={(i) => i}
+            renderItem={(value) => (
+                <div className="h-10 px-4 flex items-center text-sm text-foreground border-b border-border">
+                    Row {value + 1}
+                </div>
+            )}
+        />
+    </div>
+</Demo>
+
+## Props
+
+| Prop            | Type                                          | Default | Description                                                                                  |
+| --------------- | --------------------------------------------- | ------- | -------------------------------------------------------------------------------------------- |
+| `items`         | `T[]`                                         | —       | The array to virtualize.                                                                     |
+| `renderItem`    | `(item: T, index: number) => ReactNode`       | —       | Renders one row.                                                                             |
+| `listHeight`    | `number`                                      | —       | Viewport height in pixels.                                                                   |
+| `estimateSize`  | `(index: number) => number`                   | —       | Estimated row height. Constant for equal rows, index-driven otherwise.                       |
+| `getItemKey`    | `(index: number) => string \| number`         | `index` | Stable React key per row — use the item's id for correct reconciliation.                     |
+| `overscan`      | `number`                                      | `5`     | Rows rendered beyond the visible window — smooths scroll perceptual feel.                    |
+| `initialScroll` | `{ index, clickAfterScroll }`                 | —       | Scroll to index on mount, optionally auto-click the first child of that row.                 |
+| `className`     | `string`                                      | —       | Forwarded to the inner ScrollArea root.                                                      |

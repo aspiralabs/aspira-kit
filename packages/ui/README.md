@@ -1,6 +1,6 @@
 # @aspiralabs/ui
 
-Components, tokens, component docs, and an MCP server that serves those docs to agents. The docs ship inside the package so an agent on version 1.4 gets 1.4's docs.
+Components, tokens, component docs, and an MCP server that serves those docs to agents. The docs ship inside the package so an agent on version 1.4 gets 1.4's docs. Migrated from SAAS_BOILER on 2026-09-19: 31 components, 11 primitives, the page layout patterns, and every design-system doc.
 
 ## Use
 
@@ -9,6 +9,7 @@ Components, tokens, component docs, and an MCP server that serves those docs to 
 @import "tailwindcss";
 @import "@aspiralabs/ui/tokens.css";
 @source "../node_modules/@aspiralabs/ui/dist";
+@source "../node_modules/@aspiralabs/ui/docs";   /* only if the app renders the docs */
 
 :root {
   --primary: #0057ff;   /* override any token */
@@ -18,24 +19,39 @@ Components, tokens, component docs, and an MCP server that serves those docs to 
 ```
 
 ```tsx
-import { Button } from '@aspiralabs/ui'
-<Button variant="secondary">Add customer</Button>
+import { Button, Modal, DataTable } from '@aspiralabs/ui'
 ```
+
+The app supplies the fonts: GT Standard (or any sans) on `<body>`, `--font-mono` and `--font-serif` as CSS variables. Dark mode is class based (`dark` on `<html>`). Mount `TooltipProviderPrimitive`, `NiceModal.Provider`, `ToasterPrimitive`, and a `QueryClientProvider` at the root, as SAAS_BOILER's `app/providers.tsx` does.
+
+## Layout
+
+```
+src/
+  components/<name>/   31 components, one folder each (alert … virtualized-scroll-area, data-table, data-infinite-table)
+  primitives/          11 Radix wrappers (avatar, checkbox, dropdown-menu, floating-panel, option-picker, popover, select, sonner, switch, table, tooltip)
+  layout/              Page, Section, StandardToolbar, PageHeader
+  docs-helpers/        TokenSwatch, TypeScale, SemanticSwatch, FormDemo (used by the docs)
+  lib/                 cn, block-ui, use-debounce, use-standard-page, use-search-params, navigate, types
+  mcp/server.ts        the MCP server
+docs/                  one MDX per component; patterns/ and overview/ subfolders
+tokens.css             @theme mappings, type scale, :root, .dark, base layer
+```
+
+## No framework dependency
+
+The package does not import Next. Three things changed on the way in from SAAS_BOILER:
+
+- `DataTable` and `DataInfiniteTable` take a `navigate?: (url: string) => void` prop for row-click navigation. Default is a full page load. In Next.js pass `useRouter().push`.
+- `PageHeader`'s back link is a plain `<a>`.
+- `useStandardPage` reads `window.location.search` through `useSearchParams` from this package instead of `next/navigation`.
+
+Also: `Button` uses `rounded-md` instead of the hardcoded `rounded-none` so radius tokens reach it (square by default because `--radius-on` is 0), and `Alert`'s blue and success variants use new `--alert-*` tokens with the same hex values the palette classes had.
 
 ## MCP server
 
 `aspiralabs-ui-mcp` (stdio). Registered by `kit init` in `.mcp.json`. Tools: `list_components`, `get_component`, `search`, `get_tokens`, `get_pattern`. Reads `docs/*.mdx`, `docs/patterns/*.mdx`, and `tokens.css` from the installed package.
 
-## Migration from SAAS_BOILER
+## Migration debt
 
-`Button` is migrated as the pattern. One change on the way in: `rounded-none` became `rounded-md` so radius tokens reach buttons (square by default since `--radius-on` is 0).
-
-```bash
-node scripts/migrate-component.mjs badge     # copies component + doc, rewrites imports
-```
-
-Remaining, in rough dependency order (leaves first): icon, badge, skeleton, alert, avatar, card, keyboard-shortcut, tooltip, switch, checkbox, textarea, input, input-otp, slider, segmented-control, toggle-box, choice-box, scroll-area, virtualized-scroll-area, color-picker, editable-text, input-select, input-date, menu, modal, drawer, form, toast. Then `primitives/` (11 Radix wrappers) and `tables/` (two data tables; these import `next/navigation` and need the router passed in).
-
-Known coupling to break as they come over: `@/lib/utils` (done, `lib/cn.ts`), `@/components/ui/core/icon` (16 importers; migrate icon early), `next/navigation` (tables, option-picker).
-
-Audit on the way in: `rounded-*` literals, `text-[..px]`, hex values, palette classes. The lint config will flag the last two.
+`eslint.config.mjs` turns the JSX-ternary rule off for `src/**` (49 ternaries in 17 files came over). Tracked in `@aspiralabs/config` `agent/slop-register.md`. `scripts/migrate-component.mjs` remains for pulling a future component from SAAS_BOILER.

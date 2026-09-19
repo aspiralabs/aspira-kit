@@ -1,0 +1,140 @@
+---
+eyebrow: Choice Box
+title: ChoiceBox
+group: Form
+description: A selectable card with a radio-style indicator. Use for mutually-exclusive options that need more room than a standard radio — label + optional description, each in its own tap target. Import from @aspiralabs/ui.
+---
+
+export const TONE_OPTIONS = [
+    { key: 'professional', label: 'Professional', sample: 'Clear, confident, industry-appropriate language.' },
+    { key: 'friendly', label: 'Friendly', sample: 'Warm and approachable, like talking to a neighbor.' },
+    { key: 'playful', label: 'Playful', sample: 'Light-hearted, emoji-friendly, conversational energy.' },
+    { key: 'minimalist', label: 'Minimalist', sample: 'Sparse, precise. Every word earns its place.' },
+];
+
+export const SingleModeDemo = () => {
+    const [selectedTone, setSelectedTone] = useState('professional');
+    return (
+        <div className="max-w-2xl">
+            <ChoiceBox
+                options={TONE_OPTIONS.map((t) => ({
+                    title: t.label,
+                    description: t.sample,
+                    value: t.key,
+                }))}
+                value={selectedTone}
+                onValueChange={setSelectedTone}
+                className="grid-cols-2"
+            />
+        </div>
+    );
+};
+
+export const MultiModeDemo = () => {
+    const [selectedFeatures, setSelectedFeatures] = useState(['email']);
+    return (
+        <div className="max-w-2xl">
+            <ChoiceBox
+                mode="multi"
+                options={[
+                    { title: 'Email alerts', description: 'Daily digest to your inbox.', value: 'email' },
+                    { title: 'Slack', description: 'Ping the #alerts channel in real time.', value: 'slack' },
+                    { title: 'Mobile push', description: 'Native push notifications.', value: 'push' },
+                    { title: 'Webhooks', description: 'POST to an external endpoint.', value: 'webhook' },
+                ]}
+                value={selectedFeatures}
+                onValueChange={setSelectedFeatures}
+                className="grid-cols-2"
+            />
+            <p className="text-xs text-foreground-subtext mt-3 font-mono">
+                value = {JSON.stringify(selectedFeatures)}
+            </p>
+        </div>
+    );
+};
+
+export const NoDescriptionDemo = () => {
+    const [selectedTone, setSelectedTone] = useState('yes');
+    return (
+        <div className="max-w-md">
+            <ChoiceBox
+                options={[
+                    { title: 'Yes', value: 'yes' },
+                    { title: 'No', value: 'no' },
+                ]}
+                value={selectedTone}
+                onValueChange={setSelectedTone}
+                className="grid-cols-2"
+            />
+        </div>
+    );
+};
+
+## Usage
+
+```tsx
+import { ChoiceBox } from '@aspiralabs/ui';
+
+const TONE_OPTIONS = [
+    { title: 'Professional', description: 'Clear, confident language.', value: 'professional' },
+    { title: 'Friendly', description: 'Warm and approachable.', value: 'friendly' },
+];
+
+// Single — value is a string, default mode
+<ChoiceBox
+    name="tone"
+    options={TONE_OPTIONS}
+    value={tone}
+    onValueChange={setTone}
+    className="grid-cols-2"
+/>
+
+// Multi — value is a string[]
+<ChoiceBox
+    name="features"
+    mode="multi"
+    options={FEATURE_OPTIONS}
+    value={features}
+    onValueChange={setFeatures}
+    className="grid-cols-2"
+/>
+```
+
+## Single mode (radio)
+
+Default mode — exclusive selection. Indicator is a radio dot. `value` is a string.
+
+<Demo>
+    <SingleModeDemo />
+</Demo>
+
+## Multi mode (checkbox)
+
+Toggle multiple options. Indicator is a checkbox square. `value` is a string[].
+
+<Demo>
+    <MultiModeDemo />
+</Demo>
+
+## Without description
+
+Description is optional — omit it for a tighter card.
+
+<Demo>
+    <NoDescriptionDemo />
+</Demo>
+
+## Props
+
+| Prop            | Type                       | Default    | Description                                                                  |
+| --------------- | -------------------------- | ---------- | ---------------------------------------------------------------------------- |
+| `options`       | `ChoiceBoxOption[]`        | —          | Array of `{ title, description?, value, disabled? }`.                        |
+| `mode`          | `'single' \| 'multi'`      | `'single'` | Single swaps the selected value; multi toggles each option.                  |
+| `value`         | `string \| string[]`       | —          | Controlled value — string for single, string[] for multi.                    |
+| `defaultValue`  | `string \| string[]`       | —          | Uncontrolled initial value. Multi defaults to `[]`.                          |
+| `onValueChange` | `(value) => void`          | —          | Fires on selection change with the new value in the mode's shape.            |
+| `name`          | `string`                   | —          | Field name for the `<Form>` wrapper's auto-wiring.                           |
+| `disabled`      | `boolean`                  | `false`    | Disables every option. Individual options can be disabled via `option.disabled`. |
+| `error`         | `FormError`                | —          | Paints the destructive border on each card when truthy.                      |
+| `className`     | `string`                   | —          | Merged onto the grid wrapper (e.g. `grid-cols-2`).                           |
+| `cardClassName` | `string`                   | —          | Merged onto every option card's button root.                                 |

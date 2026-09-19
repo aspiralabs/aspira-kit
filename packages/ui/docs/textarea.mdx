@@ -1,0 +1,80 @@
+---
+eyebrow: Textarea
+title: Textarea
+group: Form
+description: "Multi-line text input with optional label + error. Uses `field-sizing: content` so it auto-grows with its content. Accepts all native `textarea` props. Import from @aspiralabs/ui."
+---
+
+## Usage
+
+```tsx
+import { Textarea } from '@aspiralabs/ui';
+
+<Textarea
+    label="Bio"
+    placeholder="Tell us about yourself…"
+    value={bio}
+    onChange={(e) => setBio(e.target.value)}
+/>
+```
+
+## Default
+
+<Demo>
+    <div className="max-w-md">
+        <Textarea placeholder="Type a few lines…" />
+    </div>
+</Demo>
+
+## With label
+
+<Demo>
+    <div className="max-w-md">
+        <Textarea label="Bio" placeholder="Tell us about yourself…" />
+    </div>
+</Demo>
+
+## With error
+
+Error message renders below. Border turns destructive.
+
+<Demo>
+    <div className="max-w-md pb-5">
+        <Textarea
+            label="Feedback"
+            placeholder="What went wrong?"
+            error={{ message: 'Required', type: 'required', ref: null }}
+        />
+    </div>
+</Demo>
+
+## Auto-grow
+
+The textarea uses CSS `field-sizing: content` — its height grows as you type. Minimum height is `min-h-16` (64px).
+
+<Demo>
+    <div className="max-w-md">
+        <Textarea
+            label="Long note"
+            placeholder="Start typing — the field will grow as you add lines."
+        />
+    </div>
+</Demo>
+
+## Disabled
+
+<Demo>
+    <div className="max-w-md">
+        <Textarea label="Locked" defaultValue="Can't touch this" disabled />
+    </div>
+</Demo>
+
+## Props
+
+Accepts all native `textarea` attributes plus the props below.
+
+| Prop        | Type        | Description                                                                            |
+| ----------- | ----------- | -------------------------------------------------------------------------------------- |
+| `label`     | `string`    | Optional label rendered above.                                                         |
+| `error`     | `FormError` | react-hook-form error object. Shows destructive border and the message below the field. |
+| `className` | `string`    | Merged onto the textarea element.                                                      |

@@ -1,0 +1,91 @@
+---
+eyebrow: Data Infinite Table
+title: DataInfiniteTable
+group: Tables
+description: Cursor-paginated, infinite-scrolling sibling of `DataTable` — drives page fetches via TanStack Query's `useInfiniteQuery` and an IntersectionObserver sentinel. Pair it with `useInfiniteFetcher` (from `@/lib/api/api-fetcher`) which builds the expected queryFn shape for you. Import from @aspiralabs/ui.
+---
+
+export const dataInfiniteTableDemoColumns = [
+    { accessorKey: 'name', header: 'Name' },
+    { accessorKey: 'email', header: 'Email' },
+    { accessorKey: 'role', header: 'Role' },
+];
+
+export const dataInfiniteTableDemoQuery = {
+    queryKey: ['design-system-data-infinite-table-demo'],
+    queryFn: async ({ pageParam }) => {
+        const page = pageParam ? parseInt(pageParam, 10) : 0;
+        const pageSize = 8;
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        const items = Array.from({ length: pageSize }, (_, i) => {
+            const idx = page * pageSize + i;
+            return {
+                id: String(idx),
+                name: `User ${idx + 1}`,
+                email: `user${idx + 1}@example.com`,
+                role: idx % 3 === 0 ? 'Admin' : 'Member',
+            };
+        });
+        const nextCursor = page < 4 ? String(page + 1) : null; // 5 pages total (40 rows)
+        return { items, nextCursor };
+    },
+    initialPageParam: undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    retry: 0,
+};
+
+## Usage
+
+```tsx
+import { DataInfiniteTable } from '@aspiralabs/ui';
+import { useInfiniteFetcher } from '@/lib/api/api-fetcher';
+
+export default function AccountsPage() {
+    const { queryFn } = useInfiniteFetcher<User>('/api/users', {
+        params: { limit: '10' },
+    });
+
+    return (
+        <DataInfiniteTable
+            columns={columns}
+            queryFn={queryFn}
+            onRowClick="/admin/users/<id>"
+        />
+    );
+}
+```
+
+## Live — 5 pages × 8 rows
+
+Mock query returning 5 pages of 8 items (with an artificial 400ms delay). Scroll to the bottom to trigger the next page.
+
+<Demo>
+    <div className="h-[400px]">
+        <DataInfiniteTable
+            columns={dataInfiniteTableDemoColumns}
+            queryFn={dataInfiniteTableDemoQuery}
+        />
+    </div>
+</Demo>
+
+## Props
+
+| Prop         | Type                   | Description                                                                                                                  |
+| ------------ | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `columns`    | `ColumnDef<T>[]`       | TanStack Table column defs.                                                                                                  |
+| `queryFn`    | `InfiniteQueryOptions` | The full useInfiniteQuery options object — queryKey, queryFn, initialPageParam, getNextPageParam, retry. Usually produced by `useInfiniteFetcher`. |
+| `onRowClick` | `string`               | Same URL-template pattern as DataTable.                                                                                      |
+| `hideHeader` | `boolean`              | Skips the table header row.                                                                                                  |
+| `emptyState` | `ReactNode`            | Rendered in place of the table (centered, 60vh min-height) when the query returns zero rows.                                 |
+
+## queryFn shape
+
+The expected shape if you're building the options object by hand (rare — prefer `useInfiniteFetcher`):
+
+| Key                | Type                                                    | Description                                                                          |
+| ------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `queryKey`         | `any[]`                                                 | Cache key array.                                                                     |
+| `queryFn`          | `({ pageParam }) => Promise<{ items, nextCursor }>`     | Fetch one page. `nextCursor` is null when exhausted.                                 |
+| `initialPageParam` | `string \| undefined`                                   | First pageParam value passed to queryFn.                                             |
+| `getNextPageParam` | `(lastPage) => string \| undefined`                     | Maps the last page to the next pageParam (return `undefined` to stop).               |
+| `retry`            | `number`                                                | Retries on failure.                                                                  |

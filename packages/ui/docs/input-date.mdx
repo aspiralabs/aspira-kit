@@ -1,0 +1,95 @@
+---
+eyebrow: Input - Date
+title: Input - Date
+group: Form
+description: Date input with a calendar popover. Users can type a masked MM/DD/YYYY value or pick from the calendar via the trailing icon. Value is a native Date so it pairs with z.date() directly. Supports uncontrolled, controlled, and Form-controlled usage. Import from @aspiralabs/ui.
+---
+
+export const UncontrolledDemo = () => {
+    const [value, setValue] = useState(undefined);
+    return (
+        <div className="max-w-sm">
+            <InputDate label="Birthday" onValueChange={setValue} />
+            <p className="text-xs text-foreground-subtext mt-2 font-mono">
+                value = {value ? dayjs(value).format('MM/DD/YYYY') : 'undefined'}
+            </p>
+        </div>
+    );
+};
+
+export const ControlledDemo = () => {
+    const [value, setValue] = useState(new Date(1990, 5, 15));
+    return (
+        <div className="max-w-sm">
+            <InputDate label="Birthday" value={value} onValueChange={setValue} />
+            <p className="text-xs text-foreground-subtext mt-2 font-mono">
+                value = {value ? dayjs(value).format('MM/DD/YYYY') : 'undefined'}
+            </p>
+        </div>
+    );
+};
+
+## Usage
+
+```tsx
+import { InputDate } from '@aspiralabs/ui';
+
+<InputDate
+    label="Birthday"
+    value={birthday}
+    onValueChange={setBirthday}
+/>
+```
+
+## Uncontrolled
+
+No `value` prop — the component manages its own state, and `onValueChange` observes changes.
+
+<Demo>
+    <UncontrolledDemo />
+</Demo>
+
+## Controlled
+
+Parent owns the `value`. Useful when the date needs to react to other form state.
+
+<Demo>
+    <ControlledDemo />
+</Demo>
+
+## With bounds
+
+`fromDate` / `toDate` disable out-of-range days in the calendar and surface an error when a user types one.
+
+<Demo>
+    <div className="max-w-sm">
+        <InputDate
+            label="In the next 30 days"
+            fromDate={dayjs().toDate()}
+            toDate={dayjs().add(30, 'day').toDate()}
+        />
+    </div>
+</Demo>
+
+## Disabled
+
+<Demo>
+    <div className="max-w-sm">
+        <InputDate label="Birthday" defaultValue={new Date(1990, 5, 15)} disabled />
+    </div>
+</Demo>
+
+## Props
+
+| Prop            | Type                                    | Default      | Description                                                              |
+| --------------- | --------------------------------------- | ------------ | ------------------------------------------------------------------------ |
+| `value`         | `Date \| undefined`                     | —            | Controlled value. Parent drives state.                                   |
+| `defaultValue`  | `Date \| undefined`                     | —            | Uncontrolled initial value.                                              |
+| `onValueChange` | `(date: Date \| undefined) => void`     | —            | Fires when a valid date is typed or picked, or when cleared.             |
+| `name`          | `string`                                | —            | Field name for `<Form>` auto-wiring.                                     |
+| `fromDate`      | `Date`                                  | `1900-01-01` | Oldest allowed date (inclusive).                                         |
+| `toDate`        | `Date`                                  | `2100-12-31` | Newest allowed date (inclusive).                                         |
+| `format`        | `string`                                | `MM/DD/YYYY` | dayjs format string used for the input display + parsing.                |
+| `error`         | `FormError`                             | —            | Overrides the internal out-of-range error when set.                      |
+| `size`          | `'default' \| 'sm' \| 'xs'`             | `'default'`  | Forwarded to the underlying Input.                                       |
+| `disabled`      | `boolean`                               | `false`      | Disables both the input and the calendar trigger.                        |

@@ -1,0 +1,85 @@
+---
+eyebrow: Tooltip
+title: Tooltip
+group: Overlays
+description: Hover-triggered tooltip that wraps any child element. Zero-delay, non-hoverable content, portaled so it escapes overflow containers. Import from @aspiralabs/ui.
+---
+
+## Usage
+
+```tsx
+import { Tooltip } from '@aspiralabs/ui';
+
+<Tooltip text="Copy to clipboard">
+    <Button>Hover me</Button>
+</Tooltip>
+```
+
+## Text tooltip
+
+Pass a `text` prop. Hover the button.
+
+<Demo>
+    <Tooltip text="This is a tooltip">
+        <Button variant="secondary">Hover me</Button>
+    </Tooltip>
+</Demo>
+
+## Sides
+
+`side` controls placement — defaults to `top`.
+
+<Demo>
+    <div className="flex gap-3 flex-wrap">
+        <Tooltip text="Top tooltip" side="top">
+            <Button variant="secondary">Top</Button>
+        </Tooltip>
+        <Tooltip text="Right tooltip" side="right">
+            <Button variant="secondary">Right</Button>
+        </Tooltip>
+        <Tooltip text="Bottom tooltip" side="bottom">
+            <Button variant="secondary">Bottom</Button>
+        </Tooltip>
+        <Tooltip text="Left tooltip" side="left">
+            <Button variant="secondary">Left</Button>
+        </Tooltip>
+    </div>
+</Demo>
+
+## Custom content
+
+Use `render` for JSX content (instead of `text`).
+
+<Demo>
+    <Tooltip
+        render={() => (
+            <div className="flex flex-col gap-0.5">
+                <span className="font-semibold">Rich content</span>
+                <span className="opacity-70">Supports any JSX</span>
+            </div>
+        )}
+    >
+        <Button variant="secondary">Hover for JSX</Button>
+    </Tooltip>
+</Demo>
+
+## No-op
+
+When both `text` and `render` are omitted, the wrapper returns children unchanged — useful for conditional tooltips.
+
+<Demo>
+    <Tooltip>
+        <Button variant="secondary">No tooltip attached</Button>
+    </Tooltip>
+</Demo>
+
+## Props
+
+| Prop               | Type                                  | Default | Description                                              |
+| ------------------ | ------------------------------------- | ------- | -------------------------------------------------------- |
+| `children`         | `JSX.Element`                         | —       | Element to wrap. Tooltip fires on hover/focus.           |
+| `text`             | `string \| number`                    | —       | Simple text content.                                     |
+| `render`           | `() => JSX.Element`                   | —       | JSX content. Takes precedence over `text`.               |
+| `side`             | `'top' \| 'bottom' \| 'left' \| 'right'` | `'top'` | Placement relative to trigger.                           |
+| `className`        | `string`                              | —       | Forwarded to the tooltip content.                        |
+| `triggerClassName` | `string`                              | —       | Forwarded to the trigger wrapper.                        |

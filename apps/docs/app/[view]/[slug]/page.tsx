@@ -1,10 +1,8 @@
 import { notFound } from 'next/navigation'
-import { compileMDX } from 'next-mdx-remote/rsc'
-import remarkGfm from 'remark-gfm'
-import rehypeSlug from 'rehype-slug'
 import { CopyMarkdown } from '@/components/copy-markdown'
-import { mdxComponents } from '@/components/mdx'
+import { DocBody } from '@/components/doc-body'
 import { getDoc, listDocs, VIEWS } from '@/lib/docs'
+import { compileDoc } from '@/lib/mdx'
 
 export function generateStaticParams() {
   return VIEWS.flatMap((v) => listDocs(v.id).map((d) => ({ view: v.id, slug: d.slug })))
@@ -20,12 +18,7 @@ export default async function DocPage({ params }: { params: Promise<{ view: stri
   if (!doc) {
     notFound()
   }
-
-  const { content } = await compileMDX({
-    source: doc.body,
-    components: mdxComponents,
-    options: { mdxOptions: { remarkPlugins: [remarkGfm], rehypePlugins: [rehypeSlug] } },
-  })
+  const code = await compileDoc(doc.body)
 
   return (
     <article>
@@ -37,7 +30,7 @@ export default async function DocPage({ params }: { params: Promise<{ view: stri
         </div>
         <CopyMarkdown raw={doc.raw} />
       </header>
-      {content}
+      <DocBody code={code} />
     </article>
   )
 }
