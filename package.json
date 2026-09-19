@@ -4,6 +4,7 @@
   "description": "The Aspira Labs development kit: ui, config, and the kit CLI. One repo, one version, every project.",
   "packageManager": "pnpm@12.4.1",
   "scripts": {
+    "dev": "pnpm -r --parallel --filter @aspiralabs/ui --filter docs dev",
     "build": "pnpm -r --filter './packages/*' build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",

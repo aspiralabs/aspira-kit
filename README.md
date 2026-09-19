@@ -16,7 +16,7 @@ Why this shape: [enforcement ladder](https://github.com/dludemann) notes in LIFE
 pnpm install
 pnpm check          # typecheck, lint, build every package
 pnpm changeset      # describe a change; versions are lockstep
-pnpm --filter docs dev
+pnpm dev            # ui in tsc --watch plus the docs site on http://localhost:3100
 ```
 
 ## Status
