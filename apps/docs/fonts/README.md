@@ -1,0 +1,1 @@
+GT Standard trial files copied from SAAS_BOILER lib/fonts/gt-standard on 2026-09-19 so the docs site renders with the same face. These are trial-licensed; the docs app is private and unpublished. Do not ship them in @aspiralabs/ui. A product supplies its own sans face.

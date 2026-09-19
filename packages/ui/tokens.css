@@ -4,10 +4,16 @@
  *   @import "tailwindcss";
  *   @import "@aspiralabs/ui/tokens.css";
  *   @source "../node_modules/@aspiralabs/ui/dist";
+ *   @source "../node_modules/@aspiralabs/ui/docs";
  *   :root { --primary: #0057ff; --radius: 0.5rem; --radius-on: 1; }   override anything below
  *
- * The @theme block maps raw variables to Tailwind utilities. Override the raw
- * variables (:root), not the --color-* mappings.
+ * Four parts: the @theme inline block maps raw variables to Tailwind utilities;
+ * the @theme block is the type scale; :root and .dark are the raw values;
+ * @layer base sets the default border color and body colors.
+ * Override the raw variables (:root), not the --color-* mappings.
+ * Dark mode is class-based: put `dark` on <html> (next-themes attribute="class").
+ * Fonts are the app's job: set --font-serif and --font-mono with next/font and the
+ * sans face on <body>; the tokens only reference them.
  */
 
 @custom-variant dark (&:is(.dark *));
@@ -84,6 +90,55 @@
     --color-editor-clip-border: var(--editor-clip-border);
     --color-editor-selection: var(--editor-selection);
     --color-editor-pasteboard: var(--editor-pasteboard);
+}
+
+@theme {
+    --shadow-sm: 0 1px 1px 0 rgba(12, 12, 12, 0.06), 0 2px 2px 0 rgba(12, 12, 12, 0.06);
+    --shadow-md: 0 1px 1px 0 rgba(12, 12, 12, 0.06), 0 2px 2px 0 rgba(12, 12, 12, 0.06), 0 4px 4px 0 rgba(12, 12, 12, 0.06), 0 8px 8px 0 rgba(12, 12, 12, 0.06);
+    --shadow-lg: 0 1px 1px 0 rgba(12, 12, 12, 0.06), 0 2px 2px 0 rgba(12, 12, 12, 0.06), 0 4px 4px 0 rgba(12, 12, 12, 0.06), 0 8px 8px 0 rgba(12, 12, 12, 0.06), 0 16px 16px 0 rgba(12, 12, 12, 0.06);
+
+    --text-display: 80px;
+    --text-display--letter-spacing: -1.6px;
+    --text-display--line-height: 73.6px;
+
+    --text-7xl--letter-spacing: -1.44px;
+    --text-7xl--line-height: 66.24px;
+
+    --text-6xl: 56px;
+    --text-6xl--letter-spacing: -1.4px;
+    --text-6xl--line-height: 1.1;
+
+    --text-5xl: 48px;
+    --text-5xl--letter-spacing: -1px;
+    --text-5xl--line-height: 1.1;
+
+    --text-4xl--letter-spacing: -1px;
+    --text-4xl--line-height: 40px;
+
+    --text-3xl: 30px;
+    --text-3xl--letter-spacing: -0.6px;
+    --text-3xl--line-height: 36px;
+
+    --text-2xl--letter-spacing: 0px;
+    --text-2xl--line-height: 33.6px;
+
+    --text-xl--letter-spacing: 0px;
+    --text-xl--line-height: 1.625;
+
+    --text-lg: 18px;
+    --text-lg--letter-spacing: 0px;
+    --text-lg--line-height: 28px;
+
+    --text-base--letter-spacing: 0px;
+    --text-base--line-height: 22.4px;
+
+    --text-sm: 14px;
+    --text-sm--letter-spacing: -0.13px;
+    --text-sm--line-height: 20px;
+
+    --text-xs: 12px;
+    --text-xs--letter-spacing: -0.13px;
+    --text-xs--line-height: 16px;
 }
 
 :root {
@@ -293,3 +348,13 @@
     --sidebar-border: #1e1e24; /* gray-phantom */
     --sidebar-ring: rgba(181, 217, 156, 0.55);
 }
+
+@layer base {
+    * {
+        @apply border-border outline-ring/50;
+    }
+    body {
+        @apply bg-background text-foreground;
+    }
+}
+

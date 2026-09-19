@@ -30,7 +30,7 @@ export default async function DocPage({ params }: { params: Promise<{ view: stri
   return (
     <article>
       <header className="mb-10 flex items-start justify-between gap-6">
-        <div className="flex flex-col gap-2">
+        <div className="flex min-w-0 flex-col gap-2">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">{doc.eyebrow}</p>
           <h1 className="text-4xl font-semibold tracking-tight">{doc.title}</h1>
           {doc.description && <p className="max-w-2xl text-lg text-foreground-subtext">{doc.description}</p>}
