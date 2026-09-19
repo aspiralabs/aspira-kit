@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import type { ReactNode } from 'react'
-import { Button } from '@aspiralabs/ui'
+import { Button, ScrollArea } from '@aspiralabs/ui'
 import { Sidebar } from '@/components/sidebar'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { firstSlug, navFor, uiVersion, VIEWS } from '@/lib/docs'
@@ -44,11 +44,15 @@ export default async function ViewLayout({ children, params }: { children: React
       </header>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <aside className="w-56 shrink-0 overflow-y-auto border-r border-border p-4">
-          <Sidebar view={meta.id} nav={nav} />
+        <aside className="w-56 shrink-0 border-r border-border">
+          <ScrollArea className="h-full" viewPortClassName="p-4">
+            <Sidebar view={meta.id} nav={nav} />
+          </ScrollArea>
         </aside>
-        <main className="min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-5xl px-10 py-16">{children}</div>
+        <main className="min-w-0 flex-1 overflow-hidden">
+          <ScrollArea className="h-full">
+            <div className="mx-auto max-w-5xl px-10 py-16">{children}</div>
+          </ScrollArea>
         </main>
       </div>
     </div>
