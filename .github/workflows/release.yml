@@ -1,0 +1,46 @@
+# Releases, driven by changesets.
+#
+# Every merge to main runs this. If there are pending changesets it opens or
+# updates ONE "Version Packages" pull request that accumulates every change
+# since the last release. Merging that PR is cutting the release: this same
+# workflow then builds, publishes all three packages to GitHub Packages in
+# lockstep, tags, and creates a GitHub Release. Merges without changesets are
+# fine; they simply do not add to the pending release.
+name: release
+on:
+  push:
+    branches: [main]
+concurrency:
+  group: release
+  cancel-in-progress: false
+permissions:
+  contents: write
+  pull-requests: write
+  packages: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          registry-url: https://npm.pkg.github.com
+          scope: "@aspiralabs"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Version PR or publish
+        uses: changesets/action@v1
+        with:
+          version: pnpm version
+          publish: pnpm release
+          title: "Release: version packages"
+          commit: "Version packages"
+          createGithubReleases: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

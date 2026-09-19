@@ -1,4 +1,5 @@
-# Reusable. Every product calls this so the deterministic gates are the same everywhere:
+# Reusable. The kit's own CI calls this, and every product can call it too so
+# the deterministic gates are identical everywhere:
 #   jobs:
 #     checks:
 #       uses: aspiralabs/aspira-kit/.github/workflows/kit-checks.yml@main
@@ -23,3 +24,4 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm build
+      - run: pnpm test

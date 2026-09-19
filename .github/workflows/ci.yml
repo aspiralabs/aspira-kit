@@ -1,8 +1,12 @@
+# Every pull request and every push to main: typecheck, lint, build, smoke tests.
 name: ci
 on:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   checks:
     uses: ./.github/workflows/kit-checks.yml

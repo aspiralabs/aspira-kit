@@ -1,11 +1,16 @@
 {
   "name": "@aspiralabs/kit",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "The Aspira Labs kit CLI. `kit init --stack next` wires a project to @aspiralabs/ui and @aspiralabs/config; `kit doctor` reports drift.",
   "type": "module",
   "license": "MIT",
-  "files": ["dist", "README.md"],
-  "bin": { "kit": "./dist/cli.js" },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "bin": {
+    "kit": "./dist/cli.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -17,5 +22,14 @@
     "@types/node": "^22",
     "eslint": "^9.39.0",
     "typescript": "^5.9.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aspiralabs/aspira-kit.git",
+    "directory": "packages/kit"
+  },
+  "homepage": "https://github.com/aspiralabs/aspira-kit/tree/main/packages/kit",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   }
 }

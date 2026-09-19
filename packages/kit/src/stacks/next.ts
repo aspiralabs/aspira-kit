@@ -22,6 +22,31 @@ function packageManager(root: string): 'pnpm' | 'npm' | 'yarn' {
   return 'pnpm'
 }
 
+const NPMRC = `@aspiralabs:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=\${NPM_TOKEN}
+`
+
+// GitHub Packages needs the scope mapped and a token, even for public packages.
+function npmrc(opts: InitOptions): void {
+  const path = join(opts.projectRoot, '.npmrc')
+  if (existsSync(path)) {
+    const current = readFileSync(path, 'utf8')
+    if (current.includes('@aspiralabs:registry')) {
+      opts.log(`keep   ${path} (scope already mapped)`)
+      return
+    }
+    opts.log(`update ${path} (map @aspiralabs to GitHub Packages)`)
+    if (!opts.dryRun) {
+      writeFileSync(path, `${current.trimEnd()}\n${NPMRC}`)
+    }
+    return
+  }
+  opts.log(`write  ${path}`)
+  if (!opts.dryRun) {
+    writeFileSync(path, NPMRC)
+  }
+}
+
 function install(opts: InitOptions): void {
   const pm = packageManager(opts.projectRoot)
   const add = pm === 'yarn' ? 'add' : pm === 'npm' ? 'install' : 'add'
@@ -155,6 +180,7 @@ function specs(opts: InitOptions): void {
 
 export async function initNext(opts: InitOptions): Promise<void> {
   opts.log(`stack  next (${opts.projectRoot})`)
+  npmrc(opts)
   install(opts)
   eslint(opts)
   prettier(opts)
@@ -162,5 +188,5 @@ export async function initNext(opts: InitOptions): Promise<void> {
   css(opts)
   agentFiles(opts)
   specs(opts)
-  opts.log('done   run `pnpm lint` to see what the org rules think of the codebase')
+  opts.log('done   set NPM_TOKEN (a GitHub token with read:packages) before installing; then run `pnpm lint` to see what the org rules think of the codebase')
 }

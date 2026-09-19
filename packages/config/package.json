@@ -1,10 +1,16 @@
 {
   "name": "@aspiralabs/config",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "Aspira Labs shared config: eslint, tsconfig, prettier, and agent config, as subpath exports.",
   "type": "module",
   "license": "MIT",
-  "files": ["eslint", "tsconfig", "prettier", "agent", "README.md"],
+  "files": [
+    "eslint",
+    "tsconfig",
+    "prettier",
+    "agent",
+    "README.md"
+  ],
   "exports": {
     "./eslint/base": "./eslint/base.js",
     "./eslint/next": "./eslint/next.js",
@@ -33,5 +39,14 @@
   },
   "devDependencies": {
     "eslint": "^9.39.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aspiralabs/aspira-kit.git",
+    "directory": "packages/config"
+  },
+  "homepage": "https://github.com/aspiralabs/aspira-kit/tree/main/packages/config",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   }
 }

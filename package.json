@@ -8,13 +8,20 @@
     "build": "pnpm -r --filter './packages/*' build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
-    "check": "pnpm typecheck && pnpm lint && pnpm build",
+    "check": "pnpm typecheck && pnpm lint && pnpm build && pnpm test",
     "changeset": "changeset",
-    "version": "changeset version",
-    "release": "pnpm build && changeset publish"
+    "version": "changeset version && pnpm install --lockfile-only",
+    "release": "changeset publish",
+    "test": "node packages/ui/scripts/mcp-smoke.mjs && pnpm -r --filter \"./packages/*\" exec pnpm pack --pack-destination ../../.packs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.0",
     "typescript": "^5.9.0"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "core-js-pure",
+      "unrs-resolver"
+    ]
   }
 }
