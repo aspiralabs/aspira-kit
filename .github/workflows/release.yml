@@ -36,8 +36,9 @@ jobs:
       - name: Version PR or publish
         uses: changesets/action@v1
         with:
-          version: pnpm version
-          publish: pnpm release
+          # not `pnpm version` / `pnpm release`: `version` is a pnpm built-in and shadows the script
+          version: pnpm changeset:version
+          publish: pnpm changeset:publish
           title: "Release: version packages"
           commit: "Version packages"
           createGithubReleases: true
