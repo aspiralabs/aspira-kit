@@ -23,10 +23,11 @@ function packageManager(root: string): 'pnpm' | 'npm' | 'yarn' {
 }
 
 const NPMRC = `@aspiralabs:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=\${NPM_TOKEN}
 `
 
-// GitHub Packages needs the scope mapped and a token, even for public packages.
+// GitHub Packages needs the scope mapped (here, committed) and a token (in the
+// user's ~/.npmrc, never in the project). pnpm 12 does not expand ${VAR} in
+// .npmrc, so the token line cannot live in a committed file.
 function npmrc(opts: InitOptions): void {
   const path = join(opts.projectRoot, '.npmrc')
   if (existsSync(path)) {
@@ -47,7 +48,18 @@ function npmrc(opts: InitOptions): void {
   }
 }
 
+function ensureToken(opts: InitOptions): void {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? ''
+  const userRc = join(home, '.npmrc')
+  if (existsSync(userRc) && readFileSync(userRc, 'utf8').includes('npm.pkg.github.com/:_authToken')) {
+    return
+  }
+  opts.log('note   no GitHub Packages token in ~/.npmrc; add one line there (never in the project):')
+  opts.log('       //npm.pkg.github.com/:_authToken=<classic token with read:packages>')
+}
+
 function install(opts: InitOptions): void {
+  ensureToken(opts)
   const pm = packageManager(opts.projectRoot)
   const add = pm === 'yarn' ? 'add' : pm === 'npm' ? 'install' : 'add'
   const devFlag = pm === 'npm' ? '--save-dev' : '-D'
@@ -68,11 +80,11 @@ function install(opts: InitOptions): void {
 }
 
 function eslint(opts: InitOptions): void {
-  writeIfAbsent(join(opts.projectRoot, 'eslint.config.mjs'), "import next from '@aspiralabs/config/eslint/next'\n\nexport default next\n", opts.log)
+  writeIfAbsent(join(opts.projectRoot, 'eslint.config.mjs'), "import next from '@aspiralabs/config/eslint/next'\n\nexport default next\n", opts.log, opts.dryRun)
 }
 
 function prettier(opts: InitOptions): void {
-  writeIfAbsent(join(opts.projectRoot, 'prettier.config.mjs'), "export { default } from '@aspiralabs/config/prettier'\n", opts.log)
+  writeIfAbsent(join(opts.projectRoot, 'prettier.config.mjs'), "export { default } from '@aspiralabs/config/prettier'\n", opts.log, opts.dryRun)
 }
 
 function tsconfig(opts: InitOptions): void {
@@ -151,7 +163,7 @@ function agentFiles(opts: InitOptions): void {
     }
   }
 
-  writeIfAbsent(join(opts.projectRoot, 'CLAUDE.md'), tpl('CLAUDE.md', '@AGENTS.md\n'), opts.log)
+  writeIfAbsent(join(opts.projectRoot, 'CLAUDE.md'), tpl('CLAUDE.md', '@AGENTS.md\n'), opts.log, opts.dryRun)
 
   const mcpPath = join(opts.projectRoot, '.mcp.json')
   const mcpTemplate = JSON.parse(tpl('mcp.json', '{"mcpServers":{"aspiralabs-ui":{"command":"npx","args":["--no","aspiralabs-ui-mcp"]}}}')) as Record<string, unknown>
@@ -175,6 +187,7 @@ function specs(opts: InitOptions): void {
     join(opts.projectRoot, 'specs', 'README.md'),
     '# Specs\n\nOne file per feature: intent, constraints, acceptance criteria, out of scope, expected blast radius. Status approved before any code. See the kit constraints.\n',
     opts.log,
+    opts.dryRun,
   )
 }
 
@@ -188,5 +201,5 @@ export async function initNext(opts: InitOptions): Promise<void> {
   css(opts)
   agentFiles(opts)
   specs(opts)
-  opts.log('done   set NPM_TOKEN (a GitHub token with read:packages) before installing; then run `pnpm lint` to see what the org rules think of the codebase')
+  opts.log('done   run `pnpm lint` to see what the org rules think of the codebase')
 }

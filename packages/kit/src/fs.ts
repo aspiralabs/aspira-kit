@@ -15,14 +15,17 @@ export function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
 }
 
-export function writeIfAbsent(path: string, content: string, log: Log): boolean {
+export function writeIfAbsent(path: string, content: string, log: Log, dryRun = false): boolean {
   if (existsSync(path)) {
     log(`keep   ${path} (exists)`)
     return false
   }
+  log(`write  ${path}`)
+  if (dryRun) {
+    return true
+  }
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, content)
-  log(`write  ${path}`)
   return true
 }
 
