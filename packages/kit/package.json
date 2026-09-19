@@ -1,0 +1,21 @@
+{
+  "name": "@aspiralabs/kit",
+  "version": "0.1.0",
+  "description": "The Aspira Labs kit CLI. `kit init --stack next` wires a project to @aspiralabs/ui and @aspiralabs/config; `kit doctor` reports drift.",
+  "type": "module",
+  "license": "MIT",
+  "files": ["dist", "README.md"],
+  "bin": { "kit": "./dist/cli.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@aspiralabs/config": "workspace:*",
+    "@types/node": "^22",
+    "eslint": "^9.39.0",
+    "typescript": "^5.9.0"
+  }
+}

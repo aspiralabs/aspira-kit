@@ -1,0 +1,67 @@
+---
+eyebrow: Button
+title: Button
+description: The app's button primitive. Six variants, four sizes, class-variance-authority driven. Supports `asChild` for Radix Slot composition. Import from @aspiralabs/ui.
+---
+
+## Usage
+
+```tsx
+import { Button } from '@aspiralabs/ui';
+
+<Button variant="default" size="default">Click me</Button>
+```
+
+## Variants
+
+Six visual styles. Pick based on emphasis and semantics.
+
+<Demo>
+    <div className="flex flex-wrap gap-3">
+        <Button variant="default">Default</Button>
+        <Button variant="secondary">Secondary</Button>
+        <Button variant="outline">Outline</Button>
+        <Button variant="ghost">Ghost</Button>
+        <Button variant="destructive">Destructive</Button>
+        <Button variant="link">Link</Button>
+    </div>
+</Demo>
+
+## Sizes
+
+Four sizes — `sm`, `default`, `lg`, and `icon` (square).
+
+<Demo>
+    <div className="flex flex-wrap items-center gap-3">
+        <Button size="sm">Small</Button>
+        <Button size="default">Default</Button>
+        <Button size="lg">Large</Button>
+        <Button size="icon" aria-label="Icon button">
+            <span aria-hidden>★</span>
+        </Button>
+    </div>
+</Demo>
+
+## States
+
+Native HTML button states — disabled renders at 50% opacity, pointer-events off.
+
+<Demo>
+    <div className="flex flex-wrap gap-3">
+        <Button>Enabled</Button>
+        <Button disabled>Disabled</Button>
+        <Button variant="destructive" disabled>
+            Disabled destructive
+        </Button>
+    </div>
+</Demo>
+
+## Props
+
+| Prop        | Type                                                          | Default   | Description                                                                          |
+| ----------- | ------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------ |
+| `variant`   | `default \| secondary \| outline \| ghost \| destructive \| link` | `default` | Visual style.                                                                        |
+| `size`      | `sm \| default \| lg \| icon`                                 | `default` | Height + padding tier.                                                               |
+| `asChild`   | `boolean`                                                     | `false`   | Render as the single child element via Radix Slot (e.g. to style an `<a>`).          |
+| `disabled`  | `boolean`                                                     | `false`   | Native button disabled. 50% opacity + no pointer events.                             |
+| `className` | `string`                                                      | —         | Merged after variants via `cn()`.                                                    |

@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [{ "type": "command", "command": "sh node_modules/@aspiralabs/config/agent/hooks/session-start.sh" }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "sh node_modules/@aspiralabs/config/agent/hooks/deny-tier3.sh" },
+          { "type": "command", "command": "sh node_modules/@aspiralabs/config/agent/hooks/audit-log.sh" }
+        ]
+      }
+    ]
+  }
+}

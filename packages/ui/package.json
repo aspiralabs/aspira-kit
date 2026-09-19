@@ -1,0 +1,61 @@
+{
+  "name": "@aspiralabs/ui",
+  "version": "0.1.0",
+  "description": "Aspira Labs component library: components, tokens, component docs, and an MCP server that serves the docs to agents.",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "tokens.css",
+    "docs",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./tokens.css": "./tokens.css",
+    "./components/*": {
+      "types": "./dist/components/*/index.d.ts",
+      "default": "./dist/components/*/index.js"
+    },
+    "./docs/*": "./docs/*",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "aspiralabs-ui-mcp": "./bin/mcp.js"
+  },
+  "sideEffects": [
+    "*.css"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "mcp": "node bin/mcp.js",
+    "migrate": "node scripts/migrate-component.mjs"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "@radix-ui/react-slot": "^1.2.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.3.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@aspiralabs/config": "workspace:*",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9.39.0",
+    "react": "^19",
+    "react-dom": "^19",
+    "typescript": "^5.9.0"
+  }
+}

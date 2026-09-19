@@ -1,0 +1,295 @@
+/* @aspiralabs/ui tokens. Extracted from SAAS_BOILER app/globals.css on 2026-09-19.
+ *
+ * Consumer globals.css:
+ *   @import "tailwindcss";
+ *   @import "@aspiralabs/ui/tokens.css";
+ *   @source "../node_modules/@aspiralabs/ui/dist";
+ *   :root { --primary: #0057ff; --radius: 0.5rem; --radius-on: 1; }   override anything below
+ *
+ * The @theme block maps raw variables to Tailwind utilities. Override the raw
+ * variables (:root), not the --color-* mappings.
+ */
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-serif: var(--font-serif);
+
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+
+    --color-foreground-subtext: var(--foreground-subtext);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-success: var(--success);
+    --color-warning: var(--warning);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-surface: var(--surface);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-marketing: var(--marketing);
+    --color-marketing-foreground: var(--marketing-foreground);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --radius-sm: calc((var(--radius) - 4px) * var(--radius-on));
+    --radius-md: calc((var(--radius) - 2px) * var(--radius-on));
+    --radius-lg: calc(var(--radius) * var(--radius-on));
+    --radius-xl: calc((var(--radius) + 4px) * var(--radius-on));
+    --radius-2xl: calc((var(--radius) + 12px) * var(--radius-on));
+    --radius-3xl: calc((var(--radius) + 24px) * var(--radius-on));
+    --radius-4xl: calc((var(--radius) + 32px) * var(--radius-on));
+    --color-black: var(--black);
+    --color-black-foreground: var(--black-foreground);
+    --color-brand: var(--brand);
+    --color-brand-foreground: var(--brand-foreground);
+    --color-muted: var(--muted);
+    --color-primary-hover: var(--primary-hover);
+    --color-brand-blue: var(--brand-blue);
+    --color-brand-blue-foreground: var(--brand-blue-foreground);
+    --color-input-alt: var(--input-alt);
+    --color-input-bg: var(--input-bg);
+
+    /* Grayscale palette */
+    --color-gray-cloud: var(--gray-cloud);
+    --color-gray-smoke: var(--gray-smoke);
+    --color-gray-steel: var(--gray-steel);
+    --color-gray-space: var(--gray-space);
+    --color-gray-graphite: var(--gray-graphite);
+    --color-gray-arsenic: var(--gray-arsenic);
+    --color-gray-phantom: var(--gray-phantom);
+    --color-gray-black: var(--gray-black);
+
+    --color-editor-clip-border: var(--editor-clip-border);
+    --color-editor-selection: var(--editor-selection);
+    --color-editor-pasteboard: var(--editor-pasteboard);
+}
+
+:root {
+    --radius: 0.75rem; /* Increased base radius for rounder feel (12px) */
+    --radius-on: 0; /* 1 = rounded, 0 = sharp corners */
+    --background: #ffffff;
+    --foreground: #1a1d27;
+    /* --foreground-subtext: #6e7180; */
+    --foreground-subtext: #677083;
+
+    --card: #ffffff;
+    --card-foreground: #1a1d27;
+    --popover: #ffffff;
+    --popover-foreground: #1a1d27;
+
+    --destructive: #dc2626;
+    --success: #16a34a;
+    --warning: #f59e0b;
+
+    --border: #dadada;
+    --input: #dadada;
+    --input-alt: #f4f4f9;
+    --input-bg: #ffffff;
+    --ring: #d3d6e0;
+
+    --black: #3a3a3a;
+    --black-foreground: #fcfcfc;
+
+    --primary: #1a1d27;
+    --primary-foreground: #fcfcfc;
+    --primary-hover: #3b3f4d;
+
+    --secondary: #edeff7;
+    --secondary-foreground: #1a1d27;
+
+    --brand: #b5d99c;
+    --brand-foreground: #263635;
+
+    --brand-blue: #2b65f6;
+    --brand-blue-foreground: #ffffff;
+
+    --accent: #f4ecd6;
+    --accent-foreground: #111827;
+
+    --marketing: #a7cab1;
+    --marketing-foreground: #111827;
+
+    /* --surface: #F1F0EE; */
+    --surface: #ededed;
+    --muted: #edeff7;
+    --muted-foreground: #9da2b3;
+    --editor-clip-border: #323265;
+    --editor-selection: #0b99ff;
+    --editor-pasteboard: #f4f4f9;
+
+    /* Grayscale palette */
+    --gray-cloud: #edeff7;
+    --gray-smoke: #d3d6e0;
+    --gray-steel: #bcbfcc;
+    --gray-space: #9da2b3;
+    --gray-graphite: #5e7180;
+    --gray-arsenic: #40424d;
+    --gray-phantom: #1e1e24;
+    --gray-black: #0c0c0c;
+
+    /* Badges */
+    --badge-pink-foreground: #ac3575;
+    --badge-purple-foreground: #522eb4;
+    --badge-blue-foreground: #0f766e;
+    --badge-indigo-foreground: #232498;
+    --badge-orange-foreground: #ce5610;
+    --badge-gray-foreground: #1d1d1d;
+    --badge-green-foreground: #15803d;
+
+    --badge-pink-border: #e9d0db;
+    --badge-purple-border: #e3e0e8;
+    --badge-blue-border: #99f6e4;
+    --badge-indigo-border: #dce2f2;
+    --badge-orange-border: #eed9c2;
+    --badge-gray-border: #e2e2e2;
+    --badge-green-border: #bbf7d0;
+
+    --badge-pink: #f8e6f2;
+    --badge-purple: #eee4ff;
+    --badge-blue: #ccfbf1;
+    --badge-indigo: #d7ebff;
+    --badge-orange: #ffede0;
+    --badge-gray: #ededed;
+    --badge-green: #dcfce7;
+
+    /* Chart */
+    --chart-1: #f97316;
+    --chart-2: #06b6d4;
+    --chart-3: #3730a3;
+    --chart-4: #facc15;
+    --chart-5: #f59e0b;
+    --sidebar: #fafafa;
+
+    /* Sidebar */
+    --sidebar-foreground: #252525;
+    --sidebar-primary: #343434;
+    --sidebar-primary-foreground: #fafafa;
+    --sidebar-accent: #f7f7f7;
+    --sidebar-accent-foreground: #343434;
+    --sidebar-border: #ebebeb;
+    --sidebar-ring: #b5b5b5;
+}
+
+.dark {
+    /* Core — derived from grayscale palette */
+    --background: #0c0c0c; /* gray-black */
+    --foreground: #f2f4f8;
+    --foreground-subtext: #9aa3b2;
+
+    /* Surfaces */
+    --card: #1e1e24; /* gray-phantom */
+    --card-foreground: #f2f4f8;
+    --popover: #1e1e24; /* gray-phantom */
+    --popover-foreground: #f2f4f8;
+
+    /* Brand + UI semantics */
+    --primary: #f2f4f8;
+    --primary-foreground: #0c0c0c; /* gray-black */
+    --primary-hover: #d3d6e0;
+
+    --secondary: #1e1e24; /* gray-phantom, same as --input */
+    --secondary-foreground: #f2f4f8;
+
+    --surface: #1e1e24;
+
+    --muted: #1c2030;
+    --muted-foreground: #b7bfcc;
+
+    /* Keep the same family as light mode */
+    --brand: #b5d99c;
+    --brand-foreground: #0c0c0c; /* gray-black */
+
+    --brand-blue: #4b7ff7;
+    --brand-blue-foreground: #ffffff;
+
+    --marketing: #7fbfa5;
+    --marketing-foreground: #08110d;
+
+    --accent: #f4ecd6;
+    --accent-foreground: #1e1e24;
+
+    /* Status */
+    --destructive: #ef4444;
+    --success: #22c55e;
+    --warning: #f59e0b;
+
+    /* Lines + focus */
+    --border: #2a2f3a;
+    --input: #1e1e24; /* gray-phantom */
+    --input-alt: #1e1e24; /* matches pasteboard/surface */
+    --input-bg: var(--surface);
+    --ring: rgba(181, 217, 156, 0.55); /* soft brand ring */
+
+    /* “Black” token used in some UI */
+    --black: #07080c;
+    --black-foreground: #f2f4f8;
+
+    /* Editor-specific */
+    --editor-clip-border: rgba(255, 255, 255, 0.14);
+    --editor-selection: #0b99ff;
+    --editor-pasteboard: #1e1e24;
+
+    /* Badges */
+    --badge-pink-foreground: #ffc7f3;
+    --badge-purple-foreground: #d8c9fd;
+    --badge-blue-foreground: #5eead4;
+    --badge-indigo-foreground: #dae3ff;
+    --badge-orange-foreground: #ffd8af;
+    --badge-gray-foreground: #f0eef4;
+    --badge-green-foreground: #4ade80;
+
+    --badge-pink-border: #842a5b;
+    --badge-purple-border: #493a82;
+    --badge-blue-border: #115e59;
+    --badge-indigo-border: #383e87;
+    --badge-orange-border: #86413d;
+    --badge-gray-border: #424244;
+    --badge-green-border: #166534;
+
+    --badge-pink: #500a33;
+    --badge-purple: #2c1b62;
+    --badge-blue: #042f2e;
+    --badge-indigo: #1e225c;
+    --badge-orange: #511d0f;
+    --badge-gray: #1f1f21;
+    --badge-green: #052e16;
+
+    /* Charts (optional: keep your current, these just look nicer on dark) */
+    --chart-1: #f97316;
+    --chart-2: #06b6d4;
+    --chart-3: #8b5cf6;
+    --chart-4: #facc15;
+    --chart-5: #f59e0b;
+
+    /* Sidebar tokens — uses gray-phantom for consistent dark palette */
+    --sidebar: #1e1e24; /* gray-phantom */
+    --sidebar-foreground: #f2f4f8;
+    --sidebar-primary: #b5d99c;
+    --sidebar-primary-foreground: #0b0c10;
+    --sidebar-accent: #252528;
+    --sidebar-accent-foreground: #f2f4f8;
+    --sidebar-border: #1e1e24; /* gray-phantom */
+    --sidebar-ring: rgba(181, 217, 156, 0.55);
+}

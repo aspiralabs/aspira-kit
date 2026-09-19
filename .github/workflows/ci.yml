@@ -1,0 +1,8 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  checks:
+    uses: ./.github/workflows/kit-checks.yml

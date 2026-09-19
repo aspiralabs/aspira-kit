@@ -1,0 +1,12 @@
+// Lifted from SAAS_BOILER on 2026-09-19.
+export default {
+  printWidth: 120,
+  useTabs: false,
+  tabWidth: 4,
+  semi: true,
+  singleQuote: true,
+  trailingComma: 'all',
+  bracketSpacing: true,
+  arrowParens: 'always',
+  overrides: [{ files: '*.scss', options: { singleQuote: false } }],
+}

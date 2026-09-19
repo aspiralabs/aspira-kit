@@ -1,0 +1,5 @@
+{
+  "extends": "@aspiralabs/config/tsconfig/base.json",
+  "compilerOptions": { "outDir": "dist", "rootDir": "src", "types": ["node"], "declaration": false, "jsx": "react-jsx" },
+  "include": ["src"]
+}

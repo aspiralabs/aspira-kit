@@ -1,0 +1,19 @@
+{
+  "name": "aspira-kit",
+  "private": true,
+  "description": "The Aspira Labs development kit: ui, config, and the kit CLI. One repo, one version, every project.",
+  "packageManager": "pnpm@12.4.1",
+  "scripts": {
+    "build": "pnpm -r --filter './packages/*' build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "check": "pnpm typecheck && pnpm lint && pnpm build",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "pnpm build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.29.0",
+    "typescript": "^5.9.0"
+  }
+}
