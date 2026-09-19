@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "@aspiralabs/ui/tokens.css";
 @source "../../../packages/ui/dist";
+@source "../../../packages/ui/docs";   /* classes used inside <Demo> blocks in the MDX */
 
 body {
   background: var(--background);

@@ -86,7 +86,7 @@ function css(opts: InitOptions): void {
   }
   const depth = rel.split('/').length - 1
   const up = '../'.repeat(depth)
-  const lines = [`@import "@aspiralabs/ui/tokens.css";`, `@source "${up}node_modules/@aspiralabs/ui/dist";`]
+  const lines = [`@import "@aspiralabs/ui/tokens.css";`, `@source "${up}node_modules/@aspiralabs/ui/dist";`, `@source "${up}node_modules/@aspiralabs/ui/docs";`]
   const anchor = text.match(/^@import ['"]tailwindcss['"];?\s*$/m)
   const next = anchor ? text.replace(anchor[0], `${anchor[0]}\n${lines.join('\n')}`) : `${lines.join('\n')}\n${text}`
   opts.log(`update ${path} (tokens import + @source)`)
