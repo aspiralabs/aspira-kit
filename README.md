@@ -15,14 +15,19 @@ All three are published to **GitHub Packages** under the `aspiralabs` org and ve
 GitHub Packages needs a token to install, even for public packages. Once per machine:
 
 1. Create a GitHub personal access token (classic) with the `read:packages` scope.
-2. Export it: `export NPM_TOKEN=ghp_...` (put it in your shell profile, or in CI as a secret).
+2. Put it in your user-level npmrc, which is never committed:
 
-Then in the project:
+```bash
+echo '//npm.pkg.github.com/:_authToken=ghp_...' >> ~/.npmrc && chmod 600 ~/.npmrc
+```
+
+pnpm 12 does not expand `${VAR}` inside `.npmrc`, so the token cannot be referenced from a committed file. In CI, write the same line from a secret before `pnpm install`; inside the `aspiralabs` org the built-in `GITHUB_TOKEN` with `packages: read` works instead.
+
+Then in the project, committed:
 
 ```bash
 # .npmrc  (kit init writes this for you)
 @aspiralabs:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${NPM_TOKEN}
 ```
 
 ```bash
