@@ -1,6 +1,9 @@
 packages:
   - packages/*
   - apps/*
+
+# pnpm 12 refuses to install unless every dependency with build scripts is listed here
+# (`pnpm approve-builds`). Neither of these needs its postinstall for our use.
 allowBuilds:
-  core-js-pure: set this to true or false
-  unrs-resolver: set this to true or false
+  core-js-pure: false
+  unrs-resolver: false
