@@ -90,11 +90,20 @@ export function getDoc(view: View, slug: string): Doc | undefined {
   return listDocs(view).find((d) => d.slug === slug)
 }
 
+// Sidebar labels: PascalCase titles get spaces (KeyboardShortcut -> Keyboard Shortcut); titles with
+// spaces or dashes are left alone. SAAS_BOILER hardcoded these labels; here they derive from the title.
+function navLabel(title: string): string {
+  if (/[\s-]/.test(title)) {
+    return title
+  }
+  return title.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+}
+
 export function navFor(view: View): NavGroup[] {
   const groups = new Map<string, NavGroup>()
   for (const doc of listDocs(view)) {
     const g = groups.get(doc.group) ?? { group: doc.group, items: [] }
-    g.items.push({ slug: doc.slug, label: doc.title })
+    g.items.push({ slug: doc.slug, label: navLabel(doc.title) })
     groups.set(doc.group, g)
   }
   return [...groups.values()].sort((a, b) => {
