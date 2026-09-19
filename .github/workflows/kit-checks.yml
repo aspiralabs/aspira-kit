@@ -21,7 +21,8 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # build first: apps/docs typechecks against @aspiralabs/ui's dist
+      - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm build
       - run: pnpm test
