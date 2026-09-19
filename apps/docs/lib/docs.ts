@@ -1,11 +1,30 @@
-// Reads the component docs from the installed @aspiralabs/ui package. The docs
-// site is a renderer of the package's MDX, never a second copy of it.
-// Resolves the package by walking up from cwd to node_modules, which works
-// under Turbopack where import.meta.url is rewritten.
+// Reads the docs that ship inside @aspiralabs/ui. The docs site is a renderer
+// of the package's MDX, never a second copy of it. The nav is derived from
+// frontmatter, so adding a doc to the package adds it to the site.
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-export type ComponentDoc = { name: string; title: string; description: string; body: string }
+export type View = 'components' | 'patterns' | 'overview'
+export const VIEWS: Array<{ id: View; label: string; dir: string }> = [
+  { id: 'overview', label: 'Overview', dir: 'overview' },
+  { id: 'components', label: 'Components', dir: '.' },
+  { id: 'patterns', label: 'Layout Patterns', dir: 'patterns' },
+]
+
+export type Doc = {
+  view: View
+  slug: string
+  eyebrow: string
+  title: string
+  group: string
+  description: string
+  body: string
+  raw: string
+}
+
+export type NavGroup = { group: string; items: Array<{ slug: string; label: string }> }
+
+const GROUP_ORDER = ['Foundations', 'Surfaces', 'Actionable', 'Form', 'Tables', 'Overlays', 'Layout', 'Misc', 'Page Chrome', 'Marketing']
 
 export function uiPackageRoot(): string {
   let dir = process.cwd()
@@ -20,6 +39,10 @@ export function uiPackageRoot(): string {
     }
     dir = parent
   }
+}
+
+export function uiVersion(): string {
+  return (JSON.parse(readFileSync(join(uiPackageRoot(), 'package.json'), 'utf8')) as { version: string }).version
 }
 
 function frontmatter(raw: string): { fields: Record<string, string>; body: string } {
@@ -37,17 +60,50 @@ function frontmatter(raw: string): { fields: Record<string, string>; body: strin
   return { fields, body: m[2]! }
 }
 
-export function listDocs(): ComponentDoc[] {
-  const dir = join(uiPackageRoot(), 'docs')
+export function listDocs(view: View): Doc[] {
+  const meta = VIEWS.find((v) => v.id === view)!
+  const dir = join(uiPackageRoot(), 'docs', meta.dir)
+  if (!existsSync(dir)) {
+    return []
+  }
   return readdirSync(dir)
     .filter((f) => f.endsWith('.mdx'))
     .map((f) => {
-      const { fields, body } = frontmatter(readFileSync(join(dir, f), 'utf8'))
-      const name = f.replace(/\.mdx$/, '')
-      return { name, title: fields.title ?? name, description: fields.description ?? '', body }
+      const raw = readFileSync(join(dir, f), 'utf8')
+      const { fields, body } = frontmatter(raw)
+      const slug = f.replace(/\.mdx$/, '')
+      return {
+        view,
+        slug,
+        eyebrow: fields.eyebrow ?? '',
+        title: fields.title ?? slug,
+        group: fields.group ?? 'Misc',
+        description: fields.description ?? '',
+        body,
+        raw,
+      }
     })
+    .sort((a, b) => a.title.localeCompare(b.title))
 }
 
-export function uiVersion(): string {
-  return (JSON.parse(readFileSync(join(uiPackageRoot(), 'package.json'), 'utf8')) as { version: string }).version
+export function getDoc(view: View, slug: string): Doc | undefined {
+  return listDocs(view).find((d) => d.slug === slug)
+}
+
+export function navFor(view: View): NavGroup[] {
+  const groups = new Map<string, NavGroup>()
+  for (const doc of listDocs(view)) {
+    const g = groups.get(doc.group) ?? { group: doc.group, items: [] }
+    g.items.push({ slug: doc.slug, label: doc.title })
+    groups.set(doc.group, g)
+  }
+  return [...groups.values()].sort((a, b) => {
+    const ai = GROUP_ORDER.indexOf(a.group)
+    const bi = GROUP_ORDER.indexOf(b.group)
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+  })
+}
+
+export function firstSlug(view: View): string | undefined {
+  return navFor(view)[0]?.items[0]?.slug
 }
