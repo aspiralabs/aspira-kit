@@ -10,9 +10,9 @@
     "lint": "pnpm -r lint",
     "check": "pnpm build && pnpm typecheck && pnpm lint && pnpm test",
     "changeset": "changeset",
-    "version": "changeset version && pnpm install --lockfile-only",
-    "release": "changeset publish",
-    "test": "node packages/ui/scripts/mcp-smoke.mjs && pnpm -r --filter \"./packages/*\" exec pnpm pack --pack-destination ../../.packs"
+    "test": "node packages/ui/scripts/mcp-smoke.mjs && pnpm -r --filter \"./packages/*\" exec pnpm pack --pack-destination ../../.packs",
+    "changeset:version": "changeset version && pnpm install --lockfile-only",
+    "changeset:publish": "changeset publish"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.0",
