@@ -97,7 +97,7 @@ pnpm check          # typecheck, lint, build, smoke tests, for every package
 
 The published packages appear at https://github.com/orgs/aspiralabs/packages. Each release is tagged `@aspiralabs/<pkg>@<version>` and listed under the repo's Releases.
 
-Bootstrap note, 2026-09-19: the first version PR was opened by the Actions bot, which counted as a first-time contributor, so its CI run needed a one-time manual approval in the Actions tab before it could merge. That is behind us; later version PRs run CI on their own.
+The version PR is opened by the Actions bot. With GitHub's default policy every one of its CI runs waited for manual approval, so this repo's Actions setting "approval for running workflows from contributors" is set to require approval only for first-time contributors who are new to GitHub. If a version PR ever shows "action required" on its check, approve the run in the Actions tab; that is the policy having been reset, not a failure.
 
 ## Layout
 
