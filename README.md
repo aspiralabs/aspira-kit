@@ -90,7 +90,9 @@ pnpm check          # typecheck, lint, build, smoke tests, for every package
 2. On every merge to `main`, `release.yml` looks for pending changesets. If there are any, it opens or updates **one** pull request titled "Release: version packages" that bumps all three packages in lockstep and writes the changelogs. That PR stays open and accumulates as more changesets merge.
 3. **Cutting a release is merging that PR.** The workflow then builds, publishes all three packages to GitHub Packages, tags `v<version>`, and creates a GitHub Release from the changelog. It uses the built-in `GITHUB_TOKEN`; there are no personal tokens in the publish path.
 
-The published packages appear at https://github.com/orgs/aspiralabs/packages.
+The published packages appear at https://github.com/orgs/aspiralabs/packages. Each release is tagged `@aspiralabs/<pkg>@<version>` and listed under the repo's Releases.
+
+Bootstrap note, 2026-09-19: the first version PR was opened by the Actions bot, which counted as a first-time contributor, so its CI run needed a one-time manual approval in the Actions tab before it could merge. That is behind us; later version PRs run CI on their own.
 
 ## Layout
 
