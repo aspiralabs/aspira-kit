@@ -1,5 +1,5 @@
 /// <reference types="@testing-library/jest-dom" />
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useFormContext } from 'react-hook-form';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -105,7 +105,7 @@ describe('Form', () => {
             );
             const street = container.querySelector('input[placeholder^="Start typing"]') as HTMLInputElement;
             fireEvent.input(street, { target: { value: '1 Mai' } });
-            await vi.advanceTimersByTimeAsync(300);
+            await act(() => vi.advanceTimersByTimeAsync(300));
             await waitFor(() => expect(fetchMock).toHaveBeenCalled());
             const option = await screen.findByText(feature.place_name);
             fireEvent.click(option);

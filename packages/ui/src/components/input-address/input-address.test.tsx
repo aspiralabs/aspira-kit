@@ -1,5 +1,5 @@
 /// <reference types="@testing-library/jest-dom" />
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -144,11 +144,15 @@ describe('InputAddress (component)', () => {
         vi.unstubAllGlobals();
     });
 
+    // The debounce timer and the fetch resolution both set state outside any
+    // event handler, so the timer advance has to run inside act.
+    const tick = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
     it('is a plain text input without a token: emits edits, never fetches', async () => {
         const onChange = vi.fn();
         render(<InputAddress value="" onChange={onChange} />);
         fireEvent.input(streetInput(), { target: { value: '123 Main' } });
-        await vi.advanceTimersByTimeAsync(400);
+        await tick(400);
         expect(onChange).toHaveBeenLastCalledWith('123 Main');
         expect(fetchMock).not.toHaveBeenCalled();
         expect(screen.queryByRole('listbox')).toBeNull();
@@ -158,7 +162,7 @@ describe('InputAddress (component)', () => {
         render(<InputAddress token="tok" country="ca" value="" onChange={vi.fn()} />);
         fireEvent.input(streetInput(), { target: { value: '1 Ma' } });
         expect(fetchMock).not.toHaveBeenCalled();
-        await vi.advanceTimersByTimeAsync(300);
+        await tick(300);
         expect(fetchMock).toHaveBeenCalledTimes(1);
         const url = String((fetchMock.mock.calls[0] as unknown[])[0]);
         expect(url).toContain('access_token=tok');
@@ -170,7 +174,7 @@ describe('InputAddress (component)', () => {
     it('does not query for fewer than three characters', async () => {
         render(<InputAddress token="tok" value="" onChange={vi.fn()} />);
         fireEvent.input(streetInput(), { target: { value: '12' } });
-        await vi.advanceTimersByTimeAsync(400);
+        await tick(400);
         expect(fetchMock).not.toHaveBeenCalled();
     });
 
@@ -187,9 +191,9 @@ describe('InputAddress (component)', () => {
             );
         }
         render(<Parent />);
-        await vi.advanceTimersByTimeAsync(400);
+        await tick(400);
         fireEvent.click(screen.getByText('reset'));
-        await vi.advanceTimersByTimeAsync(400);
+        await tick(400);
         await waitFor(() => expect(streetInput().value).toBe('9 Other Rd'));
         expect(fetchMock).not.toHaveBeenCalled();
     });
@@ -199,7 +203,7 @@ describe('InputAddress (component)', () => {
         const onAddressSelect = vi.fn();
         render(<InputAddress token="tok" value="" onChange={onChange} onAddressSelect={onAddressSelect} />);
         fireEvent.input(streetInput(), { target: { value: '1 Ma' } });
-        await vi.advanceTimersByTimeAsync(300);
+        await tick(300);
         fireEvent.click(await screen.findByText(FEATURE.place_name));
         expect(onChange).toHaveBeenLastCalledWith('1 Main St');
         expect(onAddressSelect).toHaveBeenCalledWith(
@@ -213,11 +217,11 @@ describe('InputAddress (component)', () => {
         const onChange = vi.fn();
         render(<InputAddress token="tok" value="" onChange={onChange} showFullAddress />);
         fireEvent.input(streetInput(), { target: { value: '1 Ma' } });
-        await vi.advanceTimersByTimeAsync(300);
+        await tick(300);
         fireEvent.click(await screen.findByText(FEATURE.place_name));
         await waitFor(() => expect(streetInput().value).toBe('1 Main St, Austin, TX 78701'));
         // The mask echo of the seeded display must not be emitted as the value.
-        await vi.advanceTimersByTimeAsync(50);
+        await tick(50);
         expect(onChange).toHaveBeenLastCalledWith('1 Main St');
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
@@ -225,12 +229,12 @@ describe('InputAddress (component)', () => {
     it('does not re-fetch on the echo of a pick, but does on the next real edit', async () => {
         render(<InputAddress token="tok" value="" onChange={vi.fn()} />);
         fireEvent.input(streetInput(), { target: { value: '1 Ma' } });
-        await vi.advanceTimersByTimeAsync(300);
+        await tick(300);
         fireEvent.click(await screen.findByText(FEATURE.place_name));
-        await vi.advanceTimersByTimeAsync(400);
+        await tick(400);
         expect(fetchMock).toHaveBeenCalledTimes(1);
         fireEvent.input(streetInput(), { target: { value: '1 Main Str' } });
-        await vi.advanceTimersByTimeAsync(300);
+        await tick(300);
         expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 });

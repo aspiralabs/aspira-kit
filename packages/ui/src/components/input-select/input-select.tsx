@@ -205,7 +205,9 @@ function InputSelectSingle(props: InputSelectSingleProps) {
     };
 
     const hasValue = current !== undefined && current !== null && current !== '';
-    const selectValue = hasValue ? String(current) : undefined;
+    // '' rather than undefined: Radix treats '' as "controlled, nothing
+    // selected" and warns if the prop flips between undefined and a string.
+    const selectValue = hasValue ? String(current) : '';
 
     // Reset the search query whenever the dropdown closes so the next open
     // starts with a clean slate.

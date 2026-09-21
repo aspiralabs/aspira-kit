@@ -167,6 +167,9 @@ describe('InputSelect', () => {
         it('warns on duplicate stringified values in development', () => {
             vi.stubEnv('NODE_ENV', 'development');
             const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            // Two options with the same string key also trip React's duplicate-key
+            // error; that is the scenario under test, not noise to fix.
+            const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
             const dupeOptions = [
                 { label: 'Number 1', value: 1 },
@@ -180,6 +183,7 @@ describe('InputSelect', () => {
             );
 
             consoleSpy.mockRestore();
+            errorSpy.mockRestore();
             vi.unstubAllEnvs();
         });
     });
