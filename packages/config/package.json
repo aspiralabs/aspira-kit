@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/config",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Aspira Labs shared config: eslint, tsconfig, prettier, and agent config, as subpath exports.",
   "type": "module",
   "license": "MIT",
