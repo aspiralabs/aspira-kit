@@ -14,6 +14,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     ({ className, label, error, id, ...props }, ref) => {
         const generatedId = React.useId();
         const inputId = id ?? generatedId;
+        const invalid = error ? true : undefined;
 
         return (
             <div className="relative flex flex-col gap-1.5 w-full ">
@@ -26,7 +27,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
                     ref={ref}
                     id={inputId}
                     data-slot="textarea"
-                    aria-invalid={error ? true : undefined}
+                    aria-invalid={invalid}
                     className={cn(
                         'border border-input rounded-md bg-input-bg hover:border-primary focus-visible:border-primary placeholder:text-foreground-subtext aria-invalid:border-destructive flex field-sizing-content min-h-16 w-full px-3 py-2 text-base transition-colors duration-200 outline-none disabled:cursor-not-allowed disabled:opacity-50',
                         {

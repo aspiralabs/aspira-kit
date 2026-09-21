@@ -26,25 +26,37 @@ function Overlay({ className, ...props }: React.ComponentProps<typeof DrawerPrim
     );
 }
 
-function Panel({ className, children, ...props }: React.ComponentProps<typeof DrawerPrimitive.Content>) {
+interface PanelProps extends React.ComponentProps<typeof DrawerPrimitive.Content> {
+    /** Applied to the inner card — `size` drives the card's own width/height. */
+    cardStyle?: React.CSSProperties;
+}
+
+function Panel({ className, children, cardStyle, ...props }: PanelProps) {
     return (
         <DrawerPrimitive.Portal data-slot="drawer-portal">
             <Overlay />
+            {/* Outer positioner: anchors to an edge and shrinks to wrap the card.
+                `p-4` becomes the automatic, equal inset on every side. */}
             <DrawerPrimitive.Content
                 data-slot="drawer-content"
                 className={cn(
                     'group/drawer-content bg-transparent fixed z-[100000000] flex h-auto flex-col p-4',
-                    'data-[vaul-drawer-direction=top]:inset-x-0 data-[vaul-drawer-direction=top]:top-0 data-[vaul-drawer-direction=top]:max-h-[80vh]',
-                    'data-[vaul-drawer-direction=bottom]:inset-x-0 data-[vaul-drawer-direction=bottom]:bottom-0 data-[vaul-drawer-direction=bottom]:max-h-[80vh]',
-                    'data-[vaul-drawer-direction=right]:inset-y-0 data-[vaul-drawer-direction=right]:right-0 data-[vaul-drawer-direction=right]:w-3/4',
-                    'data-[vaul-drawer-direction=left]:inset-y-0 data-[vaul-drawer-direction=left]:left-0 data-[vaul-drawer-direction=left]:w-3/4',
+                    'data-[vaul-drawer-direction=top]:inset-x-0 data-[vaul-drawer-direction=top]:top-0',
+                    'data-[vaul-drawer-direction=bottom]:inset-x-0 data-[vaul-drawer-direction=bottom]:bottom-0',
+                    'data-[vaul-drawer-direction=right]:inset-y-0 data-[vaul-drawer-direction=right]:right-0',
+                    'data-[vaul-drawer-direction=left]:inset-y-0 data-[vaul-drawer-direction=left]:left-0',
                 )}
                 {...props}
             >
                 <DrawerPrimitive.Title className="sr-only">Drawer</DrawerPrimitive.Title>
+                {/* Inner card: `size` sets its width (left/right) or height (top/bottom).
+                    Clamped to the viewport minus the p-4 inset so callers never need
+                    their own max-w/max-h. */}
                 <div
+                    style={cardStyle}
                     className={cn(
                         'bg-background border border-border rounded-xl shadow-lg flex flex-col flex-1 min-h-0 overflow-hidden',
+                        'max-w-[calc(100dvw-2rem)] max-h-[calc(100dvh-2rem)]',
                         className,
                     )}
                 >
@@ -83,7 +95,10 @@ const DrawerRoot = ({
 }: DrawerProps) => {
     const [isMounted, setIsMounted] = useState(false);
 
-    const contentStyle = useMemo(() => {
+    // `size` sizes the inner card. The outer positioner wraps it and supplies the
+    // inset automatically, so callers only ever specify the content size (and it's
+    // clamped to the viewport, so no per-caller max-w/max-h).
+    const cardStyle = useMemo(() => {
         if (size === undefined) return undefined;
 
         const drawerSize = typeof size === 'number' ? `${size}px` : size;
@@ -117,7 +132,7 @@ const DrawerRoot = ({
 
     return (
         <DrawerPrimitive.Root open={modal.visible} onOpenChange={handleOpenChange} direction={direction}>
-            <Panel className={cn('p-0', className)} style={contentStyle}>
+            <Panel className={cn('p-0', className)} cardStyle={cardStyle}>
                 <div className="flex h-full min-h-0 flex-col">
                     {title && (
                         <header className="flex items-center justify-between gap-3 p-6 shrink-0">

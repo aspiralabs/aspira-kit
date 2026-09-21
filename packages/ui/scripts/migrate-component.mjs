@@ -1,30 +1,34 @@
 #!/usr/bin/env node
 // Copy one component and its doc from SAAS_BOILER into this package, rewriting
 // import paths. Usage: node scripts/migrate-component.mjs badge [--boiler <path>]
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+// The boiler's web-app directory comes from --boiler, then $SAAS_BOILER, then the
+// sibling checkout next to this repo (PRODUCTS/SAAS_BOILER/web-app).
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const pkg = join(here, '..')
 const args = process.argv.slice(2)
 const name = args[0]
-const boiler = args.includes('--boiler') ? args[args.indexOf('--boiler') + 1] : '/Users/davidludemann/Documents/DEVELOPMENT/PRODUCTS/SAAS_BOILER/web-app'
+const boiler = resolve(
+  (args.includes('--boiler') && args[args.indexOf('--boiler') + 1]) ||
+    process.env.SAAS_BOILER ||
+    join(pkg, '..', '..', '..', 'SAAS_BOILER', 'web-app'),
+)
 if (!name) {
-  console.error('usage: migrate-component <name> [--boiler <path>]')
+  console.error('usage: migrate-component <name> [--boiler <path>]  (or set SAAS_BOILER)')
   process.exit(2)
 }
 const src = join(boiler, 'components', 'ui', 'core', name)
 const dst = join(pkg, 'src', 'components', name)
 if (!existsSync(src)) {
-  console.error(`not found: ${src}`)
+  console.error(`not found: ${src}\npass --boiler <path-to-SAAS_BOILER/web-app> or set SAAS_BOILER`)
   process.exit(1)
 }
 mkdirSync(dst, { recursive: true })
+// Tests come along: they run here under vitest with the same import rewrites.
 for (const f of readdirSync(src)) {
-  if (f.includes('.test.')) {
-    continue
-  }
   let text = readFileSync(join(src, f), 'utf8')
   text = text
     .replace(/from '@\/lib\/utils'/g, "from '../../lib/cn.js'")

@@ -6,9 +6,29 @@ import * as React from 'react';
 import { Icon } from '../icon/index.js';
 import { cn } from '../../lib/cn.js';
 import { FactoryOpts } from 'imask';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useIMask } from 'react-imask';
 import { FormError } from '../form/index.js';
+
+// Serialize the mask opts into a stable string key. Callers almost always pass
+// an inline `mask={{...}}` literal, which is a fresh object every render.
+// useIMask keys its options effect on the opts *reference*, so an unstable
+// reference makes it call updateOptions() on every render — that fires an
+// `accept` event, which setStates the value, which (in a controlled input)
+// echoes back through onValueChange → parent setState → re-render → new mask
+// object → infinite loop. Keying on the contents keeps the reference stable
+// unless the options actually change. Functions (e.g. `mask: Number`) are
+// serialized by name since JSON.stringify would otherwise drop them.
+function maskKey(mask?: FactoryOpts) {
+  if (!mask) return '';
+  return JSON.stringify(mask, (_k, v) => (typeof v === 'function' ? v.name || 'fn' : v));
+}
+
+const PASSWORD_TOGGLE = {
+  default: { button: 'size-10', padding: 'pr-12' },
+  sm: { button: 'size-8', padding: 'pr-10' },
+  xs: { button: 'size-6', padding: 'pr-8' },
+} as const;
 interface InputProps extends Omit<React.ComponentProps<'input'>, 'onBlur' | 'size'> {
   label?: string;
   error?: FormError;
@@ -44,6 +64,17 @@ function Input({
   const inputRef = useRef<HTMLInputElement>(null);
   const lastSetDefaultValue = useRef<string | number | undefined>(undefined);
   const lastSyncedValue = useRef<React.ComponentProps<'input'>['value']>(undefined);
+  // The mask value we last wrote programmatically (from the controlled-value
+  // sync below). Used to distinguish user edits from our own sync writes so we
+  // don't echo a sync back to the parent and loop. Starts '' to swallow the
+  // mask's empty initial emission on mount. One-shot: consumed by the first
+  // matching echo, otherwise clearing a field back to '' would never be reported.
+  const syncedMaskValue = useRef<string | null>('');
+  const [showPassword, setShowPassword] = useState(false);
+  // Stable mask reference — see maskKey() above. Without this, an inline mask
+  // object passed by the caller re-inits imask every render and loops. The memo
+  // is keyed on the serialized contents on purpose, not on `mask` itself.
+  const maskOpts = React.useMemo(() => (mask ? mask : { mask: /.*/ }), [maskKey(mask)]);
   const {
     ref,
     value: IValue,
@@ -52,10 +83,18 @@ function Input({
     setUnmaskedValue,
     typedValue,
     maskRef,
-  } = useIMask(mask ? mask : { mask: /.*/ });
+  } = useIMask(maskOpts);
 
-  // Callback for when a value is changed
+  // Propagate changes to the caller — but only genuine user edits. When the
+  // controlled-value sync below (or the mask mount) writes a `value` INTO the
+  // mask, IValue changes too; echoing that back would drive the parent's state,
+  // re-render, and re-sync forever (parent `value` and mask IValue endlessly
+  // swap). Skip the echo when IValue matches the value we last wrote ourselves.
   useEffect(() => {
+    if (IValue === syncedMaskValue.current) {
+      syncedMaskValue.current = null;
+      return;
+    }
     onValueChange?.({ value: IValue, typedValue });
   }, [IValue]);
 
@@ -115,6 +154,9 @@ function Input({
     }
     maskRef.current.value = next;
     maskRef.current.updateValue();
+    // Record the normalized result so the onValueChange effect above can tell
+    // this IValue change came from our sync (not a user edit) and skip the echo.
+    syncedMaskValue.current = maskRef.current.value;
   }, [value, maskRef, IValue]);
 
   // Custom onBlur handler that calls the custom callback with values
@@ -176,6 +218,13 @@ function Input({
     }, 0);
   };
 
+  // Everything but password renders as text: masks and number-like inputs are handled by imask.
+  // A password field carries an eye toggle that swaps it to text while held open.
+  const isPassword = type === 'password';
+  const inputType = isPassword && !showPassword ? 'password' : 'text';
+  const toggleLabel = showPassword ? 'Hide password' : 'Show password';
+  const toggleIcon = showPassword ? 'visibility_off' : 'visibility';
+
   return (
     <div className="relative flex flex-col  flex-shrink-0 ">
       {(label || error) && (
@@ -195,7 +244,7 @@ function Input({
         )}
         <input
           {...props}
-          type={type === 'password' ? 'password' : 'text'}
+          type={inputType}
           data-slot="input"
           onBlur={handleBlur}
           className={cn(
@@ -206,6 +255,7 @@ function Input({
             '[&::-webkit-outer-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&[type="number"]]:appearance-textfield',
             { 'border-destructive': error, 'focus-visible:border-destructive': error },
             icon && 'pl-9',
+            isPassword && PASSWORD_TOGGLE[size].padding,
             className,
           )}
           ref={(el) => {
@@ -213,6 +263,21 @@ function Input({
             inputRef.current = el;
           }}
         />
+        {isPassword && (
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            aria-label={toggleLabel}
+            tabIndex={-1}
+            disabled={props.disabled}
+            className={cn(
+              PASSWORD_TOGGLE[size].button,
+              'absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center justify-center rounded-md text-foreground-subtext hover:text-foreground hover:bg-surface transition-colors cursor-pointer disabled:pointer-events-none disabled:opacity-50',
+            )}
+          >
+            <Icon icon={toggleIcon} size={20} />
+          </button>
+        )}
 
         {/* {hint && (
                     <div className="absolute top-1/2 -translate-y-1/2 right-3 flex items-center gap-1 text-xs text-muted-foreground">

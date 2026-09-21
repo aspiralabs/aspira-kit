@@ -95,6 +95,50 @@ InputSelect.displayName = 'InputSelect';
 // auto-close-on-pick behavior that makes single-select feel right.
 // =============================================================================
 
+// Radix's SelectValue retains its last-rendered label across a controlled →
+// undefined transition (it can't actively clear its own internal state). When
+// there is no value, render the placeholder ourselves so the X button visibly
+// clears the trigger.
+function TriggerValue({ hasValue, placeholder, className }: { hasValue: boolean; placeholder?: string; className?: string }) {
+    if (hasValue) {
+        return <SelectValuePrimitive placeholder={placeholder} />;
+    }
+    return <span className={cn('text-muted-foreground', className)}>{placeholder}</span>;
+}
+
+// A native select item's content: the caller's `entryRender` when given, else the label.
+function ItemLabel({ option, entry: Entry }: { option: SelectOption; entry?: EntryRenderComponent }) {
+    if (Entry) {
+        return <Entry data={option.raw ?? option} />;
+    }
+    return option.label;
+}
+
+// The trigger's chevron, by trigger variant.
+/**
+ * Radix Select speaks strings, so `1` and `'1'` collide in the value maps and
+ * the later option silently wins. Dev-only: a collision is a data bug, not
+ * something to recover from at runtime.
+ */
+function warnOnDuplicateStringValues(options: SelectOption[]) {
+    if (process.env.NODE_ENV === 'production') return;
+    const seen = new Set<string>();
+    for (const opt of options) {
+        const k = String(opt.value);
+        if (seen.has(k)) {
+            console.warn(
+                `InputSelect: Duplicate stringified value "${k}" detected in options. Values are compared as strings, so only one of these options can be selected.`,
+            );
+        }
+        seen.add(k);
+    }
+}
+
+const CHEVRON = {
+    badge: { icon: 'unfold_more', size: 16, weight: 700, className: 'shrink-0 opacity-70' },
+    input: { icon: 'keyboard_arrow_down', size: 20, weight: 400, className: 'shrink-0 opacity-50' },
+} as const;
+
 function InputSelectSingle(props: InputSelectSingleProps) {
     const {
         name,
@@ -135,6 +179,8 @@ function InputSelectSingle(props: InputSelectSingleProps) {
     // Stringified-value → typed-value lookup. Build from both the static options
     // prop and the currently-visible pool so we can recover the original type
     // (number/boolean) across Radix's string-only value boundary.
+    React.useEffect(() => warnOnDuplicateStringValues(options), [options]);
+
     const valueMap = React.useMemo(() => {
         const map: Record<string, OptionValue> = {};
         for (const opt of options) map[String(opt.value)] = opt.value;
@@ -159,6 +205,9 @@ function InputSelectSingle(props: InputSelectSingleProps) {
     };
 
     const hasValue = current !== undefined && current !== null && current !== '';
+    // '' rather than undefined: Radix treats '' as "controlled, nothing
+    // selected" and warns if the prop flips between undefined and a string.
+    const selectValue = hasValue ? String(current) : '';
 
     // Reset the search query whenever the dropdown closes so the next open
     // starts with a clean slate.
@@ -197,11 +246,7 @@ function InputSelectSingle(props: InputSelectSingleProps) {
 
             <SelectPrimitive
                 name={name}
-                value={
-                    current !== undefined && current !== null && current !== ''
-                        ? String(current)
-                        : undefined
-                }
+                value={selectValue}
                 onValueChange={handleValueChange}
                 onOpenChange={handleOpenChange}
                 disabled={disabled}
@@ -246,13 +291,9 @@ function InputSelectSingle(props: InputSelectSingleProps) {
                             its own internal state). When we have no value, render the
                             placeholder ourselves so the X button visibly clears the
                             trigger. */}
-                        {isBadge ? (
+                        {isBadge && (
                             <span className="flex items-center gap-1.5 min-w-0">
-                                {hasValue ? (
-                                    <SelectValuePrimitive placeholder={placeholder} />
-                                ) : (
-                                    <span className="text-muted-foreground truncate">{placeholder}</span>
-                                )}
+                                <TriggerValue hasValue={hasValue} placeholder={placeholder} className="truncate" />
                                 <Icon
                                     icon="unfold_more"
                                     size={16}
@@ -260,11 +301,8 @@ function InputSelectSingle(props: InputSelectSingleProps) {
                                     className="opacity-70 shrink-0"
                                 />
                             </span>
-                        ) : hasValue ? (
-                            <SelectValuePrimitive placeholder={placeholder} />
-                        ) : (
-                            <span className="text-muted-foreground">{placeholder}</span>
                         )}
+                        {!isBadge && <TriggerValue hasValue={hasValue} placeholder={placeholder} />}
                     </SelectTriggerPrimitive>
                     {!isBadge && hasValue && !disabled && (
                         <Tooltip text="Clear Value">
@@ -382,7 +420,7 @@ function InputSelectSingle(props: InputSelectSingleProps) {
                                 value={String(opt.value)}
                                 className={cn('rounded-sm', itemSizeClass)}
                             >
-                                {Entry ? <Entry data={opt.raw ?? opt} /> : opt.label}
+                                <ItemLabel option={opt} entry={Entry} />
                             </SelectItemPrimitive>
                         ))}
                 </SelectContentPrimitive>
@@ -431,6 +469,8 @@ function InputSelectMulti(props: InputSelectMultiProps) {
         setCachedLabels((prev) => (prev[k] === opt.label ? prev : { ...prev, [k]: opt.label }));
     }, []);
 
+    React.useEffect(() => warnOnDuplicateStringValues(options), [options]);
+
     const labelMap = React.useMemo(() => {
         const map: Record<string, string> = { ...cachedLabels };
         for (const opt of options) map[String(opt.value)] = opt.label;
@@ -453,6 +493,8 @@ function InputSelectMulti(props: InputSelectMultiProps) {
         }
         return `${current.length} selected`;
     }, [current, labelMap]);
+    const triggerText = hasValue ? triggerLabel : placeholder;
+    const chevron = CHEVRON[triggerVariant];
 
     return (
         <div
@@ -509,14 +551,9 @@ function InputSelectMulti(props: InputSelectMultiProps) {
                                     !hasValue && 'text-muted-foreground',
                                 )}
                             >
-                                {hasValue ? triggerLabel : placeholder}
+                                {triggerText}
                             </span>
-                            <Icon
-                                icon={isBadge ? 'unfold_more' : 'keyboard_arrow_down'}
-                                size={isBadge ? 16 : 20}
-                                weight={isBadge ? 700 : 400}
-                                className={cn('shrink-0', isBadge ? 'opacity-70' : 'opacity-50')}
-                            />
+                            <Icon {...chevron} />
                         </button>
                     </PopoverTriggerPrimitive>
                     {!isBadge && hasValue && !disabled && (

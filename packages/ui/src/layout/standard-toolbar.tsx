@@ -61,6 +61,48 @@ interface StandardToolbarProps {
     className?: string;
 }
 
+// One dimension's picker. Multi (the default) and single differ only in the
+// value shape; everything else is the dimension's data config.
+function DimensionPicker({
+    dim,
+    current,
+    onChange,
+}: {
+    dim: ToolbarFilterDimension;
+    current: string[];
+    onChange: (next: string[]) => void;
+}) {
+    const config = {
+        headerLabel: dim.label,
+        options: dim.options,
+        searchable: dim.searchable,
+        dataMode: dim.dataMode,
+        baseEndpoint: dim.baseEndpoint,
+        defaultParams: dim.defaultParams,
+        limit: dim.limit,
+        labelKey: dim.labelKey,
+        valueKey: dim.valueKey,
+        debounceMs: dim.debounceMs,
+    };
+    if (dim.multi ?? true) {
+        return (
+            <OptionPickerPrimitive
+                multi
+                {...config}
+                value={current}
+                onValueChange={(vals) => onChange((vals as OptionValue[]).map(String))}
+            />
+        );
+    }
+    return (
+        <OptionPickerPrimitive
+            {...config}
+            value={current[0]}
+            onValueChange={(val) => onChange(val === undefined ? [] : [String(val)])}
+        />
+    );
+}
+
 export function StandardToolbar({
     filters = [],
     filterValues = {},
@@ -145,7 +187,6 @@ export function StandardToolbar({
                             {filters.map((dim) => {
                                 const current = filterValues[dim.key] ?? [];
                                 const dimCount = current.length;
-                                const multi = dim.multi ?? true;
                                 return (
                                     <DropdownMenuSubPrimitive key={dim.key}>
                                         <DropdownMenuSubTriggerPrimitive>
@@ -157,48 +198,11 @@ export function StandardToolbar({
                                             )}
                                         </DropdownMenuSubTriggerPrimitive>
                                         <DropdownMenuSubContentPrimitive className="p-0 w-64">
-                                            {multi ? (
-                                                <OptionPickerPrimitive
-                                                    multi
-                                                    headerLabel={dim.label}
-                                                    options={dim.options}
-                                                    searchable={dim.searchable}
-                                                    dataMode={dim.dataMode}
-                                                    baseEndpoint={dim.baseEndpoint}
-                                                    defaultParams={dim.defaultParams}
-                                                    limit={dim.limit}
-                                                    labelKey={dim.labelKey}
-                                                    valueKey={dim.valueKey}
-                                                    debounceMs={dim.debounceMs}
-                                                    value={current}
-                                                    onValueChange={(vals) =>
-                                                        setDimensionValues(
-                                                            dim.key,
-                                                            (vals as OptionValue[]).map(String),
-                                                        )
-                                                    }
-                                                />
-                                            ) : (
-                                                <OptionPickerPrimitive
-                                                    headerLabel={dim.label}
-                                                    options={dim.options}
-                                                    searchable={dim.searchable}
-                                                    dataMode={dim.dataMode}
-                                                    baseEndpoint={dim.baseEndpoint}
-                                                    defaultParams={dim.defaultParams}
-                                                    limit={dim.limit}
-                                                    labelKey={dim.labelKey}
-                                                    valueKey={dim.valueKey}
-                                                    debounceMs={dim.debounceMs}
-                                                    value={current[0]}
-                                                    onValueChange={(val) =>
-                                                        setDimensionValues(
-                                                            dim.key,
-                                                            val === undefined ? [] : [String(val)],
-                                                        )
-                                                    }
-                                                />
-                                            )}
+                                            <DimensionPicker
+                                                dim={dim}
+                                                current={current}
+                                                onChange={(next) => setDimensionValues(dim.key, next)}
+                                            />
                                         </DropdownMenuSubContentPrimitive>
                                     </DropdownMenuSubPrimitive>
                                 );
@@ -217,7 +221,8 @@ export function StandardToolbar({
 
                 {activeBadges.map((badge) => (
                     <Badge key={`${badge.key}-${badge.value}`} size="xl">
-                        {badge.label !== undefined ? (
+                        {badge.label === undefined && <Skeleton className="h-3.5 w-20" />}
+                        {badge.label !== undefined && (
                             <>
                                 {badge.label}
                                 <button
@@ -227,8 +232,6 @@ export function StandardToolbar({
                                     <Icon icon="close" size={16} />
                                 </button>
                             </>
-                        ) : (
-                            <Skeleton className="h-3.5 w-20" />
                         )}
                     </Badge>
                 ))}

@@ -49,12 +49,13 @@ function InputOTP({
             </InputOTPGroup>
         );
 
+    const invalid = error ? true : undefined;
     const otp = (
         <OTPInput
             data-slot="input-otp"
             id={inputId}
             maxLength={finalMaxLength}
-            aria-invalid={error ? true : undefined}
+            aria-invalid={invalid}
             containerClassName={cn(
                 'flex items-center gap-2 has-disabled:opacity-50',
                 error &&

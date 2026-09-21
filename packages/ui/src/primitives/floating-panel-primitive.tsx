@@ -19,7 +19,9 @@ export const floatingPanelClassName = [
     'rounded-md',
     'shadow-md',
     'outline-none',
-    'z-[10000]',
+    // Above the drawer/modal layers (overlay z-[10000000], content z-[100000000])
+    // so Selects/popovers opened *inside* a drawer are never clipped behind it.
+    'z-[1000000000]',
     'data-[state=open]:animate-in',
     'data-[state=closed]:animate-out',
     'data-[state=closed]:fade-out-0',

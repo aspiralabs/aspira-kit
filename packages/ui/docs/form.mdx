@@ -103,6 +103,7 @@ Form walks the child tree and wraps recognized elements in a RHF `Controller`. E
 | `ChoiceBox`                | Wired to RHF field. Payload shape matches `mode`: string for single, string[] for multi.                                                                                                                              |
 | `InputSelect`              | Wired to RHF field. Preserves typed option values (string \| number \| boolean) through the Radix stringified-value boundary.                                                                                         |
 | `InputDate`                | Wired to RHF field. Payload is a `Date` (works with `z.date()`); typing a valid date or picking from the Calendar both update the field.                                                                              |
+| `InputAddress`             | Wired to RHF field (street string). Picking a suggestion also fills the sibling fields named by `cityField` / `stateField` / `zipField` / `latField` / `lngField` through the form context.                          |
 | `InputOTP`                 | Wired to RHF field. Payload is the typed string (use `z.string().length(n)`); coerces undefined → `''` so the field stays controlled from first paint. `label` and `error` chrome render automatically.              |
 | `Slider`                   | Wired to RHF field with shape coercion — single-thumb schemas (`z.number()`) stay `number`; range schemas (`z.array(z.number())`) stay `number[]`.                                                                    |
 | `RadioGroup`               | Wired via Controller. `RadioGroupItem` children are passed through untouched.                                                                                                                                         |
@@ -126,9 +127,13 @@ Form walks the child tree and wraps recognized elements in a RHF `Controller`. E
 | `skeleton`      | `ReactNode`                | —           | Loading state rendered in place of the form.                                                                           |
 | `className`     | `string`                   | —           | Forwarded to the underlying `<form>` element.                                                                          |
 
+## Form context
+
+`Form` renders a react-hook-form `FormProvider`, so any component inside it can call `useFormContext()` to read or set fields without prop-drilling. `InputAddress` uses this to fill its sibling fields; a multi-step layout can use it to `trigger()` validation for one step's fields before advancing.
+
 ## Gotchas
 
-- Inputs must have a `name` that matches a key in the zod schema — otherwise they fall through unwired.
+- Inputs must have a `name` that matches a key in the zod schema — otherwise they fall through unwired. A `Textarea` without a `name` is rendered as-is (it is not bound), so notes held in component state are safe inside a `Form`.
 - Define the schema at module scope (or memoize it) — redefining inline each render rebuilds the resolver and can cause unexpected remounts.
 - `onValueChange` fires on every keystroke; debounce if you use it for side effects.
 - Submit `Button` must have `type="submit"`; any other Button is auto-converted to `type="button"` with click propagation stopped.

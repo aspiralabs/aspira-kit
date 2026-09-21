@@ -15,6 +15,7 @@ import {
 } from '@tanstack/react-table';
 
 import { Button } from '../button/index.js';
+import { Skeleton } from '../skeleton/index.js';
 import {
     TableBodyPrimitive,
     TableCellPrimitive,
@@ -24,7 +25,13 @@ import {
     TableRowPrimitive,
 } from '../../primitives/table-primitive.js';
 import { defaultNavigate, type Navigate } from '../../lib/navigate.js';
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
+
+// TanStack's default column size is 150; only an explicit size becomes a width.
+function columnStyle(column: { getSize: () => number }): CSSProperties | undefined {
+    const size = column.getSize();
+    return size === 150 ? undefined : { width: size };
+}
 
 interface DataTableProps<TData> {
     columns: ColumnDef<TData>[];
@@ -33,6 +40,10 @@ interface DataTableProps<TData> {
     hideHeader?: boolean;
     /** Row-click navigation. Defaults to a full page load; pass `useRouter().push` in Next.js. */
     navigate?: Navigate;
+    /** When true, keep the header but replace rows with skeleton placeholders. */
+    loading?: boolean;
+    /** How many skeleton rows to show while loading (default 5). */
+    skeletonRows?: number;
 }
 
 export function DataTable<TData extends Record<string, unknown>>({
@@ -41,6 +52,8 @@ export function DataTable<TData extends Record<string, unknown>>({
     onRowClick,
     hideHeader = false,
     navigate = defaultNavigate,
+    loading = false,
+    skeletonRows = 5,
 }: DataTableProps<TData>) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
@@ -90,7 +103,7 @@ export function DataTable<TData extends Record<string, unknown>>({
                                             <TableHeadPrimitive
                                                 key={header.id}
                                                 className="h-12 text-xs font-medium uppercase tracking-wider text-foreground-subtext"
-                                                style={header.column.getSize() !== 150 ? { width: header.column.getSize() } : undefined}
+                                                style={columnStyle(header.column)}
                                             >
                                                 {!header.isPlaceholder &&
                                                     flexRender(header.column.columnDef.header, header.getContext())}
@@ -102,25 +115,37 @@ export function DataTable<TData extends Record<string, unknown>>({
                         </TableHeaderPrimitive>
                     )}
                     <TableBodyPrimitive>
-                        {table.getRowModel().rows?.length > 0 &&
+                        {/* Loading: keep the header, swap rows for skeleton placeholders. */}
+                        {loading &&
+                            Array.from({ length: skeletonRows }).map((_, rowIndex) => (
+                                <TableRowPrimitive key={`skeleton-${rowIndex}`} className="h-12 hover:bg-transparent">
+                                    {columns.map((_column, colIndex) => (
+                                        <TableCellPrimitive key={colIndex}>
+                                            <Skeleton className="h-4 w-full max-w-[160px]" />
+                                        </TableCellPrimitive>
+                                    ))}
+                                </TableRowPrimitive>
+                            ))}
+                        {!loading &&
+                            table.getRowModel().rows?.length > 0 &&
                             table.getRowModel().rows.map((row: Row<TData>) => (
                                 <TableRowPrimitive
                                     key={row.id}
                                     data-state={row.getIsSelected() && 'selected'}
-                                    className={onRowClick ? 'cursor-pointer hover:bg-surface/50' : ''}
+                                    className={onRowClick && 'cursor-pointer hover:bg-surface/50'}
                                     onClick={(e) => handleRowClick(row, e)}
                                 >
                                     {row.getVisibleCells().map((cell: Cell<TData, unknown>) => (
                                         <TableCellPrimitive
                                             key={cell.id}
-                                            style={cell.column.getSize() !== 150 ? { width: cell.column.getSize() } : undefined}
+                                            style={columnStyle(cell.column)}
                                         >
                                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                         </TableCellPrimitive>
                                     ))}
                                 </TableRowPrimitive>
                             ))}
-                        {!table.getRowModel().rows?.length && (
+                        {!loading && !table.getRowModel().rows?.length && (
                             <TableRowPrimitive>
                                 <TableCellPrimitive colSpan={columns.length} className="h-24 text-center">
                                     No results.

@@ -19,6 +19,8 @@ interface TooltipProps {
 export const Tooltip = ({ children, text, side = 'top', render, className, triggerClassName }: TooltipProps) => {
     if (!render && !text) return children;
 
+    const content = render ? render() : text;
+
     return (
         <TooltipPrimitive disableHoverableContent delayDuration={0}>
             <TooltipTriggerPrimitive asChild className={cn('flex-1', triggerClassName)}>
@@ -26,7 +28,7 @@ export const Tooltip = ({ children, text, side = 'top', render, className, trigg
             </TooltipTriggerPrimitive>
             <TooltipPortal>
                 <TooltipContentPrimitive side={side} className={cn('max-w-[300px]', className)}>
-                    {render ? render() : text}
+                    {content}
                 </TooltipContentPrimitive>
             </TooltipPortal>
         </TooltipPrimitive>

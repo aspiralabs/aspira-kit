@@ -32,6 +32,8 @@ interface MenuProps {
     className?: string;
 }
 
+const ITEM_VARIANT: Record<MenuVariant, 'default' | 'destructive'> = { info: 'default', danger: 'destructive' };
+
 function renderOption(option: MenuOption): React.ReactNode {
     if (option.children && option.children.length > 0) {
         return (
@@ -50,7 +52,7 @@ function renderOption(option: MenuOption): React.ReactNode {
     return (
         <DropdownMenuItemPrimitive
             key={option.key}
-            variant={option.variant === 'danger' ? 'destructive' : 'default'}
+            variant={ITEM_VARIANT[option.variant ?? 'info']}
             disabled={option.disabled}
             onClick={option.action}
         >

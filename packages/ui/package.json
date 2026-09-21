@@ -32,8 +32,10 @@
   "scripts": {
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "lint": "eslint src",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "mcp": "node bin/mcp.js",
     "migrate": "node scripts/migrate-component.mjs"
   },
@@ -80,10 +82,15 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
     "eslint": "^9.39.0",
+    "jsdom": "^26.1.0",
     "react": "^19",
     "react-dom": "^19",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.4"
   },
   "repository": {
     "type": "git",

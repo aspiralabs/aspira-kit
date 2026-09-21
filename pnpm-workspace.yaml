@@ -3,7 +3,9 @@ packages:
   - apps/*
 
 # pnpm 12 refuses to install unless every dependency with build scripts is listed here
-# (`pnpm approve-builds`). Neither of these needs its postinstall for our use.
+# (`pnpm approve-builds`). None of these needs its postinstall for our use; esbuild's
+# only downloads a prebuilt binary the npm package already ships.
 allowBuilds:
   core-js-pure: false
+  esbuild: false
   unrs-resolver: false

@@ -14,6 +14,8 @@ export type MenuItem = {
 
 export interface PageHeaderConfig {
     title: string;
+    /** Optional muted line under the title. The bar grows to fit it. */
+    description?: string;
     tooltip?: string;
     menu?: readonly MenuItem[];
     activeTab?: string;
@@ -28,7 +30,7 @@ export function PageActions({ children }: { children: ReactNode }) {
 PageActions.displayName = 'Page.Actions';
 
 export function PageHeader({ config, children }: { config: PageHeaderConfig; children?: ReactNode }) {
-    const { title, tooltip, menu, activeTab, onTabChange, backHref } = config;
+    const { title, description, tooltip, menu, activeTab, onTabChange, backHref } = config;
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     const isTabMode = menu && menu.length > 0;
@@ -41,11 +43,13 @@ export function PageHeader({ config, children }: { config: PageHeaderConfig; chi
     const activeLabel = isTabMode
         ? (menu.find((item) => item.paramKey === activeTab)?.label ?? '')
         : '';
+    const tabVariant = (paramKey: string) => (paramKey === activeTab ? 'default' : 'ghost');
+    const mobileChevron = mobileMenuOpen ? 'keyboard_arrow_up' : 'keyboard_arrow_down';
 
     return (
         <>
             {/* Desktop Header */}
-            <div className="hidden sm:flex items-center justify-between gap-4 px-8 h-16 bg-background border-b border-border">
+            <div className="hidden sm:flex items-center justify-between gap-4 px-8 min-h-16 py-2 bg-background border-b border-border">
                 <div className="flex items-center gap-3 min-w-0">
                     {backHref && (
                         <a href={backHref}>
@@ -54,17 +58,20 @@ export function PageHeader({ config, children }: { config: PageHeaderConfig; chi
                             </Button>
                         </a>
                     )}
-                    <div className="flex items-center gap-1.5">
-                        <h1 className="text-2xl font-semibold text-foreground whitespace-nowrap">
-                            {title}
-                        </h1>
-                        {tooltip && (
-                            <Tooltip text={tooltip} side="bottom">
-                                <button className="text-muted-foreground/50 hover:text-muted-foreground transition-colors">
-                                    <Icon icon="help" size={14} />
-                                </button>
-                            </Tooltip>
-                        )}
+                    <div className="flex flex-col min-w-0">
+                        <div className="flex items-center gap-1.5">
+                            <h1 className="text-2xl font-semibold text-foreground whitespace-nowrap">
+                                {title}
+                            </h1>
+                            {tooltip && (
+                                <Tooltip text={tooltip} side="bottom">
+                                    <button className="text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+                                        <Icon icon="help" size={14} />
+                                    </button>
+                                </Tooltip>
+                            )}
+                        </div>
+                        {description && <p className="text-sm text-muted-foreground truncate">{description}</p>}
                     </div>
 
                     {isTabMode && (
@@ -74,7 +81,7 @@ export function PageHeader({ config, children }: { config: PageHeaderConfig; chi
                                 {menu.map((item) => (
                                     <Button
                                         key={item.paramKey}
-                                        variant={activeTab === item.paramKey ? 'default' : 'ghost'}
+                                        variant={tabVariant(item.paramKey)}
                                         onClick={() => handleTabClick(item.paramKey)}
                                     >
                                         {item.label}
@@ -106,15 +113,18 @@ export function PageHeader({ config, children }: { config: PageHeaderConfig; chi
                             </Button>
                         </a>
                     )}
-                    <div className="flex items-center gap-1.5 min-w-0">
-                        <h1 className="text-lg font-semibold text-foreground truncate">{title}</h1>
-                        {tooltip && (
-                            <Tooltip text={tooltip} side="bottom">
-                                <button className="text-muted-foreground/50 hover:text-muted-foreground transition-colors shrink-0">
-                                    <Icon icon="help" size={14} />
-                                </button>
-                            </Tooltip>
-                        )}
+                    <div className="flex flex-col min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                            <h1 className="text-lg font-semibold text-foreground truncate">{title}</h1>
+                            {tooltip && (
+                                <Tooltip text={tooltip} side="bottom">
+                                    <button className="text-muted-foreground/50 hover:text-muted-foreground transition-colors shrink-0">
+                                        <Icon icon="help" size={14} />
+                                    </button>
+                                </Tooltip>
+                            )}
+                        </div>
+                        {description && <p className="text-xs text-muted-foreground truncate">{description}</p>}
                     </div>
                 </div>
 
@@ -126,10 +136,7 @@ export function PageHeader({ config, children }: { config: PageHeaderConfig; chi
                         className="gap-1.5 shrink-0"
                     >
                         {activeLabel || 'Menu'}
-                        <Icon
-                            icon={mobileMenuOpen ? 'keyboard_arrow_up' : 'keyboard_arrow_down'}
-                            size={16}
-                        />
+                        <Icon icon={mobileChevron} size={16} />
                     </Button>
                 )}
             </div>
@@ -141,7 +148,7 @@ export function PageHeader({ config, children }: { config: PageHeaderConfig; chi
                         {menu.map((item) => (
                             <Button
                                 key={item.paramKey}
-                                variant={activeTab === item.paramKey ? 'default' : 'ghost'}
+                                variant={tabVariant(item.paramKey)}
                                 onClick={() => handleTabClick(item.paramKey)}
                                 className="justify-start h-12 text-base"
                             >

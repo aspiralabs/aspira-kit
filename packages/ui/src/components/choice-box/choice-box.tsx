@@ -43,6 +43,46 @@ export type ChoiceBoxProps = ChoiceBoxSingleProps | ChoiceBoxMultiProps;
 
 type AnyValue = string | string[] | undefined;
 
+function RadioIndicator({ selected }: { selected: boolean }) {
+    const state = selected ? 'checked' : 'unchecked';
+    return (
+        <div
+            data-slot="choice-box-radio-indicator"
+            data-state={state}
+            className={cn(
+                'size-[18px] rounded-full border-2 flex items-center justify-center transition-colors',
+                selected ? 'border-primary bg-primary' : 'border-muted-foreground/40',
+            )}
+        >
+            {selected && <div className="size-2 rounded-full bg-primary-foreground" />}
+        </div>
+    );
+}
+
+// Shared `CheckboxPrimitive` (same one `<Checkbox>` uses) so the visual stays in
+// lockstep. The 18×18 slot wrapper keeps title columns aligned with the radio
+// variant even though the primitive is natively 16×16 (size-4). Kept
+// non-interactive (tabIndex=-1 + aria-hidden + pointer-events-none) so the outer
+// card stays the sole click/focus target. The check icon is rendered as a direct
+// child rather than via CheckboxIndicatorPrimitive because
+// `@radix-ui/react-presence` (used by Indicator) loops its ref-attach effect when
+// nested inside an RHF Controller that re-renders on every state change.
+function CheckIndicator({ selected }: { selected: boolean }) {
+    return (
+        <CheckboxPrimitive
+            checked={selected}
+            tabIndex={-1}
+            aria-hidden="true"
+            data-slot="choice-box-checkbox-indicator"
+            className="pointer-events-none"
+        >
+            {selected && <Icon icon="check" size={16} className="text-current" />}
+        </CheckboxPrimitive>
+    );
+}
+
+const INDICATORS = { single: RadioIndicator, multi: CheckIndicator } as const;
+
 function ChoiceBox(props: ChoiceBoxProps) {
     const {
         mode = 'single',
@@ -112,13 +152,18 @@ function ChoiceBox(props: ChoiceBoxProps) {
         return current === optValue;
     };
 
+    const groupRole = mode === 'single' ? 'radiogroup' : 'group';
+    const optionRole = mode === 'single' ? 'radio' : 'checkbox';
+    const Indicator = INDICATORS[mode];
+    const invalid = error ? true : undefined;
+
     return (
         <div
-            role={mode === 'single' ? 'radiogroup' : 'group'}
+            role={groupRole}
             data-slot="choice-box"
             data-mode={mode}
             data-name={name}
-            aria-invalid={error ? true : undefined}
+            aria-invalid={invalid}
             className={cn('grid gap-3', className)}
         >
             {options.map((option) => {
@@ -150,18 +195,22 @@ function ChoiceBox(props: ChoiceBoxProps) {
                     handleSelect(option.value);
                 };
 
+                const tabIndex = optDisabled ? -1 : 0;
+                const dataSelected = selected ? '' : undefined;
+                const dataDisabled = optDisabled ? '' : undefined;
+
                 return (
                     <div
                         key={option.value}
-                        role={mode === 'single' ? 'radio' : 'checkbox'}
+                        role={optionRole}
                         aria-checked={selected}
                         aria-disabled={optDisabled || undefined}
-                        tabIndex={optDisabled ? -1 : 0}
+                        tabIndex={tabIndex}
                         data-slot="choice-box-card"
                         data-value={option.value}
-                        data-selected={selected ? '' : undefined}
-                        data-disabled={optDisabled ? '' : undefined}
-                        onClick={optDisabled ? undefined : handleClick}
+                        data-selected={dataSelected}
+                        data-disabled={dataDisabled}
+                        onClick={handleClick}
                         onKeyDown={handleKey}
                         className={cn(
                             // Border effect lives entirely on an inset ring so the active/hover
@@ -183,61 +232,12 @@ function ChoiceBox(props: ChoiceBoxProps) {
                         {/*
                          * Indicator slot is a fixed 18×18 box so the title column starts at the
                          * same X regardless of mode. Both indicators are sized identically.
-                         * Multi uses Radix's CheckboxPrimitive.Root for structure + data-state
-                         * styling — same primitive as <Checkbox>. We render the check icon as a
-                         * direct child (not wrapped in CheckboxPrimitive.Indicator) because
-                         * Indicator uses @radix-ui/react-presence, whose ref-attach effect
-                         * re-entered on every RHF Controller re-render and blew past React's
-                         * update-depth limit. The primitive is kept non-interactive
-                         * (tabIndex=-1 + aria-hidden + pointer-events-none) so the outer card
-                         * remains the sole click/focus target.
                          */}
                         <div
                             className="mt-[3px] shrink-0 size-[18px] flex items-center justify-center"
                             data-slot="choice-box-indicator-slot"
                         >
-                            {mode === 'single' ? (
-                                <div
-                                    data-slot="choice-box-radio-indicator"
-                                    data-state={selected ? 'checked' : 'unchecked'}
-                                    className={cn(
-                                        'size-[18px] rounded-full border-2 flex items-center justify-center transition-colors',
-                                        selected
-                                            ? 'border-primary bg-primary'
-                                            : 'border-muted-foreground/40',
-                                    )}
-                                >
-                                    {selected && (
-                                        <div className="size-2 rounded-full bg-primary-foreground" />
-                                    )}
-                                </div>
-                            ) : (
-                                // Shared `CheckboxPrimitive` (same one `<Checkbox>` uses) so the
-                                // visual stays in lockstep. The 18×18 slot wrapper above keeps
-                                // title columns aligned with the radio variant even though the
-                                // primitive is natively 16×16 (size-4). Kept non-interactive
-                                // (tabIndex=-1 + aria-hidden + pointer-events-none) so the outer
-                                // card stays the sole click/focus target. The check icon is
-                                // rendered as a direct child rather than via
-                                // CheckboxIndicatorPrimitive because `@radix-ui/react-presence`
-                                // (used by Indicator) loops its ref-attach effect when nested
-                                // inside an RHF Controller that re-renders on every state change.
-                                <CheckboxPrimitive
-                                    checked={selected}
-                                    tabIndex={-1}
-                                    aria-hidden="true"
-                                    data-slot="choice-box-checkbox-indicator"
-                                    className="pointer-events-none"
-                                >
-                                    {selected && (
-                                        <Icon
-                                            icon="check"
-                                            size={16}
-                                            className="text-current"
-                                        />
-                                    )}
-                                </CheckboxPrimitive>
-                            )}
+                            <Indicator selected={selected} />
                         </div>
                         <div className="flex-1 min-w-0">
                             <span className="text-base font-semibold text-foreground">

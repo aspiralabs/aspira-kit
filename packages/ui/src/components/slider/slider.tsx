@@ -39,10 +39,12 @@ function Slider({
         [normalizedValue, normalizedDefault, min, max],
     );
 
+    const dataError = error ? '' : undefined;
+
     return (
         <SliderPrimitive.Root
             data-slot="slider"
-            data-error={error ? '' : undefined}
+            data-error={dataError}
             defaultValue={normalizedDefault}
             value={normalizedValue}
             min={min}

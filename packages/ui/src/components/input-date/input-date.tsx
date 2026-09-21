@@ -132,6 +132,24 @@ function InputDate({
             return;
         }
 
+        // ECHO GUARD (controlled mode only). The Input is driven by `displayValue` (via its
+        // `defaultValue`), which — in controlled mode — we re-derive from the parent-owned
+        // `currentDate`. When we push that canonical value into imask, imask re-emits it back
+        // through `onValueChange`, and mid-rewrite often emits a transient empty string first.
+        // Acting on those echoes (clearing `displayValue` → emitting `undefined` → re-syncing
+        // the mask → another echo …) has no fixed point and spins into an infinite update loop.
+        // So while a canonical value is present and controlled, ignore an incoming string that
+        // is either that same value (a full echo) or empty (a transient mid-rewrite echo).
+        // Uncontrolled mode is unaffected — there is no external re-derivation to echo against,
+        // so genuine clears/edits flow through normally.
+        if (controlledByParent) {
+            const canonical = toDisplayString(currentDate, format);
+            if (canonical !== '' && (nextString === canonical || trimmed === '')) {
+                if (displayValue !== canonical) setDisplayValue(canonical);
+                return;
+            }
+        }
+
         if (!trimmed) {
             setRangeError(undefined);
             if (lastEmittedRef.current !== '') {
