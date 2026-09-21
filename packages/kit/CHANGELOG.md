@@ -1,5 +1,11 @@
 # @aspiralabs/kit
 
+## 0.2.0
+
+### Patch Changes
+
+- adcc8e7: `kit init` writes a registry-only `.npmrc` and points at `~/.npmrc` for the token, since pnpm 12 does not expand `${VAR}` in `.npmrc`. `--dry-run` no longer writes files.
+
 ## 0.1.0
 
 ### Minor Changes
