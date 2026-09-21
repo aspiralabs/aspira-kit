@@ -26,6 +26,7 @@ import {
 import { cn } from '../../lib/cn.js';
 import { defaultNavigate, type Navigate } from '../../lib/navigate.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Skeleton } from '../skeleton/index.js';
 
 interface InfiniteQueryOptions<TData> {
     queryKey: readonly unknown[];
@@ -83,8 +84,8 @@ export function DataInfiniteTable<TData extends Record<string, unknown>>({
         return (
             <colgroup>
                 {columns.map((col, i) => {
-                    const w = col.size && col.size !== 150 ? col.size : undefined;
-                    return <col key={i} style={w ? { width: w } : undefined} />;
+                    const style = col.size && col.size !== 150 ? { width: col.size } : undefined;
+                    return <col key={i} style={style} />;
                 })}
             </colgroup>
         );
@@ -134,9 +135,11 @@ export function DataInfiniteTable<TData extends Record<string, unknown>>({
     };
 
     if (isLoading) {
+        // Hug the skeleton rows instead of stretching the bordered box to full
+        // height — a short table in a tall empty box (with a dangling column
+        // rule) reads as broken. Render enough rows to look like a real table.
         return (
-            <div className="border border-border rounded-xl overflow-hidden h-full">
-            <ScrollArea className="h-full w-full" viewPortRef={scrollViewportRef}>
+            <div className="border border-border rounded-xl overflow-hidden">
                 <TablePrimitive>
                     {colGroup}
                     {!hideHeader && (
@@ -157,18 +160,17 @@ export function DataInfiniteTable<TData extends Record<string, unknown>>({
                         </TableHeaderPrimitive>
                     )}
                     <TableBodyPrimitive>
-                        {Array.from({ length: 3 }).map((_, i) => (
-                            <TableRowPrimitive key={i}>
+                        {Array.from({ length: 8 }).map((_, i) => (
+                            <TableRowPrimitive key={i} className="hover:bg-transparent">
                                 {columns.map((_, j) => (
                                     <TableCellPrimitive key={j}>
-                                        <div className="h-4 w-24 rounded bg-surface" />
+                                        <Skeleton className="h-4 w-24" />
                                     </TableCellPrimitive>
                                 ))}
                             </TableRowPrimitive>
                         ))}
                     </TableBodyPrimitive>
                 </TablePrimitive>
-            </ScrollArea>
             </div>
         );
     }
@@ -209,7 +211,7 @@ export function DataInfiniteTable<TData extends Record<string, unknown>>({
                             <TableRowPrimitive
                                 key={row.id}
                                 data-state={row.getIsSelected() && 'selected'}
-                                className={onRowClick ? 'cursor-pointer hover:bg-surface/50' : ''}
+                                className={onRowClick && 'cursor-pointer hover:bg-surface/50'}
                                 onClick={(e) => handleRowClick(row, e)}
                             >
                                 {row.getVisibleCells().map((cell: Cell<TData, unknown>) => (

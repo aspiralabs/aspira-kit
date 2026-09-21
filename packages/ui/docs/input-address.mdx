@@ -1,0 +1,87 @@
+---
+eyebrow: Input - Address
+title: Input - Address
+group: Form
+description: Street-address input with Mapbox autocomplete. Typing queries the Mapbox Geocoding API; picking a suggestion fills the street and, inside a Form, the sibling city / state / zip / lat / lng fields in one go. Without a token it is a plain text input. Import from @aspiralabs/ui.
+---
+
+export const StandaloneDemo = () => {
+    const [value, setValue] = useState('');
+    const [picked, setPicked] = useState(null);
+    return (
+        <div className="max-w-md">
+            <InputAddress label="Street address" value={value} onChange={setValue} onAddressSelect={setPicked} />
+            <p className="text-xs text-foreground-subtext mt-2 font-mono">
+                value = {JSON.stringify(value)}
+            </p>
+            {picked && (
+                <pre className="text-xs text-foreground-subtext mt-1 font-mono">{JSON.stringify(picked, null, 2)}</pre>
+            )}
+        </div>
+    );
+};
+
+## Usage
+
+```tsx
+import { InputAddress } from '@aspiralabs/ui';
+
+// Inside a Form: the street is the bound field; the others are filled on pick.
+<Form schema={schema} onSubmit={save}>
+    <InputAddress
+        name="streetAddress"
+        label="Street address"
+        token={process.env.NEXT_PUBLIC_MAPBOX_TOKEN}
+        cityField="city"
+        stateField="state"
+        zipField="zip"
+        latField="lat"
+        lngField="lng"
+    />
+    <Input name="city" label="City" />
+    <Input name="state" label="State" />
+    <Input name="zip" label="ZIP" />
+</Form>
+```
+
+The token is a prop. The package reads no environment; the app decides where the Mapbox public token comes from and passes it in.
+
+## Standalone
+
+Without a `token` there are no suggestions and the field behaves as a plain controlled text input. That is what this demo shows; wire a token to see the dropdown.
+
+<Demo>
+    <StandaloneDemo />
+</Demo>
+
+## Behavior
+
+- Suggestions start at three characters, debounced 250ms, five results, `types=address`, filtered by `country`.
+- Picking a suggestion emits the **street line only** as the field value. City, state, and zip go to the sibling fields (when named) through the form context, with `shouldValidate` so their required errors clear.
+- `showFullAddress` displays "street, city, ST zip" in the field after a pick while still emitting only the street. Use it when the sibling fields are not shown.
+- A prefilled or reset value does not open the dropdown; only typing does.
+- Focus leaving the widget (input and list) closes the list and fires `onBlur`.
+
+## Props
+
+| Prop              | Type                             | Default                       | Description                                                                 |
+| ----------------- | -------------------------------- | ----------------------------- | --------------------------------------------------------------------------- |
+| `value`           | `string`                         | —                             | Controlled street value. `Form` wires this.                                 |
+| `onChange`        | `(value: string) => void`        | —                             | Fires with the street string on every edit and on pick.                     |
+| `onAddressSelect` | `(parts: AddressParts) => void`  | —                             | Fires with the parsed `{ streetAddress, city, state, zip, lat, lng, placeName }` on pick. |
+| `token`           | `string`                         | —                             | Mapbox public access token. Omit to disable suggestions.                    |
+| `country`         | `string`                         | `'us'`                        | ISO 3166-1 country filter for suggestions.                                  |
+| `cityField`       | `string`                         | —                             | Sibling form field to fill with the city.                                   |
+| `stateField`      | `string`                         | —                             | Sibling form field to fill with the two-letter state code.                  |
+| `zipField`        | `string`                         | —                             | Sibling form field to fill with the postcode.                               |
+| `latField`        | `string`                         | —                             | Sibling form field to fill with latitude.                                   |
+| `lngField`        | `string`                         | —                             | Sibling form field to fill with longitude.                                  |
+| `showFullAddress` | `boolean`                        | `false`                       | Display the full one-line address after a pick (value stays street-only).   |
+| `label`           | `string`                         | —                             | Label above the input.                                                      |
+| `placeholder`     | `string`                         | `'Start typing an address…'`  |                                                                             |
+| `error`           | `FormError`                      | —                             | react-hook-form error object.                                               |
+| `size`            | `default \| sm \| xs`            | `default`                     | Input height tier; the dropdown text follows it.                            |
+| `disabled`        | `boolean`                        | `false`                       |                                                                             |
+| `onBlur`          | `() => void`                     | —                             | Fires when focus leaves the whole widget.                                   |
+
+`parseFeature`, `formatFullAddress`, and `shouldQueryOnChange` are exported as pure functions for tests.

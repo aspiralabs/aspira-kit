@@ -11,17 +11,31 @@ export interface SectionHeaderConfig {
 /**
  * `Section` is the canonical in-page grouping: a serif `Section.Header` (with an
  * optional sans-serif description and a right-aligned `Section.Actions` slot)
- * above a `Section.Content` body. Stack multiple `Section`s with `space-y-12`.
+ * above a `Section.Content` body. Stack multiple `Section`s with `space-y-12`,
+ * or pass `divider` to close each one with a rule.
  *
- *   <Section>
+ *   <Section divider>
  *     <Section.Header config={{ title, description }}>
  *       <Section.Actions><Button /></Section.Actions>
  *     </Section.Header>
  *     <Section.Content>{...}</Section.Content>
  *   </Section>
  */
-function Section({ children, className }: { children: ReactNode; className?: string }) {
-    return <div className={cn('flex flex-col gap-6 w-full', className)}>{children}</div>;
+function Section({
+    children,
+    divider,
+    className,
+}: {
+    children: ReactNode;
+    /** Close the section with a bottom rule (for stacked sub-sections). */
+    divider?: boolean;
+    className?: string;
+}) {
+    return (
+        <section className={cn('flex flex-col gap-6 w-full', divider && 'pb-12 border-b border-border', className)}>
+            {children}
+        </section>
+    );
 }
 
 /** Right-aligned action slot for `Section.Header` (buttons, menus, badges). */

@@ -85,16 +85,20 @@ function ToggleBox({
         }
     };
 
+    const tabIndex = disabled ? -1 : 0;
+    const dataSelected = selected ? '' : undefined;
+    const dataDisabled = disabled ? '' : undefined;
+
     return (
         <div
             role="switch"
             aria-checked={selected}
             aria-disabled={disabled || undefined}
-            tabIndex={disabled ? -1 : 0}
+            tabIndex={tabIndex}
             data-slot="toggle-box"
-            data-selected={selected ? '' : undefined}
-            data-disabled={disabled ? '' : undefined}
-            onClick={disabled ? undefined : handleClick}
+            data-selected={dataSelected}
+            data-disabled={dataDisabled}
+            onClick={handleClick}
             onKeyDown={handleKey}
             className={cn(
                 'text-left py-6 px-5 rounded-lg border transition-all duration-200 flex items-center gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',

@@ -78,13 +78,15 @@ Mock query returning 5 pages of 8 items (with an artificial 400ms delay). Scroll
 | `hideHeader` | `boolean`              | Skips the table header row.                                                                                                  |
 | `emptyState` | `ReactNode`            | Rendered in place of the table (centered, 60vh min-height) when the query returns zero rows.                                 |
 
+While the first page loads, the table renders its header over eight skeleton rows and hugs them, rather than stretching an empty bordered box to full height.
+
 ## queryFn shape
 
 The expected shape if you're building the options object by hand (rare — prefer `useInfiniteFetcher`):
 
 | Key                | Type                                                    | Description                                                                          |
 | ------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `queryKey`         | `any[]`                                                 | Cache key array.                                                                     |
+| `queryKey`         | `readonly unknown[]`                                    | Cache key array.                                                                     |
 | `queryFn`          | `({ pageParam }) => Promise<{ items, nextCursor }>`     | Fetch one page. `nextCursor` is null when exhausted.                                 |
 | `initialPageParam` | `string \| undefined`                                   | First pageParam value passed to queryFn.                                             |
 | `getNextPageParam` | `(lastPage) => string \| undefined`                     | Maps the last page to the next pageParam (return `undefined` to stop).               |

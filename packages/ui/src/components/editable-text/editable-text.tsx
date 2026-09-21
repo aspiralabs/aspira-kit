@@ -42,6 +42,9 @@ export function EditableText({ value, onSave, className }: EditableTextProps) {
         }
     }, [isEditing]);
 
+    // Sizer text: while editing, mirror the draft (an nbsp keeps the box from collapsing).
+    const sizerText = isEditing ? editValue || ' ' : value;
+
     return (
         <div className={cn(className, 'relative min-w-0')}>
             {/* Sizer span — always rendered, invisible during editing to size the container */}
@@ -54,7 +57,7 @@ export function EditableText({ value, onSave, className }: EditableTextProps) {
                     }
                 }}
             >
-                {isEditing ? editValue || ' ' : value}
+                {sizerText}
             </span>
             {isEditing && (
                 <input

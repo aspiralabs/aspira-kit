@@ -166,6 +166,16 @@ Matches Select and Button size tiers.
     </div>
 </Demo>
 
+## Password
+
+`type="password"` adds a trailing eye toggle that reveals the value while open. The toggle is `tabIndex={-1}` so it never steals the tab order, and it follows `disabled`.
+
+<Demo>
+    <div className="max-w-sm">
+        <Input label="Password" type="password" defaultValue="hunter2" />
+    </div>
+</Demo>
+
 ## State management
 
 The input works in three modes. Reach for whichever matches who should own the value.
@@ -254,6 +264,7 @@ Accepts all native `input` attributes plus the props below.
 | `error`         | `FormError`                                                | —         | react-hook-form error object. Shows message + destructive border.                                    |
 | `icon`          | `string`                                                   | —         | Material icon name rendered inside the input on the left.                                            |
 | `size`          | `default \| sm \| xs`                                      | `default` | Height tier (56 / 40 / 32 px).                                                                       |
-| `mask`          | `FactoryOpts`                                              | —         | IMask mask config. See `imask`'s FactoryOpts docs.                                                   |
+| `mask`          | `FactoryOpts`                                              | —         | IMask mask config. See `imask`'s FactoryOpts docs. Keyed by contents, so an inline `mask={{...}}` literal is safe. |
+| `type`          | `string`                                                   | `text`    | `password` renders as a password field with a show/hide toggle; every other type renders as `text` (masks handle the rest). |
 | `onValueChange` | `({ value, typedValue }) => void`                          | —         | Fires on value change with masked `value` and coerced `typedValue`.                                  |
 | `onBlur`        | `(event, { unmaskedValue, typedValue }) => void`           | —         | Fires on blur with the event + unmasked / typed values.                                              |

@@ -272,6 +272,18 @@ function PickerSearchRow({
     );
 }
 
+// The option row's label: the caller's `entryRender` when given, else the plain label.
+function OptionLabel({ option, entry: Entry }: { option: SelectOption; entry?: EntryRenderComponent }) {
+    if (Entry) {
+        return (
+            <span className="flex-1 min-w-0">
+                <Entry data={option.raw ?? option} />
+            </span>
+        );
+    }
+    return <span className="flex-1 truncate">{option.label}</span>;
+}
+
 function PickerStates({
     dataMode,
     isLoading,
@@ -387,13 +399,7 @@ function OptionPickerMulti(props: MultiOptionPickerProps) {
                                         <Icon icon="check" size={12} />
                                     </CheckboxIndicatorPrimitive>
                                 </CheckboxPrimitive>
-                                {Entry ? (
-                                    <span className="flex-1 min-w-0">
-                                        <Entry data={opt.raw ?? opt} />
-                                    </span>
-                                ) : (
-                                    <span className="flex-1 truncate">{opt.label}</span>
-                                )}
+                                <OptionLabel option={opt} entry={Entry} />
                             </label>
                         );
                     })}
@@ -438,6 +444,7 @@ function OptionPickerSingle(props: SingleOptionPickerProps) {
         !isLoading &&
         !hasError &&
         !visibleOptions.some((o) => o.label.toLowerCase() === trimmedQuery.toLowerCase());
+    const createText = createLabel ? createLabel(trimmedQuery) : `Add “${trimmedQuery}”`;
 
     return (
         <div className={cn('flex flex-col max-h-80 overflow-hidden', className)}>
@@ -476,13 +483,7 @@ function OptionPickerSingle(props: SingleOptionPickerProps) {
                                     itemSizeClass,
                                 )}
                             >
-                                {Entry ? (
-                                    <span className="flex-1 min-w-0">
-                                        <Entry data={opt.raw ?? opt} />
-                                    </span>
-                                ) : (
-                                    <span className="flex-1 truncate">{opt.label}</span>
-                                )}
+                                <OptionLabel option={opt} entry={Entry} />
                                 {selected && (
                                     <Icon
                                         icon="check"
@@ -503,9 +504,7 @@ function OptionPickerSingle(props: SingleOptionPickerProps) {
                         )}
                     >
                         <Icon icon="add" size={16} className="shrink-0 text-foreground-subtext" />
-                        <span className="flex-1 truncate">
-                            {createLabel ? createLabel(trimmedQuery) : `Add “${trimmedQuery}”`}
-                        </span>
+                        <span className="flex-1 truncate">{createText}</span>
                     </button>
                 )}
             </div>

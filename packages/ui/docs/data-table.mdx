@@ -48,6 +48,14 @@ const columns: ColumnDef<User>[] = [
     <DataTable columns={DATA_TABLE_DEMO_COLUMNS} data={DATA_TABLE_DEMO_DATA} />
 </Demo>
 
+## Loading
+
+`loading` keeps the header and swaps the rows for skeleton placeholders, so the table does not collapse while data is on the way.
+
+<Demo>
+    <DataTable columns={DATA_TABLE_DEMO_COLUMNS} data={[]} loading skeletonRows={3} />
+</Demo>
+
 ## Props
 
 | Prop         | Type                | Default | Description                                                                                                                |
@@ -56,3 +64,5 @@ const columns: ColumnDef<User>[] = [
 | `data`       | `T[]`               | —       | Full dataset. Pagination is client-side.                                                                                   |
 | `onRowClick` | `string`            | —       | URL template. Tokens `<fieldName>` are replaced from the row's data. Clicks on buttons / links inside the row are ignored. |
 | `hideHeader` | `boolean`           | `false` | Skips the table header row.                                                                                                |
+| `loading`    | `boolean`           | `false` | Keep the header, render skeleton rows instead of data.                                                                     |
+| `skeletonRows` | `number`          | `5`     | How many skeleton rows to show while `loading`.                                                                            |

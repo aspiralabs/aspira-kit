@@ -98,6 +98,7 @@ Any authenticated product surface: Settings, Organization, Admin sub-pages, this
 | Key           | Type                          | Default | Description                                              |
 | ------------- | ----------------------------- | ------- | -------------------------------------------------------- |
 | `title`       | `string`                      | —       | Page title shown on the left.                            |
+| `description` | `string`                      | —       | Optional muted line under the title; the bar grows to fit. |
 | `menu`        | `readonly MenuItem[]`         | —       | Array of `{ label, paramKey, badge? }`. `paramKey` becomes the URL value. |
 | `activeTab`   | `string`                      | —       | Current tab key. Pair with `useStandardPage<T>`.         |
 | `onTabChange` | `(paramKey: string) => void`  | —       | Fires on tab click. Hook returns one wired to `?view=`.  |

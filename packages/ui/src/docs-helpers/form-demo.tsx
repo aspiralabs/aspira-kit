@@ -123,6 +123,8 @@ export function FormDemo() {
         setFormDefaults({ ...FORM_DEMO_EMPTY });
     };
 
+    const submitLabel = formPending ? 'Submitting…' : 'Save';
+
     return (
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)] gap-6">
             <div className="border border-border rounded-lg p-6">
@@ -229,7 +231,7 @@ export function FormDemo() {
                         <Button variant="ghost" onClick={handleFormReset}>
                             Reset
                         </Button>
-                        <Button type="submit">{formPending ? 'Submitting…' : 'Save'}</Button>
+                        <Button type="submit">{submitLabel}</Button>
                     </div>
                 </Form>
             </div>

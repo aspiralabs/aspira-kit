@@ -48,10 +48,14 @@ The package does not import Next. Three things changed on the way in from SAAS_B
 
 Also: `Button` uses `rounded-md` instead of the hardcoded `rounded-none` so radius tokens reach it (square by default because `--radius-on` is 0), and `Alert`'s blue and success variants use new `--alert-*` tokens with the same hex values the palette classes had.
 
+## Tests
+
+`pnpm test` runs vitest (jsdom + testing-library) over `src/**/*.test.tsx`, co-located with each component. The tests are excluded from the build and typechecked separately (`tsconfig.test.json`, part of `pnpm typecheck`). Pure logic (parsers, gates) is exported and tested without rendering; component specs render through testing-library. Type into a masked `Input` with `fireEvent.input` or a per-key delay, never a 0ms burst (see `agent/pitfalls.md`).
+
 ## MCP server
 
 `aspiralabs-ui-mcp` (stdio). Registered by `kit init` in `.mcp.json`. Tools: `list_components`, `get_component`, `search`, `get_tokens`, `get_pattern`. Reads `docs/*.mdx`, `docs/patterns/*.mdx`, and `tokens.css` from the installed package.
 
-## Migration debt
+## Pulling a component from SAAS_BOILER
 
-`eslint.config.mjs` turns the JSX-ternary rule off for `src/**` (49 ternaries in 17 files came over). Tracked in `@aspiralabs/config` `agent/slop-register.md`. `scripts/migrate-component.mjs` remains for pulling a future component from SAAS_BOILER.
+`pnpm migrate <name> --boiler <path-to-SAAS_BOILER/web-app>` (or set `SAAS_BOILER`; the default is a sibling checkout next to this repo) copies one component, its tests, and its doc in and rewrites the import paths. Then fix any remaining `@/` imports, check for hardcoded radius or colors, and run `pnpm check`. The org lint rules apply in full to `src/**`, JSX ternaries included.

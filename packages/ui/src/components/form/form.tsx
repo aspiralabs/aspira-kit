@@ -5,7 +5,7 @@ import { cn } from '../../lib/cn.js';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { maskitoNumberOptionsGenerator } from '@maskito/kit';
 import React, { ReactElement, useEffect } from 'react';
-import { Controller, DefaultValues, Path, Resolver, SubmitHandler, useForm } from 'react-hook-form';
+import { Controller, DefaultValues, FormProvider, Path, Resolver, SubmitHandler, useForm } from 'react-hook-form';
 import { TypeOf, z } from 'zod';
 
 interface FormProps<T extends z.ZodType<any, any>> {
@@ -48,6 +48,13 @@ export const Form = <T extends z.ZodType<any, any>>({
     // =========================================================================
     // USE FORM
     // =========================================================================
+    // Keep the full methods object so it can be exposed via <FormProvider>, letting
+    // nested components (composed field groups, InputAddress filling its siblings)
+    // reach the form with useFormContext() without prop-drilling.
+    const methods = useForm<FormData>({
+        resolver: zodResolver(schema) as Resolver<FormData>,
+        defaultValues,
+    });
     const {
         register,
         control,
@@ -55,10 +62,7 @@ export const Form = <T extends z.ZodType<any, any>>({
         watch,
         reset,
         formState: { errors },
-    } = useForm<FormData>({
-        resolver: zodResolver(schema) as Resolver<FormData>,
-        defaultValues,
-    });
+    } = methods;
 
     useEffect(() => {
         if (defaultValues) {
@@ -109,8 +113,35 @@ export const Form = <T extends z.ZodType<any, any>>({
                             onValueChange: ({ typedValue }: { typedValue: any }) =>
                                 field.onChange(typedValue ?? undefined),
                             defaultValue: defaultValues?.[fieldName] ?? '',
+                            // Feed the current RHF value back so programmatic setValue
+                            // (e.g. InputAddress filling city/state/zip) reflects in the
+                            // UI. Input's controlled-mode effect keeps imask in sync without
+                            // clobbering typing. `?? ''` keeps it controlled from first paint.
+                            value: field.value ?? '',
                             disabled: pending || child.props.disabled,
                             error: errors[fieldName],
+                        });
+                    }}
+                />
+            );
+        }
+
+        if (element.type.displayName === 'InputAddress') {
+            const fieldName = child.props.name as Path<FormData>;
+            return (
+                <Controller
+                    name={fieldName}
+                    control={control}
+                    defaultValue={defaultValues?.[fieldName]}
+                    render={({ field }) => {
+                        return React.cloneElement(child, {
+                            ...child.props,
+                            name: fieldName,
+                            value: field.value,
+                            onChange: field.onChange,
+                            onBlur: field.onBlur,
+                            error: errors[fieldName],
+                            disabled: pending || child.props.disabled,
                         });
                     }}
                 />
@@ -311,7 +342,10 @@ export const Form = <T extends z.ZodType<any, any>>({
             );
         }
 
-        if (element.type.displayName === 'Textarea') {
+        // Only bind a Textarea that declares a `name`. An unnamed Textarea (e.g. a
+        // note carried in component state) falls through to `return child`; binding
+        // it would create `<Controller name={undefined}>`, which crashes RHF.
+        if (element.type.displayName === 'Textarea' && child.props.name) {
             const fieldName = child.props.name as Path<FormData>;
             const defaultValue = defaultValues && defaultValues[fieldName];
             const error = errors[fieldName];
@@ -410,7 +444,7 @@ export const Form = <T extends z.ZodType<any, any>>({
                 <Controller
                     name={fieldName}
                     control={control}
-                    defaultValue={defaultValues ? defaultValues[fieldName] : undefined}
+                    defaultValue={defaultValues?.[fieldName]}
                     render={({ field }) => {
                         return React.cloneElement(child, {
                             ...child.props,
@@ -535,6 +569,10 @@ export const Form = <T extends z.ZodType<any, any>>({
                     return registerChild(child as ReactElement<ChildProps>);
                 }
 
+                if (element.type.displayName === 'InputAddress') {
+                    return registerChild(child as ReactElement<ChildProps>);
+                }
+
                 // Detects Form components and divs and stuff
                 if (element.props.children) {
                     return React.cloneElement(child, {
@@ -562,9 +600,11 @@ export const Form = <T extends z.ZodType<any, any>>({
     }
 
     return (
-        <form onSubmit={handleSubmit(onSubmitHandler)} className={cn('', className)}>
-            {registerChildren(children)}
-        </form>
+        <FormProvider {...methods}>
+            <form onSubmit={handleSubmit(onSubmitHandler)} className={cn('', className)}>
+                {registerChildren(children)}
+            </form>
+        </FormProvider>
     );
 };
 

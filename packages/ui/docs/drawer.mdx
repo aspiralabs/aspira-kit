@@ -68,7 +68,7 @@ The `direction` prop controls which edge the drawer slides in from. Defaults to 
 
 ## Size
 
-`size` is a number (px) or any CSS string. Width applies on `left`/`right`; height applies on `top`/`bottom`.
+`size` is a number (px) or any CSS string. Width applies on `left`/`right`; height applies on `top`/`bottom`. It sizes the card itself; the 16px inset around it is automatic, and the card is clamped to the viewport so a `size` larger than the screen never overflows.
 
 <Demo>
     <div className="flex flex-wrap gap-3">
@@ -124,6 +124,6 @@ NiceModal.show(AssetDetailsDrawer, { assetId: 'abc123' });
 | `children`       | `ReactNode`                       | —       | Usually `Drawer.Content` + `Drawer.Actions`.                                               |
 | `title`          | `string`                          | —       | Renders a header with title + close button when present.                                   |
 | `direction`      | `top \| bottom \| left \| right`  | `right` | Which edge the drawer slides in from.                                                      |
-| `size`           | `number \| string`                | `500`   | Width for left/right, height for top/bottom. Number = px; string = any CSS value.          |
+| `size`           | `number \| string`                | `500`   | Card width for left/right, height for top/bottom. Number = px; string = any CSS value. Clamped to the viewport. |
 | `onOutsideClick` | `() => void`                      | —       | Fires before the drawer hides on backdrop click / ESC.                                     |
 | `className`      | `string`                          | —       | Merged onto the panel.                                                                     |

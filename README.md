@@ -80,14 +80,14 @@ Dark mode is class-based (`dark` on `<html>`, for example with `next-themes`). F
 ```bash
 pnpm install
 pnpm dev            # ui in tsc --watch plus the docs site on http://localhost:3100
-pnpm check          # typecheck, lint, build, smoke tests, for every package
+pnpm check          # build, typecheck, lint, unit tests, smoke tests, for every package
 ```
 
 `apps/docs` is the design-system site. It renders the MDX that ships inside `@aspiralabs/ui`; it is never a second copy of the docs.
 
 ## CI and releases
 
-**Every pull request and every push to `main`** runs `ci.yml`: install, typecheck, lint, build, and the smoke tests (the MCP server answers over stdio; each package packs cleanly). `main` is protected: changes land by pull request and the `ci` check must pass.
+**Every pull request and every push to `main`** runs `ci.yml`: install, build, typecheck, lint, the `@aspiralabs/ui` unit tests, and the smoke tests (the MCP server answers over stdio; each package packs cleanly). `main` is protected: changes land by pull request and the `ci` check must pass.
 
 **Releases are decoupled from merges.** You can merge as many PRs into `main` as you like before cutting a release.
 

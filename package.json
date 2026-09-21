@@ -10,7 +10,7 @@
     "lint": "pnpm -r lint",
     "check": "pnpm build && pnpm typecheck && pnpm lint && pnpm test",
     "changeset": "changeset",
-    "test": "node packages/ui/scripts/mcp-smoke.mjs && pnpm -r --filter \"./packages/*\" exec pnpm pack --pack-destination ../../.packs",
+    "test": "pnpm --filter @aspiralabs/ui test && node packages/ui/scripts/mcp-smoke.mjs && pnpm -r --filter \"./packages/*\" exec pnpm pack --pack-destination ../../.packs",
     "changeset:version": "changeset version && pnpm install --lockfile-only",
     "changeset:publish": "changeset publish"
   },
