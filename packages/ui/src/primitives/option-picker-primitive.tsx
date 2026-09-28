@@ -4,7 +4,7 @@ import * as React from 'react';
 
 import { cn } from '../lib/cn.js';
 import { Icon } from '../components/icon/index.js';
-import { useDebounce } from '../lib/use-debounce.js';
+import { useDebounce } from '../hooks/use-debounce.js';
 import { PaginatedResponse } from '../lib/types.js';
 import {
     CheckboxPrimitive,

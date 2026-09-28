@@ -1,0 +1,64 @@
+---
+eyebrow: Hooks
+title: useFormAction
+group: Hooks
+description: Wraps an async action (server action, fetch, mutation) with isPending and error state, keeping the original function signature. Use it to disable a submit button while the call runs without hand-rolled useState. Import useFormAction from @aspiralabs/ui (or @aspiralabs/ui/hooks).
+---
+
+export const FormActionDemo = () => {
+    const { action, isPending, error } = useFormAction(
+        (fail) => new Promise((resolve, reject) => setTimeout(() => (fail ? reject(new Error('Request failed')) : resolve('ok')), 1200)),
+    );
+    return (
+        <div className="flex flex-col gap-3">
+            <div className="flex gap-3">
+                <Button disabled={isPending} onClick={() => action(false).then(() => toast.success('Saved'))}>
+                    Save
+                </Button>
+                <Button variant="secondary" disabled={isPending} onClick={() => action(true).catch(() => {})}>
+                    Save (fails)
+                </Button>
+            </div>
+            {error && <p className="text-sm text-destructive">{error.message}</p>}
+        </div>
+    );
+};
+
+## Usage
+
+```tsx
+import { useFormAction } from '@aspiralabs/ui';
+
+const { action: submit, isPending, error } = useFormAction(createContactRequest);
+
+const onSubmit = async (values: ContactForm) => {
+    await submit(values);
+    toast.success('Request sent');
+};
+
+<Button type="submit" disabled={isPending}>Send</Button>
+```
+
+## When to use
+
+For one-off async calls behind a button or form submit where you only need a
+pending flag and the last error. If the call is a cached server read or needs
+invalidation, use TanStack Query's `useMutation` instead.
+
+## Live example
+
+<Demo>
+    <FormActionDemo />
+</Demo>
+
+## API
+
+| Symbol          | Signature                                                       | Description                                                                                         |
+| --------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `useFormAction` | `<T extends (...args) => Promise<any>>(action: T) => { action: T; isPending: boolean; error: Error \| null }` | Returns a wrapped `action` with the same signature. `isPending` is true while it runs; `error` holds the last failure and is cleared on the next call. |
+
+## Notes
+
+-   The wrapped action still rejects on failure. Catch it (or let your form library catch it) so the error isn't unhandled.
+-   Errors that aren't `Error` instances are normalized to `new Error('An unknown error occurred')` in `error`; the rejection carries the original value.
+-   Pass a stable function (module-level server action, or `useCallback`), otherwise the wrapped `action` changes identity every render.

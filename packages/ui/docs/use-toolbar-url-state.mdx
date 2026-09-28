@@ -1,0 +1,72 @@
+---
+eyebrow: Hooks
+title: useToolbarUrlState
+group: Hooks
+description: The state hook for StandardToolbar. Syncs multi-value filters, single-value toggles, and search to the URL query string with replaceState, and returns a debounced search for data fetching. Import useToolbarUrlState from @aspiralabs/ui (or @aspiralabs/ui/hooks).
+---
+
+## Usage
+
+```tsx
+import { StandardToolbar, useToolbarUrlState } from '@aspiralabs/ui';
+
+const { filterValues, setFilterValues, search, setSearch, debouncedSearch } = useToolbarUrlState({
+    filterKeys: ['role', 'status'],
+});
+
+<StandardToolbar
+    filters={FILTERS}
+    filterValues={filterValues}
+    onFilterChange={setFilterValues}
+    search={search}
+    onSearchChange={setSearch}
+/>;
+
+// Fetch with debouncedSearch, not search, so each keystroke doesn't fire a request.
+```
+
+Single-value keys are for toggles that live outside the filter dropdown, like a
+`SegmentedControl` in `rightSlot`:
+
+```tsx
+const { singleValues, setSingleValue } = useToolbarUrlState({
+    filterKeys: ['role'],
+    singleValueKeys: ['view'],
+});
+
+<SegmentedControl value={singleValues.view ?? 'list'} onChange={(v) => setSingleValue('view', v)} />;
+```
+
+See the `standard-toolbar` pattern for the full list-page layout.
+
+## URL format
+
+-   Multi-value filters are repeatable keys: `?role=ADMIN&role=OWNER`.
+-   Single values are one key, removed when set to `null` or `''`.
+-   Search is `?q=` by default (`searchKey` to change it), trimmed, and written only after the debounce.
+-   Other query params on the page are left alone.
+
+## API
+
+| Option            | Type       | Default | Description                                         |
+| ----------------- | ---------- | ------- | --------------------------------------------------- |
+| `filterKeys`      | `string[]` | —       | Keys of multi-value filters, matching `ToolbarFilterDimension.key`. |
+| `singleValueKeys` | `string[]` | `[]`    | Keys holding one value each.                        |
+| `searchKey`       | `string`   | `'q'`   | Query param for search.                             |
+| `debounceMs`      | `number`   | `300`   | Delay before `debouncedSearch` and the URL update.  |
+
+| Returns           | Type                                         | Description                                        |
+| ----------------- | -------------------------------------------- | -------------------------------------------------- |
+| `filterValues`    | `Record<string, string[]>`                   | Pass to `StandardToolbar`'s `filterValues`.        |
+| `setFilterValues` | `(values) => void`                           | Pass to `onFilterChange`.                          |
+| `singleValues`    | `Record<string, string \| null>`             | Current single values.                             |
+| `setSingleValue`  | `(key: string, value: string \| null) => void` | Set or clear one single value.                   |
+| `search`          | `string`                                     | Raw input value, for `search`.                     |
+| `setSearch`       | `(value: string) => void`                    | Pass to `onSearchChange`.                          |
+| `debouncedSearch` | `string`                                     | Use this in query params.                          |
+
+## Notes
+
+-   The URL is read once on mount. Back/forward navigation doesn't re-sync the state.
+-   Writes use `window.history.replaceState`, so there's no router navigation and no history entry per keystroke. It works the same under Next.js, React Router, or no router.
+-   On the server and the first client render, every value is empty; the URL is applied in an effect. Don't fire the first fetch off `debouncedSearch` before hydration if an empty query is expensive.
