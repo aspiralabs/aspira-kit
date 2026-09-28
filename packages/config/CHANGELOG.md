@@ -1,5 +1,13 @@
 # @aspiralabs/config
 
+## 0.3.0
+
+### Patch Changes
+
+- 9e1b4e5: The AGENTS.md template gets a Gotchas section for project facts that contradict a reasonable assumption. The spec-reviewer's debaters read the project's AGENTS.md or CLAUDE.md, Gotchas first, before writing a finding, and the org's Review Verification rules (REV) in Notion say the same.
+- 9e1b4e5: Rule zero names the business spec contract: intent and observable feature acceptance criteria are the floor. The spec-reviewer enforces this contract; technical test design belongs in the implementation plan.
+- 9e1b4e5: Separate business acceptance criteria in feature specs from technical tasks and test-first unit/integration checklists in implementation plans.
+
 ## 0.2.1
 
 ## 0.2.0

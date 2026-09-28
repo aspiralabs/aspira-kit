@@ -1,5 +1,11 @@
 # @aspiralabs/kit
 
+## 0.3.0
+
+### Minor Changes
+
+- 9e1b4e5: `kit add auth` writes a base Better Auth setup into a Next.js project: server config, client, session helpers, auth emails, Redis and Prisma clients, the route handler, and `.env.example` keys. Options: `--no-passkey`, `--expo <scheme>`. Existing files are kept. CLI errors now print one line instead of a stack trace.
+
 ## 0.2.1
 
 ## 0.2.0
