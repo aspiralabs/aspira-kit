@@ -2,9 +2,23 @@
   "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [["@aspiralabs/ui", "@aspiralabs/config", "@aspiralabs/kit"]],
+  "fixed": [
+    [
+      "@aspiralabs/ui",
+      "@aspiralabs/config",
+      "@aspiralabs/kit"
+    ]
+  ],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["docs"]
+  "ignore": [
+    "docs",
+    "@aspiralabs/spec-reviewer",
+    "@aspiralabs/pr-reviewer",
+    "@aspiralabs/agent-common",
+    "@aspiralabs/planner",
+    "@aspiralabs/code-analyzer",
+    "@aspiralabs/implementor"
+  ]
 }

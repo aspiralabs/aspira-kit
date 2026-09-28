@@ -1,0 +1,34 @@
+{
+  "name": "@aspiralabs/agent-common",
+  "version": "0.2.1",
+  "private": true,
+  "description": "Tools and helpers shared by the eve agents in packages/agents: each agent re-exports what it mounts from agent/tools/.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    "./tools/*": "./src/tools/*.ts",
+    "./lib/*": "./src/lib/*.ts"
+  },
+  "scripts": {
+    "build": "echo '@aspiralabs/agent-common is source-only; the agents bundle it'",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "eve": "^0.63.0",
+    "zod": "4.5.4",
+    "ai": "^7.0.105",
+    "@modelcontextprotocol/sdk": "1.30.0"
+  },
+  "devDependencies": {
+    "@aspiralabs/config": "workspace:*",
+    "@types/node": "^24",
+    "eslint": "^9.39.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

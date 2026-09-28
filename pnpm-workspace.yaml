@@ -1,5 +1,6 @@
 packages:
   - packages/*
+  - packages/agents/*
   - apps/*
 
 # pnpm 12 refuses to install unless every dependency with build scripts is listed here
@@ -9,3 +10,6 @@ allowBuilds:
   core-js-pure: false
   esbuild: false
   unrs-resolver: false
+
+patchedDependencies:
+  '@modelcontextprotocol/sdk@1.30.0': patches/@modelcontextprotocol__sdk@1.30.0.patch

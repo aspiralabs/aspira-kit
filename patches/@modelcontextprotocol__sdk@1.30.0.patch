@@ -1,0 +1,62 @@
+diff --git a/dist/cjs/shared/protocol.d.ts b/dist/cjs/shared/protocol.d.ts
+index a91048d8b96121c46b29821bd86425ef3c3dfc72..61a210670ef873bec230c5446a842868b2bf7e79 100644
+--- a/dist/cjs/shared/protocol.d.ts
++++ b/dist/cjs/shared/protocol.d.ts
+@@ -72,9 +72,10 @@ export type RequestOptions = {
+     /**
+      * A timeout (in milliseconds) for this request. If exceeded, an McpError with code `RequestTimeout` will be raised from request().
+      *
++     * Set false to wait until a response, transport failure, or signal cancellation.
+      * If not specified, `DEFAULT_REQUEST_TIMEOUT_MSEC` will be used as the timeout.
+      */
+-    timeout?: number;
++    timeout?: number | false;
+     /**
+      * If true, receiving a progress notification will reset the request timeout.
+      * This is useful for long-running operations that send periodic progress updates.
+diff --git a/dist/cjs/shared/protocol.js b/dist/cjs/shared/protocol.js
+index 3617e787f0ba70447c99501aee7aa67584d89758..1f714811a40e23674bdb7bde937089b91558b2a9 100644
+--- a/dist/cjs/shared/protocol.js
++++ b/dist/cjs/shared/protocol.js
+@@ -715,7 +715,9 @@ class Protocol {
+             });
+             const timeout = options?.timeout ?? exports.DEFAULT_REQUEST_TIMEOUT_MSEC;
+             const timeoutHandler = () => cancel(types_js_1.McpError.fromError(types_js_1.ErrorCode.RequestTimeout, 'Request timed out', { timeout }));
+-            this._setupTimeout(messageId, timeout, options?.maxTotalTimeout, timeoutHandler, options?.resetTimeoutOnProgress ?? false);
++            if (timeout !== false) {
++                this._setupTimeout(messageId, timeout, options?.maxTotalTimeout, timeoutHandler, options?.resetTimeoutOnProgress ?? false);
++            }
+             // Queue request if related to a task
+             const relatedTaskId = relatedTask?.taskId;
+             if (relatedTaskId) {
+diff --git a/dist/esm/shared/protocol.d.ts b/dist/esm/shared/protocol.d.ts
+index a91048d8b96121c46b29821bd86425ef3c3dfc72..61a210670ef873bec230c5446a842868b2bf7e79 100644
+--- a/dist/esm/shared/protocol.d.ts
++++ b/dist/esm/shared/protocol.d.ts
+@@ -72,9 +72,10 @@ export type RequestOptions = {
+     /**
+      * A timeout (in milliseconds) for this request. If exceeded, an McpError with code `RequestTimeout` will be raised from request().
+      *
++     * Set false to wait until a response, transport failure, or signal cancellation.
+      * If not specified, `DEFAULT_REQUEST_TIMEOUT_MSEC` will be used as the timeout.
+      */
+-    timeout?: number;
++    timeout?: number | false;
+     /**
+      * If true, receiving a progress notification will reset the request timeout.
+      * This is useful for long-running operations that send periodic progress updates.
+diff --git a/dist/esm/shared/protocol.js b/dist/esm/shared/protocol.js
+index bfa2b7120a0f50c569364ea5264e6f811076f44f..7bf3f4afb3939c610e28b7f5c645b2e42e737f98 100644
+--- a/dist/esm/shared/protocol.js
++++ b/dist/esm/shared/protocol.js
+@@ -711,7 +711,9 @@ export class Protocol {
+             });
+             const timeout = options?.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC;
+             const timeoutHandler = () => cancel(McpError.fromError(ErrorCode.RequestTimeout, 'Request timed out', { timeout }));
+-            this._setupTimeout(messageId, timeout, options?.maxTotalTimeout, timeoutHandler, options?.resetTimeoutOnProgress ?? false);
++            if (timeout !== false) {
++                this._setupTimeout(messageId, timeout, options?.maxTotalTimeout, timeoutHandler, options?.resetTimeoutOnProgress ?? false);
++            }
+             // Queue request if related to a task
+             const relatedTaskId = relatedTask?.taskId;
+             if (relatedTaskId) {

@@ -6,7 +6,7 @@ The Aspira Labs development kit. One repo that says everything the organization 
 |---|---|---|
 | `@aspiralabs/ui` | Components, `tokens.css`, component docs (MDX), and an MCP server that serves those docs to agents | `pnpm add @aspiralabs/ui` |
 | `@aspiralabs/config` | `eslint/next`, `eslint/base`, `eslint/library`, `tsconfig/*`, `prettier`, and `agent/*` (constraints, guides, hooks, personas, templates) | `pnpm add -D @aspiralabs/config` |
-| `@aspiralabs/kit` | The CLI. `kit init --stack next` wires a project; `kit doctor` reports its kit version and drift | `pnpm add -D @aspiralabs/kit` |
+| `@aspiralabs/kit` | The CLI. `kit init --stack next` wires a project, `kit add auth` scaffolds Better Auth, `kit doctor` reports its kit version and drift. [Reference](packages/kit/README.md) | `pnpm add -D @aspiralabs/kit` |
 
 All three are published to **GitHub Packages** under the `aspiralabs` org and versioned in lockstep: one version number across the kit.
 
@@ -34,8 +34,11 @@ Then in the project, committed:
 pnpm add -D @aspiralabs/kit
 pnpm kit init --stack next        # installs ui + config, writes eslint/prettier/tsconfig wiring,
                                   # globals.css imports, AGENTS.md, CLAUDE.md, .mcp.json, hooks, specs/
+pnpm kit add auth                 # optional: base Better Auth setup the project then owns
 pnpm kit doctor                   # what version you are on, what is wired
 ```
+
+Every command, flag and file the CLI writes is in the [kit README](packages/kit/README.md).
 
 What `init` leaves you with, if you would rather do it by hand:
 
@@ -104,7 +107,7 @@ The version PR is opened by the Actions bot. With GitHub's default policy every 
 ```
 packages/ui        @aspiralabs/ui        src/components, src/primitives, src/layout, tokens.css, docs/*.mdx, bin/mcp.js
 packages/config    @aspiralabs/config    eslint/, tsconfig/, prettier/, agent/
-packages/kit       @aspiralabs/kit       src/cli.ts, src/stacks/next.ts, src/doctor.ts
+packages/kit       @aspiralabs/kit       src/cli.ts, src/stacks/ (next.ts, next-auth.ts), src/doctor.ts, templates/
 apps/docs          the design-system site (private, not published)
 .github/workflows  ci.yml, release.yml, kit-checks.yml (reusable; products can call it)
 .changeset         lockstep config and pending changesets

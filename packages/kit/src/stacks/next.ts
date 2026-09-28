@@ -9,7 +9,7 @@ export type InitOptions = { projectRoot: string; dryRun: boolean; log: Log }
 const DEPS = ['@aspiralabs/ui']
 const DEV_DEPS = ['@aspiralabs/config', '@aspiralabs/kit', 'eslint', 'prettier', 'typescript']
 
-function packageManager(root: string): 'pnpm' | 'npm' | 'yarn' {
+export function packageManager(root: string): 'pnpm' | 'npm' | 'yarn' {
   if (existsSync(join(root, 'pnpm-lock.yaml'))) {
     return 'pnpm'
   }

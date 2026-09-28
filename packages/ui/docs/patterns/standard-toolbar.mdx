@@ -55,9 +55,7 @@ List/table views with **3+ filter axes** or a **heavy search flow**. Don't add i
 The most common form: `useToolbarUrlState` syncs filter selections + search to `?q=`/`?role=` and gives you back debounced search + values. Pair it with `useInfiniteFetcher` to drive a data table.
 
 ```tsx
-import { Page } from '@aspiralabs/ui';
-import { StandardToolbar } from '@/components/standard-toolbar';
-import { useToolbarUrlState } from '@/hooks/use-toolbar-url-state';
+import { Page, StandardToolbar, useToolbarUrlState } from '@aspiralabs/ui';
 
 export default function AccountsPage() {
     const { filterValues, setFilterValues, search, setSearch, debouncedSearch } =

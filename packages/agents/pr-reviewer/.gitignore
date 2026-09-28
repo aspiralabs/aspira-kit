@@ -1,0 +1,5 @@
+.eve/
+.output/
+.env.local
+reviews/
+.env.development.local
