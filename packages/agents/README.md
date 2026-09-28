@@ -9,11 +9,11 @@ Aspira Labs agents, built on [eve](https://vercel.com/eve). One package per agen
 
 | Package | Agent | Spec | State |
 | --- | --- | --- | --- |
-| `packages/agents/spec-review-agent` | `spec-review-agent` | `specs/agents-spec-review.md` | official three-phase reviewer |
-| `packages/agents/spec-to-plan` | `spec-to-plan` | `specs/agents-spec-to-plan.md` | implementation and test planning |
-| `packages/agents/pr-review-agent` | `pr-review-agent` | `specs/agents-pr-review.md` | working |
-| `packages/agents/static-analysis-agent` | `static-analysis-agent` | `specs/agents-static-analysis.md` | detect, run, auto-fix, model-fix, loop until clean |
-| `packages/agents/implementor` | `implementor` | `specs/agents-implementor.md` | cloud runner for the `/aspira-implement` skill: builds a plan test-first, parallel lanes |
+| `packages/agents/spec-reviewer` | `spec-reviewer` | `specs/agents-spec-reviewer.md` | official three-phase reviewer |
+| `packages/agents/planner` | `planner` | `specs/agents-planner.md` | implementation and test planning |
+| `packages/agents/pr-reviewer` | `pr-reviewer` | `specs/agents-pr-reviewer.md` | working |
+| `packages/agents/code-analyzer` | `code-analyzer` | `specs/agents-code-analyzer.md` | detect, run, auto-fix, model-fix, loop until clean |
+| `packages/agents/implementor` | `implementor` | `specs/agents-implementor.md` | cloud runner for the `/aspira-implementor` skill: builds a plan test-first, parallel lanes |
 
 ## How an agent is selected
 
@@ -27,10 +27,10 @@ Two forms, and the difference matters:
 
 ```bash
 # Anywhere on the machine, including ~ : point pnpm at the package directory.
-pnpm -C /path/to/ASPIRA_KIT/packages/agents/pr-review-agent exec eve invoke "who are you?"
+pnpm -C /path/to/ASPIRA_KIT/packages/agents/pr-reviewer exec eve invoke "who are you?"
 
 # Inside the monorepo only: name the package and let pnpm find it.
-pnpm --filter @aspiralabs/pr-review-agent exec eve invoke "who are you?"
+pnpm --filter @aspiralabs/pr-reviewer exec eve invoke "who are you?"
 ```
 
 `--filter` resolves package names against the workspace, so it needs the working directory to be *inside* the monorepo. Run it from your home directory and pnpm finds no workspace root, tries to enumerate everything under `~`, and dies on macOS-protected directories:
@@ -68,9 +68,9 @@ agent-dev() { pnpm -C "$ASPIRA_KIT/packages/agents/${1:?usage: agent-dev <name>}
 Then, from anywhere — including inside the repo you want reviewed:
 
 ```bash
-agent spec-review-agent "Review $PWD/specs/feature/spec.md against $PWD"
+agent spec-reviewer "Review $PWD/specs/feature/spec.md against $PWD"
 agent                     # no args: lists the installed agents
-agent-dev spec-review-agent
+agent-dev spec-reviewer
 ```
 
 Either way the package directory is what selects the agent — eve loads the one root agent under the app root it finds from the working directory, and both `-C` and `--filter` set that directory for you. There is no agent-name flag to get wrong.
@@ -95,7 +95,7 @@ Root `typecheck` and `lint` (`pnpm -r`) pick the package up for free. Root `buil
 
 Every agent package looks the same from the outside: `dev`, `build`, `typecheck`, `lint`, `info` scripts; `@aspiralabs/config` for eslint and tsconfig; `private: true`; Node 24.
 
-Inside `agent/`, the convention `spec-review-agent` sets and the next agent should follow:
+Inside `agent/`, the convention `spec-reviewer` sets and the next agent should follow:
 
 | Path | What goes there |
 | --- | --- |
@@ -124,10 +124,10 @@ export { default } from '@aspiralabs/agent-common/tools/load-knowledge'
 
 | Tool | Mounted by | What it does |
 | --- | --- | --- |
-| `load-knowledge` | spec-review-agent, pr-review-agent | Loads the org's engineering guidelines from Notion into the sandbox at `/workspace/knowledge` as markdown, `INDEX.md` first, one file per page. Needs `NOTION_TOKEN` and `KNOWLEDGE_PAGE` in the agent's `.env.local`; without them it reports `configured: false`; the spec reviewer requires guidelines and reports a blocker. `KNOWLEDGE_REQUIRED` names the pages every agent must read in full; they are concatenated into `REQUIRED.md`, returned as `requiredFile`, and a missing one is an error. |
+| `load-knowledge` | spec-reviewer, pr-reviewer | Loads the org's engineering guidelines from Notion into the sandbox at `/workspace/knowledge` as markdown, `INDEX.md` first, one file per page. Needs `NOTION_TOKEN` and `KNOWLEDGE_PAGE` in the agent's `.env.local`; without them it reports `configured: false`; the spec reviewer requires guidelines and reports a blocker. `KNOWLEDGE_REQUIRED` names the pages every agent must read in full; they are concatenated into `REQUIRED.md`, returned as `requiredFile`, and a missing one is an error. |
 
 Helpers and their tests live in `common/src/lib/`, so a shared helper is tested once. The spec reviewer owns its three-phase pipeline and per-phase cost report; the PR reviewer owns its separate review loop.
 
 ## Spec to implementation workflow
 
-`spec-review-agent` reviews intent and business acceptance criteria. `spec-to-plan` reads the reviewed spec and creates concrete technical tasks with mapped unit/integration test checklists. `/aspira-implement` (or the `implementor` agent in the cloud) writes those tests first, then implements the plan, running independent tasks in parallel. Both planning agents use shared read-only repository/MCP access and run-analysis/trace infrastructure in `agent-common`.
+`spec-reviewer` reviews intent and business acceptance criteria. `planner` reads the reviewed spec and creates concrete technical tasks with mapped unit/integration test checklists. `/aspira-implementor` (or the `implementor` agent in the cloud) writes those tests first, then implements the plan, running independent tasks in parallel. Both planning agents use shared read-only repository/MCP access and run-analysis/trace infrastructure in `agent-common`.

@@ -2,7 +2,7 @@
 // write, without a sandbox or a model. Reads NOTION_TOKEN and KNOWLEDGE_PAGE from
 // the environment (a --env-file flag on node points it at an agent's .env.local).
 //
-//   node --env-file=../spec-review-agent/.env.local scripts/probe-knowledge.ts
+//   node --env-file=../spec-reviewer/.env.local scripts/probe-knowledge.ts
 //
 // Prints one line per page (depth, file it would become, title, truncated flag)
 // and the first lines of INDEX.md, so a page that is not shared with the
@@ -24,7 +24,7 @@ import {
 const token = process.env[KNOWLEDGE_ENV.token]?.trim()
 const start = process.env[KNOWLEDGE_ENV.page]?.trim()
 if (!token || !start) {
-  console.error(`Set ${KNOWLEDGE_ENV.token} and ${KNOWLEDGE_ENV.page} (for example: node --env-file=../spec-review-agent/.env.local scripts/probe-knowledge.ts)`)
+  console.error(`Set ${KNOWLEDGE_ENV.token} and ${KNOWLEDGE_ENV.page} (for example: node --env-file=../spec-reviewer/.env.local scripts/probe-knowledge.ts)`)
   process.exit(2)
 }
 const rootId = pageIdFrom(start)

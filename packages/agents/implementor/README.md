@@ -1,17 +1,17 @@
 # Implementor
 
-Builds a feature test-first from a `spec-to-plan` plan, a spec or a ticket, under the Aspira engineering rules in Notion, running independent tasks in parallel. The procedure is the `aspira-implement` skill. This package mounts that skill so it can also run unattended in the cloud.
+Builds a feature test-first from a `planner` plan, a spec or a ticket, under the Aspira engineering rules in Notion, running independent tasks in parallel. The procedure is the `aspira-implementor` skill. This package mounts that skill so it can also run unattended in the cloud.
 
-## In Claude Code: `/aspira-implement`
+## In Claude Code: `/aspira-implementor`
 
 ```bash
-ln -sfn "$ASPIRA_KIT/packages/agents/implementor/agent/skills/aspira-implement" ~/.claude/skills/aspira-implement
+ln -sfn "$ASPIRA_KIT/packages/agents/implementor/agent/skills/aspira-implementor" ~/.claude/skills/aspira-implementor
 ```
 
-`/aspira-implement @my-spec.md` builds that spec in the repository of the current directory, start to finish, without stopping for confirmation. Open decisions become assumptions recorded in `implementation.md` and listed in the summary. It stops only for an `incomplete` reviewed plan, a Notion/project rule conflict, an irreversible or high-risk decision (destructive migrations, auth, payments, security, unplanned dependencies) or an unreadable source, and builds everything else first.
+`/aspira-implementor @my-spec.md` builds that spec in the repository of the current directory, start to finish, without stopping for confirmation. Open decisions become assumptions recorded in `implementation.md` and listed in the summary. It stops only for an `incomplete` reviewed plan, a Notion/project rule conflict, an irreversible or high-risk decision (destructive migrations, auth, payments, security, unplanned dependencies) or an unreadable source, and builds everything else first.
 
 ```
-/aspira-implement <source> [--repo DIR | --repo owner/name] [--ref BRANCH] [--pr] [--max-parallel N] [--serial] [--guidelines FILE]
+/aspira-implementor <source> [--repo DIR | --repo owner/name] [--ref BRANCH] [--pr] [--max-parallel N] [--serial] [--guidelines FILE]
 ```
 
 | Source | Repository | What happens |
@@ -26,7 +26,7 @@ Every mode then does the same thing. It loads Agent Instructions and the matchin
 ## In the cloud: the `implementor` agent
 
 ```bash
-# from a session: /aspira-implement docs/plans/my-feature/plan.review --repo owner/name [--ref develop] [--pr]
+# from a session: /aspira-implementor docs/plans/my-feature/plan.review --repo owner/name [--ref develop] [--pr]
 agent implementor "Implement docs/plans/my-feature/plan.review in the GitHub repository owner/name"
 agent implementor "Implement specs/my-feature.md in the GitHub repository owner/name, starting from branch develop. Push the branch and open a draft pull request."
 ```
@@ -49,8 +49,8 @@ Environment: `AI_GATEWAY_API_KEY`, `GITHUB_TOKEN` (clone private repos, push, PR
 agent/
   agent.ts                        root agent; keeps the built-in `agent` tool for parallel lanes
   instructions.md                 cloud-only differences; everything else is in the skill
-  skills/aspira-implement/SKILL.md  the skill, the single source for both runtimes
-  skills/aspira-implement/scripts/implement-remote.sh  session launcher for remote repositories
+  skills/aspira-implementor/SKILL.md  the skill, the single source for both runtimes
+  skills/aspira-implementor/scripts/implement-remote.sh  session launcher for remote repositories
   tools/                          checkout-repo, publish-branch, load-knowledge, glob, grep
   lib/github.ts                   pure repo/branch/token helpers
   lib/checkout-state.ts           session state: what was cloned, so publish pushes only that

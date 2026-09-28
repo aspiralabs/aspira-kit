@@ -1,13 +1,13 @@
-# Implementor agent and /aspira-implement skill
+# Implementor agent and /aspira-implementor skill
 
 ## Intent
 
-Build a feature test first, under the Aspira engineering rules in Notion, from one of three sources: the plan `spec-to-plan` produces (`plan.review/` with `trace/plan.json`), a spec file, or a ticket from a connected tracker. The repository is local, or a GitHub repository built by the cloud agent. The procedure is a skill, `/aspira-implement`, that runs in a Claude Code session. The `implementor` agent exists only so the same skill can run unattended in the cloud: it mounts the skill and supplies what a cloud run lacks (a repository checkout, the Notion guidelines and a way to publish a branch). The skill replaces greenfield-gary for Aspira projects.
+Build a feature test first, under the Aspira engineering rules in Notion, from one of three sources: the plan the `planner` agent produces (`plan.review/` with `trace/plan.json`), a spec file, or a ticket from a connected tracker. The repository is local, or a GitHub repository built by the cloud agent. The procedure is a skill, `/aspira-implementor`, that runs in a Claude Code session. The `implementor` agent exists only so the same skill can run unattended in the cloud: it mounts the skill and supplies what a cloud run lacks (a repository checkout, the Notion guidelines and a way to publish a branch). The skill replaces greenfield-gary for Aspira projects.
 
 ## Constraints
 
-- One skill source, `packages/agents/implementor/agent/skills/aspira-implement/SKILL.md`, used by both runtimes. Claude Code links to it; the eve agent loads it with `load_skill`. No second copy that can drift.
-- `/aspira-implement @spec.md` runs to completion in the current directory's repository without asking for confirmation. Open decisions are settled conservatively and recorded as assumptions. Work stops only for an `incomplete` reviewed plan, a rule conflict, an irreversible or high-risk decision, or an unreadable source, and everything that does not depend on the blocker is built first.
+- One skill source, `packages/agents/implementor/agent/skills/aspira-implementor/SKILL.md`, used by both runtimes. Claude Code links to it; the eve agent loads it with `load_skill`. No second copy that can drift.
+- `/aspira-implementor @spec.md` runs to completion in the current directory's repository without asking for confirmation. Open decisions are settled conservatively and recorded as assumptions. Work stops only for an `incomplete` reviewed plan, a rule conflict, an irreversible or high-risk decision, or an unreadable source, and everything that does not depend on the blocker is built first.
 - The plan is the contract. A reviewed plan marked `incomplete` is refused. A spec or ticket is built directly: the skill drafts a plan in the same shape as `plan.json` (tasks, tests, dependencies, evidence) and does not add scope the source does not state. Scope beyond the plan is reported, not built.
 - A ticket is restated as a spec with numbered criteria before planning (rule zero). Tickets come from whatever tracker MCP or CLI the session has; no tracker is hardcoded.
 - Guidelines come from Notion as they do for the other agents: `Agent Instructions` routes to the topic pages, the planner's `trace/guidelines.md` snapshot is the baseline, and a conflict between a project instruction and a Notion rule stops the run. The project's `AGENTS.md`/`CLAUDE.md` and its Gotchas are read before any code.
@@ -20,10 +20,10 @@ Build a feature test first, under the Aspira engineering rules in Notion, from o
 
 ### Features
 
-- [ ] F1: `/aspira-implement <plan>` builds a `ready` plan in a local repository and refuses `incomplete` plans. For `needs-author` plans it records the open decisions as assumptions and builds.
-- [ ] F8: `/aspira-implement <spec file>` in a local repository drafts a grounded test-first plan beside the spec and builds it without stopping for confirmation. `@` file mentions are accepted and the current directory's repository is the default.
-- [ ] F9: `/aspira-implement <ticket>` in a local repository fetches the ticket through a connected MCP or CLI, restates it as a spec with numbered criteria, records its gaps as assumptions, then plans and builds it. Commits carry a `Ticket:` trailer.
-- [ ] F10: `/aspira-implement <path> --repo owner/name` hands a plan or spec path inside that GitHub repository to the `implementor` agent through a detached launcher, and relays its report.
+- [ ] F1: `/aspira-implementor <plan>` builds a `ready` plan in a local repository and refuses `incomplete` plans. For `needs-author` plans it records the open decisions as assumptions and builds.
+- [ ] F8: `/aspira-implementor <spec file>` in a local repository drafts a grounded test-first plan beside the spec and builds it without stopping for confirmation. `@` file mentions are accepted and the current directory's repository is the default.
+- [ ] F9: `/aspira-implementor <ticket>` in a local repository fetches the ticket through a connected MCP or CLI, restates it as a spec with numbered criteria, records its gaps as assumptions, then plans and builds it. Commits carry a `Ticket:` trailer.
+- [ ] F10: `/aspira-implementor <path> --repo owner/name` hands a plan or spec path inside that GitHub repository to the `implementor` agent through a detached launcher, and relays its report.
 - [ ] F2: Before any code, the skill loads the Notion engineering rules (Agent Instructions plus the topic pages for the task's area), the planner's guidelines snapshot, the project's AGENTS.md/CLAUDE.md and Gotchas, and the Aspira UI component docs when the plan touches UI.
 - [ ] F3: The skill shows a parallelization plan (waves, lanes, write scopes and the reason for each split) derived from the plan's dependencies and file overlap. It runs independent lanes as parallel subagents and runs small or fully serial plans in the session.
 - [ ] F4: Every lane writes its tests first, confirms they fail for the planned reason, then implements until its task commands pass. Workers edit only files in their write scope and report anything else as a blocker.
@@ -38,12 +38,12 @@ Build a feature test first, under the Aspira engineering rules in Notion, from o
 - Integration: `eve info` compiles the agent with the skill, `load-knowledge`, `checkout-repo` and `publish-branch` and reports 0 diagnostics. [F7]
 - Integration: the skill file is the one the Claude Code link resolves to, and it names the three sources, the gate, standards, plan drafting, parallelization, TDD, wave verification and report steps. [F1] [F2] [F3] [F4] [F5] [F6] [F8] [F9]
 - Integration: the remote launcher passes a repo-relative source, ref and PR choice to the official agent, and rejects local paths, without a paid run. [F10]
-- Manual: real runs of `/aspira-implement` on a small ready plan, a spec and a ticket. [F1] [F3] [F4] [F5] [F6] [F8] [F9]
+- Manual: real runs of `/aspira-implementor` on a small ready plan, a spec and a ticket. [F1] [F3] [F4] [F5] [F6] [F8] [F9]
 - Validation: tests, lint and typecheck pass for the new package.
 
 ## Out of scope
 
-Deploying the agent to Vercel, editing Notion pages, reviewing the resulting diff (that is `pr-review-agent`), fixing plans (that is `spec-to-plan`), and merging pull requests.
+Deploying the agent to Vercel, editing Notion pages, reviewing the resulting diff (that is `pr-reviewer`), fixing plans (that is `planner`), and merging pull requests.
 
 ## Blast radius
 

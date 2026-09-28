@@ -14,11 +14,11 @@
   "updateInternalDependencies": "patch",
   "ignore": [
     "docs",
-    "@aspiralabs/spec-review-agent",
-    "@aspiralabs/pr-review-agent",
+    "@aspiralabs/spec-reviewer",
+    "@aspiralabs/pr-reviewer",
     "@aspiralabs/agent-common",
-    "@aspiralabs/spec-to-plan",
-    "@aspiralabs/static-analysis-agent",
+    "@aspiralabs/planner",
+    "@aspiralabs/code-analyzer",
     "@aspiralabs/implementor"
   ]
 }

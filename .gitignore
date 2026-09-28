@@ -13,6 +13,7 @@ spec.review.lock/
 spec.reviewed/
 spec.reviewed.history/
 spec.reviewed.lock/
+spec.reviewed.local/
 plan.review/
 plan.review.lock/
 .static-analysis/

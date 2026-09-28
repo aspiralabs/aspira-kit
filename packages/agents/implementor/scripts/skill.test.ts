@@ -7,18 +7,18 @@ import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
-const skillDir = join(root, 'agent/skills/aspira-implement')
+const skillDir = join(root, 'agent/skills/aspira-implementor')
 const exec = promisify(execFile)
 
 it('is one skill file for Claude Code and eve, carrying every step of the contract', async () => {
   const skill = await readFile(join(skillDir, 'SKILL.md'), 'utf8')
-  expect(skill).toMatch(/^---\nname: aspira-implement\ndescription: .+\n---\n/)
+  expect(skill).toMatch(/^---\nname: aspira-implementor\ndescription: .+\n---\n/)
   for (const step of ['## 1. Resolve the input and gate it', '## 2. Load the standards', '## 3. Draft the plan', '## 4. Analyze the plan and decide how to parallelize', '## 5. Execute', '## 6. Final verification', '## 7. Progress log and report', '### Remote repositories']) expect(skill).toContain(step)
   for (const term of ['needs-author', 'incomplete', 'Agent Instructions', 'load-knowledge', 'trace/guidelines.md', 'WRITE SCOPE', 'Hot files', '--max-parallel', 'Spec: <path>', 'implementation.md', 'publish-branch', '**A plan**', '**A spec**', '**A ticket**', 'Ticket: <key or URL>', 'scripts/implement-remote.sh', '## Run to completion', 'Assumptions', 'A leading `@`']) expect(skill).toContain(term)
 })
 
 it('is what the Claude Code skill link resolves to, when installed', async () => {
-  const link = join(homedir(), '.claude/skills/aspira-implement')
+  const link = join(homedir(), '.claude/skills/aspira-implementor')
   const target = await realpath(link).catch(() => null)
   if (target === null) return
   expect(target).toBe(await realpath(skillDir))
