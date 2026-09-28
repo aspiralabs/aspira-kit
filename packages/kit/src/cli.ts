@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // kit init --stack next [--dry-run] [--cwd <path>]
+// kit add auth [--no-passkey] [--expo <scheme>] [--dry-run] [--cwd <path>]
 // kit doctor [--cwd <path>]
 import { resolve } from 'node:path'
 import { doctor } from './doctor.js'
 import { initNext } from './stacks/next.js'
+import { addAuthNext } from './stacks/next-auth.js'
 
 const argv = process.argv.slice(2)
 const command = argv[0]
@@ -20,6 +22,7 @@ const log = (line: string) => console.log(line)
 
 const usage = `usage:
   kit init --stack next [--dry-run] [--cwd <path>]
+  kit add auth [--no-passkey] [--expo <scheme>] [--dry-run] [--cwd <path>]
   kit doctor [--cwd <path>]`
 
 async function main(): Promise<number> {
@@ -32,6 +35,19 @@ async function main(): Promise<number> {
     await initNext({ projectRoot: cwd, dryRun: flag('dry-run') === true, log })
     return 0
   }
+  if (command === 'add') {
+    if (argv[1] !== 'auth') {
+      console.error(`unknown or missing feature (have: auth)\n${usage}`)
+      return 2
+    }
+    const expo = flag('expo')
+    if (expo === true) {
+      console.error(`--expo needs the app's URL scheme\n${usage}`)
+      return 2
+    }
+    addAuthNext({ projectRoot: cwd, dryRun: flag('dry-run') === true, log, passkey: flag('no-passkey') !== true, expo: typeof expo === 'string' ? expo : undefined })
+    return 0
+  }
   if (command === 'doctor') {
     return doctor(cwd, log)
   }
@@ -39,4 +55,9 @@ async function main(): Promise<number> {
   return 2
 }
 
-process.exit(await main())
+try {
+  process.exit(await main())
+} catch (err) {
+  console.error(`error  ${err instanceof Error ? err.message : String(err)}`)
+  process.exit(1)
+}
