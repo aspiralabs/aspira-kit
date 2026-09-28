@@ -1,0 +1,30 @@
+{
+  "name": "@aspiralabs/implementor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runs the /aspira-implement skill in the cloud: builds a spec-to-plan plan test-first, in parallel where the plan allows.",
+  "type": "module",
+  "scripts": {
+    "dev": "eve dev",
+    "build": "eve info",
+    "info": "eve info",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint agent scripts"
+  },
+  "dependencies": {
+    "@aspiralabs/agent-common": "workspace:*",
+    "eve": "^0.63.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@aspiralabs/config": "workspace:*",
+    "@types/node": "^24",
+    "eslint": "^9.39.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

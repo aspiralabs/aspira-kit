@@ -4,3 +4,15 @@ dist/
 *.tsbuildinfo
 .DS_Store
 .packs/
+
+# Agent review output, written next to the source spec
+*.debate/
+spec.review/
+spec.review.history/
+spec.review.lock/
+spec.reviewed/
+spec.reviewed.history/
+spec.reviewed.lock/
+plan.review/
+plan.review.lock/
+.static-analysis/

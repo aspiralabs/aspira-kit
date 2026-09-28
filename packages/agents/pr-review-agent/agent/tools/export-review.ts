@@ -1,0 +1,122 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { basename, resolve } from 'node:path'
+import { defineTool } from 'eve/tools'
+import { z } from 'zod'
+import { REVIEW_DIR, ignoreRule, needsIgnoreRule } from '../lib/pr'
+import { FILES, roundFilesInOrder, slugify } from '../lib/review'
+import { USAGE_LEDGER, parseLedger, renderCostMarkdown, summarizeUsage } from '../lib/usage'
+
+// Which model each agent runs on, for the cost table. Keep in step with the agent.ts files.
+const MODELS: Record<string, string> = {
+  'pr-review-agent': 'anthropic/claude-sonnet-5',
+  ava: 'anthropic/claude-opus-5.5',
+  cole: 'anthropic/claude-opus-5.5',
+  nova: 'anthropic/claude-opus-5.5',
+  reba: 'anthropic/claude-opus-5.5',
+  dex: 'anthropic/claude-opus-5.5',
+  iris: 'anthropic/claude-opus-5.5',
+  quinn: 'openai/gpt-6-luna',
+}
+
+// Sandboxes are per session and disposable. This copies the review's markdown out to
+// the host so the person keeps it: the fix list, the summary, the transcript, what was
+// reviewed, and what it cost. Runs in the app runtime, not the sandbox, hence node:fs.
+
+export default defineTool({
+  availableInSubagents: false,
+  description:
+    'Copy the review markdown (findings.md, review.md, conversation.md, pr.patch, changed_files.txt) from the sandbox to the host, plus cost.md with the model spend. For a local review it lands in <repoDir>/.pr-review/<branch>/ and adds .pr-review/ to that repo\'s .gitignore. Call after pr-debator finishes.',
+  inputSchema: z.object({
+    rounds: z.number().int().min(1).describe('The `rounds` pr-debator returned. Decides how much transcript to assemble.'),
+    label: z.string().optional().describe('The `label` pr-debator returned. Names the transcript.'),
+    repoDir: z
+      .string()
+      .optional()
+      .describe('The `repoDir` load-pr returned, for a local review. Files then land in <repoDir>/.pr-review/<branch>/.'),
+    branch: z.string().optional().describe('The `branch` load-pr returned. Names the directory inside .pr-review/.'),
+    outputDir: z.string().optional().describe('Host directory, absolute or relative to the agent project. Overrides the default.'),
+  }),
+  async execute({ rounds, label, repoDir, branch, outputDir }, ctx) {
+    const slug = slugify(branch ?? label ?? 'review')
+    const dir = resolve(process.cwd(), outputDir ?? defaultDir(slug, repoDir))
+    await mkdir(dir, { recursive: true })
+    // The review lives in the repo it reviewed, and git never sees it. Done before
+    // anything is written, so the files are ignored the moment they exist — otherwise
+    // the next review of this branch would find the last one sitting in its own diff.
+    const ignored = repoDir === undefined || outputDir !== undefined ? null : await ensureIgnored(repoDir)
+
+    const sandbox = await ctx.getSandbox()
+    const written: string[] = []
+    const missing: string[] = []
+    // Handed back so the orchestrator can print the documents without a second read.
+    // `written` holds host paths, and read_file only sees the sandbox, so a model that
+    // reaches for one of them gets "File not found" and burns a call retrying.
+    let findings: string | null = null
+    let review: string | null = null
+
+    for (const path of [FILES.meta, FILES.patch, FILES.changed, FILES.findings, FILES.review]) {
+      const content = await sandbox.readTextFile({ path })
+      if (content === null) {
+        missing.push(path)
+        continue
+      }
+      if (path === FILES.findings) findings = content
+      if (path === FILES.review) review = content
+      await writeFile(resolve(dir, basename(path)), content, 'utf8')
+      written.push(resolve(dir, basename(path)))
+    }
+
+    // The transcript is assembled here rather than in the sandbox: six seats write six
+    // files a round, and concatenating them is the one place that ordering is decided.
+    const sections: string[] = [`# Review: ${label ?? slug}`]
+    for (const path of roundFilesInOrder(rounds)) {
+      const content = await sandbox.readTextFile({ path })
+      if (content !== null && content.trim() !== '') sections.push(content.trim())
+    }
+    const conversation = resolve(dir, basename(FILES.conversation))
+    await writeFile(conversation, `${sections.join('\n\n')}\n`, 'utf8')
+    written.push(conversation)
+
+    // Cost: every model call in this session (root, six seats, verifier) landed in the
+    // shared ledger via hooks/usage.ts. Aggregate, write, then clear it so a second
+    // review in the same session starts from zero.
+    const ledger = await sandbox.readTextFile({ path: USAGE_LEDGER })
+    const summary = summarizeUsage(parseLedger(ledger ?? ''))
+    const costPath = resolve(dir, 'cost.md')
+    await writeFile(costPath, renderCostMarkdown(label ?? slug, summary, MODELS), 'utf8')
+    written.push(costPath)
+    if (ledger !== null) {
+      await writeFile(resolve(dir, 'usage.jsonl'), ledger, 'utf8')
+      await sandbox.removePath({ path: USAGE_LEDGER, force: true })
+    }
+
+    return { dir, written, missing, findings, review, gitignore: ignored, cost: summary }
+  },
+})
+
+// In the repo that was reviewed, under the branch name, when we know where it is.
+// Otherwise — a GitHub PR, a pasted diff — a dated folder in the package, because
+// there is no checkout on this machine to put it in.
+function defaultDir(slug: string, repoDir: string | undefined): string {
+  if (repoDir !== undefined) return resolve(resolve(process.cwd(), repoDir), REVIEW_DIR, slug)
+  const date = new Date().toISOString().slice(0, 10)
+  return `reviews/${date}-${slug}`
+}
+
+/**
+ * Append `.pr-review/` to the reviewed repo's .gitignore, once. Idempotent, and it
+ * never rewrites what is there — worst case it adds two lines to a file the person
+ * owns. A repo we cannot write to is not worth failing an otherwise finished review,
+ * so a failure is reported rather than thrown.
+ */
+async function ensureIgnored(repoDir: string): Promise<{ path: string; added: boolean; error?: string }> {
+  const path = resolve(resolve(process.cwd(), repoDir), '.gitignore')
+  try {
+    const existing = await readFile(path, 'utf8').catch(() => '')
+    if (!needsIgnoreRule(existing)) return { path, added: false }
+    await writeFile(path, existing + ignoreRule(existing), 'utf8')
+    return { path, added: true }
+  } catch (error) {
+    return { path, added: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}

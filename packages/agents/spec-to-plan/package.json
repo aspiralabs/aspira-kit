@@ -1,0 +1,34 @@
+{
+  "name": "@aspiralabs/spec-to-plan",
+  "version": "0.2.1",
+  "private": true,
+  "description": "Turn business specs into grounded, test-first implementation plans.",
+  "type": "module",
+  "scripts": {
+    "dev": "eve dev",
+    "build": "eve info",
+    "info": "eve info",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint agent scripts",
+    "mcp:check": "node --env-file-if-exists=../.env.local --env-file-if-exists=.env.development.local --experimental-strip-types scripts/probe-mcp.ts",
+    "plan": "node --env-file-if-exists=../.env.local --env-file-if-exists=.env.development.local --experimental-strip-types scripts/plan.ts"
+  },
+  "dependencies": {
+    "@aspiralabs/agent-common": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "ai": "^7.0.105",
+    "eve": "^0.63.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@aspiralabs/config": "workspace:*",
+    "@types/node": "^24",
+    "eslint": "^9.39.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

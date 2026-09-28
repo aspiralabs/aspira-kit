@@ -1,0 +1,5 @@
+{
+  "extends": "@aspiralabs/config/tsconfig/base.json",
+  "compilerOptions": { "noEmit": true, "types": ["node"], "allowImportingTsExtensions": true },
+  "include": ["agent/**/*.ts", "scripts/**/*.ts"]
+}
