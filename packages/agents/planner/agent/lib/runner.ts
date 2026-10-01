@@ -10,7 +10,10 @@ import { checkBusinessSpec } from '@aspiralabs/agent-common/lib/spec'
 import { planSchema, researchSchema, renderPlan, validatePlan, type Plan, type Research } from './plan.ts'
 import { system, researchInstructions, planningInstructions } from './prompts.ts'
 
-export type PlanInput = { specPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean }
+/** Research model turns, including the final forced `submit_research` turn. */
+const RESEARCH_STEPS = 10
+
+export type PlanInput ={ specPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean }
 export async function runPlan(input: PlanInput, options: { signal?: AbortSignal; progress?: (phase: string) => void } = {}) {
   const started = Date.now()
   const specDirectory = dirname(resolve(input.specPath))
@@ -41,7 +44,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
     research = await trace.invoke({ phase: 'research', model: models.research, prompt }, async (signal, hooks) => {
       let submitted: Research | undefined
       const tools: ToolSet = { ...repo.tools, ...mcp.tools, submit_research: tool({ description: 'Finish after gathering concrete repository and guideline evidence.', inputSchema: researchSchema, execute: async (value) => { submitted = value; return { accepted: true } } }) }
-      await generateText({ model: gateway(models.research), system, prompt, tools, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', stopWhen: [stepCountIs(7), hasToolCall('submit_research')], prepareStep: ({ stepNumber }) => stepNumber >= 6 ? { toolChoice: { type: 'tool' as const, toolName: 'submit_research' } } : stepNumber === 0 ? { activeTools: Object.keys(tools).filter((name) => name !== 'submit_research'), toolChoice: 'required' as const } : {}, ...hooks })
+      await generateText({ model: gateway(models.research), system, prompt, tools, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', stopWhen: [stepCountIs(RESEARCH_STEPS), hasToolCall('submit_research')], prepareStep: ({ stepNumber }) => stepNumber >= RESEARCH_STEPS - 1 ? { toolChoice: { type: 'tool' as const, toolName: 'submit_research' } } : stepNumber === 0 ? { activeTools: Object.keys(tools).filter((name) => name !== 'submit_research'), toolChoice: 'required' as const } : {}, ...hooks })
       if (!submitted) throw new Error('Research did not submit evidence within its turn budget')
       return researchSchema.parse(submitted)
     })

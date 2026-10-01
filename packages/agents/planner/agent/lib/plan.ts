@@ -71,10 +71,13 @@ export function validatePlan(plan: Plan, spec: string, files: Map<string, string
       if (!safePath(change.path)) { errors.push(`Unsafe path: ${change.path}`); continue }
       if (change.operation === 'create' && existing.has(change.path)) errors.push(`Create target already exists: ${change.path}`)
       if (change.operation !== 'create' && !existing.has(change.path)) errors.push(`Missing ${change.operation} target: ${change.path}`)
-      const sources = change.evidence.map((citation) => citation.match(/^(.+?):(\d+)(?::|\s|$)/)).filter((match) => match !== null)
+      // Citations are `path:line` or `path:start-end`; a range must sit inside the file.
+      const sources = change.evidence.map((citation) => citation.match(/^(.+?):(\d+)(?:-(\d+))?(?::|\s|$)/)).filter((match) => match !== null)
       const valid = sources.filter((match) => {
         const source = files.get(match[1]!)
-        return source !== undefined && Number(match[2]) > 0 && Number(match[2]) <= source.split('\n').length
+        const start = Number(match[2])
+        const end = match[3] === undefined ? start : Number(match[3])
+        return source !== undefined && start > 0 && end >= start && end <= source.split('\n').length
       })
       if (!valid.length) errors.push(`No valid source evidence: ${task.id}/${change.path}`)
       if (change.operation !== 'create' && files.has(change.path) && !valid.some((match) => match[1] === change.path)) errors.push(`Target not cited: ${change.path}`)

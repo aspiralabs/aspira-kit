@@ -41,3 +41,13 @@ it('rejects unsafe paths, nonexistent targets, create collisions and fabricated 
   const evidence = validPlan(); evidence.tasks[1]!.changes[0]!.evidence = ['src/items.ts:999']
   expect(validatePlan(evidence, spec, files)).toContain('No valid source evidence: P2/src/items.ts')
 })
+
+it('accepts line-range citations that stay inside the file and rejects ranges that do not', () => {
+  const lines = files.get('src/items.ts')!.split('\n').length
+  const range = validPlan(); range.tasks[1]!.changes[0]!.evidence = [`src/items.ts:1-${lines}`]
+  expect(validatePlan(range, spec, files)).toEqual([])
+  for (const citation of [`src/items.ts:1-${lines + 1}`, 'src/items.ts:3-2', 'src/items.ts:0-1']) {
+    const bad = validPlan(); bad.tasks[1]!.changes[0]!.evidence = [citation]
+    expect(validatePlan(bad, spec, files)).toContain('No valid source evidence: P2/src/items.ts')
+  }
+})
