@@ -11,19 +11,30 @@ export function allowedPath(path: string): boolean {
 }
 
 
+const MAX_REF_MATCHES = 3
+const PACKET_BUDGET = 110_000
+const MAX_EXCERPT = 40_000
+const MIN_EXCERPT = 2_000
+
 /** A reproducible source packet avoids a frontier model spending its budget navigating.
  * Omitted/truncated material stays available through the specialist read tools. */
 export function evidencePacket(spec: string, files: Map<string, string>): string {
   const refs = [...new Set([...spec.matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!).filter((value) => value.length < 160))]
+  const exact = new Set<string>()
   const selected = new Set<string>()
   const producers = new Set<string>()
   const producerFacts: string[] = []
   for (const ref of refs) {
     const path = ref.split('?')[0]!
+    if (files.has(path)) { exact.add(path); selected.add(path); continue }
+    // Only path-like refs and component names name files. A bare word such as
+    // `page` or `sort` would suffix-match dozens of files and flood the budget.
+    const component = /^[A-Z][A-Za-z0-9]+$/.test(path)
+    if (!component && !path.includes('/') && !/\.[a-z]{1,5}$/i.test(path)) continue
     const kebab = path.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()
-    for (const file of files.keys()) {
-      if (file === path || file.endsWith(`/${path}`) || file.endsWith(`/${kebab}.tsx`) || file.endsWith(`/${kebab}.ts`) || file.endsWith(`${path}/route.ts`)) selected.add(file)
-    }
+    const matches = [...files.keys()].filter((file) => file.endsWith(`/${path}`) || file.endsWith(`${path}/route.ts`) || (component && (file.endsWith(`/${kebab}.tsx`) || file.endsWith(`/${kebab}.ts`))))
+    // An ambiguous ref is skipped; the spec's full paths and the read tools cover it.
+    if (matches.length <= MAX_REF_MATCHES) for (const file of matches) selected.add(file)
   }
   // Schema and policy are high-signal context for virtually every data feature.
   for (const file of files.keys()) if (/(?:schema\.prisma|auth\.config\.ts)$/.test(file)) selected.add(file)
@@ -44,20 +55,44 @@ export function evidencePacket(spec: string, files: Map<string, string>): string
       }
     }
   }
-  const parts: string[] = []
-  let remaining = 110_000
-  // Current producers precede long prerequisite docs and schema excerpts so
-  // the packet budget cannot hide the query the existing screen actually runs.
-  const ordered = new Set([...producers, ...[...selected].filter((file) => !file.endsWith('.md')), ...selected])
-  for (const file of ordered) {
-    if (remaining <= 0) break
+  // Files the spec names by full path come first, then current producers, so
+  // neither looser matches nor long docs and schema excerpts can push them out.
+  const ordered = new Set([...exact, ...producers, ...[...selected].filter((file) => !file.endsWith('.md')), ...selected])
+  const bodies = new Map([...ordered].map((file) => {
     const lines = files.get(file)!.split('\n')
-    const body = lines.map((line, index) => `${index + 1}: ${line}`).join('\n')
-    const limit = Math.min(40_000, remaining)
-    const excerpt = body.slice(0, limit)
-    parts.push(`SOURCE ${file} (${lines.length} lines)\n${excerpt}${excerpt.length < body.length ? '\n[PACKET EXCERPT TRUNCATED: use read_files/search for remaining lines]' : ''}`)
-    remaining -= excerpt.length
+    return [file, { lines: lines.length, body: lines.map((line, index) => `${index + 1}: ${line}`).join('\n') }] as const
+  }))
+  // Named targets and current producers share the budget first; schema, policy,
+  // imports and looser matches get what is left. Within a tier the budget is
+  // shared smallest-first, so one large file cannot crowd out several small
+  // ones. Truncated or omitted files stay reachable through read_files.
+  const primary = [...ordered].filter((file) => exact.has(file) || producers.has(file))
+  const tiers = [primary, [...ordered].filter((file) => !primary.includes(file))]
+  const admitted: string[] = []
+  const allotment = new Map<string, number>()
+  let left = PACKET_BUDGET
+  for (const tier of tiers) {
+    const members: string[] = []
+    let reserved = 0
+    for (const file of tier) {
+      const floor = Math.min(bodies.get(file)!.body.length, MIN_EXCERPT)
+      if (reserved + floor > left) break
+      members.push(file)
+      reserved += floor
+    }
+    const bySize = [...members].sort((a, b) => bodies.get(a)!.body.length - bodies.get(b)!.body.length)
+    bySize.forEach((file, index) => {
+      const take = Math.min(bodies.get(file)!.body.length, MAX_EXCERPT, Math.floor(left / (bySize.length - index)))
+      allotment.set(file, take)
+      left -= take
+    })
+    admitted.push(...members)
   }
+  const parts = admitted.map((file) => {
+    const { lines, body } = bodies.get(file)!
+    const excerpt = body.slice(0, allotment.get(file))
+    return `SOURCE ${file} (${lines} lines)\n${excerpt}${excerpt.length < body.length ? '\n[PACKET EXCERPT TRUNCATED: use read_files/search for remaining lines]' : ''}`
+  })
   return `Source packet selected from spec references, schemas, auth policy and first-hop imports. It is not exhaustive; specialists must inspect callers and missing paths.\nCURRENT PRODUCER LINKS (literal source observations; check applicability):\n${producerFacts.slice(0, 30).join('\n')}\n\n${parts.join('\n\n')}`
 }
 
