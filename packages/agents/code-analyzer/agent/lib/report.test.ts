@@ -8,8 +8,8 @@ const detection = { analyzers: [], ecosystems: ['js' as const], setup: [], notes
 
 describe('renderReport', () => {
   it('renders before/after, rounds, rejected edits and unreported cost', () => {
-    const md = renderReport({ label: '/repo', where: 'host', result: base({}), detection, unavailable: ['mypy (needs mypy)'], model: 'openai/gpt-6-sol', timing: { prepareMs: 100, loopMs: 2000, publishMs: 100, totalMs: 2200 }, remote: null,
-      turns: [{ round: 1, batch: 1, model: 'openai/gpt-6-sol', turn: 1, startedMs: 0, durationMs: 900, status: 'completed', usage: { inputTokens: 1000, outputTokens: 50 } }] })
+    const md = renderReport({ label: '/repo', where: 'host', result: base({}), detection, unavailable: ['mypy (needs mypy)'], model: 'openai/gpt-6.1-sol', timing: { prepareMs: 100, loopMs: 2000, publishMs: 100, totalMs: 2200 }, remote: null,
+      turns: [{ round: 1, batch: 1, model: 'openai/gpt-6.1-sol', turn: 1, startedMs: 0, durationMs: 900, status: 'completed', usage: { inputTokens: 1000, outputTokens: 50 } }] })
     expect(md).toContain('Status: **partial**. Stop reason: round cap (1) reached.')
     expect(md).toContain('| eslint | 1 | 0 |')
     expect(md).toContain('| tsc | 1 | 1 |')

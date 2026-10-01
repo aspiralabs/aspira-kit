@@ -86,7 +86,7 @@ export async function runStaticAnalysis(input: RunInput, deps: RunDeps = {}) {
   detection.notes.push(...toolchain.notes, ...setupNotes)
   const ledger = new Ledger(started)
   const calls: Parameters<typeof createFixer>[0]['calls'] = []
-  const model = env('STATIC_ANALYSIS_FIX_MODEL', 'openai/gpt-6-sol')
+  const model = env('STATIC_ANALYSIS_FIX_MODEL', 'openai/gpt-6.1-sol')
   const fixer = deps.fixer ?? createFixer({ executor, model, ledger, calls, started, instructions: await repositoryInstructions(executor), timeoutMs: Number(process.env.STATIC_ANALYSIS_BATCH_TIMEOUT_MS) || 180_000 })
   const prepareMs = Date.now() - started
   const loopStarted = Date.now()

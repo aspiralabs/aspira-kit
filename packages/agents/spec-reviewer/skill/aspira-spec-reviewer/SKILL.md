@@ -13,7 +13,7 @@ The spec path may be an `@` file mention (`@specs/cart.md`); the leading `@` is 
 | | Default | `--local` |
 | --- | --- | --- |
 | Where the model work runs | `spec-reviewer`, a separate process | subagents of this Claude Code session |
-| Models | Opus 5.5 research, GPT-6 Sol specialists and reconciliation | this session's model, for every phase |
+| Models | Opus 5.5 research, GPT-6.1 Sol specialists and reconciliation | this session's model, for every phase |
 | Independence | a second vendor, no session context | fresh subagent contexts, same vendor and session |
 | Cost | Vercel AI Gateway, itemized in `run-analysis.md` | this session's usage, not itemized |
 | Needs | Node 24, pnpm, screen, the agents' `.env.local`; Docker when loading Notion | Node 24, pnpm, the Notion MCP (or `--guidelines`) |

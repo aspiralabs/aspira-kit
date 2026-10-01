@@ -2,7 +2,7 @@
 
 Private eve agent that brings a repository to a clean static-analysis state. Spec: `specs/agents-code-analyzer.md`.
 
-One eve tool, `static-analysis`, owns the loop. Code detects the analyzers from the tree, runs them, applies the tools' own auto-fixes, parses the remaining diagnostics, batches the error-severity ones by file and hands each batch to a workhorse model (`openai/gpt-6-sol` by default, no frontier model) with `read_file`, `search`, `edit_file` and `done` tools. Every edit is an exact, unique replacement inside the repository, validated by guards before it is written: no suppression directives, no edits to analyzer configuration, lockfiles, package manifests, CI files or tests, no emptied files. The loop repeats until the analyzers are clean, a round changes nothing, the round cap or cost cap is reached, or the turn is cancelled. The stop reason is always recorded.
+One eve tool, `static-analysis`, owns the loop. Code detects the analyzers from the tree, runs them, applies the tools' own auto-fixes, parses the remaining diagnostics, batches the error-severity ones by file and hands each batch to a workhorse model (`openai/gpt-6.1-sol` by default, no frontier model) with `read_file`, `search`, `edit_file` and `done` tools. Every edit is an exact, unique replacement inside the repository, validated by guards before it is written: no suppression directives, no edits to analyzer configuration, lockfiles, package manifests, CI files or tests, no emptied files. The loop repeats until the analyzers are clean, a round changes nothing, the round cap or cost cap is reached, or the turn is cancelled. The stop reason is always recorded.
 
 ## Where the code runs
 

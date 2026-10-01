@@ -6,7 +6,7 @@ The reviewer has three model phases: frontier research → six simultaneous spec
 
 A deterministic source packet supplies spec-referenced code, schemas, auth policy and direct imports to the frontier reviewer. It follows literal fetch URLs to current producers, prioritizes them ahead of long documents and extracts source-backed result caps so migrations do not hide existing truncation. Specialists explore the repository and live MCP sources in parallel. A workhorse model reconciles their evidence in one structured response with medium reasoning and an explicit check that requirements survive the rewrite; code validates and renders its edits.
 
-The AI SDK handles review calls inside one eve tool. These are independent model contexts, not eve child sessions: no extra child-session scheduling, verifier-per-finding sessions or model-written transcripts. Defaults use Opus 5.5 for initial research and GPT-6 Sol for specialists and reconciliation. Override them with `SPEC_REVIEW_FRONTIER_MODEL`, `SPEC_REVIEW_SPECIALIST_MODEL` and `SPEC_REVIEW_RECONCILIATION_MODEL`.
+The AI SDK handles review calls inside one eve tool. These are independent model contexts, not eve child sessions: no extra child-session scheduling, verifier-per-finding sessions or model-written transcripts. Defaults use Opus 5.5 for initial research and GPT-6.1 Sol for specialists and reconciliation. Override them with `SPEC_REVIEW_FRONTIER_MODEL`, `SPEC_REVIEW_SPECIALIST_MODEL` and `SPEC_REVIEW_RECONCILIATION_MODEL`.
 
 Research, parallel audits, reconciliation and preparation have no elapsed-time limit. Calls retain step limits, output caps, no automatic retries, and explicit cancellation passed to providers and MCP. Wall time and cost are measured without terminating slow work.
 

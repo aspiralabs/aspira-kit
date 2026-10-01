@@ -67,8 +67,8 @@ export async function runReview(input: RunInput, options: { signal?: AbortSignal
   const prepareMs = Date.now() - started
   const models = {
     frontier: process.env.SPEC_REVIEW_FRONTIER_MODEL || process.env.V3_FRONTIER_MODEL || 'anthropic/claude-opus-5.5',
-    specialist: process.env.SPEC_REVIEW_SPECIALIST_MODEL || process.env.V3_SPECIALIST_MODEL || 'openai/gpt-6-sol',
-    reconciliation: process.env.SPEC_REVIEW_RECONCILIATION_MODEL || process.env.V3_RECONCILIATION_MODEL || 'openai/gpt-6-sol',
+    specialist: process.env.SPEC_REVIEW_SPECIALIST_MODEL || process.env.V3_SPECIALIST_MODEL || 'openai/gpt-6.1-sol',
+    reconciliation: process.env.SPEC_REVIEW_RECONCILIATION_MODEL || process.env.V3_RECONCILIATION_MODEL || 'openai/gpt-6.1-sol',
   }
   const invokeModel: Call = async ({ phase, prompt, signal }) => {
     const structuredPhase = phase === 'research' || phase === 'synthesis'

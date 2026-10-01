@@ -13,7 +13,7 @@ import { system, researchInstructions, planningInstructions } from './prompts.ts
 /** Research model turns, including the final forced `submit_research` turn. */
 const RESEARCH_STEPS = 10
 
-export type PlanInput ={ specPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean }
+export type PlanInput = { specPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean }
 export async function runPlan(input: PlanInput, options: { signal?: AbortSignal; progress?: (phase: string) => void } = {}) {
   const started = Date.now()
   const specDirectory = dirname(resolve(input.specPath))
@@ -32,7 +32,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   const mcp = await connectReadTools(process.env.MCP_READ_CONNECTIONS, preparation)
   const prepareMs = Date.now() - started
   const trace = modelTrace(started, options.signal)
-  const models = { research: process.env.SPEC_PLAN_RESEARCH_MODEL || 'anthropic/claude-opus-5.5', planning: process.env.SPEC_PLAN_MODEL || 'openai/gpt-6-sol' }
+  const models = { research: process.env.SPEC_PLAN_RESEARCH_MODEL || 'anthropic/claude-opus-5.5', planning: process.env.SPEC_PLAN_MODEL || 'openai/gpt-6.1-sol' }
   const uiRequired = input.uiRequired ?? /\b(?:UI|screen|page|card|button|mobile|component|navigation)\b/i.test(spec)
   const context = `BUSINESS SPEC:\n${spec}\n\nREQUIRED GUIDELINES:\n${guidelines}\n\nREPOSITORY INSTRUCTIONS:\n${repo.instructions}\n\n${repo.packet(spec)}`
   let plan: Plan | null = null

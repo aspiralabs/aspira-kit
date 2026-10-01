@@ -16,7 +16,7 @@ Spec: `specs/agents-pr-reviewer.md`. The reviewer roles are ported from [nitpick
 | Iris | design system: `@aspiralabs/ui`, tokens, variants, the constraints a linter cannot see | Claude Opus 5.5 |
 | Quinn | verification: confirms, adjusts, rejects, and deduplicates every finding | OpenAI gpt-6-luna |
 
-Quinn is independent twice over: it raises nothing, so it has no finding of its own to defend, and it runs on a different model family, so it is not agreeing with six Claude seats by construction. It is also the cheapest seat on purpose — checking a finding against the file it names is mechanical work, and Quinn makes more calls than anyone. On `gpt-6-astra` it was a third of the bill; `gpt-6-luna` is ~100x cheaper per token. `openai/gpt-6-sol` sits in between if the rulings ever start reading like rubber stamps.
+Quinn is independent twice over: it raises nothing, so it has no finding of its own to defend, and it runs on a different model family, so it is not agreeing with six Claude seats by construction. It is also the cheapest seat on purpose — checking a finding against the file it names is mechanical work, and Quinn makes more calls than anyone. On `gpt-6-astra` it was a third of the bill; `gpt-6-luna` is ~100x cheaper per token. `openai/gpt-6.1-sol` sits in between if the rulings ever start reading like rubber stamps.
 
 ## The loop
 
