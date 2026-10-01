@@ -12,12 +12,11 @@ export function allowedPath(path: string): boolean {
 
 
 const MAX_REF_MATCHES = 3
-const PACKET_BUDGET = 110_000
-const MAX_EXCERPT = 40_000
-const MIN_EXCERPT = 2_000
+/** Largest line-numbered file body pasted into the packet; larger files are linked. */
+const INLINE_LIMIT = 40_000
 
 /** A reproducible source packet avoids a frontier model spending its budget navigating.
- * Omitted/truncated material stays available through the specialist read tools. */
+ * Large files are linked rather than inlined and stay available through the read tools. */
 export function evidencePacket(spec: string, files: Map<string, string>): string {
   const refs = [...new Set([...spec.matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!).filter((value) => value.length < 160))]
   const exact = new Set<string>()
@@ -55,45 +54,22 @@ export function evidencePacket(spec: string, files: Map<string, string>): string
       }
     }
   }
-  // Files the spec names by full path come first, then current producers, so
-  // neither looser matches nor long docs and schema excerpts can push them out.
+  // Files the spec names by full path come first, then current producers, then
+  // schema, policy, imports and looser matches; long docs go last.
   const ordered = new Set([...exact, ...producers, ...[...selected].filter((file) => !file.endsWith('.md')), ...selected])
-  const bodies = new Map([...ordered].map((file) => {
+  // Every selected file is either inlined whole or linked; nothing is cut
+  // mid-file. A file too large to inline is listed by path and size, and the
+  // agent reads it with read_files/search when it needs it.
+  const parts: string[] = []
+  const linked: string[] = []
+  for (const file of ordered) {
     const lines = files.get(file)!.split('\n')
-    return [file, { lines: lines.length, body: lines.map((line, index) => `${index + 1}: ${line}`).join('\n') }] as const
-  }))
-  // Named targets and current producers share the budget first; schema, policy,
-  // imports and looser matches get what is left. Within a tier the budget is
-  // shared smallest-first, so one large file cannot crowd out several small
-  // ones. Truncated or omitted files stay reachable through read_files.
-  const primary = [...ordered].filter((file) => exact.has(file) || producers.has(file))
-  const tiers = [primary, [...ordered].filter((file) => !primary.includes(file))]
-  const admitted: string[] = []
-  const allotment = new Map<string, number>()
-  let left = PACKET_BUDGET
-  for (const tier of tiers) {
-    const members: string[] = []
-    let reserved = 0
-    for (const file of tier) {
-      const floor = Math.min(bodies.get(file)!.body.length, MIN_EXCERPT)
-      if (reserved + floor > left) break
-      members.push(file)
-      reserved += floor
-    }
-    const bySize = [...members].sort((a, b) => bodies.get(a)!.body.length - bodies.get(b)!.body.length)
-    bySize.forEach((file, index) => {
-      const take = Math.min(bodies.get(file)!.body.length, MAX_EXCERPT, Math.floor(left / (bySize.length - index)))
-      allotment.set(file, take)
-      left -= take
-    })
-    admitted.push(...members)
+    const body = lines.map((line, index) => `${index + 1}: ${line}`).join('\n')
+    if (body.length <= INLINE_LIMIT) parts.push(`SOURCE ${file} (${lines.length} lines)\n${body}`)
+    else linked.push(`- ${file} (${lines.length} lines)`)
   }
-  const parts = admitted.map((file) => {
-    const { lines, body } = bodies.get(file)!
-    const excerpt = body.slice(0, allotment.get(file))
-    return `SOURCE ${file} (${lines} lines)\n${excerpt}${excerpt.length < body.length ? '\n[PACKET EXCERPT TRUNCATED: use read_files/search for remaining lines]' : ''}`
-  })
-  return `Source packet selected from spec references, schemas, auth policy and first-hop imports. It is not exhaustive; specialists must inspect callers and missing paths.\nCURRENT PRODUCER LINKS (literal source observations; check applicability):\n${producerFacts.slice(0, 30).join('\n')}\n\n${parts.join('\n\n')}`
+  const links = linked.length ? `\n\nLINKED FILES (selected but too large to inline; read them with read_files in line windows, or search):\n${linked.join('\n')}` : ''
+  return `Source packet selected from spec references, schemas, auth policy and first-hop imports. It is not exhaustive; specialists must inspect callers and missing paths.\nCURRENT PRODUCER LINKS (literal source observations; check applicability):\n${producerFacts.slice(0, 30).join('\n')}\n\n${parts.join('\n\n')}${links}`
 }
 
 export async function repository(root: string, signal?: AbortSignal) {
