@@ -59,6 +59,7 @@ function Input({
   defaultValue,
   value,
   size = 'default',
+  ref: forwardedRef,
   ...props
 }: InputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -225,6 +226,23 @@ function Input({
   const toggleLabel = showPassword ? 'Hide password' : 'Show password';
   const toggleIcon = showPassword ? 'visibility_off' : 'visibility';
 
+  // React 19 passes `ref` as a prop. Merge the caller's ref with the mask's so
+  // callers can focus the field, read the selection or set its value.
+  const setRefs = (el: HTMLInputElement | null) => {
+    ref.current = el;
+    inputRef.current = el;
+    if (typeof forwardedRef === 'function') {
+      forwardedRef(el);
+    } else if (forwardedRef) {
+      forwardedRef.current = el;
+    }
+  };
+
+  // A hidden field carries a form value only: no label, wrapper, mask or styling.
+  if (type === 'hidden') {
+    return <input {...props} type="hidden" value={value} defaultValue={defaultValue} ref={forwardedRef} />;
+  }
+
   return (
     <div className="relative flex flex-col  flex-shrink-0 ">
       {(label || error) && (
@@ -258,10 +276,7 @@ function Input({
             isPassword && PASSWORD_TOGGLE[size].padding,
             className,
           )}
-          ref={(el) => {
-            ref.current = el;
-            inputRef.current = el;
-          }}
+          ref={setRefs}
         />
         {isPassword && (
           <button
