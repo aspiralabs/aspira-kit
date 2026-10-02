@@ -1,0 +1,127 @@
+---
+eyebrow: Input - File
+title: FileInput
+group: Form
+description: Native file picker. Forwards every input prop and `ref`, so it can be shown as-is, hidden and opened from a Button, laid over a drop target, or handed react-dropzone's `getInputProps()`. Adds `onFilesChange(files)`. Import from @aspiralabs/ui.
+---
+
+export const FileList = ({ files }) => (
+    <p className="text-sm text-foreground-subtext">
+        {files.length === 0 && 'No file picked yet.'}
+        {files.length > 0 && <>Picked: <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-foreground">{files.map((f) => f.name).join(', ')}</code></>}
+    </p>
+);
+
+export const DefaultDemo = () => {
+    const [files, setFiles] = useState([]);
+    return (
+        <div className="flex flex-col gap-3">
+            <FileInput aria-label="Attachments" multiple onFilesChange={setFiles} />
+            <FileList files={files} />
+        </div>
+    );
+};
+
+export const ButtonDemo = () => {
+    const ref = useRef(null);
+    const [files, setFiles] = useState([]);
+    return (
+        <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+                <Button size="sm" onClick={() => ref.current?.click()}>Upload avatar</Button>
+                <FileInput ref={ref} accept="image/*" className="hidden" onFilesChange={setFiles} />
+            </div>
+            <FileList files={files} />
+        </div>
+    );
+};
+
+export const OverlayDemo = () => {
+    const [files, setFiles] = useState([]);
+    return (
+        <div className="flex flex-col gap-3">
+            <div className="relative flex h-32 max-w-sm items-center justify-center rounded-md border-2 border-dashed border-border text-sm text-foreground-subtext hover:border-primary transition-colors">
+                Click or drop an image here
+                <FileInput
+                    aria-label="Cover image"
+                    accept="image/*"
+                    className="absolute inset-0 z-10 cursor-pointer opacity-0"
+                    onFilesChange={setFiles}
+                />
+            </div>
+            <FileList files={files} />
+        </div>
+    );
+};
+
+## Usage
+
+```tsx
+import { FileInput } from '@aspiralabs/ui';
+
+<FileInput accept="image/*" onFilesChange={(files) => upload(files[0])} />
+```
+
+## Default
+
+The native control, styled with kit tokens.
+
+<Demo>
+    <DefaultDemo />
+</Demo>
+
+## Opened from a button
+
+Hide the input and open it through a `ref`. The usual pattern for avatar and cover uploads.
+
+```tsx
+const ref = useRef<HTMLInputElement>(null);
+
+<Button onClick={() => ref.current?.click()}>Upload avatar</Button>
+<FileInput ref={ref} accept="image/*" className="hidden" onFilesChange={handleFiles} />
+```
+
+<Demo>
+    <ButtonDemo />
+</Demo>
+
+## Over a drop target
+
+Lay a transparent input over a drop area. The browser handles both click-to-pick and drag-and-drop onto the input.
+
+```tsx
+<div className="relative ...">
+    Click or drop an image here
+    <FileInput accept="image/*" className="absolute inset-0 z-10 cursor-pointer opacity-0" onFilesChange={handleFiles} />
+</div>
+```
+
+<Demo>
+    <OverlayDemo />
+</Demo>
+
+## With react-dropzone
+
+Spread `getInputProps()` onto it. The dropzone's `ref`, `style` and handlers all pass through.
+
+```tsx
+const { getRootProps, getInputProps } = useDropzone({ onDrop });
+
+<div {...getRootProps()}>
+    <FileInput {...getInputProps()} />
+    Drop a photo here
+</div>
+```
+
+## Props
+
+Accepts all native `input` attributes except `type`, `value` and `defaultValue`.
+
+| Prop            | Type                              | Default | Description                                                         |
+| --------------- | --------------------------------- | ------- | ------------------------------------------------------------------- |
+| `accept`        | `string`                          | —       | Allowed file types, e.g. `image/*`.                                 |
+| `multiple`      | `boolean`                         | `false` | Allow picking more than one file.                                   |
+| `onChange`      | `(event) => void`                 | —       | Native change event.                                                |
+| `onFilesChange` | `(files: File[]) => void`         | —       | Fires after `onChange` with the picked files as an array.           |
+| `ref`           | `Ref<HTMLInputElement>`           | —       | The underlying `<input>`. Call `.click()` on it to open the picker. |
+| `className`     | `string`                          | —       | Merged last, so `hidden` or an overlay layout overrides the default. |

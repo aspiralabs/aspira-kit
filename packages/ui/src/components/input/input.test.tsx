@@ -1,7 +1,7 @@
 /// <reference types="@testing-library/jest-dom" />
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { useState } from 'react';
+import { createRef, useState } from 'react';
 import { Input } from './input.js';
 
 // Reproduces the RecipeTimeSelector pattern: a controlled, masked Input whose
@@ -110,5 +110,65 @@ describe('Input (password)', () => {
         expect(screen.queryByRole('button', { name: /password/ })).toBeNull();
         rerender(<Input label="Password" type="password" disabled />);
         expect(screen.getByRole('button', { name: 'Show password' })).toBeDisabled();
+    });
+});
+
+describe('Input (forwarded ref)', () => {
+    it('gives an object ref the underlying input element', () => {
+        const ref = createRef<HTMLInputElement>();
+        render(<Input aria-label="Name" ref={ref} />);
+        expect(ref.current).toBe(screen.getByRole('textbox'));
+    });
+
+    it('calls a callback ref with the element and keeps the mask working', () => {
+        const refCallback = vi.fn();
+        const onValueChange = vi.fn();
+        render(
+            <Input
+                aria-label="Minutes"
+                ref={refCallback}
+                mask={{ mask: Number, scale: 0, min: 0, max: 59 }}
+                onValueChange={onValueChange}
+            />,
+        );
+        const input = screen.getByRole('textbox') as HTMLInputElement;
+        expect(refCallback).toHaveBeenCalledWith(input);
+        fireEvent.input(input, { target: { value: '45' } });
+        expect(onValueChange).toHaveBeenCalledWith(expect.objectContaining({ value: '45' }));
+    });
+
+    it('lets the caller drive focus and selection through the ref', () => {
+        const ref = createRef<HTMLInputElement>();
+        render(<Input aria-label="Title" ref={ref} defaultValue="Chop onions" />);
+        ref.current?.focus();
+        ref.current?.setSelectionRange(0, 4);
+        expect(document.activeElement).toBe(ref.current);
+        expect(ref.current?.selectionStart).toBe(0);
+        expect(ref.current?.selectionEnd).toBe(4);
+    });
+});
+
+describe('Input (hidden)', () => {
+    it('renders a bare hidden input that posts its name and value', () => {
+        const { container } = render(
+            <form data-testid="form">
+                <Input type="hidden" name="redirectTo" value="/recipes" label="ignored" />
+            </form>,
+        );
+        expect(screen.queryByRole('textbox')).toBeNull();
+        expect(screen.queryByText('ignored')).toBeNull();
+        const hidden = container.querySelector('input[type="hidden"]') as HTMLInputElement;
+        expect(hidden).not.toBeNull();
+        expect(hidden.name).toBe('redirectTo');
+        expect(hidden.value).toBe('/recipes');
+        expect(new FormData(screen.getByTestId('form') as HTMLFormElement).get('redirectTo')).toBe('/recipes');
+        expect(hidden.parentElement?.tagName).toBe('FORM');
+    });
+
+    it('forwards a ref to the hidden input', () => {
+        const ref = createRef<HTMLInputElement>();
+        render(<Input type="hidden" name="token" defaultValue="abc" ref={ref} />);
+        expect(ref.current?.type).toBe('hidden');
+        expect(ref.current?.value).toBe('abc');
     });
 });
