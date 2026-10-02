@@ -1,5 +1,11 @@
 # @aspiralabs/ui
 
+## 0.4.0
+
+### Minor Changes
+
+- ab42330: Add `FileInput`, a native file picker that forwards every input prop and `ref` and adds `onFilesChange(files)`. `Input` now forwards a caller's `ref` (merged with the mask's) and renders `type="hidden"` as a bare hidden input. Spec: specs/ui-input-gaps.md
+
 ## 0.3.0
 
 ### Minor Changes
