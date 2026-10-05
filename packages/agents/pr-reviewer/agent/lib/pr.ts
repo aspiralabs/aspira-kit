@@ -160,6 +160,17 @@ export const LOCAL_EXCLUDES = [
   '.pr-review',
 ]
 
+/**
+ * A path a model handed back from a tool result. A JSON null round-trips through a model as
+ * the string "null", and an empty value as "", so both mean no path, not a directory name.
+ */
+export function optionalPath(value: string | null | undefined): string | undefined {
+  if (value === undefined || value === null) return undefined
+  const trimmed = value.trim()
+  if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') return undefined
+  return trimmed
+}
+
 /** Reviews live in the repo they reviewed, under this directory, ignored by git. */
 export const REVIEW_DIR = '.pr-review'
 export const IGNORE_PATTERN = `${REVIEW_DIR}/`

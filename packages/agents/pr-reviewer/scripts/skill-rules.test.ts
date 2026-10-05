@@ -17,6 +17,8 @@ const rules = [
   { reason: 'reviewing a guessed branch reviews the wrong code', file: instructions, phrase: 'Never review something you could not load' },
   { reason: 'the branch reviewed must be named when it was defaulted, or the human assumes theirs', file: instructions, phrase: 'say in your reply which branch was reviewed' },
   { reason: 'the review files belong to the seats; the router writing them breaks the verifier chain', file: instructions, phrase: 'Never write to `/workspace/findings.md` or `/workspace/review.md` yourself' },
+  { reason: 'the review comment goes only to the PR that was reviewed; posting elsewhere publishes findings to the wrong audience', file: instructions, phrase: 'Post the review only to the PR that was loaded' },
+  { reason: 'a review the person asked to keep private must not be posted', file: instructions, phrase: 'Skip it only when the person asked you not to comment' },
   { reason: 'a missing guidelines load is reported, never silently skipped', file: instructions, phrase: 'saying the guidelines were not loaded and why' },
 ]
 

@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
-import { REVIEW_DIR, ignoreRule, needsIgnoreRule } from '../lib/pr'
+import { REVIEW_DIR, ignoreRule, needsIgnoreRule, optionalPath } from '../lib/pr'
 import { FILES, roundFilesInOrder, slugify } from '../lib/review'
 import { USAGE_LEDGER, parseLedger, renderCostMarkdown, summarizeUsage } from '../lib/usage'
 
@@ -31,12 +31,16 @@ export default defineTool({
     label: z.string().optional().describe('The `label` pr-debator returned. Names the transcript.'),
     repoDir: z
       .string()
+      .nullable()
       .optional()
       .describe('The `repoDir` load-pr returned, for a local review. Files then land in <repoDir>/.pr-review/<branch>/.'),
-    branch: z.string().optional().describe('The `branch` load-pr returned. Names the directory inside .pr-review/.'),
+    branch: z.string().nullable().optional().describe('The `branch` load-pr returned. Names the directory inside .pr-review/.'),
     outputDir: z.string().optional().describe('Host directory, absolute or relative to the agent project. Overrides the default.'),
   }),
-  async execute({ rounds, label, repoDir, branch, outputDir }, ctx) {
+  async execute({ rounds, label, repoDir: rawRepoDir, branch: rawBranch, outputDir }, ctx) {
+    // load-pr returns null for these on a GitHub PR, and a model passes that back as "null".
+    const repoDir = optionalPath(rawRepoDir)
+    const branch = optionalPath(rawBranch)
     const slug = slugify(branch ?? label ?? 'review')
     const dir = resolve(process.cwd(), outputDir ?? defaultDir(slug, repoDir))
     await mkdir(dir, { recursive: true })
