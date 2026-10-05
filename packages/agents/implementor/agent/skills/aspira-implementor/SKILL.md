@@ -93,7 +93,16 @@ The ticket work directory is a local record; leave it out of commits unless the 
 2. Restate the ticket as intent plus numbered acceptance criteria (`F1`, `F2`, …), each one observable. Anything the ticket leaves undecided (behavior, copy, edge cases, data rules) is settled as an assumption, conservatively, and recorded; never invent scope beyond the ticket.
 3. Org rule zero is "no spec, no code". The restated ticket is the spec for this build: write it to `<work dir>/spec.md` and tell the human that is what you are building against.
 
-**Every input.** Check the working tree. Leave uncommitted changes that are not yours alone: never stage, stash, revert or commit them, and note them in the log. If they touch a file the plan writes, that file is a blocker. If you are on the default branch, create `feat/<feature-slug>` (the cloud run is already on its `implement/` branch).
+**Every input.** Check the working tree. Leave uncommitted changes that are not yours alone: never stage, stash, revert or commit them, and note them in the log. If they touch a file the plan writes, that file is a blocker.
+
+**Every input: the branch.** Build on a branch dedicated to this feature, never on the default branch, and settle it before writing any file. The cloud run is already on its `implement/` branch; in a session:
+1. Find the default branch: `git symbolic-ref --short refs/remotes/origin/HEAD` (strip `origin/`), else `git config init.defaultBranch`, else `main`.
+2. The dedicated branch is `feat/<feature-slug>`. The slug is the spec's or plan's directory name (`specs/han-14-workspace-ci/plan.review` gives `feat/han-14-workspace-ci`), or the ticket key plus its title in kebab case.
+3. On the default branch, or with a detached HEAD: switch to the dedicated branch if it already exists (`git switch feat/<slug>`), otherwise create it from the current commit (`git switch -c feat/<slug>`). Uncommitted changes travel with you; never stash them to switch. If the switch is refused because they conflict with the existing branch, that is a blocker.
+4. On a branch whose name contains the slug or the ticket key, you are already on the dedicated branch: stay.
+5. On any other branch, that branch holds different work. Do not build on it or branch from it: stop and report the branch you found and the one you expected.
+
+Say which branch you are building on in your first update and in the report.
 
 ## 2. Load the standards (before any code)
 
