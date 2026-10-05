@@ -1,5 +1,6 @@
 #!/bin/bash
-# Launch the planner agent without keeping the caller's tool invocation open.
+# Launch the planner agent without keeping the caller's tool invocation open (start/status/wait),
+# or step a --local plan whose model work runs in the calling Claude Code session (local).
 set -euo pipefail
 
 die() { echo "planner: $*" >&2; exit 1; }
@@ -62,6 +63,35 @@ RUNNER
   AGENT="$agent" SPEC="$spec" REPO="$repo" GUIDELINES="$guidelines" OUTPUT="$out" PROMPT="$prompt" RUN="$run" screen -dmS "planner-$(basename "$run")" "$run/run.sh"
   printf 'started\nrun: %s\nspec: %s\nrepo: %s\noutput: %s\n' "$run" "$spec" "$repo" "$out"
 }
+# One synchronous step of a --local plan: no model calls here, so no screen, gateway key or wait.
+# The driver prints the next stage as JSON (knowledge, research or planning) or the exported plan.
+cmd_local() {
+  local spec="" guidelines="" repo="" out="" finish=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --guidelines) [ $# -ge 2 ] || die "--guidelines needs a path"; guidelines=$2; shift 2 ;;
+      --repo) [ $# -ge 2 ] || die "--repo needs a path"; repo=$2; shift 2 ;;
+      --output) [ $# -ge 2 ] || die "--output needs a path"; out=$2; shift 2 ;;
+      --finish) finish=--finish; shift ;;
+      -*) die "unknown option: $1" ;;
+      *) [ -z "$spec" ] || die "one spec at a time"; spec=${1#@}; shift ;;
+    esac
+  done
+  [ -n "$spec" ] || die "usage: planner.sh local <spec.md> [--guidelines FILE] [--repo DIR] [--output DIR] [--finish]"
+  spec=$(absolute_file "$spec")
+  [ -z "$guidelines" ] || guidelines=$(absolute_file "$guidelines")
+  repo=$(git -C "${repo:-$PWD}" rev-parse --show-toplevel) || die "run inside a Git repo or pass --repo"
+  local feature_dir
+  feature_dir="$(dirname "$spec")"
+  if [ "$(basename "$feature_dir")" = spec.reviewed ]; then feature_dir="$(dirname "$feature_dir")"; fi
+  out=${out:-"$feature_dir/plan.review"}
+  [[ $out = /* ]] || out="$PWD/$out"
+  command -v pnpm >/dev/null || die "pnpm is not installed"
+  local args=("$spec" "$repo" --output "$out")
+  [ -z "$guidelines" ] || args+=(--guidelines "$guidelines")
+  [ -z "$finish" ] || args+=("$finish")
+  pnpm -C "$(agent_dir)" run plan:local "${args[@]}"
+}
 cmd_status() {
   local run=${1:?usage: planner.sh status RUN} elapsed
   [ -f "$run/started" ] || die "not a run directory: $run"
@@ -88,5 +118,6 @@ case ${1:-} in
   start) shift; cmd_start "$@" ;;
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
-  *) die "usage: planner.sh start SPEC [--guidelines FILE] [--repo DIR] [--output DIR] | status RUN | wait RUN [--max SECONDS]" ;;
+  local) shift; cmd_local "$@" ;;
+  *) die "usage: planner.sh start SPEC [--guidelines FILE] [--repo DIR] [--output DIR] | status RUN | wait RUN [--max SECONDS] | local SPEC [--guidelines FILE] [--repo DIR] [--output DIR] [--finish]" ;;
 esac

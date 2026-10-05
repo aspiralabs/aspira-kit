@@ -1,7 +1,7 @@
 // The review, posted back to the GitHub PR it was of: one conversation comment per PR,
 // updated on a rerun. Pure helpers plus one fetch-injected function, so it is testable
 // without a network. The tool around it decides whether to post at all.
-import { SEVERITIES, verdictFrom, type Counts } from './review'
+import { SEVERITIES, verdictFrom, type Counts } from './review.ts'
 
 /** Hidden first line: how a rerun finds its own earlier comment. */
 export const REVIEW_COMMENT_MARKER = '<!-- aspiralabs-pr-reviewer -->'
@@ -11,17 +11,28 @@ export const MAX_COMMENT_CHARS = 65_000
 export type GithubPr = { owner: string; name: string; number: number }
 
 const API = 'https://api.github.com'
-const TOTALS = /^Totals:\s*(.+)$/m
+const TITLE = /^# Findings\b/m
+const SECTION = /^## (\w+)\s*$/
+const FINDING = /^### \[/
 
-/** The counts from findings.md's `Totals:` line, or null when it has none. */
+/**
+ * The counts from findings.md, or null when the text is not a findings file.
+ * Counts the `### [ID]` findings under each `## <Severity>` heading, so the
+ * verdict never depends on how the model worded its totals line.
+ */
 export function countsFromFindings(findings: string): Counts | null {
-  const line = findings.match(TOTALS)?.[1]
-  if (line === undefined) return null
-  const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 }
-  for (const severity of SEVERITIES) {
-    const value = line.match(new RegExp(`(\\d+)\\s+${severity}\\b`))?.[1]
-    if (value === undefined) return null
-    counts[severity] = Number.parseInt(value, 10)
+  if (!TITLE.test(findings)) return null
+  const counts: Counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 }
+  let section: string | null = null
+  for (const line of findings.split('\n')) {
+    const heading = line.match(SECTION)?.[1]?.toLowerCase()
+    if (heading !== undefined) {
+      section = heading
+      continue
+    }
+    if (section === null || !FINDING.test(line)) continue
+    const severity = SEVERITIES.find((name) => name === section)
+    if (severity !== undefined) counts[severity] += 1
   }
   return counts
 }

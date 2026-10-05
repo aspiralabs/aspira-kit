@@ -24,7 +24,7 @@ export default defineTool({
     const [review, findings] = await Promise.all([sandbox.readTextFile({ path: FILES.review }), sandbox.readTextFile({ path: FILES.findings })])
     if (review === null || findings === null) return { posted: false, reason: 'review.md or findings.md is missing from the sandbox' }
     const counts = countsFromFindings(findings)
-    if (counts === null) return { posted: false, reason: 'findings.md has no Totals line, so the verdict cannot be computed' }
+    if (counts === null) return { posted: false, reason: 'findings.md is missing or is not a findings file, so the verdict cannot be computed' }
     try {
       const { action, url } = await upsertReviewComment(github, reviewCommentBody(review, counts), token)
       return { posted: true, action, url }

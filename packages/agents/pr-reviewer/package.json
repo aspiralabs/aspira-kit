@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "eve dev",
     "build": "echo '@aspiralabs/pr-reviewer is not published; run `pnpm dev` to start the agent'",
+    "review:local": "node --experimental-strip-types scripts/local.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint agent scripts",
