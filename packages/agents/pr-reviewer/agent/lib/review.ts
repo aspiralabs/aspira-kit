@@ -1,6 +1,9 @@
 // Pure helpers for the pr-debator workflow. No eve imports, no side effects, so
 // the seats, prompts, schemas, and the verdict can be tested without a runtime.
 
+import { z } from 'zod'
+
+/** The sandbox files every seat reads or writes, at the agent's paths. */
 export const FILES = {
   meta: '/workspace/pr.md',
   patch: '/workspace/pr.patch',
@@ -10,11 +13,44 @@ export const FILES = {
   review: '/workspace/review.md',
 } as const
 
+/** Where load-pr checks out the tree in the sandbox. */
 export const REPO_PATH = '/workspace/repo'
+/** Where every seat writes its round files in the sandbox. */
 export const ROUNDS_DIR = '/workspace/review'
+/** The sandbox root the agent's paths hang off. */
+export const WORKSPACE_ROOT = '/workspace'
 
-export const roundDir = (round: number) => `${ROUNDS_DIR}/round-${round}`
-export const roundFile = (round: number, who: Reviewer) => `${roundDir(round)}/${who}.md`
+/**
+ * The paths the prompts name. The agent's sandbox layout by default; `--local` maps
+ * them to a work directory on the host so the same prompt functions produce its prompts.
+ */
+export type WorkspacePaths = { files: Record<keyof typeof FILES, string>; roundsDir: string }
+
+/** The agent's own layout: what every prompt says when no paths are given. */
+export const SANDBOX_PATHS: WorkspacePaths = { files: FILES, roundsDir: ROUNDS_DIR }
+
+/** The sandbox layout rehomed under `root`: `/workspace/pr.patch` becomes `<root>/pr.patch`. */
+export function workspacePaths(root: string): WorkspacePaths {
+  const files = {
+    meta: rehome(FILES.meta, root),
+    patch: rehome(FILES.patch, root),
+    changed: rehome(FILES.changed, root),
+    conversation: rehome(FILES.conversation, root),
+    findings: rehome(FILES.findings, root),
+    review: rehome(FILES.review, root),
+  }
+  return { files, roundsDir: rehome(ROUNDS_DIR, root) }
+}
+
+/** One sandbox path rehomed under `root`. Paths outside the sandbox are returned unchanged. */
+export function rehome(path: string, root: string): string {
+  return path.startsWith(`${WORKSPACE_ROOT}/`) ? `${root.replace(/\/+$/, '')}${path.slice(WORKSPACE_ROOT.length)}` : path
+}
+
+/** A round's directory under `roundsDir` (the sandbox's by default). */
+export const roundDir = (round: number, roundsDir: string = ROUNDS_DIR) => `${roundsDir}/round-${round}`
+/** One reviewer's file for one round. */
+export const roundFile = (round: number, who: Reviewer, roundsDir: string = ROUNDS_DIR) => `${roundDir(round, roundsDir)}/${who}.md`
 
 /** The six lenses. Ported from nitpick's reviewer roles, plus a design-system seat. */
 export type Seat = 'ava' | 'cole' | 'nova' | 'reba' | 'dex' | 'iris'
@@ -161,6 +197,41 @@ export type VerifyOutput = TurnOutput & { rejected: string[]; duplicates: string
 export type DocOutput = { path: string; changed: boolean; note: string }
 export type FindingsOutput = DocOutput & { counts: Counts }
 
+const countsShape = z.strictObject({ critical: z.number(), high: z.number(), medium: z.number(), low: z.number(), info: z.number() })
+
+/**
+ * Validators for the four structured results, for callers outside eve (`--local`). They
+ * describe exactly the JSON schemas above; review.test.ts fails if the two drift apart.
+ */
+export const OUTPUT_VALIDATORS: {
+  turn: z.ZodType<TurnOutput>
+  verify: z.ZodType<VerifyOutput>
+  doc: z.ZodType<DocOutput>
+  findings: z.ZodType<FindingsOutput>
+} = {
+  turn: z.strictObject({ agreed: z.boolean(), openPoints: z.array(z.string()), note: z.string() }),
+  verify: z.strictObject({
+    agreed: z.boolean(),
+    openPoints: z.array(z.string()),
+    rejected: z.array(z.string()),
+    duplicates: z.array(z.string()),
+    note: z.string(),
+  }),
+  doc: z.strictObject({ path: z.string(), changed: z.boolean(), note: z.string() }),
+  findings: z.strictObject({ path: z.string(), changed: z.boolean(), note: z.string(), counts: countsShape }),
+}
+
+/** The JSON schema each validator mirrors, by the same key. */
+export const OUTPUT_SCHEMAS = {
+  turn: TURN_OUTPUT_SCHEMA,
+  verify: VERIFY_OUTPUT_SCHEMA,
+  doc: DOC_OUTPUT_SCHEMA,
+  findings: FINDINGS_OUTPUT_SCHEMA,
+} as const
+
+/** Which structured result a turn returns. */
+export type OutputKind = keyof typeof OUTPUT_SCHEMAS
+
 export type PrContext = {
   /** Human label for the transcript header: `owner/name#123` or a local path with its base ref. */
   label: string
@@ -170,7 +241,11 @@ export type PrContext = {
   knowledgePath?: string | null
   /** REQUIRED.md from load-knowledge: the pages every seat reads in full, first. */
   knowledgeRequiredFile?: string | null
+  /** Where the prompts say the files are. The sandbox layout when absent. */
+  paths?: WorkspacePaths
 }
+
+const pathsOf = (pr: PrContext): WorkspacePaths => pr.paths ?? SANDBOX_PATHS
 
 const knowledgeSection = (pr: PrContext) =>
   pr.knowledgePath === undefined || pr.knowledgePath === null
@@ -186,17 +261,17 @@ const repoSection = (pr: PrContext) =>
 
 const context = (pr: PrContext) => `What you are reviewing, in the sandbox:
 
-- ${FILES.meta} — the pull request: title, description, base and head.
-- ${FILES.patch} — the unified diff. This is the change. Everything you flag lives in here.
-- ${FILES.changed} — the changed paths, one per line.
+- ${pathsOf(pr).files.meta} — the pull request: title, description, base and head.
+- ${pathsOf(pr).files.patch} — the unified diff. This is the change. Everything you flag lives in here.
+- ${pathsOf(pr).files.changed} — the changed paths, one per line.
 
 ${repoSection(pr)}${knowledgeSection(pr)}`
 
-const FINDING_RULES = `Finding rules, all seats:
+const findingRules = (files: WorkspacePaths['files']) => `Finding rules, all seats:
 
 - Review only what the diff changes. A finding about code the diff does not touch is out of scope and Quinn will reject it.
-- Every finding cites a path from ${FILES.changed} and a line or line range, and quotes the evidence from the diff.
-- Copy paths from ${FILES.changed} or ${FILES.patch}. Never assemble one from memory of how the project is probably laid out: \`components/ui/core/alert.tsx\` and \`components/ui/core/alert/alert.tsx\` are different files, and only one of them exists. If read_file says a path is not there, the path was wrong — find the real one with \`rg --files | rg <name>\` before you write anything about it.
+- Every finding cites a path from ${files.changed} and a line or line range, and quotes the evidence from the diff.
+- Copy paths from ${files.changed} or ${files.patch}. Never assemble one from memory of how the project is probably laid out: \`components/ui/core/alert.tsx\` and \`components/ui/core/alert/alert.tsx\` are different files, and only one of them exists. If read_file says a path is not there, the path was wrong — find the real one with \`rg --files | rg <name>\` before you write anything about it.
 - Severity is one of \`critical\`, \`high\`, \`medium\`, \`low\`, \`info\`. Confidence is a number from 0 to 1. Both are yours to defend.
 - Prefer the exploitable, reachable, and concrete over the theoretical. Three real findings beat ten vague ones.
 - Do not spend a finding on what typecheck, lint, or prettier already catches. Those gates run before you do.
@@ -220,10 +295,10 @@ One short paragraph: what you now believe must change in this PR, across every p
 ### Status
 \`agreed\` or \`open\`, followed by the ids still open. An accepted, withdrawn, or rejected finding is closed; do not list it.`
 
-const protocol = (who: Seat, round: number) => `Protocol, every turn:
+const protocol = (who: Seat, round: number, { files, roundsDir }: WorkspacePaths) => `Protocol, every turn:
 
-1. Read ${FILES.meta}, ${FILES.patch}, and ${FILES.changed} in full. Then read every file under ${ROUNDS_DIR}/ — every seat's rounds and every one of Quinn's verification files. Do not rely on memory; the files are the record. \`find ${ROUNDS_DIR} -type f | sort\` lists them.
-2. Write ${roundFile(round, who)}. One file, yours alone, this round only. Never edit another seat's file and never edit your own earlier rounds. The shape:
+1. Read ${files.meta}, ${files.patch}, and ${files.changed} in full. Then read every file under ${roundsDir}/ — every seat's rounds and every one of Quinn's verification files. Do not rely on memory; the files are the record. \`find ${roundsDir} -type f | sort\` lists them.
+2. Write ${roundFile(round, who, roundsDir)}. One file, yours alone, this round only. Never edit another seat's file and never edit your own earlier rounds. The shape:
 
 ${sectionShape(who, round)}
 
@@ -234,9 +309,9 @@ export function openingPrompt(who: Seat, pr: PrContext): string {
 
 ${context(pr)}
 
-${FINDING_RULES}
+${findingRules(pathsOf(pr).files)}
 
-${protocol(who, 1)}`
+${protocol(who, 1, pathsOf(pr))}`
 }
 
 export function turnPrompt(who: Seat, round: number, pr: PrContext): string {
@@ -244,19 +319,20 @@ export function turnPrompt(who: Seat, round: number, pr: PrContext): string {
 
 ${context(pr)}
 
-${FINDING_RULES}
+${findingRules(pathsOf(pr).files)}
 
-${protocol(who, round)}`
+${protocol(who, round, pathsOf(pr))}`
 }
 
 export function verifyPrompt(round: number, pr: PrContext): string {
+  const { files, roundsDir } = pathsOf(pr)
   return `You are Quinn, the verification seat for the review of ${pr.label}. You are independent of the six reviewers twice over: they hunt and you check, and you run on a different model family than any of them. You raise no findings of your own. Your job is to keep the list honest.
 
 ${context(pr)}
 
-Read every file under ${ROUNDS_DIR}/ — all seats, all rounds including your own earlier rulings. For every finding that is still open, read the actual code at the path and lines it cites, cross-reference it against ${FILES.patch}, and rule on it.
+Read every file under ${roundsDir}/ — all seats, all rounds including your own earlier rulings. For every finding that is still open, read the actual code at the path and lines it cites, cross-reference it against ${files.patch}, and rule on it.
 
-Write ${roundFile(round, 'quinn')}:
+Write ${roundFile(round, 'quinn', roundsDir)}:
 
 ## Round ${round} — Quinn (verification)
 
@@ -289,9 +365,10 @@ export function writeFindingsPrompt(pr: PrContext, agreed: boolean): string {
   const unresolved = agreed
     ? ''
     : `\n\nThe review hit its round cap without full agreement. End the file with \`## Unresolved\`: one entry per finding still contested, both positions stated plainly, and what a human has to decide. Do not pick a side and do not count these in \`counts\`.`
+  const { files, roundsDir } = pathsOf(pr)
   return `You are Nova. The review of ${pr.label} is over. Write the fix list.
 
-Read ${FILES.patch}, ${FILES.changed}, and every file under ${ROUNDS_DIR}/ in full, then write ${FILES.findings}: what this PR has to fix, settled, deduplicated, in severity order.
+Read ${files.patch}, ${files.changed}, and every file under ${roundsDir}/ in full, then write ${files.findings}: what this PR has to fix, settled, deduplicated, in severity order.
 
 Shape:
 
@@ -310,9 +387,10 @@ Return the structured result with the path, \`changed: true\`, and \`counts\`: h
 
 export function writeReviewPrompt(pr: PrContext, agreed: boolean): string {
   const unresolved = agreed ? '' : ` Say plainly that the seats did not settle everything, and name what is still open in one line each.`
+  const { files, roundsDir } = pathsOf(pr)
   return `You are Dex. The review of ${pr.label} is over. Write the summary the author reads first.
 
-Read ${FILES.meta}, ${FILES.patch}, and every file under ${ROUNDS_DIR}/ in full, then write ${FILES.review}: plain English, for the person who opened this PR and will not read the transcript.
+Read ${files.meta}, ${files.patch}, and every file under ${roundsDir}/ in full, then write ${files.review}: plain English, for the person who opened this PR and will not read the transcript.
 
 Sections:
 
@@ -330,16 +408,17 @@ Return the structured result with the path and \`changed: true\`.`
 export function reviewDocPrompt(who: Reviewer, path: string, pr: PrContext): string {
   return `You are ${DISPLAY_NAME[who]}. ${path} has been written for the review of ${pr.label}.
 
-Read every file under ${ROUNDS_DIR}/ and then ${path}. Check it against the record: nothing invented, nothing dropped, no side taken on a point that was left open, and no finding described as worse or milder than it was settled to be. If it drifts, fix the document in place and keep its structure. If it is accurate, leave it alone.
+Read every file under ${pathsOf(pr).roundsDir}/ and then ${path}. Check it against the record: nothing invented, nothing dropped, no side taken on a point that was left open, and no finding described as worse or milder than it was settled to be. If it drifts, fix the document in place and keep its structure. If it is accurate, leave it alone.
 
 Return the structured result with the path and whether you changed it.`
 }
 
 /** Quinn's last pass: the fix list is the deliverable, so the verifier signs it off, counts and all. */
 export function checkFindingsPrompt(pr: PrContext): string {
-  return `You are Quinn. Nova has written ${FILES.findings} for the review of ${pr.label}. Sign it off.
+  const { files, roundsDir } = pathsOf(pr)
+  return `You are Quinn. Nova has written ${files.findings} for the review of ${pr.label}. Sign it off.
 
-Read ${FILES.patch}, ${FILES.changed}, every file under ${ROUNDS_DIR}/, and then ${FILES.findings}. Check that:
+Read ${files.patch}, ${files.changed}, every file under ${roundsDir}/, and then ${files.findings}. Check that:
 
 - Every entry cites a path the diff actually changes.
 - Every severity is where it finally landed after your rulings, not where it started.
@@ -353,11 +432,11 @@ Return the structured result with the path, whether you changed it, and \`counts
 }
 
 /** The per-seat round files, in the order a transcript should read. */
-export function roundFilesInOrder(rounds: number): string[] {
+export function roundFilesInOrder(rounds: number, roundsDir: string = ROUNDS_DIR): string[] {
   const order: Reviewer[] = [...SEATS, 'quinn']
   const files: string[] = []
   for (let round = 1; round <= rounds; round += 1) {
-    for (const who of order) files.push(roundFile(round, who))
+    for (const who of order) files.push(roundFile(round, who, roundsDir))
   }
   return files
 }

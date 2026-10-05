@@ -1,7 +1,7 @@
 // The review, posted back to the GitHub PR it was of: one conversation comment per PR,
 // updated on a rerun. Pure helpers plus one fetch-injected function, so it is testable
 // without a network. The tool around it decides whether to post at all.
-import { SEVERITIES, verdictFrom, type Counts } from './review'
+import { SEVERITIES, verdictFrom, type Counts } from './review.ts'
 
 /** Hidden first line: how a rerun finds its own earlier comment. */
 export const REVIEW_COMMENT_MARKER = '<!-- aspiralabs-pr-reviewer -->'
