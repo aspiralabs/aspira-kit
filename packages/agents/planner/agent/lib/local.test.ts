@@ -161,3 +161,25 @@ it('takes a --guidelines snapshot instead of Notion, and --finish exports a miss
   expect(done.problems).toContain('No structured plan produced')
   expect(JSON.parse(await readFile(join(f.outputDir, 'trace/knowledge.json'), 'utf8'))).toMatchObject({ source: 'snapshot', snapshot })
 })
+
+it('refuses research that leaves a required rule out, and runs the agent\'s correction pass on a failing plan', async () => {
+  const f = await fixture()
+  const snapshot = join(f.dir, 'REQUIRED.md')
+  await writeFile(snapshot, RULES)
+  const args = { specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir, guidelinesPath: snapshot }
+  const research = pending(await runLocal(args, { env: {} }))
+  await writeFile(research.tasks[0]!.output, JSON.stringify({ facts: [], checks: [], gaps: [], decisions: [] }))
+  const refused = pending(await runLocal(args, { env: {} }))
+  expect(refused.tasks[0]).toMatchObject({ id: 'research', retry: true, error: expect.stringContaining('REV-001') })
+  await writeFile(research.tasks[0]!.output, JSON.stringify({ facts: [], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] }))
+  const planning = pending(await runLocal(args, { env: {} }))
+  const broken = validPlan(); broken.tasks[1]!.dependsOn = []
+  await writeFile(planning.tasks[0]!.output, JSON.stringify(broken))
+  const repair = pending(await runLocal(args, { env: {} }))
+  expect(repair).toMatchObject({ stage: 'planning', tasks: [{ id: 'repair-1' }] })
+  expect(await readFile(repair.tasks[0]!.prompt, 'utf8')).toContain('PLAN CHECKS:\n- Implementation P2 needs an earlier test dependency for F1')
+  await writeFile(repair.tasks[0]!.output, JSON.stringify(validPlan()))
+  const done = await runLocal(args, { env: {} })
+  if (done.pending) throw new Error('expected export')
+  expect(done.status).toBe('ready')
+})

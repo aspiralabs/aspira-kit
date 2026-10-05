@@ -5,7 +5,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import type { ToolSet } from 'ai'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 
-const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, close: vi.fn() }))
+const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, brokenPlans: 0, uiPlan: false, refusals: [] as unknown[], close: vi.fn() }))
 vi.mock('@aspiralabs/agent-common/lib/repository', () => ({ repository: async () => ({ files, instructions: '', packet: () => 'src/items.ts:1: existing save', gaps: [], commit: 'abc', dirty: false, tools: { read_files: {} } }), allowedPath: (path: string) => !path.includes('.env') }))
 vi.mock('@aspiralabs/agent-common/lib/mcp', () => ({ connectReadTools: async () => ({ tools: {}, reads: [], sources: [], close: state.close }) }))
 vi.mock('ai', async (original) => {
@@ -21,17 +21,20 @@ vi.mock('ai', async (original) => {
         // response.messages holds only the last step; responseMessages holds every step.
         return { response: { messages: [prose] }, responseMessages: [{ role: 'assistant', content: 'read src/items.ts' }, { role: 'tool', content: 'EARLIER READ' }, prose] }
       }
+      if (state.partialChecks) state.refusals.push(await args.tools.submit_research!.execute!({ facts: ['src/items.ts:1 establishes save'], checks: [], gaps: [], decisions: [] }, { toolCallId: 'early', messages: [], context: {} }))
       await args.tools.submit_research!.execute!({ facts: ['src/items.ts:1 establishes save'], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] }, { toolCallId: 'test', messages: [], context: {} })
       return {}
     }
     const plan = validPlan()
+    if (state.brokenPlans > 0) { state.brokenPlans--; plan.tasks[1]!.dependsOn = [] }
+    if (state.uiPlan) plan.tasks[1]!.changes[0]!.path = 'src/components/item-card.tsx'
     if (state.needsAuthor) plan.decisions = ['Choose retention duration before implementing deletion.']
     return { output: plan }
   }) }
 })
 import { runPlan } from './runner.ts'
 
-beforeEach(() => { state.failResearch = false; state.needsAuthor = false; state.proseResearch = false; state.close.mockClear() })
+beforeEach(() => { Object.assign(state, { failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, brokenPlans: 0, uiPlan: false, refusals: [] }); state.close.mockClear() })
 async function input() {
   const dir = await mkdtemp(join(tmpdir(), 'planner-test-'))
   const specPath = join(dir, 'spec.reviewed.md')
@@ -56,6 +59,7 @@ it('writes only the plan, analysis and trace while preserving the original spec'
 })
 
 it('blocks UI planning without live kit evidence and preserves diagnostics', async () => {
+  state.uiPlan = true
   const result = await runPlan({ ...await input(), uiRequired: true })
   expect(result.status).toBe('incomplete')
   expect(result.problems).toContain('UI planning requires successful list_components and get_component MCP reads')
@@ -131,4 +135,38 @@ it('sends research and planning the exact default prompt bytes', async () => {
   expect(sent.map((call) => call.system)).toEqual([system, system])
   expect(sent[0]!.prompt).toBe(`${context}\n\n${researchInstructions}`)
   expect(sent[1]!.prompt).toBe(`${context}\n\nRESEARCH:\n${JSON.stringify(research)}\n\n${planningInstructions}`)
+})
+
+it('needs UI kit reads only when the plan writes UI files', async () => {
+  const result = await runPlan({ ...await input(), uiRequired: true })
+  expect(result.problems).not.toContain('UI planning requires successful list_components and get_component MCP reads')
+  expect(result.status).toBe('ready')
+})
+
+it('refuses research that leaves a required rule out, naming the rule, then takes the full submission', async () => {
+  state.partialChecks = true
+  const result = await runPlan(await input())
+  expect(state.refusals).toEqual([expect.objectContaining({ accepted: false, reason: expect.stringContaining('REV-001') })])
+  expect(result.status).toBe('ready')
+})
+
+it('hands a plan that fails its checks back for a correction pass and keeps the corrected plan', async () => {
+  state.brokenPlans = 1
+  const { generateText } = await import('ai')
+  vi.mocked(generateText).mockClear()
+  const result = await runPlan(await input())
+  expect(result.status).toBe('ready')
+  const prompts = vi.mocked(generateText).mock.calls.map(([call]) => (call as { prompt?: string }).prompt ?? '')
+  expect(prompts).toHaveLength(3)
+  expect(prompts[2]).toContain('PLAN CHECKS:\n- Implementation P2 needs an earlier test dependency for F1')
+  const trace = JSON.parse(await readFile(join(result.dir, 'trace/calls.json'), 'utf8'))
+  expect(trace.calls.map((call: { phase: string }) => call.phase)).toEqual(['research', 'planning', 'repair-1'])
+})
+
+it('stops correcting when a pass does not improve the plan, after at most two passes', async () => {
+  state.brokenPlans = 5
+  const result = await runPlan(await input())
+  expect(result.status).toBe('incomplete')
+  const trace = JSON.parse(await readFile(join(result.dir, 'trace/calls.json'), 'utf8'))
+  expect(trace.calls.map((call: { phase: string }) => call.phase)).toEqual(['research', 'planning', 'repair-1'])
 })
