@@ -27,12 +27,30 @@ function fakeGithub(comments: { id: number; login: string; body: string }[], sta
   return { calls, request }
 }
 
+const finding = (id: string) => `### [${id}] title\n- **Location:** \`a.ts:1\`\n`
+
 describe('countsFromFindings', () => {
-  it('reads the Totals line', () => {
-    expect(countsFromFindings(FINDINGS)).toEqual({ critical: 0, high: 0, medium: 2, low: 9, info: 0 })
+  it('counts the findings under each severity heading', () => {
+    const findings = `# Findings: o/r#2\n\nTotals: 0 critical · 1 high · 2 medium · 0 low · 1 info\n\n## High\n\n${finding('A1')}\n## Medium\n\n${finding('B1')}${finding('B2')}\n## Info\n\n${finding('C1')}`
+    expect(countsFromFindings(findings)).toEqual({ critical: 0, high: 1, medium: 2, low: 0, info: 1 })
   })
-  it('returns null when there is no Totals line', () => {
-    expect(countsFromFindings('# Findings\n\nNo totals here.\n')).toBeNull()
+  it('does not depend on how the totals line is worded', () => {
+    const findings = `# Findings: o/r#2\n\nCritical 0 · High 1 · Medium 1 · Low 0 · Info 0\n\n## High\n\n${finding('A1')}\n## Medium\n\n${finding('B1')}`
+    expect(countsFromFindings(findings)).toEqual({ critical: 0, high: 1, medium: 1, low: 0, info: 0 })
+  })
+  it('trusts the headings over a totals line that disagrees', () => {
+    const findings = `# Findings: o/r#2\n\nTotals: 0 critical · 0 high · 0 medium · 0 low · 0 info\n\n## Critical\n\n${finding('A1')}`
+    expect(countsFromFindings(findings)).toEqual({ critical: 1, high: 0, medium: 0, low: 0, info: 0 })
+  })
+  it('reads a clean review with no severity sections as all zeros', () => {
+    expect(countsFromFindings(FINDINGS.replace('## Medium\n', ''))).toEqual({ critical: 0, high: 0, medium: 0, low: 0, info: 0 })
+  })
+  it('ignores headings under sections that are not a severity', () => {
+    const findings = `# Findings: o/r#2\n\n## High\n\n${finding('A1')}\n## Notes\n\n${finding('X1')}`
+    expect(countsFromFindings(findings)).toEqual({ critical: 0, high: 1, medium: 0, low: 0, info: 0 })
+  })
+  it('returns null when the text is not a findings file', () => {
+    expect(countsFromFindings('No findings title here.\n')).toBeNull()
   })
 })
 

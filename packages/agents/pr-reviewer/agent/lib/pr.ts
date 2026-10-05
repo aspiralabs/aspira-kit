@@ -1,7 +1,7 @@
 // Pure helpers for load-pr: source parsing, the commands that produce a diff, and
 // the markdown the seats read. No eve or node imports.
 
-import { REPO_PATH, FILES } from './review'
+import { REPO_PATH, FILES } from './review.ts'
 
 export { REPO_PATH }
 
