@@ -1,4 +1,5 @@
-import { generateText, gateway, hasToolCall, stepCountIs, tool, type ToolSet } from 'ai'
+import { generateText, hasToolCall, stepCountIs, tool, type ToolSet } from 'ai'
+import { gateway } from '@aspiralabs/agent-common/lib/gateway'
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod'

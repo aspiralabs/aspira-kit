@@ -297,6 +297,9 @@ importers:
       eve:
         specifier: ^0.63.0
         version: 0.63.0(ai@7.0.107(zod@4.5.4))
+      undici:
+        specifier: ^7.29.1
+        version: 7.29.1
       zod:
         specifier: 4.5.4
         version: 4.5.4
