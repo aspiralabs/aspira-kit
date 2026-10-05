@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { basename, dirname, relative, resolve } from 'node:path'
-import { generateText, gateway, Output, stepCountIs, tool, type ToolSet } from 'ai'
+import { generateText, Output, stepCountIs, tool, type ToolSet } from 'ai'
+import { gateway } from '@aspiralabs/agent-common/lib/gateway'
 import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
 import { connectReadTools } from '@aspiralabs/agent-common/lib/mcp'
 import { modelTrace } from '@aspiralabs/agent-common/lib/model-trace'

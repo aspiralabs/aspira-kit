@@ -1,4 +1,5 @@
-import { generateText, gateway, Output, hasToolCall, tool, stepCountIs, type ToolSet } from 'ai'
+import { generateText, Output, hasToolCall, tool, stepCountIs, type ToolSet } from 'ai'
+import { gateway } from '@aspiralabs/agent-common/lib/gateway'
 import type { z } from 'zod'
 import type { Call } from './pipeline.ts'
 import { reviewSchema, synthesisSchema, systemPrompt } from './review.ts'
