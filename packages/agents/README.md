@@ -14,7 +14,26 @@ Aspira Labs agents, built on [eve](https://vercel.com/eve). One package per agen
 | `packages/agents/planner` | `planner` | `specs/agents-planner.md` | implementation and test planning |
 | `packages/agents/pr-reviewer` | `pr-reviewer` | `specs/agents-pr-reviewer.md` | working |
 | `packages/agents/code-analyzer` | `code-analyzer` | `specs/agents-code-analyzer.md` | detect, run, auto-fix, model-fix, loop until clean |
-| `packages/agents/implementor` | `implementor` | `specs/agents-implementor.md` | cloud runner for the `/aspira-implementor` skill: builds a plan test-first, parallel lanes |
+| `packages/agents/implementor` | `implementor` | `specs/agents-implementor.md` | builds a plan test-first, parallel lanes |
+
+## Skills: one pattern for every agent
+
+Spec: `specs/agents-skill-pattern.md`. Every agent a person runs (spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer) has a Claude Code skill at `<agent>/skill/aspira-<agent>/`, with `SKILL.md` and `scripts/<agent>.sh`. The agent is the single source of truth, and the skill only calls it:
+
+- **Default: launch the agent.** `scripts/<agent>.sh start` runs the agent as a separate process, detached in `screen`. `status` and `wait` follow it. The skill relays the agent's report and never does the work itself.
+- **`--local`: the same pipeline in the session.** `scripts/<agent>.sh local` steps a driver in the agent's package. The driver makes no model calls. Each step prints the next stage as JSON, with every task's prompt written to a file. The session runs those tasks as subagents (in parallel where the stage says), and the driver checks their outputs against the agent's own schemas before it advances. Prompts are assembled at runtime from the agent's own files: `agent/instructions.md`, `agent/subagents/*/instructions.md`, and the prompt and schema modules in `agent/lib/`. Editing the agent changes `--local` with no copy to update. `--finish` exports what exists as incomplete. A change to the source or the rules mid-run is refused.
+- **Notion rules on every path.** The agent loads them with `load-knowledge`, or takes a `--guidelines` `REQUIRED.md` snapshot. In `--local`, the first stage is `knowledge`, which lists the exact pages the agent's own configuration would load: `KNOWLEDGE_PAGE`, the `KNOWLEDGE_REQUIRED` pages, and the topic pages they route to. The session fetches them with the Notion MCP into `<work>/knowledge/` (`REQUIRED.md`, `INDEX.md`, one file per page), or `--guidelines` stands in. The driver refuses to start without them, and the export records which rules were used.
+- **`SKILL.md` is mechanics only.** It says which command to run, how to launch the tasks, and what to report, and it names `agent/instructions.md` (or the agent's procedure file) as the authority. Each skill has a test that the agent's key rule sentences are absent from `SKILL.md`.
+
+Install a skill once per machine. Claude Code reads `~/.claude/skills/`, so link each skill there from the kit:
+
+```bash
+for a in spec-writer spec-reviewer planner implementor code-analyzer pr-reviewer; do
+  ln -sfn "$ASPIRA_KIT/packages/agents/$a/skill/aspira-$a" ~/.claude/skills/aspira-$a
+done
+```
+
+A new agent follows the same pattern: a skill directory, a launcher with `start`/`status`/`wait`/`local`, a `local` driver that reads the agent's own files, a knowledge stage, and the tests from F5 of the spec.
 
 ## How an agent is selected
 
@@ -89,6 +108,7 @@ Package scripts (`dev`, `info`, `typecheck`, `lint`) need no `exec`: `pnpm -C <d
 3. Add `@aspiralabs/<name>` to `ignore` in `.changeset/config.json`. Repo-local packages are never versioned by the release flow, and a package missing from that list breaks `changeset version`.
 4. `pnpm install`, then `pnpm --filter @aspiralabs/<name> exec eve info` to confirm eve discovers it with 0 diagnostics.
 5. `cp .env.example .env.local` in the new package and put an AI Gateway key in it. Every package needs its own; `.env.local` is gitignored.
+6. Add its skill as **Skills** above describes: `skill/aspira-<name>/` with `SKILL.md` and `scripts/<name>.sh`, plus a `--local` driver and its tests.
 
 Root `typecheck` and `lint` (`pnpm -r`) pick the package up for free. Root `build` and `test` filter on `./packages/*` and skip it.
 
@@ -125,10 +145,10 @@ export { default } from '@aspiralabs/agent-common/tools/load-knowledge'
 
 | Tool | Mounted by | What it does |
 | --- | --- | --- |
-| `load-knowledge` | spec-reviewer, pr-reviewer | Loads the org's engineering guidelines from Notion into the sandbox at `/workspace/knowledge` as markdown, `INDEX.md` first, one file per page. Needs `NOTION_TOKEN` and `KNOWLEDGE_PAGE` in the agent's `.env.local`; without them it reports `configured: false`; the spec reviewer requires guidelines and reports a blocker. `KNOWLEDGE_REQUIRED` names the pages every agent must read in full; they are concatenated into `REQUIRED.md`, returned as `requiredFile`, and a missing one is an error. |
+| `load-knowledge` | spec-writer, spec-reviewer, planner, implementor, pr-reviewer | Loads the org's engineering guidelines from Notion into the sandbox at `/workspace/knowledge` as markdown, `INDEX.md` first, one file per page. Needs `NOTION_TOKEN` and `KNOWLEDGE_PAGE` in the agent's `.env.local`; without them it reports `configured: false`; the spec reviewer requires guidelines and reports a blocker. `KNOWLEDGE_REQUIRED` names the pages every agent must read in full; they are concatenated into `REQUIRED.md`, returned as `requiredFile`, and a missing one is an error. |
 
 Helpers and their tests live in `common/src/lib/`, so a shared helper is tested once. The spec reviewer owns its three-phase pipeline and per-phase cost report; the PR reviewer owns its separate review loop.
 
 ## Spec to implementation workflow
 
-`spec-reviewer` reviews intent and business acceptance criteria. `planner` reads the reviewed spec and creates concrete technical tasks with mapped unit/integration test checklists. `/aspira-implementor` (or the `implementor` agent in the cloud) writes those tests first, then implements the plan, running independent tasks in parallel. Both planning agents use shared read-only repository/MCP access and run-analysis/trace infrastructure in `agent-common`.
+`spec-reviewer` reviews intent and business acceptance criteria. `planner` reads the reviewed spec and creates concrete technical tasks with mapped unit/integration test checklists. `implementor` (or `/aspira-implementor`) writes those tests first, then implements the plan, running independent tasks in parallel. Both planning agents use shared read-only repository/MCP access and run-analysis/trace infrastructure in `agent-common`.
