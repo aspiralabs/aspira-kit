@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { basename, dirname, relative, resolve } from 'node:path'
-import { generateText, Output, stepCountIs, tool, type ToolSet } from 'ai'
+import { generateText, Output, stepCountIs, tool, type ModelMessage, type ToolSet } from 'ai'
 import { gateway } from '@aspiralabs/agent-common/lib/gateway'
 import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
 import { connectReadTools } from '@aspiralabs/agent-common/lib/mcp'
@@ -9,7 +9,7 @@ import { repository } from '@aspiralabs/agent-common/lib/repository'
 import { runAnalysis } from '@aspiralabs/agent-common/lib/run-analysis'
 import { checkBusinessSpec } from '@aspiralabs/agent-common/lib/spec'
 import { planSchema, researchSchema, renderPlan, touchesUi, validatePlan, type Plan, type Research } from './plan.ts'
-import { system, researchInstructions, planningInstructions, repairInstructions } from './prompts.ts'
+import { system, researchSystem, researchInstructions, planningInstructions, repairInstructions } from './prompts.ts'
 
 /** Research model turns, including the final forced `submit_research` turn. */
 const RESEARCH_STEPS = 10
@@ -56,6 +56,11 @@ export async function preparePlan(input: PlanInput, signal: AbortSignal): Promis
 /** The evidence block both model phases start from: spec, required guidelines, repository instructions and source packet. */
 export function planContext(prepared: Pick<PreparedPlan, 'spec' | 'guidelines' | 'repo'>): string {
   return `BUSINESS SPEC:\n${prepared.spec}\n\nREQUIRED GUIDELINES:\n${prepared.guidelines}\n\nREPOSITORY INSTRUCTIONS:\n${prepared.repo.instructions}\n\n${prepared.repo.packet(prepared.spec)}`
+}
+
+/** What research is told when it replies without submitting while turns remain. */
+export function researchContinue(turnsLeft: number): string {
+  return `You replied without calling submit_research, and you have ${turnsLeft} turns left. Research gathers evidence; it does not write the plan. Keep reading: open the files, guideline topic pages and kit configuration you have not read yet that the plan will depend on, batching reads. Then call submit_research.`
 }
 
 /** The research phase's user prompt. */
@@ -157,11 +162,20 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         return { accepted: true }
       }
       const tools: ToolSet = { ...repo.tools, ...mcp.tools, submit_research: tool({ description: 'Finish after gathering concrete repository and guideline evidence.', inputSchema: researchSchema, execute: submit }) }
-      const result = await generateText({ model: gateway(models.research), system, prompt, tools, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', stopWhen: [stepCountIs(RESEARCH_STEPS), () => submitted !== undefined], prepareStep: ({ stepNumber }) => { lastTurn = stepNumber >= RESEARCH_STEPS - 1; return lastTurn ? { toolChoice: { type: 'tool' as const, toolName: 'submit_research' } } : stepNumber === 0 ? { activeTools: Object.keys(tools).filter((name) => name !== 'submit_research'), toolChoice: 'required' as const } : {} }, ...hooks })
+      // Research that replies without submitting while turns remain is sent back to keep reading,
+      // told how many turns it has left. Only its last turn is forced to submit what it has.
+      let messages: ModelMessage[] = [{ role: 'user', content: prompt }]
+      let used = 0
+      while (!submitted && RESEARCH_STEPS - used > 1 && !signal.aborted) {
+        const remaining = RESEARCH_STEPS - used
+        const first = used === 0
+        const result = await generateText({ model: gateway(models.research), system: researchSystem, ...(first ? { prompt } : { messages }), tools, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', stopWhen: [stepCountIs(remaining - 1), () => submitted !== undefined], prepareStep: ({ stepNumber }) => first && stepNumber === 0 ? { activeTools: Object.keys(tools).filter((name) => name !== 'submit_research'), toolChoice: 'required' as const } : {}, ...hooks })
+        used += Math.max(1, result.steps?.length ?? 1)
+        messages = [...messages, ...(result.responseMessages ?? [])]
+        if (!submitted) messages.push({ role: 'user', content: researchContinue(RESEARCH_STEPS - used) })
+      }
       lastTurn = true
-      // Research may stop early with prose. Its structured submission is the proof
-      // that it finished, so give it one turn that can only submit what it found.
-      if (!submitted) await generateText({ model: gateway(models.research), system, messages: [{ role: 'user', content: prompt }, ...(result?.responseMessages ?? []), { role: 'user', content: 'Submit the evidence you gathered with submit_research now. Cite only files and lines you actually read; list anything you did not read as a gap.' }], tools: { submit_research: tools.submit_research! }, toolChoice: { type: 'tool', toolName: 'submit_research' }, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', ...hooks })
+      if (!submitted && !signal.aborted) await generateText({ model: gateway(models.research), system: researchSystem, messages: [...messages.slice(0, -1), { role: 'user', content: 'Your turns are used up. Submit the evidence you gathered with submit_research now. Cite only files and lines you actually read; list anything you did not read as a gap.' }], tools: { submit_research: tools.submit_research! }, toolChoice: { type: 'tool', toolName: 'submit_research' }, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', ...hooks })
       if (!submitted) throw new Error('Research did not submit evidence within its turn budget')
       return researchSchema.parse(submitted)
     })
@@ -189,7 +203,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
     const exportStarted = Date.now()
     const files: Record<string, string> = {
       ...planReportFiles({ prepared, specPath: input.specPath, research, plan, status, problems }),
-      'trace/calls.json': JSON.stringify({ system, models, calls: trace.calls }, null, 2),
+      'trace/calls.json': JSON.stringify({ system: { research: researchSystem, planning: system }, models, calls: trace.calls }, null, 2),
       'trace/usage.json': JSON.stringify({ scope: 'Direct planner calls only; excludes eve routing and guideline loading before entry.', turns: trace.turns }, null, 2),
     }
     let totalMs = 0

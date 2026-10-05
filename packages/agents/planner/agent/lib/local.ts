@@ -59,7 +59,7 @@ export const workDirFor = (outputDir: string) => `${outputDir}.local`
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-const promptsModule = z.object({ system: z.string().min(1), researchInstructions: z.string().min(1), planningInstructions: z.string().min(1), repairInstructions: z.string().min(1) })
+const promptsModule = z.object({ system: z.string().min(1), researchSystem: z.string().min(1), researchInstructions: z.string().min(1), planningInstructions: z.string().min(1), repairInstructions: z.string().min(1) })
 /** The agent's prompt texts, loaded from its prompt module when the step runs. */
 export type AgentPrompts = z.infer<typeof promptsModule>
 
@@ -203,7 +203,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       retry = rejected.length < 2
     }
     const promptFile = join(work, 'prompts', `${id}.md`)
-    await writeFile(promptFile, renderTaskPrompt({ id, system: prompts.system, prompt, output, reads: readsFile, repo: resolve(input.repoPath), knowledge: topics, schema }))
+    await writeFile(promptFile, renderTaskPrompt({ id, system: id === 'research' ? prompts.researchSystem : prompts.system, prompt, output, reads: readsFile, repo: resolve(input.repoPath), knowledge: topics, schema }))
     return { task: { id, prompt: promptFile, output, schema: id === 'research' ? 'researchSchema' : 'planSchema', ...(readsFile === null ? {} : { reads: readsFile }), ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) } }
   }
 
@@ -264,7 +264,7 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
     : new Map([[REQUIRED_NAME, prepared.guidelines]])
   const files: Record<string, string> = {
     ...planReportFiles({ prepared, specPath: input.specPath, research, plan, status, problems }),
-    'trace/calls.json': JSON.stringify({ mode: 'local', system: prompts.system, models: { all: 'Claude Code session subagents' }, rejections: state.rejections, calls }, null, 2),
+    'trace/calls.json': JSON.stringify({ mode: 'local', system: { research: prompts.researchSystem, planning: prompts.system }, models: { all: 'Claude Code session subagents' }, rejections: state.rejections, calls }, null, 2),
     'trace/usage.json': JSON.stringify({ scope: '--local run: model work ran in a Claude Code session; no usage is itemized.', turns: [] }, null, 2),
     'trace/knowledge.json': JSON.stringify({ ...knowledge, pages: knowledge.files.filter((file) => file.url !== null).map((file) => ({ file: file.name, title: file.title, url: file.url })).concat(knowledge.source === 'notion' ? requiredUrls(knowledgeContents.get(REQUIRED_NAME) ?? '') : []) }, null, 2),
     ...Object.fromEntries([...knowledgeContents].map(([name, text]) => [`trace/knowledge/${name}`, text])),
