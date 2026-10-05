@@ -33,7 +33,7 @@ The skill source is `skill/aspira-planner/`. Install it by linking that director
 
 Configure `MCP_READ_CONNECTIONS` from `.env.example` for read-only Notion/Aspira UI access. Use `pnpm mcp:check` to probe the connections. UI plans require actual successful catalog and component-document reads. Secrets stay in environment variables. A Codex connector is not automatically inherited by this runtime.
 
-Research defaults to Opus 5.5 with seven tool steps. Planning defaults to GPT-6 Sol. Override with `SPEC_PLAN_RESEARCH_MODEL` and `SPEC_PLAN_MODEL`. Research, planning and preparation have no elapsed-time limit; manual cancellation remains available. There are no automatic retries.
+Research defaults to Opus 5.5 with ten tool steps. Planning defaults to GPT-6.1 Sol. Override with `SPEC_PLAN_RESEARCH_MODEL` and `SPEC_PLAN_MODEL`. Research, planning and preparation have no elapsed-time limit; manual cancellation remains available. There are no automatic retries.
 
 ## Output
 

@@ -4,9 +4,9 @@ Status: drafted 2026-09-22 by the agent, awaiting review. Supersedes the scaffol
 
 ## Intent
 
-Give `pr-reviewer` (`@aspiralabs/pr-reviewer`) behaviour: take a pull request, a branch, or a diff, put six specialist reviewers on it, and loop them until they agree on one fix list. Output is markdown — a fix list and a plain-English summary — written next to the repo and printed back in the reply.
+Give `pr-reviewer` (`@aspiralabs/pr-reviewer`) behaviour: take a pull request, a branch, or a diff, put six specialist reviewers on it, and loop them until they agree on one fix list. Output is markdown — a fix list and a plain-English summary — written next to the repo and printed back in the reply. When the review was of a GitHub PR, the summary is also posted to that PR as one comment (added 2026-10-05).
 
-The reviewer roles are ported from [nitpick](https://github.com/ilterkavlak/nitpick): security, performance, architecture, testing, and DX, plus a sixth seat for the design system, and nitpick's independent verification agent. What is *not* ported is nitpick's shape — no Upstash boxes, no interactive triage, no GitHub review posting. The loop is `spec-reviewer`'s: reviewers write into a shared record, respond to each other, and the workflow stops when every seat says the list is settled.
+The reviewer roles are ported from [nitpick](https://github.com/ilterkavlak/nitpick): security, performance, architecture, testing, and DX, plus a sixth seat for the design system, and nitpick's independent verification agent. What is *not* ported is nitpick's shape — no Upstash boxes, no interactive triage, no inline review comments; a GitHub PR gets one summary comment. The loop is `spec-reviewer`'s: reviewers write into a shared record, respond to each other, and the workflow stops when every seat says the list is settled.
 
 Why both: nitpick's parallel reviewers each produce a pile of findings that nobody reconciles, so a verifier has to clean up after them. A debate reconciles as it goes — a finding that another seat can refute dies in round two instead of reaching the author. The verifier stays because the debate alone does not check anything against the code: six seats can agree on a finding none of them opened the file for, and six seats from one model family can agree because they are one model family. Quinn is on another, and is the cheapest seat in the package — the work is mechanical, and it makes the most calls.
 
@@ -130,13 +130,21 @@ A GitHub PR or a pasted diff has no checkout on this machine to write into, so t
 
 The root agent's reply is: verdict and counts on one line, cost on one line, the exported paths, then `review.md` verbatim, then an offer to print `findings.md`. `export-review` hands both documents back in its result so the root never has to read a host path it cannot see.
 
+## Posting to the PR
+
+Added 2026-10-05. When `load-pr` loaded a GitHub PR, it returns `github: { owner, name, number }` (null for a local branch or a pasted diff), and after `export-review` the root calls `comment-on-pr` with it. The tool reads `review.md` and `findings.md` from the sandbox itself, so the model never retypes the review, and posts one comment on the PR conversation: a hidden marker, the verdict and counts (computed from the `Totals:` line of `findings.md` with the same `verdictFrom` the workflow uses), then `review.md`. A body over GitHub's limit is cut with a note that the full review is in the export.
+
+A rerun updates the reviewer's own earlier comment (found by the marker, authored by the token's user) instead of adding another, so a PR carries one current review. It posts only to the PR that was loaded, never anywhere else, and never for a local branch or a diff. `PR_REVIEW_COMMENT=off` turns posting off, and so does the person asking for no comment. The token is `GITHUB_TOKEN`, which then needs write access to the PR's comments (pull requests or issues write). A missing token or a refused write is reported in the reply and does not fail the review, which is already exported.
+
+It is a conversation comment, not a GitHub review with `REQUEST_CHANGES`: GitHub refuses that event on the token owner's own PR, and the verdict is already in the comment.
+
 ## Cost accounting
 
 Copied from `spec-reviewer`: a `step.completed` hook on every agent appends one JSON line per model call to `/workspace/usage.jsonl` through a shell append, and `export-review` aggregates it into `cost.md`. `lib/usage.ts` and `lib/usage-hook.ts` are duplicated from the sibling package rather than shared, which `packages/agents/README.md` says not to do. Consolidating them into `@aspiralabs/config/agent/usage` changes a published package's public API and is a separate change; it is recorded here as debt, not done here.
 
 ## Out of scope
 
-- Posting findings to GitHub as review comments, and interactive triage. nitpick does both; this reports and stops.
+- Inline review comments on diff lines, `REQUEST_CHANGES` reviews, and interactive triage. A GitHub PR gets one summary comment (see Posting to the PR); nitpick's inline threads are not ported.
 - Deterministic scanners (linters, secret scanning, dependency audits). `pnpm check` already runs in the repos this reviews; a seat that spends a finding on what the linter catches is wasting a round.
 - Applying fixes. The seats read; they never write to the repo.
 - Publishing, the `kit` CLI, deployment, channels beyond the default eve one.
@@ -145,7 +153,7 @@ Copied from `spec-reviewer`: a `step.completed` hook on every agent appends one 
 ## Acceptance
 
 - `pnpm --filter @aspiralabs/pr-reviewer typecheck` and `lint` pass; `pnpm check` at the root still passes.
-- `eve info` discovers agent `pr-reviewer` with tools `load-pr`, `pr-debator`, `export-review`; seven subagents, all hidden; a `usage` hook on all eight.
+- `eve info` discovers agent `pr-reviewer` with tools `load-pr`, `pr-debator`, `export-review`, `comment-on-pr`; seven subagents, all hidden; a `usage` hook on all eight.
 - `load-pr` against a public GitHub PR and against a local branch both produce `/workspace/pr.patch` and a `changed_files.txt` whose paths match `git diff --name-only`.
 - A local review of a branch that is *not* checked out contains that branch's commits and nothing else: no commits that landed on the base afterwards, and nothing from the working tree of the branch that is checked out.
 - A local review of the checked-out branch includes its uncommitted edits and its never-added files, and leaves the person's git index exactly as it was.
@@ -156,6 +164,9 @@ Copied from `spec-reviewer`: a `step.completed` hook on every agent appends one 
 - A review given a spec path copies it to `/workspace/spec.md`, exports it as `spec.md`, and names it in `review.md`. A review given a spec path that does not exist fails at `load-pr` and writes nothing.
 - A review given a spec that asks for something the diff does not do produces a `spec` finding that cites the spec section, survives Quinn, and counts toward the verdict. A review given no spec produces no `spec` findings.
 
+- A review of a GitHub PR posts one comment on that PR with the computed verdict, the counts and `review.md`; a second review of the same PR updates that comment instead of adding one. A local or pasted-diff review posts nothing. With `PR_REVIEW_COMMENT=off`, or a token that cannot write, nothing is posted, the reply says why, and the export is unaffected.
+- A GitHub PR review with no checkout exports to `reviews/<date>-<slug>/` in the package, never to a directory named after a null `repoDir`.
+
 ## Blast radius
 
-Package-local. No published package changes, no changeset (`@aspiralabs/pr-reviewer` is already in the changeset `ignore` list). `@vercel/connect` is added as a dependency, matching `spec-reviewer`, because the tools open a sandbox. Needs Node 24, an AI Gateway credential, and — for private repos and for API rate limits — `GITHUB_TOKEN` in the environment.
+Package-local. No published package changes, no changeset (`@aspiralabs/pr-reviewer` is already in the changeset `ignore` list). `@vercel/connect` is added as a dependency, matching `spec-reviewer`, because the tools open a sandbox. Needs Node 24, an AI Gateway credential, and — for private repos, for API rate limits, and to post the PR comment — `GITHUB_TOKEN` in the environment; posting needs write access to the PR's comments.

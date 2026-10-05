@@ -7,23 +7,33 @@ import { z } from 'zod'
 
 const run = promisify(execFile)
 export function allowedPath(path: string): boolean {
-  return !/(?:^|\/)[^/]*\.(?:debate|review)[^/]*\//i.test(path) && !/(?:^|\/)(?:package-lock\.json|pnpm-lock\.yaml|bun\.lockb?|yarn\.lock)$/.test(path) && !path.split('/').some((part) => /^(?:\.env(?:\..*)?|\.git|node_modules|\.eve|\.next|dist|\.output|coverage|vendor|(?:secrets?|credentials?)(?:\..*)?|\.npmrc|\.pypirc|\.netrc|id_rsa|id_ed25519)$/i.test(part)) && !/\.(?:pem|key|p12|pfx|lock|avif|webp|svg|png|jpe?g|gif|pdf|woff2?|zip|gz|mp4)$/i.test(path)
+  return !/(?:^|\/)[^/]*\.(?:debate|review|written)[^/]*\//i.test(path) && !/(?:^|\/)(?:package-lock\.json|pnpm-lock\.yaml|bun\.lockb?|yarn\.lock)$/.test(path) && !path.split('/').some((part) => /^(?:\.env(?:\..*)?|\.git|node_modules|\.eve|\.next|dist|\.output|coverage|vendor|(?:secrets?|credentials?)(?:\..*)?|\.npmrc|\.pypirc|\.netrc|id_rsa|id_ed25519)$/i.test(part)) && !/\.(?:pem|key|p12|pfx|lock|avif|webp|svg|png|jpe?g|gif|pdf|woff2?|zip|gz|mp4)$/i.test(path)
 }
 
 
+const MAX_REF_MATCHES = 3
+/** Largest line-numbered file body pasted into the packet; larger files are linked. */
+const INLINE_LIMIT = 40_000
+
 /** A reproducible source packet avoids a frontier model spending its budget navigating.
- * Omitted/truncated material stays available through the specialist read tools. */
+ * Large files are linked rather than inlined and stay available through the read tools. */
 export function evidencePacket(spec: string, files: Map<string, string>): string {
   const refs = [...new Set([...spec.matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!).filter((value) => value.length < 160))]
+  const exact = new Set<string>()
   const selected = new Set<string>()
   const producers = new Set<string>()
   const producerFacts: string[] = []
   for (const ref of refs) {
     const path = ref.split('?')[0]!
+    if (files.has(path)) { exact.add(path); selected.add(path); continue }
+    // Only path-like refs and component names name files. A bare word such as
+    // `page` or `sort` would suffix-match dozens of files and flood the budget.
+    const component = /^[A-Z][A-Za-z0-9]+$/.test(path)
+    if (!component && !path.includes('/') && !/\.[a-z]{1,5}$/i.test(path)) continue
     const kebab = path.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()
-    for (const file of files.keys()) {
-      if (file === path || file.endsWith(`/${path}`) || file.endsWith(`/${kebab}.tsx`) || file.endsWith(`/${kebab}.ts`) || file.endsWith(`${path}/route.ts`)) selected.add(file)
-    }
+    const matches = [...files.keys()].filter((file) => file.endsWith(`/${path}`) || file.endsWith(`${path}/route.ts`) || (component && (file.endsWith(`/${kebab}.tsx`) || file.endsWith(`/${kebab}.ts`))))
+    // An ambiguous ref is skipped; the spec's full paths and the read tools cover it.
+    if (matches.length <= MAX_REF_MATCHES) for (const file of matches) selected.add(file)
   }
   // Schema and policy are high-signal context for virtually every data feature.
   for (const file of files.keys()) if (/(?:schema\.prisma|auth\.config\.ts)$/.test(file)) selected.add(file)
@@ -44,27 +54,31 @@ export function evidencePacket(spec: string, files: Map<string, string>): string
       }
     }
   }
+  // Files the spec names by full path come first, then current producers, then
+  // schema, policy, imports and looser matches; long docs go last.
+  const ordered = new Set([...exact, ...producers, ...[...selected].filter((file) => !file.endsWith('.md')), ...selected])
+  // Every selected file is either inlined whole or linked; nothing is cut
+  // mid-file. A file too large to inline is listed by path and size, and the
+  // agent reads it with read_files/search when it needs it.
   const parts: string[] = []
-  let remaining = 110_000
-  // Current producers precede long prerequisite docs and schema excerpts so
-  // the packet budget cannot hide the query the existing screen actually runs.
-  const ordered = new Set([...producers, ...[...selected].filter((file) => !file.endsWith('.md')), ...selected])
+  const linked: string[] = []
   for (const file of ordered) {
-    if (remaining <= 0) break
     const lines = files.get(file)!.split('\n')
     const body = lines.map((line, index) => `${index + 1}: ${line}`).join('\n')
-    const limit = Math.min(40_000, remaining)
-    const excerpt = body.slice(0, limit)
-    parts.push(`SOURCE ${file} (${lines.length} lines)\n${excerpt}${excerpt.length < body.length ? '\n[PACKET EXCERPT TRUNCATED: use read_files/search for remaining lines]' : ''}`)
-    remaining -= excerpt.length
+    if (body.length <= INLINE_LIMIT) parts.push(`SOURCE ${file} (${lines.length} lines)\n${body}`)
+    else linked.push(`- ${file} (${lines.length} lines)`)
   }
-  return `Source packet selected from spec references, schemas, auth policy and first-hop imports. It is not exhaustive; specialists must inspect callers and missing paths.\nCURRENT PRODUCER LINKS (literal source observations; check applicability):\n${producerFacts.slice(0, 30).join('\n')}\n\n${parts.join('\n\n')}`
+  const links = linked.length ? `\n\nLINKED FILES (selected but too large to inline; read them with read_files in line windows, or search):\n${linked.join('\n')}` : ''
+  return `Source packet selected from spec references, schemas, auth policy and first-hop imports. It is not exhaustive; specialists must inspect callers and missing paths.\nCURRENT PRODUCER LINKS (literal source observations; check applicability):\n${producerFacts.slice(0, 30).join('\n')}\n\n${parts.join('\n\n')}${links}`
 }
 
 export async function repository(root: string, signal?: AbortSignal) {
   const base = await realpath(root)
   const listing = await run('git', ['-C', base, 'ls-files', '-z', '-co', '--exclude-standard'], { maxBuffer: 16 * 1024 * 1024, signal })
-  const paths = [...new Set(listing.stdout.split('\0').filter((p) => p && allowedPath(p)))].sort()
+  const listed = [...new Set(listing.stdout.split('\0').filter(Boolean))]
+  // Every tracked or unignored path, including files deliberately not indexed (lockfiles, .npmrc).
+  const tracked = new Set(listed)
+  const paths = listed.filter((p) => allowedPath(p)).sort()
   const files = new Map<string, string>()
   const gaps: string[] = []
   let bytes = 0
@@ -86,7 +100,7 @@ export async function repository(root: string, signal?: AbortSignal) {
   const status = (await run('git', ['-C', base, 'status', '--porcelain'], { signal })).stdout.trim()
   const instructions = [...files].filter(([p]) => /(^|\/)(AGENTS|CLAUDE)\.md$/.test(p) || /agent\/constraints\.md$/.test(p)).map(([p, text]) => `SOURCE ${p}\n${text}`).join('\n\n')
   return {
-    files, commit, dirty: status.length > 0, gaps, instructions, packet: (spec: string) => evidencePacket(spec, files),
+    files, tracked, commit, dirty: status.length > 0, gaps, instructions, packet: (spec: string) => evidencePacket(spec, files),
     tools: {
       list_files: tool({ description: 'List available snapshot paths matching a substring. Refine when truncated.', inputSchema: z.object({ contains: z.string() }), execute: async ({ contains }) => {
         const matches = [...files.keys()].filter((p) => p.toLowerCase().includes(contains.toLowerCase()))

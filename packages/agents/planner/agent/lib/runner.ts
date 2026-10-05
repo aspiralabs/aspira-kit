@@ -10,6 +10,9 @@ import { checkBusinessSpec } from '@aspiralabs/agent-common/lib/spec'
 import { planSchema, researchSchema, renderPlan, validatePlan, type Plan, type Research } from './plan.ts'
 import { system, researchInstructions, planningInstructions } from './prompts.ts'
 
+/** Research model turns, including the final forced `submit_research` turn. */
+const RESEARCH_STEPS = 10
+
 export type PlanInput = { specPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean }
 export async function runPlan(input: PlanInput, options: { signal?: AbortSignal; progress?: (phase: string) => void } = {}) {
   const started = Date.now()
@@ -29,7 +32,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   const mcp = await connectReadTools(process.env.MCP_READ_CONNECTIONS, preparation)
   const prepareMs = Date.now() - started
   const trace = modelTrace(started, options.signal)
-  const models = { research: process.env.SPEC_PLAN_RESEARCH_MODEL || 'anthropic/claude-opus-5.5', planning: process.env.SPEC_PLAN_MODEL || 'openai/gpt-6-sol' }
+  const models = { research: process.env.SPEC_PLAN_RESEARCH_MODEL || 'anthropic/claude-opus-5.5', planning: process.env.SPEC_PLAN_MODEL || 'openai/gpt-6.1-sol' }
   const uiRequired = input.uiRequired ?? /\b(?:UI|screen|page|card|button|mobile|component|navigation)\b/i.test(spec)
   const context = `BUSINESS SPEC:\n${spec}\n\nREQUIRED GUIDELINES:\n${guidelines}\n\nREPOSITORY INSTRUCTIONS:\n${repo.instructions}\n\n${repo.packet(spec)}`
   let plan: Plan | null = null
@@ -41,7 +44,10 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
     research = await trace.invoke({ phase: 'research', model: models.research, prompt }, async (signal, hooks) => {
       let submitted: Research | undefined
       const tools: ToolSet = { ...repo.tools, ...mcp.tools, submit_research: tool({ description: 'Finish after gathering concrete repository and guideline evidence.', inputSchema: researchSchema, execute: async (value) => { submitted = value; return { accepted: true } } }) }
-      await generateText({ model: gateway(models.research), system, prompt, tools, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', stopWhen: [stepCountIs(7), hasToolCall('submit_research')], prepareStep: ({ stepNumber }) => stepNumber >= 6 ? { toolChoice: { type: 'tool' as const, toolName: 'submit_research' } } : stepNumber === 0 ? { activeTools: Object.keys(tools).filter((name) => name !== 'submit_research'), toolChoice: 'required' as const } : {}, ...hooks })
+      const result = await generateText({ model: gateway(models.research), system, prompt, tools, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', stopWhen: [stepCountIs(RESEARCH_STEPS), hasToolCall('submit_research')], prepareStep: ({ stepNumber }) => stepNumber >= RESEARCH_STEPS - 1 ? { toolChoice: { type: 'tool' as const, toolName: 'submit_research' } } : stepNumber === 0 ? { activeTools: Object.keys(tools).filter((name) => name !== 'submit_research'), toolChoice: 'required' as const } : {}, ...hooks })
+      // Research may stop early with prose. Its structured submission is the proof
+      // that it finished, so give it one turn that can only submit what it found.
+      if (!submitted) await generateText({ model: gateway(models.research), system, messages: [{ role: 'user', content: prompt }, ...(result?.responseMessages ?? []), { role: 'user', content: 'Submit the evidence you gathered with submit_research now. Cite only files and lines you actually read; list anything you did not read as a gap.' }], tools: { submit_research: tools.submit_research! }, toolChoice: { type: 'tool', toolName: 'submit_research' }, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', ...hooks })
       if (!submitted) throw new Error('Research did not submit evidence within its turn budget')
       return researchSchema.parse(submitted)
     })
@@ -57,7 +63,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
     if (!research) problems.push('Research unavailable')
     if (!plan) problems.push('No structured plan produced')
     if (research?.gaps.length) problems.push(...research.gaps.map((gap) => `Research gap: ${gap}`))
-    if (plan) { problems.push(...validatePlan(plan, spec, repo.files), ...plan.gaps.map((gap) => `Plan gap: ${gap}`)) }
+    if (plan) { problems.push(...validatePlan(plan, spec, repo.files, repo.tracked), ...plan.gaps.map((gap) => `Plan gap: ${gap}`)) }
     if (uiRequired && !['list_components', 'get_component'].every((name) => mcp.reads.some((read) => read.ok && read.tool.endsWith(`__${name}`)))) problems.push('UI planning requires successful list_components and get_component MCP reads')
     if (options.signal?.aborted) problems.push('Planning cancelled')
     const requiredRules = [...new Set([...guidelines.matchAll(/^(?:#{1,6}\s+|\*\*|[-*]\s+)?([A-Z]{2,10}-\d+)\b/gm)].map((match) => match[1]!))]

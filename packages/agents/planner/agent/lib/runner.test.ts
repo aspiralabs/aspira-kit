@@ -5,16 +5,22 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import type { ToolSet } from 'ai'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 
-const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, close: vi.fn() }))
+const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, close: vi.fn() }))
 vi.mock('@aspiralabs/agent-common/lib/repository', () => ({ repository: async () => ({ files, instructions: '', packet: () => 'src/items.ts:1: existing save', gaps: [], commit: 'abc', dirty: false, tools: { read_files: {} } }), allowedPath: (path: string) => !path.includes('.env') }))
 vi.mock('@aspiralabs/agent-common/lib/mcp', () => ({ connectReadTools: async () => ({ tools: {}, reads: [], sources: [], close: state.close }) }))
 vi.mock('ai', async (original) => {
   const actual = await original<typeof import('ai')>()
-  return { ...actual, gateway: vi.fn(() => ({})), generateText: vi.fn(async (args: { tools?: ToolSet; output?: unknown; onStepStart: (value: { stepNumber: number; messages: unknown[] }) => void; onStepEnd: (value: { usage: { inputTokens: number; outputTokens: number }; providerMetadata: unknown; finishReason: string; text: string; toolCalls: unknown[]; toolResults: unknown[] }) => void }) => {
+  return { ...actual, gateway: vi.fn(() => ({})), generateText: vi.fn(async (args: { tools?: ToolSet; toolChoice?: unknown; messages?: unknown[]; output?: unknown; onStepStart: (value: { stepNumber: number; messages: unknown[] }) => void; onStepEnd: (value: { usage: { inputTokens: number; outputTokens: number }; providerMetadata: unknown; finishReason: string; text: string; toolCalls: unknown[]; toolResults: unknown[] }) => void }) => {
     args.onStepStart({ stepNumber: 0, messages: [] })
     if (state.failResearch && args.tools) throw new Error('Research provider unavailable')
     args.onStepEnd({ usage: { inputTokens: 10, outputTokens: 5 }, providerMetadata: { gateway: { cost: '0.10' } }, finishReason: 'stop', text: 'mock output', toolCalls: [], toolResults: [] })
     if (args.tools) {
+      // Research that ends with prose hands in nothing unless it is given a submit-only turn.
+      if (state.proseResearch && !args.toolChoice) {
+        const prose = { role: 'assistant', content: 'Here is my plan as prose.' }
+        // response.messages holds only the last step; responseMessages holds every step.
+        return { response: { messages: [prose] }, responseMessages: [{ role: 'assistant', content: 'read src/items.ts' }, { role: 'tool', content: 'EARLIER READ' }, prose] }
+      }
       await args.tools.submit_research!.execute!({ facts: ['src/items.ts:1 establishes save'], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] }, { toolCallId: 'test', messages: [], context: {} })
       return {}
     }
@@ -25,7 +31,7 @@ vi.mock('ai', async (original) => {
 })
 import { runPlan } from './runner.ts'
 
-beforeEach(() => { state.failResearch = false; state.needsAuthor = false; state.close.mockClear() })
+beforeEach(() => { state.failResearch = false; state.needsAuthor = false; state.proseResearch = false; state.close.mockClear() })
 async function input() {
   const dir = await mkdtemp(join(tmpdir(), 'planner-test-'))
   const specPath = join(dir, 'spec.reviewed.md')
@@ -63,6 +69,18 @@ it('does not plan after failed research and exports its trace', async () => {
   expect(result.problems).toContain('research: Research provider unavailable')
   expect(await readdir(result.dir)).not.toContain('plan.reviewed.md')
   expect(await readFile(join(result.dir, 'trace/calls.json'), 'utf8')).toContain('Research provider unavailable')
+})
+
+it('gives research that stops without submitting one submit-only turn before failing', async () => {
+  state.proseResearch = true
+  const { generateText } = await import('ai')
+  const result = await runPlan(await input())
+  expect(result.status).toBe('ready')
+  const finalTurn = vi.mocked(generateText).mock.calls.map(([args]) => args as { tools?: ToolSet; toolChoice?: unknown; messages?: unknown[] }).find((args) => args.toolChoice)
+  expect(Object.keys(finalTurn!.tools!)).toEqual(['submit_research'])
+  // The submit-only turn sees every earlier step, including tool results, not just the final prose.
+  expect(JSON.stringify(finalTurn!.messages)).toContain('EARLIER READ')
+  expect(finalTurn!.toolChoice).toEqual({ type: 'tool', toolName: 'submit_research' })
 })
 
 it('requires complete guidelines and rejects unresolved reviewed specs', async () => {

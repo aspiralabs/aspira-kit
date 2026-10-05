@@ -28,6 +28,7 @@ it('runs the pipeline one stage at a time with the session as the model, then ex
   expect(prompt).toContain('Research and raise the initial findings')
   expect(prompt).toContain('# Original')
   expect(prompt).toContain('"findings"')
+  expect(prompt).not.toContain('notion-fetch')
   await writeFile(research.tasks[0]!.output, JSON.stringify(review([{ title: 'Missing contract', evidence: ['spec: Original'], fix: 'Add intent and acceptance' }])))
 
   const specialists = await runLocal(input)
@@ -35,6 +36,7 @@ it('runs the pipeline one stage at a time with the session as the model, then ex
   expect(specialists.stage).toBe('specialists')
   expect(specialists.tasks.map((t) => t.phase)).toEqual(['security', 'architecture', 'data', 'behavior', 'ui', 'acceptance'])
   expect(await readFile(specialists.tasks[0]!.prompt, 'utf8')).toContain('Missing contract')
+  for (const task of specialists.tasks) expect(await readFile(task.prompt, 'utf8')).toContain('notion-fetch, read-only')
   await writeFile(specialists.tasks[0]!.output, '{"facts": "not a list"}')
   for (const task of specialists.tasks.slice(1)) await writeFile(task.output, JSON.stringify(review()))
 

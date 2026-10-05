@@ -9,6 +9,7 @@ Aspira Labs agents, built on [eve](https://vercel.com/eve). One package per agen
 
 | Package | Agent | Spec | State |
 | --- | --- | --- | --- |
+| `packages/agents/spec-writer` | `spec-writer` | `specs/agents-spec-writer.md` | idea to spec: explore, draft, then the official review |
 | `packages/agents/spec-reviewer` | `spec-reviewer` | `specs/agents-spec-reviewer.md` | official three-phase reviewer |
 | `packages/agents/planner` | `planner` | `specs/agents-planner.md` | implementation and test planning |
 | `packages/agents/pr-reviewer` | `pr-reviewer` | `specs/agents-pr-reviewer.md` | working |

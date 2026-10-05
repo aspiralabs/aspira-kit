@@ -10,7 +10,7 @@ Source: pstack's ideas that fit our narrower, typed pipeline. Declined from the 
 
 ## Decided, not yet done
 
-- **spec-reviewer: reconciliation on Opus.** The six specialists run on GPT-6 Sol and are reconciled by Sol, so the filter shares the specialists' blind spots. Move the reconciliation phase to Opus 5.5. One config change, no new cost.
+- **spec-reviewer: reconciliation on Opus.** The six specialists run on GPT-6.1 Sol and are reconciled by Sol, so the filter shares the specialists' blind spots. Move the reconciliation phase to Opus 5.5. One config change, no new cost.
 
 ## spec-reviewer
 

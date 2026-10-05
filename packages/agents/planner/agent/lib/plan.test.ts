@@ -41,3 +41,31 @@ it('rejects unsafe paths, nonexistent targets, create collisions and fabricated 
   const evidence = validPlan(); evidence.tasks[1]!.changes[0]!.evidence = ['src/items.ts:999']
   expect(validatePlan(evidence, spec, files)).toContain('No valid source evidence: P2/src/items.ts')
 })
+
+it('accepts line-range citations that stay inside the file and rejects ranges that do not', () => {
+  const lines = files.get('src/items.ts')!.split('\n').length
+  const range = validPlan(); range.tasks[1]!.changes[0]!.evidence = [`src/items.ts:1-${lines}`]
+  expect(validatePlan(range, spec, files)).toEqual([])
+  for (const citation of [`src/items.ts:1-${lines + 1}`, 'src/items.ts:3-2', 'src/items.ts:0-1']) {
+    const bad = validPlan(); bad.tasks[1]!.changes[0]!.evidence = [citation]
+    expect(validatePlan(bad, spec, files)).toContain('No valid source evidence: P2/src/items.ts')
+  }
+})
+
+it('lets a plan change tracked lockfiles and .npmrc that are not indexed, but never secrets, and names directory targets', () => {
+  const tracked = new Set([...files.keys(), 'pnpm-lock.yaml', 'app/.npmrc', 'app/pnpm-lock.yaml'])
+  const plan = validPlan()
+  plan.tasks[1]!.changes.push(
+    { operation: 'modify', path: 'pnpm-lock.yaml', symbols: ['lockfile'], instructions: 'Regenerate with pnpm install.', evidence: ['package.json:1'] },
+    { operation: 'delete', path: 'app/pnpm-lock.yaml', symbols: ['lockfile'], instructions: 'Replaced by the root lockfile.', evidence: ['package.json:1'] },
+    { operation: 'create', path: '.npmrc', symbols: ['registry'], instructions: 'Registry line only, never a token.', evidence: ['package.json:1'] },
+  )
+  expect(validatePlan(plan, spec, files, tracked)).toEqual([])
+  expect(validatePlan(plan, spec, files)).toContain('Missing modify target: pnpm-lock.yaml')
+  for (const path of ['.env', 'config/credentials.json', 'id_rsa', 'node_modules/pkg/pnpm-lock.yaml', 'dist/.npmrc']) {
+    const unsafe = validPlan(); unsafe.tasks[1]!.changes[0]!.path = path
+    expect(validatePlan(unsafe, spec, files, tracked)).toContain(`Unsafe path: ${path}`)
+  }
+  const directory = validPlan(); directory.tasks[1]!.changes[0]!.path = 'src'
+  expect(validatePlan(directory, spec, files, tracked)).toContain('Target is a directory, not a file; name each file to modify: src')
+})

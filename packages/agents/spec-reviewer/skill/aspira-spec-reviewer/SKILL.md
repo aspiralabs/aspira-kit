@@ -13,7 +13,7 @@ The spec path may be an `@` file mention (`@specs/cart.md`); the leading `@` is 
 | | Default | `--local` |
 | --- | --- | --- |
 | Where the model work runs | `spec-reviewer`, a separate process | subagents of this Claude Code session |
-| Models | Opus 5.5 research, GPT-6 Sol specialists and reconciliation | this session's model, for every phase |
+| Models | Opus 5.5 research, GPT-6.1 Sol specialists and reconciliation | this session's model, for every phase |
 | Independence | a second vendor, no session context | fresh subagent contexts, same vendor and session |
 | Cost | Vercel AI Gateway, itemized in `run-analysis.md` | this session's usage, not itemized |
 | Needs | Node 24, pnpm, screen, the agents' `.env.local`; Docker when loading Notion | Node 24, pnpm, the Notion MCP (or `--guidelines`) |
@@ -45,6 +45,8 @@ The launcher's `local` step replays the agent's pipeline with this session as th
 3. **Specialists.** Run `local` again. It prints `stage: "specialists"` and six tasks. Launch all six subagents **in one message**, one per task, with the same message shape. The `ui` subagent needs the `aspiralabs-ui` MCP; its prompt says what to do when the MCP is missing.
 4. **Reconciliation.** Run `local` again. It prints `stage: "reconciliation"` and the `synthesis` task. Launch one subagent the same way.
 5. **Report.** Run `local` a last time. It prints the finished report: `status`, `dir`, `findings`, `problems` and `authorDecisions`.
+
+The snapshot only holds the two required pages; Agent Instructions routes to topic pages (Approved Technologies, Infrastructure/CI-CD and others). The specialist subagents read the pages that apply with the Notion MCP, read-only, and cite their rules, as the agent's Notion connection does. Without the Notion MCP in this session they record those pages as gaps, which blocks `ready`.
 
 A task that comes back with an `error` had an output that failed its schema. Send that error to the same subagent (or a new one with the same message plus the error) once. If it fails again, or a subagent cannot finish, run `local ... --finish`. That exports the report with the missing phases recorded as failures, so the status is `incomplete`. The work directory, `<output>.local/`, holds the prompts and outputs between steps and is removed once the report is written; every prompt and output is kept in `trace/calls.json`. If the spec, guidelines or repository change mid-review, `local` refuses to continue; delete the work directory to start again.
 

@@ -102,7 +102,7 @@ async function loadGithubPr(sandbox: SandboxSession, parsed: Extract<ReturnType<
   const { patch: capped, truncated } = truncatePatch(rawPatch)
   if (truncated) await sandbox.writeTextFile({ path: FILES.patch, content: capped })
 
-  return finish(sandbox, meta, capped, changed, truncated, REPO_PATH)
+  return { ...(await finish(sandbox, meta, capped, changed, truncated, REPO_PATH)), github: { owner: parsed.owner, name: parsed.name, number: parsed.number } }
 }
 
 async function loadLocal(sandbox: SandboxSession, path: string, base: string | undefined, branch: string | undefined) {
@@ -274,6 +274,8 @@ async function finish(
     title: meta.title,
     repoPath,
     repoDir: local?.repoDir ?? null,
+    // Set only for a GitHub PR, where comment-on-pr can post the review back.
+    github: null as { owner: string; name: string; number: number } | null,
     branch: local?.branch ?? meta.headRef,
     files: FILES,
     stats,

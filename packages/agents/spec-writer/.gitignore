@@ -1,0 +1,5 @@
+.eve/
+.output/
+spec.written/
+spec.written.lock/
+spec.written.local/
