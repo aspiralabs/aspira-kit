@@ -94,6 +94,9 @@ export function reviewModels(env: NodeJS.ProcessEnv = process.env): ReviewModels
   }
 }
 
+/** Tool rounds a specialist gets before it must submit. */
+export const SPECIALIST_MAX_STEPS = 6
+
 /** The review phases: structured research and reconciliation, tool-using specialists. */
 export function reviewModelCall(session: ModelSession, models: ReviewModels, tools: ToolSet, componentTool?: string): Call {
   return async ({ phase, prompt, signal }) => {
@@ -101,6 +104,6 @@ export function reviewModelCall(session: ModelSession, models: ReviewModels, too
     // exploration is parallel specialists: no fragile forced-tool loop on this model.
     if (phase === 'research') return session.structured({ phase, model: models.frontier, system: systemPrompt, prompt, schema: reviewSchema, signal, reasoning: 'low', maxOutputTokens: 8_000 })
     if (phase === 'synthesis') return session.structured({ phase, model: models.reconciliation, system: systemPrompt, prompt, schema: synthesisSchema, signal, reasoning: 'medium', maxOutputTokens: 20_000 })
-    return session.toolLoop({ phase, model: models.specialist, system: systemPrompt, prompt, schema: reviewSchema, tools, signal, maxSteps: 6, maxOutputTokens: 5_000, submitName: 'submit_review', firstTool: phase === 'ui' ? componentTool : undefined })
+    return session.toolLoop({ phase, model: models.specialist, system: systemPrompt, prompt, schema: reviewSchema, tools, signal, maxSteps: SPECIALIST_MAX_STEPS, maxOutputTokens: 5_000, submitName: 'submit_review', firstTool: phase === 'ui' ? componentTool : undefined })
   }
 }

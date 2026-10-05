@@ -26,7 +26,7 @@ it('routes the skill to the official CLI or Notion-loading eve entry point with 
   const capture = join(dir, 'arguments.json')
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CAPTURE: capture, SPEC_REVIEWER_AGENT_DIR: '', SPEC_REVIEW_AGENT_DIR: '', ASPIRA_KIT: '', AI_GATEWAY_API_KEY: 'test' }
   const direct = await exec('bash', [launcher, 'start', spec, '--guidelines', guidelines], { cwd: repo, env })
-  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['-C', root, 'review', spec, repo, guidelines, join(repo, 'spec.reviewed')])
+  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['-C', root, 'run', 'review', spec, repo, guidelines, join(repo, 'spec.reviewed')])
   const run = direct.stdout.match(/^run: (.+)$/m)![1]!
   const status = await exec('bash', [launcher, 'status', run], { cwd: repo, env })
   expect(status.stdout).toContain('spec.reviewed/spec.reviewed.md')
@@ -40,7 +40,7 @@ it('routes the skill to the official CLI or Notion-loading eve entry point with 
   await expect(exec('bash', [launcher, 'start', spec, '--rounds', '2'], { cwd: repo, env })).rejects.toThrow('debate rounds were removed')
 })
 
-it('steps a --local review synchronously, with the session-written Notion snapshot as the default guidelines', async () => {
+it('steps a --local review synchronously; the driver, not the launcher, decides whether the guidelines are there', async () => {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'spec-review-local-skill-')))
   const repo = join(dir, 'repo with spaces')
   const bin = join(dir, 'bin')
@@ -53,12 +53,29 @@ it('steps a --local review synchronously, with the session-written Notion snapsh
   const capture = join(dir, 'arguments.json')
   // No screen and no gateway key: a local step makes no model calls.
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CAPTURE: capture, SPEC_REVIEWER_AGENT_DIR: '', SPEC_REVIEW_AGENT_DIR: '', ASPIRA_KIT: '', AI_GATEWAY_API_KEY: '' }
-  await expect(exec('bash', [launcher, 'local', `@${spec}`], { cwd: repo, env })).rejects.toThrow('spec.reviewed.local/REQUIRED.md')
-  const snapshot = join(repo, 'spec.reviewed.local/REQUIRED.md')
-  await mkdir(dirname(snapshot))
-  await writeFile(snapshot, 'REV-001 Check the spec')
   await exec('bash', [launcher, 'local', `@${spec}`], { cwd: repo, env })
-  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['-C', root, '--silent', 'review:local', spec, repo, snapshot, join(repo, 'spec.reviewed')])
-  await exec('bash', [launcher, 'local', spec, '--finish'], { cwd: repo, env })
-  expect(JSON.parse(await readFile(capture, 'utf8')).at(-1)).toBe('--finish')
+  // `run` is explicit: pnpm 12 does not resolve a bare script name after --silent.
+  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['-C', root, '--silent', 'run', 'review:local', spec, repo, '--output', join(repo, 'spec.reviewed')])
+  const snapshot = join(repo, 'required rules.md')
+  await writeFile(snapshot, 'REV-001 Check the spec')
+  await exec('bash', [launcher, 'local', spec, '--guidelines', snapshot, '--finish'], { cwd: repo, env })
+  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['-C', root, '--silent', 'run', 'review:local', spec, repo, '--output', join(repo, 'spec.reviewed'), '--guidelines', snapshot, '--finish'])
 })
+
+it('prints the knowledge stage on the first real local call, before anything starts', async () => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'spec-review-local-real-')))
+  const repo = join(dir, 'repo')
+  await mkdir(repo)
+  await exec('git', ['init', repo])
+  const spec = join(repo, 'spec.md')
+  await writeFile(spec, '# Test spec')
+  const output = join(dir, 'out')
+  const env = { ...process.env, SPEC_REVIEWER_AGENT_DIR: '', SPEC_REVIEW_AGENT_DIR: '', ASPIRA_KIT: '', KNOWLEDGE_REQUIRED: 'Agent Instructions, Review Verification' }
+  const { stdout } = await exec('bash', [launcher, 'local', spec, '--output', output], { cwd: repo, env })
+  const stage = JSON.parse(stdout) as { stage: string; orchestrator: string; knowledge: { dir: string; required: string[] } }
+  expect(stage.stage).toBe('knowledge')
+  expect(stage.orchestrator).toBe(join(root, 'agent', 'instructions.md'))
+  expect(stage.knowledge.dir).toBe(join(`${output}.local`, 'knowledge'))
+  expect(stage.knowledge.required).toEqual(['Agent Instructions', 'Review Verification'])
+  await expect(readFile(join(`${output}.local`, 'state.json'), 'utf8')).rejects.toThrow()
+}, 30_000)

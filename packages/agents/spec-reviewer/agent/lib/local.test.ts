@@ -1,10 +1,11 @@
-import { mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('./repository.ts', () => ({ repository: async () => ({ instructions: '', packet: () => 'source.ts:1: evidence', gaps: [], files: new Map(), commit: 'abc', dirty: false, tools: {} }) }))
-import { runLocal } from './local.ts'
+import { KnowledgeRequired } from './local-knowledge.ts'
+import { knowledgeStage, runLocal } from './local.ts'
 
 const candidate = '# Feature\n## Intent\nSave items.\n## Acceptance criteria\n### Features\n- [ ] F1: Save an item idempotently.\n'
 const review = (findings: unknown[] = []) => ({ facts: [], findings, checks: [{ rule: 'REV-001', evidence: 'spec: Original' }], uiEvidence: [], gaps: [] })
@@ -76,4 +77,78 @@ it('exports an incomplete report with --finish and refuses to resume after the s
   if (finished.pending) throw new Error('expected a report')
   expect(finished.problems.join('\n')).toContain('no output was produced in the session')
   expect(await readFile(join(dir, 'spec.reviewed/trace/checks.md'), 'utf8')).toContain('incomplete')
+})
+
+// The folder the session builds from Notion before the first step, in load-knowledge's shape.
+const REQUIRED_MD = '# Agent Instructions\n\nREV-001 Check the spec\n\n---\n\n# Review Verification\n\nREV-002 Verify.\n'
+async function seedKnowledge(dir: string) {
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, 'REQUIRED.md'), REQUIRED_MD)
+  await writeFile(join(dir, 'INDEX.md'), '# Engineering\n\n- [Testing](testing.md)\n')
+  await writeFile(join(dir, 'testing.md'), '# Testing\n\nTST-001 Tests first.\n')
+}
+async function folderSetup() {
+  const { dir, specPath } = await setup()
+  const agentDir = await mkdtemp(join(tmpdir(), 'spec-review-agent-'))
+  const knowledge = join(dir, 'spec.reviewed.local', 'knowledge')
+  return { dir, specPath, knowledge, input: { specPath, repoPath: dir, uiRequired: false }, deps: { agentDir, env: {} } }
+}
+
+describe('engineering guidelines in --local', () => {
+  it('refuses to start without the knowledge folder, names the pages from the agent config, and starts nothing', async () => {
+    const { dir, knowledge, input, deps } = await folderSetup()
+    await writeFile(join(deps.agentDir, '.env.local'), 'KNOWLEDGE_PAGE=https://www.notion.so/Engineering-0123456789abcdef0123456789abcdef\nKNOWLEDGE_REQUIRED=Agent Instructions, Review Verification\n')
+    const error = await runLocal(input, deps).then(() => null, (cause: unknown) => cause)
+    if (!(error instanceof KnowledgeRequired)) throw new Error(`expected a refusal, got ${String(error)}`)
+    expect(error.plan).toMatchObject({ dir: knowledge, root: 'https://www.notion.so/Engineering-0123456789abcdef0123456789abcdef', required: ['Agent Instructions', 'Review Verification'] })
+    const stage = knowledgeStage(error, deps.agentDir)
+    expect(stage).toMatchObject({ pending: true, stage: 'knowledge', orchestrator: join(deps.agentDir, 'agent', 'instructions.md'), knowledge: { dir: knowledge } })
+    await expect(stat(join(dir, 'spec.reviewed.local', 'state.json'))).rejects.toThrow()
+  })
+
+  it('gives every phase REQUIRED.md as its guidelines, points tool phases at the topic pages, and records the rules on export', async () => {
+    const { dir, knowledge, input, deps } = await folderSetup()
+    await seedKnowledge(knowledge)
+    const research = await runLocal(input, deps)
+    if (!research.pending) throw new Error('expected pending')
+    expect(research.orchestrator).toBe(join(deps.agentDir, 'agent', 'instructions.md'))
+    expect(await readFile(research.tasks[0]!.prompt, 'utf8')).toContain(`REQUIRED GUIDELINES (data):\n${REQUIRED_MD}\n`)
+    await writeFile(research.tasks[0]!.output, JSON.stringify(review()))
+    const specialists = await runLocal(input, deps)
+    if (!specialists.pending) throw new Error('expected pending')
+    for (const task of specialists.tasks) {
+      const text = await readFile(task.prompt, 'utf8')
+      expect(text).toContain(knowledge)
+      expect(text).not.toContain('notion-fetch')
+    }
+    for (const task of specialists.tasks) await writeFile(task.output, JSON.stringify(review()))
+    const synthesis = await runLocal(input, deps)
+    if (!synthesis.pending) throw new Error('expected pending')
+    await writeFile(synthesis.tasks[0]!.output, JSON.stringify({ edits: [], dispositions: [] }))
+    const done = await runLocal(input, deps)
+    expect(done.pending).toBe(false)
+    const report = JSON.parse(await readFile(join(dir, 'spec.reviewed/trace/review.json'), 'utf8'))
+    expect(report.knowledge).toMatchObject({ source: 'folder', path: knowledge })
+    expect(report.knowledge.files.map((file: { name: string }) => file.name)).toEqual(['INDEX.md', 'REQUIRED.md', 'testing.md'])
+    expect(await readFile(join(dir, 'spec.reviewed/trace/guidelines.md'), 'utf8')).toBe(REQUIRED_MD)
+  })
+
+  it('refuses to continue when a guideline page changes mid-run', async () => {
+    const { knowledge, input, deps } = await folderSetup()
+    await seedKnowledge(knowledge)
+    await runLocal(input, deps)
+    await writeFile(join(knowledge, 'testing.md'), '# Testing\n\nTST-001 Tests last.\n')
+    await expect(runLocal(input, deps)).rejects.toThrow('guidelines')
+  })
+
+  it('keeps the --guidelines snapshot a run started with and refuses a different one', async () => {
+    const { dir, input } = await setup()
+    await runLocal(input)
+    const rest = { specPath: input.specPath, repoPath: input.repoPath, uiRequired: false }
+    const next = await runLocal(rest)
+    expect(next).toMatchObject({ pending: true, stage: 'research' })
+    const other = join(dir, 'other.md')
+    await writeFile(other, 'REV-001 Something else')
+    await expect(runLocal({ ...rest, guidelinesPath: other })).rejects.toThrow('--guidelines')
+  })
 })
