@@ -181,31 +181,35 @@ async function gitRepo(options: { knowledge?: boolean } = {}) {
 
 const FINDINGS_MD = '# Findings: test\n\nTotals: 0 critical · 1 high · 0 medium · 0 low · 0 info\n\n## High\n\n### [AVA1.1] Unchecked input\n- **Location:** `a.ts:1`\n'
 const REVIEW_MD = '# Review: test\n\n## What this change does\nChanges a.\n'
+const CHECKED_REVIEW_MD = `${REVIEW_MD}\nChecked against the findings.\n`
 
-// What a subagent does: write the files its prompt names, then its JSON result.
-async function answer(task: LocalTask, workDir: string, options: { agreeAt?: number } = {}) {
+// What a subagent does: write the files its prompt names, then its JSON result. With handBack, a
+// document turn returns its document in the result instead, and Nova's check rewrites the review.
+type AnswerOptions = { agreeAt?: number; handBack?: boolean }
+async function answer(task: LocalTask, workDir: string, options: AnswerOptions = {}) {
   const agreeAt = options.agreeAt ?? 1
   const round = Number(task.id.match(/^round-(\d+)-/)?.[1] ?? 0)
   const write = (path: string, text: string) => mkdir(join(path, '..'), { recursive: true }).then(() => writeFile(path, text))
+  const leave = async (path: string, text: string) => (options.handBack === true ? { document: text } : (await write(path, text), {}))
   let output: unknown
   if (round > 0) {
     await write(join(workDir, 'review', `round-${round}`, `${task.agent}.md`), `## Round ${round} — ${task.agent}\n\nNone.\n`)
     output = task.agent === 'quinn' ? verify(round >= agreeAt) : turn(round >= agreeAt)
   } else if (task.id === 'findings') {
-    await write(join(workDir, 'findings.md'), FINDINGS_MD)
-    output = findingsOut(join(workDir, 'findings.md'), 1)
+    output = { ...findingsOut(join(workDir, 'findings.md'), 1), ...(await leave(join(workDir, 'findings.md'), FINDINGS_MD)) }
   } else if (task.id === 'review') {
-    await write(join(workDir, 'review.md'), REVIEW_MD)
-    output = doc(join(workDir, 'review.md'))
+    output = { ...doc(join(workDir, 'review.md')), ...(await leave(join(workDir, 'review.md'), REVIEW_MD)) }
   } else if (task.id === 'check-findings') {
     output = { ...findingsOut(join(workDir, 'findings.md'), 1), changed: false }
+  } else if (options.handBack === true) {
+    output = { ...doc(join(workDir, 'review.md')), document: CHECKED_REVIEW_MD }
   } else {
     output = { ...doc(join(workDir, 'review.md')), changed: false }
   }
   await writeFile(task.output, JSON.stringify(output))
 }
 
-async function complete(input: LocalInput, deps: LocalDeps = {}, options: { agreeAt?: number } = {}) {
+async function complete(input: LocalInput, deps: LocalDeps = {}, options: AnswerOptions = {}) {
   for (let step = 0; step < 40; step += 1) {
     const result = await runLocal(input, deps)
     if (!result.pending) return result
@@ -296,6 +300,34 @@ describe('runLocal, local repository', () => {
     // As the orchestrator, the session reports by the agent's own instructions, read at export.
     expect(done.orchestrator.text).toBe(await readFile(join(PACKAGE_DIR, 'agent', 'instructions.md'), 'utf8'))
     await expect(stat(workDirFor(dir))).rejects.toThrow()
+  })
+
+  it('writes the documents that the writers and checkers hand back, once each and in order', async () => {
+    const { repo } = await gitRepo()
+    let step = pending(await runLocal({ source: repo }))
+    while (step.stage !== 'documents') {
+      for (const task of step.tasks) await answer(task, step.workDir)
+      step = pending(await runLocal({ source: repo }))
+    }
+    // Only the document turns are told to hand the document back, naming the file the driver writes.
+    for (const task of step.tasks) {
+      expect(await readFile(task.prompt, 'utf8')).toContain(`Do not write \`${join(step.workDir, `${task.id}.md`)}\` yourself`)
+    }
+    expect(await readFile(join(step.workDir, 'prompts', 'round-1-ava.md'), 'utf8')).not.toContain('Do not write')
+    for (const task of step.tasks) await answer(task, step.workDir, { handBack: true })
+    const checks = pending(await runLocal({ source: repo }))
+    expect(checks.stage).toBe('checks')
+    expect(await readFile(join(checks.workDir, 'findings.md'), 'utf8')).toBe(FINDINGS_MD)
+    expect(await readFile(join(checks.workDir, 'review.md'), 'utf8')).toBe(REVIEW_MD)
+    expect(await readFile(checks.tasks.find((t) => t.id === 'check-review')!.prompt, 'utf8')).toContain('Do not write')
+    for (const task of checks.tasks) await answer(task, checks.workDir, { handBack: true })
+    const done = finished(await runLocal({ source: repo }))
+    expect(done).toMatchObject({ status: 'complete', verdict: 'block', counts: counts(1) })
+    // Nova's checked review wins over Dex's draft: each document is written once, in stage order.
+    expect(await readFile(join(done.dir, 'review.md'), 'utf8')).toBe(CHECKED_REVIEW_MD)
+    expect(await readFile(join(done.dir, 'findings.md'), 'utf8')).toBe(FINDINGS_MD)
+    const trace = JSON.parse(await readFile(join(done.dir, 'trace', 'calls.json'), 'utf8'))
+    expect(trace.calls.find((c: { id: string }) => c.id === 'check-review').output).not.toHaveProperty('document')
   })
 
   it('reviews a branch that is not checked out from its own committed tree', async () => {
