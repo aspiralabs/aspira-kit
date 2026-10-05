@@ -295,7 +295,7 @@ Read ${FILES.patch}, ${FILES.changed}, and every file under ${ROUNDS_DIR}/ in fu
 
 Shape:
 
-\`# Findings: ${pr.label}\`, then one line with the totals by severity, then \`## Critical\` / \`## High\` / \`## Medium\` / \`## Low\` / \`## Info\` — skip a heading with nothing under it. Under each, one \`### [ID] <one-line title>\` per finding with: location as \`path:line\`, what is wrong, the evidence quoted from the diff, the fix, who raised it, and Quinn's ruling in a few words.
+\`# Findings: ${pr.label}\`, then exactly one totals line in this form: \`Totals: <n> critical · <n> high · <n> medium · <n> low · <n> info\`, then \`## Critical\` / \`## High\` / \`## Medium\` / \`## Low\` / \`## Info\` — skip a heading with nothing under it. Under each, one \`### [ID] <one-line title>\` per finding with: location as \`path:line\`, what is wrong, the evidence quoted from the diff, the fix, who raised it, and Quinn's ruling in a few words.
 
 Rules:
 
