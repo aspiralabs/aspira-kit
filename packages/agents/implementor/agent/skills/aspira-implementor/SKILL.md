@@ -57,7 +57,7 @@ With no `<source>`, use the newest `plan.review/` under `specs/` or `docs/plans/
 Do not clone and build in the session. Launch the `implementor` agent with the launcher beside this file (use its absolute path), then report where it runs:
 
 ```bash
-<skill-dir>/scripts/implement-remote.sh start <owner/name | url> <path-in-repo> [--ref BRANCH] [--pr]
+<skill-dir>/scripts/implementor.sh start <owner/name | url> <path-in-repo> [--ref BRANCH] [--pr]
 ```
 
 It detaches the run and prints a run directory. Check it with `status <run-dir>`, or `wait <run-dir> --max 30` between updates, until it finishes or the human cancels. The wait returns control without stopping the agent. Do not retry a failed or blocked run automatically, since every run costs model time. When it finishes, relay its report (status, branch, commits, feature table, deviations, blockers, pull request link) and do not build anything yourself. If the launch fails, show the error.

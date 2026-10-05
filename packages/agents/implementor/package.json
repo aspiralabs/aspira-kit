@@ -2,12 +2,13 @@
   "name": "@aspiralabs/implementor",
   "version": "0.1.0",
   "private": true,
-  "description": "Runs the /aspira-implementor skill in the cloud: builds a planner plan test-first, in parallel where the plan allows.",
+  "description": "The implementor agent: builds a planner plan test-first, in parallel where the plan allows. Its skill launches it, or with --local runs its procedure in a Claude Code session.",
   "type": "module",
   "scripts": {
     "dev": "eve dev",
     "build": "eve info",
     "info": "eve info",
+    "implement:local": "node --experimental-strip-types scripts/local.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint agent scripts"
