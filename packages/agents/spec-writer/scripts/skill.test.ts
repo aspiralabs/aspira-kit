@@ -30,7 +30,7 @@ it('routes the skill to the official CLI or the Notion-loading eve entry point w
   await writeFile(join(bin, 'screen'), '#!/bin/bash\nexec "$3"\n', { mode: 0o755 })
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CAPTURE: capture, SPEC_WRITER_AGENT_DIR: '', ASPIRA_KIT: '', AI_GATEWAY_API_KEY: 'test' }
   const direct = await exec('bash', [launcher, 'start', `@${idea}`, '--guidelines', guidelines], { cwd: repo, env })
-  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['-C', root, 'write', idea, repo, guidelines, join(repo, 'spec.written')])
+  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['-C', root, 'run', 'write', idea, repo, guidelines, join(repo, 'spec.written')])
   const run = direct.stdout.match(/^run: (.+)$/m)![1]!
   const status = await exec('bash', [launcher, 'status', run], { cwd: repo, env })
   expect(status.stdout).toContain('spec.written/spec.md')
@@ -44,18 +44,35 @@ it('routes the skill to the official CLI or the Notion-loading eve entry point w
   await expect(exec('bash', [launcher, 'start', idea, '--finish'], { cwd: repo, env })).rejects.toThrow('--finish only applies to local')
 })
 
-it('steps a --local run synchronously, with the session-written Notion snapshot as the default guidelines', async () => {
+it('steps a --local run synchronously; the driver, not the launcher, decides whether the guidelines are there', async () => {
   const { repo, bin, capture } = await sandbox('spec-writer-local-skill-')
   const idea = join(repo, 'idea.md')
   await writeFile(idea, 'Let people save items.')
   // No screen and no gateway key: a local step makes no model calls.
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CAPTURE: capture, SPEC_WRITER_AGENT_DIR: '', ASPIRA_KIT: '', AI_GATEWAY_API_KEY: '' }
-  await expect(exec('bash', [launcher, 'local', `@${idea}`], { cwd: repo, env })).rejects.toThrow('spec.written.local/REQUIRED.md')
-  const snapshot = join(repo, 'spec.written.local/REQUIRED.md')
-  await mkdir(dirname(snapshot))
-  await writeFile(snapshot, 'REV-001 Check the spec')
   await exec('bash', [launcher, 'local', `@${idea}`], { cwd: repo, env })
-  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['-C', root, '--silent', 'write:local', idea, repo, snapshot, join(repo, 'spec.written')])
-  await exec('bash', [launcher, 'local', idea, '--finish'], { cwd: repo, env })
-  expect(JSON.parse(await readFile(capture, 'utf8')).at(-1)).toBe('--finish')
+  // `run` is explicit: pnpm 12 does not resolve a bare script name after --silent.
+  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['-C', root, '--silent', 'run', 'write:local', idea, repo, '--output', join(repo, 'spec.written')])
+  const snapshot = join(repo, 'required rules.md')
+  await writeFile(snapshot, 'REV-001 Check the spec')
+  await exec('bash', [launcher, 'local', idea, '--guidelines', snapshot, '--finish'], { cwd: repo, env })
+  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['-C', root, '--silent', 'run', 'write:local', idea, repo, '--output', join(repo, 'spec.written'), '--guidelines', snapshot, '--finish'])
 })
+
+it('prints the knowledge stage on the first real local call, before anything starts', async () => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'spec-writer-local-real-')))
+  const repo = join(dir, 'repo')
+  await mkdir(repo)
+  await exec('git', ['init', repo])
+  const idea = join(repo, 'idea.md')
+  await writeFile(idea, 'Let people save items.')
+  const output = join(dir, 'out')
+  const env = { ...process.env, SPEC_WRITER_AGENT_DIR: '', ASPIRA_KIT: '', KNOWLEDGE_REQUIRED: 'Agent Instructions, Review Verification' }
+  const { stdout } = await exec('bash', [launcher, 'local', idea, '--output', output], { cwd: repo, env })
+  const stage = JSON.parse(stdout) as { stage: string; orchestrator: string; knowledge: { dir: string; required: string[] } }
+  expect(stage.stage).toBe('knowledge')
+  expect(stage.orchestrator).toBe(join(root, 'agent', 'instructions.md'))
+  expect(stage.knowledge.dir).toBe(join(`${output}.local`, 'knowledge'))
+  expect(stage.knowledge.required).toEqual(['Agent Instructions', 'Review Verification'])
+  await expect(readFile(join(`${output}.local`, 'state.json'), 'utf8')).rejects.toThrow()
+}, 30_000)

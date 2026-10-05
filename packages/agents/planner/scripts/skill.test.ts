@@ -48,3 +48,38 @@ it('routes the skill to the official CLI or Notion-loading eve entry point with 
   expect(JSON.parse(await readFile(capture, 'utf8')).slice(-3)).toEqual([repo, guidelines, custom])
   await expect(exec('bash', [launcher, 'start', spec, '--rounds', '2'], { cwd: repo, env })).rejects.toThrow('unknown option')
 })
+
+it('steps --local through the agent package without launching the agent', async () => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'planner-skill-local-')))
+  const repo = join(dir, 'repo')
+  const bin = join(dir, 'bin')
+  await mkdir(join(repo, 'spec.reviewed'), { recursive: true })
+  await mkdir(bin)
+  await exec('git', ['init', repo])
+  const spec = join(repo, 'spec.reviewed', 'spec.reviewed.md')
+  const guidelines = join(repo, 'REQUIRED.md')
+  await writeFile(spec, '# Reviewed spec')
+  await writeFile(guidelines, 'Rules')
+  await writeFile(join(bin, 'pnpm'), '#!/usr/bin/env node\nrequire("node:fs").writeFileSync(process.env.CAPTURE, JSON.stringify(process.argv.slice(2)))\nconsole.log("{}")\n', { mode: 0o755 })
+  const capture = join(dir, 'arguments.json')
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CAPTURE: capture, PLANNER_AGENT_DIR: '', SPEC_TO_PLAN_AGENT_DIR: '', ASPIRA_KIT: '' }
+  await exec('bash', [launcher, 'local', spec], { cwd: repo, env })
+  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['-C', root, 'run', 'plan:local', spec, repo, '--output', join(repo, 'plan.review')])
+  const custom = join(dir, 'out')
+  await exec('bash', [launcher, 'local', spec, '--repo', repo, '--output', custom, '--guidelines', guidelines, '--finish'], { cwd: dir, env })
+  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['-C', root, 'run', 'plan:local', spec, repo, '--output', custom, '--guidelines', guidelines, '--finish'])
+  await expect(exec('bash', [launcher, 'local', spec, '--rounds', '2'], { cwd: repo, env })).rejects.toThrow('unknown option')
+})
+
+it('keeps SKILL.md to mechanics: it names agent/instructions.md and copies none of its rules', async () => {
+  const skill = await readFile(join(root, 'skill/aspira-planner/SKILL.md'), 'utf8')
+  const normal = (text: string) => text.toLowerCase().replace(/[`*_]/g, '').replace(/\s+/g, ' ')
+  expect(skill).toContain('agent/instructions.md')
+  const instructions = await readFile(join(root, 'agent/instructions.md'), 'utf8')
+  const { system, researchInstructions, planningInstructions } = await import('../agent/lib/prompts.ts')
+  const sentences = [instructions, system, researchInstructions, planningInstructions].flatMap((text) => text.split(/(?<=[.;])\s+/)).map((sentence) => normal(sentence).replace(/[.;]$/, '').trim()).filter((sentence) => sentence.length >= 25)
+  expect(sentences.length).toBeGreaterThan(20)
+  for (const sentence of sentences) expect(normal(skill), sentence).not.toContain(sentence)
+  // The router's key rules, as fragments a paraphrase would keep.
+  for (const fragment of ['competing plan', 'retries incur', 'automatically retry', 'block planning', 'not ready for implementation', 'cloned by the caller', 'have been executed']) expect(normal(skill), fragment).not.toContain(fragment)
+})
