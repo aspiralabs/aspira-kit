@@ -126,7 +126,9 @@ it('validates outputs against the agent schemas, refuses a mid-run knowledge cha
   const planning = pending(await runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }, { env }))
   expect(planning.stage).toBe('planning')
   const planPrompt = await readFile(planning.tasks[0]!.prompt, 'utf8')
-  expect(planPrompt).toContain(`\n\nRESEARCH:\n${JSON.stringify(evidence)}\n\n${planningInstructions}\n`)
+  expect(planPrompt).toContain(`\n\nRESEARCH:\n${JSON.stringify(evidence)}\n\nGUIDELINE PAGES READ DURING RESEARCH (full text):\nSOURCE ${join(f.knowledge, 'testing-standards.md')}\n`)
+  expect(planPrompt).toContain('TEST-001 Write the failing test first.')
+  expect(planPrompt).toContain(`API-001 Version every route.\n\n\n${planningInstructions}\n`)
 
   const original = await readFile(join(f.knowledge, 'api-design.md'), 'utf8')
   await writeFile(join(f.knowledge, 'api-design.md'), `${original}API-002 Added mid-run.\n`)

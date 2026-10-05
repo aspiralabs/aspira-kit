@@ -15,7 +15,7 @@ import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
 import { z } from 'zod'
 import { fingerprintKnowledge, inspectKnowledge, knowledgeConfig, knowledgeFiles, knowledgeFormats, REQUIRED_NAME, type KnowledgeConfig, type KnowledgeFile, type KnowledgePage } from './local-knowledge.ts'
 import { planSchema, researchSchema, type Plan, type Research } from './plan.ts'
-import { assertPlannableSpec, assessPlan, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, uncoveredRules, type PreparedPlan } from './runner.ts'
+import { assertPlannableSpec, assessPlan, type GuidelinePage, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, uncoveredRules, type PreparedPlan } from './runner.ts'
 
 /** The phases of a --local run, in order. */
 export type Stage = 'knowledge' | 'research' | 'planning'
@@ -216,14 +216,17 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   const research: Research | null = researched.value ?? null
   let plan: Plan | null = null
   if (research !== null) {
-    const planned = await resolvePhase('planning', planningPrompt(context, research, prompts.planningInstructions), planSchema)
+    // The agent hands planning the guideline pages research read; here research reads the
+    // knowledge folder's topic pages, so planning gets all of them.
+    const pages: GuidelinePage[] = await Promise.all(topics.map(async (file) => ({ source: file, markdown: await readFile(file, 'utf8') })))
+    const planned = await resolvePhase('planning', planningPrompt(context, research, prompts.planningInstructions, pages), planSchema)
     if (planned.task !== undefined) return { ...base, stage: 'planning', tasks: [planned.task] }
     plan = planned.value ?? null
     // The agent's correction passes: the same rounds, kept only while each one improves the plan.
     for (let round = 1; plan !== null && round <= REPAIR_ROUNDS; round++) {
       const issues = planIssues({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan })
       if (!issues.length) break
-      const repaired = await resolvePhase(`repair-${round}`, repairPrompt(context, research, plan, issues, prompts.repairInstructions), planSchema)
+      const repaired = await resolvePhase(`repair-${round}`, repairPrompt(context, research, plan, issues, prompts.repairInstructions, pages), planSchema)
       if (repaired.task !== undefined) return { ...base, stage: 'planning', tasks: [repaired.task] }
       if (repaired.value === undefined || planIssues({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan: repaired.value }).length >= issues.length) break
       plan = repaired.value

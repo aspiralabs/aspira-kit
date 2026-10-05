@@ -15,7 +15,7 @@ it('limits live reads to discovered pages, shares concurrent fetches and uses re
   expect(request).toHaveBeenCalledTimes(1)
   expect((await reader.read(`https://www.notion.so/${child}`, signal)).markdown).toBe('Engineering rules')
   expect(request).toHaveBeenCalledTimes(2)
-  for (const [, options] of request.mock.calls) expect(options?.method ?? 'GET').toBe('GET')
+  for (const [, options] of request.mock.calls) expect(options?.method ?? 'GET').toBe('GET') // pages are GETs; only a database query POSTs
 })
 
 it('does not cache failed or truncated evidence', async () => {

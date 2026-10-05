@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises'
-import { basename, dirname, relative, resolve } from 'node:path'
+import { readFile, realpath } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import { generateText, Output, stepCountIs, tool, type ModelMessage, type ToolSet } from 'ai'
 import { gateway } from '@aspiralabs/agent-common/lib/gateway'
 import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
@@ -23,7 +23,7 @@ export type PlanInput = { specPath: string; repoPath: string; guidelinesPath: st
 export type PlanRepository = Awaited<ReturnType<typeof repository>>
 
 /** Inputs read and checked before any model work: the same for the agent and for --local. */
-export type PreparedPlan = { dir: string; spec: string; guidelines: string; repo: PlanRepository; uiRequired: boolean }
+export type PreparedPlan = { dir: string; spec: string; specPath: string; guidelines: string; repo: PlanRepository; uiRequired: boolean }
 
 /** The export directory: an explicit one, else plan.review/ beside the spec (beside spec.reviewed/ for a reviewed spec). */
 export function outputDirFor(input: Pick<PlanInput, 'specPath' | 'outputDir'>): string {
@@ -50,12 +50,26 @@ export async function preparePlan(input: PlanInput, signal: AbortSignal): Promis
   assertPlannableSpec(spec)
   if (!guidelines.trim() || /TRUNCATED by the Notion API/i.test(guidelines)) throw new Error('A complete required-guidelines snapshot is required')
   const uiRequired = input.uiRequired ?? /\b(?:UI|screen|page|card|button|mobile|component|navigation)\b/i.test(spec)
-  return { dir, spec, guidelines, repo, uiRequired }
+  // The spec's path as commits cite it: repository-relative when the spec is inside the repository.
+  const specFromRepo = relative(await realpath(input.repoPath), await realpath(input.specPath))
+  const specPath = specFromRepo.startsWith('..') || isAbsolute(specFromRepo) ? resolve(input.specPath) : specFromRepo
+  return { dir, spec, specPath, guidelines, repo, uiRequired }
 }
 
 /** The evidence block both model phases start from: spec, required guidelines, repository instructions and source packet. */
-export function planContext(prepared: Pick<PreparedPlan, 'spec' | 'guidelines' | 'repo'>): string {
-  return `BUSINESS SPEC:\n${prepared.spec}\n\nREQUIRED GUIDELINES:\n${prepared.guidelines}\n\nREPOSITORY INSTRUCTIONS:\n${prepared.repo.instructions}\n\n${prepared.repo.packet(prepared.spec)}`
+export function planContext(prepared: Pick<PreparedPlan, 'spec' | 'specPath' | 'guidelines' | 'repo'>): string {
+  // A missing root instruction file is a fact the plan can state, not evidence it lacks.
+  const root = ['AGENTS.md', 'CLAUDE.md'].filter((name) => prepared.repo.files.has(name))
+  const rootNote = root.length ? '' : 'The repository has no AGENTS.md or CLAUDE.md at its root.\n'
+  return `BUSINESS SPEC (${prepared.specPath}):\n${prepared.spec}\n\nREQUIRED GUIDELINES:\n${prepared.guidelines}\n\nREPOSITORY INSTRUCTIONS:\n${rootNote}${prepared.repo.instructions}\n\n${prepared.repo.packet(prepared.spec)}`
+}
+
+/** A guideline page research read in full: Notion through the read tool, or a knowledge file in --local. */
+export type GuidelinePage = { source: string; markdown: string }
+
+/** The full text of the guideline pages research read, so planning (which has no tools) sees them too. */
+export function guidelinePagesSection(pages: GuidelinePage[]): string {
+  return pages.length ? `\n\nGUIDELINE PAGES READ DURING RESEARCH (full text):\n${pages.map((page) => `SOURCE ${page.source}\n${page.markdown}`).join('\n\n')}` : ''
 }
 
 /** What research is told when it replies without submitting while turns remain. */
@@ -75,13 +89,13 @@ export function researchPrompt(context: string, instructions: string = researchI
 }
 
 /** The planning phase's user prompt, over the submitted research. */
-export function planningPrompt(context: string, research: Research, instructions: string = planningInstructions): string {
-  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}\n\n${instructions}`
+export function planningPrompt(context: string, research: Research, instructions: string = planningInstructions, pages: GuidelinePage[] = []): string {
+  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}\n\n${instructions}`
 }
 
 /** The planning prompt for a correction pass: the previous plan and the checks it failed. */
-export function repairPrompt(context: string, research: Research, plan: Plan, issues: string[], instructions: string = repairInstructions): string {
-  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}\n\nPREVIOUS PLAN:\n${JSON.stringify(plan)}\n\nPLAN CHECKS:\n${issues.map((issue) => `- ${issue}`).join('\n')}\n\n${instructions}`
+export function repairPrompt(context: string, research: Research, plan: Plan, issues: string[], instructions: string = repairInstructions, pages: GuidelinePage[] = []): string {
+  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}\n\nPREVIOUS PLAN:\n${JSON.stringify(plan)}\n\nPLAN CHECKS:\n${issues.map((issue) => `- ${issue}`).join('\n')}\n\n${instructions}`
 }
 
 /** The rule IDs the required guidelines define. */
@@ -99,6 +113,24 @@ export function uncoveredRules(guidelines: string, checks: { rule: string }[]): 
 export function planIssues(args: { spec: string; guidelines: string; repo: Pick<PlanRepository, 'files' | 'tracked'>; research: Research | null; plan: Plan }): string[] {
   const checks = [...(args.research?.checks ?? []), ...args.plan.checks]
   return [...validatePlan(args.plan, args.spec, args.repo.files, args.repo.tracked), ...uncoveredRules(args.guidelines, checks).map((rule) => `Uncovered guideline: ${rule}`)]
+}
+
+/** The MCP tools, with every successful guideline-page read kept in `pages` (once per page) for planning. */
+export function readingGuidelines(tools: ToolSet, pages: GuidelinePage[]): ToolSet {
+  return Object.fromEntries(Object.entries(tools).map(([name, definition]) => {
+    if (!/read_guideline$/.test(name) || !definition.execute) return [name, definition]
+    const execute = definition.execute
+    return [name, { ...definition, execute: async (input: unknown, options: Parameters<typeof execute>[1]) => {
+      const output = await execute(input, options)
+      const text = (output as { content?: { type?: string; text?: string }[]; isError?: boolean })
+      const body = text.isError ? undefined : text.content?.find((part) => part.type === 'text')?.text
+      try {
+        const page = body === undefined ? undefined : JSON.parse(body) as { source?: string; markdown?: string }
+        if (page?.source && page.markdown && !pages.some((known) => known.source === page.source)) pages.push({ source: page.source, markdown: page.markdown })
+      } catch { /* not a page payload: nothing to keep */ }
+      return output
+    } }]
+  }))
 }
 
 /** True when a UI plan lacks the successful catalog and component-document reads it requires. */
@@ -153,6 +185,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   const context = planContext(prepared)
   let plan: Plan | null = null
   let research: Research | null = null
+  const pages: GuidelinePage[] = []
   try {
     options.progress?.('research')
     const prompt = researchPrompt(context)
@@ -177,7 +210,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         submitted = value
         return { accepted: true }
       }
-      const tools: ToolSet = { ...repo.tools, ...mcp.tools, submit_research: tool({ description: 'Finish after gathering concrete repository and guideline evidence.', inputSchema: researchSchema, execute: submit }) }
+      const tools: ToolSet = { ...repo.tools, ...readingGuidelines(mcp.tools, pages), submit_research: tool({ description: 'Finish after gathering concrete repository and guideline evidence.', inputSchema: researchSchema, execute: submit }) }
       // Research that replies without submitting while turns remain is sent back to keep reading,
       // told how many turns it has left. Only its last turn is forced to submit what it has.
       let messages: ModelMessage[] = [{ role: 'user', content: prompt }]
@@ -197,7 +230,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
     })
     if (research && !options.signal?.aborted) {
       options.progress?.('planning')
-      const prompt = planningPrompt(context, research)
+      const prompt = planningPrompt(context, research, planningInstructions, pages)
       const draftPlan = (phase: string, prompt: string) => trace.invoke({ phase, model: models.planning, prompt }, async (signal, hooks) => {
         const result = await generateText({ model: gateway(models.planning), system, prompt, output: Output.object({ schema: planSchema }), abortSignal: signal, maxRetries: 0, maxOutputTokens: 24_000, reasoning: 'medium', ...hooks })
         return planSchema.parse(result.output)
@@ -209,7 +242,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         const issues = planIssues({ spec, guidelines, repo, research, plan })
         if (!issues.length) break
         options.progress?.(`repair-${round}`)
-        const revised = await draftPlan(`repair-${round}`, repairPrompt(context, research, plan, issues))
+        const revised = await draftPlan(`repair-${round}`, repairPrompt(context, research, plan, issues, repairInstructions, pages))
         if (!revised || planIssues({ spec, guidelines, repo, research, plan: revised }).length >= issues.length) break
         plan = revised
       }
