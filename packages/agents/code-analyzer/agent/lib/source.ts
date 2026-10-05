@@ -1,26 +1,32 @@
 import { execFile } from 'node:child_process'
-import { stat } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { shellQuote } from './executor.ts'
 
 const exec = promisify(execFile)
-export type Source = { kind: 'local'; root: string } | { kind: 'remote'; owner: string; name: string; url: string; label: string }
+/** Where a run's code comes from. A local `root` is the directory that was named (the analyzed project, which may sit below `gitRoot`). */
+export type Source = { kind: 'local'; root: string; gitRoot: string } | { kind: 'remote'; owner: string; name: string; url: string; label: string }
 
 const GITHUB_HTTPS = /^https?:\/\/(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/
 const GITHUB_SSH = /^git@github\.com:([\w.-]+)\/([\w.-]+?)(?:\.git)?$/
 const SHORTHAND = /^([\w.-]+)\/([\w.-]+)$/
 
-/** Classifies what the caller typed. Local paths are resolved to their git root here, on the host. */
+/**
+ * Classifies what the caller typed. A local path is analyzed as itself: a subdirectory of a
+ * repository (one app of several, with no root manifest) is the project, not its git root.
+ * It must still be inside a git repository, which lists its files and backs `search`.
+ */
 export async function parseSource(input: string, cwd = process.cwd()): Promise<Source> {
   const value = input.trim()
   const url = value.match(GITHUB_HTTPS) ?? value.match(GITHUB_SSH)
   if (url) return remote(url[1]!, url[2]!)
   const info = await stat(resolve(cwd, value)).catch(() => null)
   if (info?.isDirectory()) {
-    const root = await exec('git', ['-C', resolve(cwd, value), 'rev-parse', '--show-toplevel']).then((r) => r.stdout.trim()).catch(() => null)
-    if (root === null) throw new Error(`Not a git repository: ${resolve(cwd, value)}`)
-    return { kind: 'local', root }
+    const dir = await realpath(resolve(cwd, value))
+    const gitRoot = await exec('git', ['-C', dir, 'rev-parse', '--show-toplevel']).then((r) => r.stdout.trim()).catch(() => null)
+    if (gitRoot === null) throw new Error(`Not a git repository: ${dir}`)
+    return { kind: 'local', root: dir, gitRoot: await realpath(gitRoot) }
   }
   const short = value.match(SHORTHAND)
   if (short && !value.startsWith('.') && !value.startsWith('/')) return remote(short[1]!, short[2]!)

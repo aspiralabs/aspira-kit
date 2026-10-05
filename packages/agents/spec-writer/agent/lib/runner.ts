@@ -10,9 +10,15 @@ import { draftSchema, exploreSchema, uiPattern, writePipeline, writerSystemPromp
 
 export type RunInput = { ideaPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean }
 
+/** The output directory: the explicit one, else spec.written/ beside the idea. */
+export const reportDirFor = (input: Pick<RunInput, 'ideaPath' | 'outputDir'>) => resolve(input.outputDir ?? resolve(dirname(input.ideaPath), 'spec.written'))
+
+/** Tool rounds the explore phase gets before it must submit. */
+export const EXPLORE_MAX_STEPS = 10
+
 /** Inputs every mode shares: the eve/CLI runner and the in-session --local replay. */
 export async function prepareWrite(input: RunInput, signal: AbortSignal) {
-  const dir = resolve(input.outputDir ?? resolve(dirname(input.ideaPath), 'spec.written'))
+  const dir = reportDirFor(input)
   for (const source of [input.ideaPath, input.guidelinesPath]) {
     const path = relative(dir, resolve(source))
     if (!path || (!path.startsWith('../') && path !== '..')) throw new Error('Output directory must not contain the idea or guidelines')
@@ -84,7 +90,7 @@ export async function runWrite(input: RunInput, options: { signal?: AbortSignal;
   const reviewCall = reviewModelCall(session, models.review, tools, componentTool)
   const call = session.record(async (request) => {
     const { phase, prompt, signal } = request
-    if (phase === 'explore') return session.toolLoop({ phase, model: models.explore, system: writerSystemPrompt, prompt, schema: exploreSchema, tools, signal, maxSteps: 10, maxOutputTokens: 8_000, submitName: 'submit_exploration' })
+    if (phase === 'explore') return session.toolLoop({ phase, model: models.explore, system: writerSystemPrompt, prompt, schema: exploreSchema, tools, signal, maxSteps: EXPLORE_MAX_STEPS, maxOutputTokens: 8_000, submitName: 'submit_exploration' })
     if (phase === 'draft') return session.structured({ phase, model: models.draft, system: writerSystemPrompt, prompt, schema: draftSchema, signal, reasoning: 'medium', maxOutputTokens: 24_000 })
     return reviewCall(request)
   })

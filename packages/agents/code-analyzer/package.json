@@ -10,11 +10,13 @@
     "build": "eve info",
     "info": "eve info",
     "analyze": "node --env-file-if-exists=../.env.local --env-file-if-exists=.env.development.local --experimental-strip-types scripts/static-analysis.ts",
+    "local": "node --env-file-if-exists=../.env.local --env-file-if-exists=.env.development.local --experimental-strip-types scripts/local.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint agent scripts"
   },
   "dependencies": {
+    "@aspiralabs/agent-common": "workspace:*",
     "ai": "^7.0.105",
     "eve": "^0.63.0",
     "zod": "4.5.4"

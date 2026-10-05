@@ -1,20 +1,45 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import type { SandboxSession } from 'eve/sandbox'
 import { detect, type Analyzer, type Detection } from './analyzers.ts'
 import { hostExecutor, sandboxExecutor, shellQuote, type Executor } from './executor.ts'
 import { createFixer } from './fixer.ts'
+import { fixKnowledge, resolveKnowledge, type LoadedKnowledge } from './knowledge.ts'
 import { Ledger } from './ledger.ts'
 import { runLoop, type Fixer, type LoopResult } from './loop.ts'
 import { renderReport } from './report.ts'
 import { branchName, cloneCommand, parseSource, redact, type Source } from './source.ts'
 
-export type RunInput = { source: string; ref?: string; push?: boolean; maxRounds?: number; maxCostUsd?: number; outputDir?: string; fixWarnings?: boolean }
-export type RunDeps = { getSandbox?: () => Promise<SandboxSession>; signal?: AbortSignal; progress?: (message: string) => void; fixer?: Fixer; now?: () => Date }
+export type RunInput = {
+  source: string
+  ref?: string
+  push?: boolean
+  maxRounds?: number
+  maxCostUsd?: number
+  outputDir?: string
+  fixWarnings?: boolean
+  /** A load-knowledge folder (REQUIRED.md, INDEX.md, one file per page) instead of loading from Notion. */
+  knowledge?: string
+  /** A REQUIRED.md snapshot instead of loading from Notion. */
+  guidelines?: string
+}
+export type RunDeps = {
+  getSandbox?: () => Promise<SandboxSession>
+  signal?: AbortSignal
+  progress?: (message: string) => void
+  fixer?: Fixer
+  now?: () => Date
+  /** Env files to read the knowledge config from; null (the default) means the process env alone. */
+  agentDir?: string | null
+  env?: NodeJS.ProcessEnv
+  /** Notion requests, for tests. */
+  fetch?: (url: string, init?: RequestInit) => Promise<Response>
+}
 
 const env = (name: string, fallback: string) => process.env[name] || fallback
-const number = (value: number | undefined, name: string, fallback: number) => value ?? (Number(process.env[name]) || fallback)
+/** A loop setting: the caller's value, else the env var, else the default. Shared with --local so both read the caps the same way. */
+export const setting = (value: number | undefined, name: string, fallback: number): number => value ?? (Number(process.env[name]) || fallback)
 
 /** Probes each analyzer's binary; installs in the sandbox, drops it on the host. */
 export async function prepareToolchain(executor: Executor, analyzers: Analyzer[], progress?: (m: string) => void): Promise<{ ready: Analyzer[]; unavailable: string[]; notes: string[] }> {
@@ -53,11 +78,25 @@ export async function runSetup(executor: Executor, detection: Detection, progres
   return notes
 }
 
-async function repositoryInstructions(executor: Executor): Promise<string> {
+const INSTRUCTION_FILES = ['AGENTS.md', 'CLAUDE.md', 'node_modules/@aspiralabs/config/agent/constraints.md', '.github/copilot-instructions.md']
+
+/**
+ * The repository's own instruction files, as data for the fix prompt. For a subdirectory, the
+ * git root's files come first (labelled with their root-relative path), so analyzing one app
+ * keeps the instructions the whole-repository run gave; at the root the text is unchanged.
+ */
+export async function repositoryInstructions(executor: Executor, gitRoot?: string): Promise<string> {
   const parts: string[] = []
-  for (const path of ['AGENTS.md', 'CLAUDE.md', 'node_modules/@aspiralabs/config/agent/constraints.md', '.github/copilot-instructions.md']) {
+  const above = gitRoot ? relative(gitRoot, executor.root) : ''
+  if (gitRoot && above && !above.startsWith('..')) {
+    for (const path of INSTRUCTION_FILES) {
+      const text = await readFile(join(gitRoot, path), 'utf8').catch(() => null)
+      if (text) parts.push(`SOURCE ${path}\n${text.slice(0, 8_000)}`)
+    }
+  }
+  for (const path of INSTRUCTION_FILES) {
     const text = await executor.readFile(path)
-    if (text) parts.push(`SOURCE ${path}\n${text.slice(0, 8_000)}`)
+    if (text) parts.push(`SOURCE ${above && !above.startsWith('..') ? `${above}/` : ''}${path}\n${text.slice(0, 8_000)}`)
   }
   return parts.join('\n\n')
 }
@@ -66,6 +105,8 @@ export async function runStaticAnalysis(input: RunInput, deps: RunDeps = {}) {
   const started = Date.now()
   const progress = deps.progress
   const source = await parseSource(input.source)
+  // The engineering guidelines come first: no run starts without them.
+  const knowledge = await resolveKnowledge(input, { agentDir: deps.agentDir ?? null, env: deps.env ?? process.env, ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(progress ? { progress } : {}) })
   const token = process.env.GITHUB_TOKEN
   let executor: Executor
   let sandbox: SandboxSession | null = null
@@ -87,14 +128,14 @@ export async function runStaticAnalysis(input: RunInput, deps: RunDeps = {}) {
   const ledger = new Ledger(started)
   const calls: Parameters<typeof createFixer>[0]['calls'] = []
   const model = env('STATIC_ANALYSIS_FIX_MODEL', 'openai/gpt-6.1-sol')
-  const fixer = deps.fixer ?? createFixer({ executor, model, ledger, calls, started, instructions: await repositoryInstructions(executor), timeoutMs: Number(process.env.STATIC_ANALYSIS_BATCH_TIMEOUT_MS) || 180_000 })
+  const fixer = deps.fixer ?? createFixer({ executor, model, ledger, calls, started, instructions: await repositoryInstructions(executor, source.kind === 'local' ? source.gitRoot : undefined), knowledge: await fixKnowledge(knowledge), timeoutMs: Number(process.env.STATIC_ANALYSIS_BATCH_TIMEOUT_MS) || 180_000 })
   const prepareMs = Date.now() - started
   const loopStarted = Date.now()
   let result: LoopResult
   try {
     result = await runLoop(executor, toolchain.ready, fixer, {
-      maxRounds: number(input.maxRounds, 'STATIC_ANALYSIS_MAX_ROUNDS', 6),
-      maxCostUsd: number(input.maxCostUsd, 'STATIC_ANALYSIS_MAX_COST_USD', 5),
+      maxRounds: setting(input.maxRounds, 'STATIC_ANALYSIS_MAX_ROUNDS', 6),
+      maxCostUsd: setting(input.maxCostUsd, 'STATIC_ANALYSIS_MAX_COST_USD', 5),
       costSoFar: () => ledger.costUsd(),
       fixWarnings: input.fixWarnings ?? process.env.STATIC_ANALYSIS_WARNINGS === 'fix',
       commandTimeoutMs: Number(process.env.STATIC_ANALYSIS_COMMAND_TIMEOUT_MS) || 600_000,
@@ -120,16 +161,30 @@ export async function runStaticAnalysis(input: RunInput, deps: RunDeps = {}) {
     const files: Record<string, string> = {
       'report.md': report,
       'diagnostics.json': JSON.stringify({ status: result.status, remaining: result.remaining, initial: result.initial }, null, 2),
-      'rounds.json': JSON.stringify({ status: result.status, reason: result.reason, rounds: result.rounds, problems: result.problems, rejected: result.rejected, editedFiles: result.editedFiles, detection: { ...detection, analyzers: detection.analyzers.map(({ parse: _p, ...a }) => a) }, unavailable: toolchain.unavailable, timing, remote }, null, 2),
+      'rounds.json': JSON.stringify({ status: result.status, reason: result.reason, rounds: result.rounds, problems: result.problems, rejected: result.rejected, editedFiles: result.editedFiles, detection: { ...detection, analyzers: detection.analyzers.map(({ parse: _p, ...a }) => a) }, unavailable: toolchain.unavailable, timing, remote, knowledge }, null, 2),
       'usage.json': JSON.stringify({ scope: 'Model turns of the fix loop only. Aborted turns may have unreported provider usage.', model, turns: ledger.turns }, null, 2),
       'calls.json': JSON.stringify({ system: 'see fixer.ts systemPrompt', model, calls: calls.map((c) => ({ ...c, output: c.output && redactOutput(c.output) })) }, null, 2),
     }
     if (patch) files['changes.patch'] = patch
     await Promise.all(Object.entries(files).map(([name, content]) => writeFile(join(outputDir, name), content, 'utf8')))
+    await recordGuidelines(knowledge, outputDir)
   }
   await write()
+  // A Notion walk is the run's own temp folder; guidelines/ in the output keeps the copy.
+  if (knowledge.source === 'notion' && knowledge.dir !== null) await rm(knowledge.dir, { recursive: true, force: true })
   if (source.kind === 'local') await ignoreOutput(source.root)
   return { status: result.status, reason: result.reason, dir: outputDir, label, rounds: result.rounds.length, initial: result.initial.length, remaining: result.remaining.length, editedFiles: result.editedFiles, rejected: result.rejected.length, problems: result.problems.map((p) => p.split('\n')[0]!), unavailable: toolchain.unavailable, reportedCostUsd: ledger.costUsd(), totalMs: Date.now() - started, remote }
+}
+
+/** The export records the rules the run was held to, in `guidelines/`. */
+export async function recordGuidelines(knowledge: LoadedKnowledge, outputDir: string): Promise<void> {
+  const target = join(outputDir, 'guidelines')
+  await rm(target, { recursive: true, force: true })
+  if (knowledge.dir !== null) await cp(knowledge.dir, target, { recursive: true })
+  else {
+    await mkdir(target, { recursive: true })
+    await cp(knowledge.requiredFile, join(target, 'REQUIRED.md'))
+  }
 }
 
 const redactOutput = (value: unknown) => JSON.parse(JSON.stringify(value)) as unknown
