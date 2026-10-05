@@ -10,9 +10,12 @@ import { systemPrompt } from './review.ts'
 
 export type RunInput = { specPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean }
 
+/** The report directory: the explicit output directory, else spec.reviewed/ beside the spec. */
+export const reportDirFor = (input: Pick<RunInput, 'specPath' | 'outputDir'>) => resolve(input.outputDir ?? resolve(dirname(input.specPath), 'spec.reviewed'))
+
 /** Inputs every review mode shares: the eve/CLI runner and the in-session --local replay. */
 export async function prepareReview(input: RunInput, signal: AbortSignal) {
-  const dir = resolve(input.outputDir ?? resolve(dirname(input.specPath), 'spec.reviewed'))
+  const dir = reportDirFor(input)
   for (const source of [input.specPath, input.guidelinesPath]) {
     const path = relative(dir, resolve(source))
     if (!path || (!path.startsWith('../') && path !== '..')) throw new Error('Output directory must not contain the source spec or guidelines')

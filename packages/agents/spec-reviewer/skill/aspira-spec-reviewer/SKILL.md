@@ -6,57 +6,51 @@ argument-hint: <spec.md> [--local] [--guidelines FILE] [--repo DIR] [--output DI
 
 # Spec review
 
-Review intent and business acceptance criteria; technical unit/integration test planning belongs to `planner`. The pipeline is frontier research, six parallel specialist reviews (security, architecture, data, behavior, ui, acceptance), then one reconciliation. Code, not a model, assigns finding IDs, validates every disposition and edit, applies the edits, checks the acceptance contract and REV rule coverage, and writes the report. There is no elapsed-time limit. Never switch to the removed debate workflow or pass round caps.
+This skill only runs the official spec-reviewer agent. Its rules live in the agent package, not here: `agent/instructions.md` is the authority for what the agent does, what it writes and how its result is reported, and the phase prompts come from its `agent/lib/` modules. This file covers mechanics only. The pipeline is research, six parallel specialists, then one reconciliation. Never switch to the removed debate workflow or pass round caps; the launcher refuses them.
 
-The spec path may be an `@` file mention (`@specs/cart.md`); the leading `@` is stripped. The repository is the git root of the current directory unless `--repo` is given. Both modes use `scripts/spec-reviewer.sh` beside this file (use its absolute path) and produce the same `spec.reviewed/` report.
+The spec path may be an `@` file mention (`@specs/cart.md`); the leading `@` is stripped. The repository is the git root of the current directory unless `--repo` is given. Both modes use `scripts/spec-reviewer.sh` beside this file (use its absolute path) and write the same report, by default to `spec.reviewed/` beside the spec.
 
 | | Default | `--local` |
 | --- | --- | --- |
 | Where the model work runs | `spec-reviewer`, a separate process | subagents of this Claude Code session |
-| Models | Opus 5.5 research, GPT-6.1 Sol specialists and reconciliation | this session's model, for every phase |
+| Models | the agent's configured models (`agent/lib/models.ts`) | this session's model, for every phase |
 | Independence | a second vendor, no session context | fresh subagent contexts, same vendor and session |
 | Cost | Vercel AI Gateway, itemized in `run-analysis.md` | this session's usage, not itemized |
 | Needs | Node 24, pnpm, screen, the agents' `.env.local`; Docker when loading Notion | Node 24, pnpm, the Notion MCP (or `--guidelines`) |
 
-Use the default when the review should be independent of the person or session that wrote the spec. Use `--local` when you want to stay in this session.
+Use the default when the review should be independent of the person or session that wrote the spec. Use `--local` to stay in this session.
 
 ## Default: run the agent
-
-Call the official `spec-reviewer`; do not perform a second review yourself.
 
 ```bash
 <skill-dir>/scripts/spec-reviewer.sh start <spec.md> [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output]
 ```
 
-A supplied guidelines snapshot uses the direct CLI. Otherwise the eve entry point loads required guidelines from Notion; that loader requires configured credentials and its Docker sandbox. The launcher resolves the package using `SPEC_REVIEWER_AGENT_DIR`, then `$ASPIRA_KIT/packages/agents/spec-reviewer`, then its own package location.
+With `--guidelines` the launcher runs the agent's CLI on that snapshot; otherwise it runs the eve entry point, which loads the guidelines with `load-knowledge` (Notion credentials and its Docker sandbox). The launcher resolves the package from `SPEC_REVIEWER_AGENT_DIR`, then `$ASPIRA_KIT/packages/agents/spec-reviewer`, then its own location, and prints the run directory and the agent's `instructions:` file.
 
-The launcher detaches the review and prints its run/log directory. Tell the user it started and where results will go. Use `status <run-dir>` to check progress, or `wait <run-dir> --max 30` between updates; `watch` is a bounded alias for `wait`. The polling wait returns control without stopping the detached agent; keep checking until it finishes or the user cancels. Do not automatically retry failed or incomplete reviews, since that starts another paid run. If launch fails, report the error rather than reviewing manually.
+The run is detached. Tell the user it started and where results will go, then use `status <run-dir>`, or `wait <run-dir> --max 30` between updates (`watch` is an alias). Waiting returns control without stopping the agent; keep checking until it finishes or the user cancels. If launch fails, report the error. When it finishes, read the file named in `instructions:` and report the result the way it says.
 
 ## `--local`: run the pipeline in this session
-
-The launcher's `local` step replays the agent's pipeline with this session as the model. Each call makes no model calls itself. It either lists the phases still to run, writing each one's exact agent prompt to a file, or, once every phase output exists, validates everything and writes the report. You run the phases as subagents in between. Do not review the spec yourself and do not edit the prompts: the value is that each phase gets exactly what the agent's phase gets.
 
 ```bash
 <skill-dir>/scripts/spec-reviewer.sh local <spec.md> [--guidelines /absolute/REQUIRED.md] [--repo DIR] [--output DIR] [--finish]
 ```
 
-1. **Guidelines.** With `--guidelines`, pass it to every `local` call. Otherwise build the snapshot from Notion with the Notion MCP. Fetch **Agent Instructions** (https://app.notion.com/p/3e73e59b2258813d9eece6ed89171bd3) and **Review Verification** (https://app.notion.com/p/3e83e59b225881caa641db4f121662da), and write `<output>.local/REQUIRED.md`. The default output is `spec.reviewed/` beside the spec, so the path is `<spec dir>/spec.reviewed.local/REQUIRED.md`. Use each page's full `<content>` under a `# <page title>` heading, in that order, separated by `---`, and keep the text as fetched, rule IDs included. If a page is truncated or cannot be fetched, stop and say so; a partial rule set would pass a review it should fail.
-2. **Research.** Run `local`. It prints JSON with `stage: "research"` and one task. Launch one `general-purpose` subagent with this message: `Read <prompt> in full and follow it exactly. Write your JSON result to <output>. Reply with one line.`
-3. **Specialists.** Run `local` again. It prints `stage: "specialists"` and six tasks. Launch all six subagents **in one message**, one per task, with the same message shape. The `ui` subagent needs the `aspiralabs-ui` MCP; its prompt says what to do when the MCP is missing.
-4. **Reconciliation.** Run `local` again. It prints `stage: "reconciliation"` and the `synthesis` task. Launch one subagent the same way.
-5. **Report.** Run `local` a last time. It prints the finished report: `status`, `dir`, `findings`, `problems` and `authorDecisions`.
+Each `local` call is one synchronous step. It makes no model calls: it prints JSON naming the next `stage` and its tasks, each with a `prompt` file assembled at that moment from the agent's own files and the `output` file to write, or the finished report. Every result carries `orchestrator`, the agent's `agent/instructions.md`: read the file named in `orchestrator` in full once, before the first phase. In this mode the `local` steps stand in for the agent's review tool, and you stand in for its router. Run the tasks as subagents and do not edit the prompt files: their content is exactly what the agent's phases get.
 
-The snapshot only holds the two required pages; Agent Instructions routes to topic pages (Approved Technologies, Infrastructure/CI-CD and others). The specialist subagents read the pages that apply with the Notion MCP, read-only, and cite their rules, as the agent's Notion connection does. Without the Notion MCP in this session they record those pages as gaps, which blocks `ready`.
+1. **Knowledge.** The engineering guidelines are mandatory; the driver refuses to start without them. With `--guidelines`, pass the same snapshot to every call. Otherwise the first call prints `stage: "knowledge"` with `knowledge.dir`, `knowledge.root` (the agent's `KNOWLEDGE_PAGE`), `knowledge.required` (the agent's `KNOWLEDGE_REQUIRED` pages, in order), `maxDepth`, `maxPages` and any `problems` with a folder already there. Build that folder with the Notion MCP the way the agent's `load-knowledge` does:
+   - `INDEX.md`: the `root` page in full. When `root` is null, search Notion for the required pages by title and use the page that links them.
+   - One file per page linked from the index, down to `maxDepth` levels and at most `maxPages` pages, named after the page title in kebab case, each starting `<!-- <title> · <url> -->`.
+   - `REQUIRED.md`: every `required` page in order, each as `# <page title>`, then `<!-- <url> -->`, then its full content, separated by `---`, text as fetched with rule IDs.
 
-A task that comes back with an `error` had an output that failed its schema. Send that error to the same subagent (or a new one with the same message plus the error) once. If it fails again, or a subagent cannot finish, run `local ... --finish`. That exports the report with the missing phases recorded as failures, so the status is `incomplete`. The work directory, `<output>.local/`, holds the prompts and outputs between steps and is removed once the report is written; every prompt and output is kept in `trace/calls.json`. If the spec, guidelines or repository change mid-review, `local` refuses to continue; delete the work directory to start again.
+   If a page is truncated or cannot be fetched, stop and say so. Run `local` again; it prints `problems` until the folder is complete.
+2. **Research.** `stage: "research"`, one task. Launch one `general-purpose` subagent with this message: `Read <prompt> in full and follow it exactly. Write your JSON result to <output>. Reply with one line.`
+3. **Specialists.** `stage: "specialists"`, six tasks. Launch all six subagents **in one message**, one per task, with the same message. The `ui` task needs the `aspiralabs-ui` MCP; its prompt says what to do without it.
+4. **Reconciliation.** `stage: "reconciliation"`, the `synthesis` task, the same way.
+5. **Report.** The last call prints `status`, `dir`, `findings`, `problems` and `authorDecisions`. Report it as the file named in `orchestrator` says.
 
-## Results
+A task that comes back with an `error` wrote an output that failed its schema: send that error back once, to the same subagent or a new one with the same message plus the error. If it fails again or a subagent cannot finish, run `local ... --finish` to export what exists with the missing phases recorded as failures. The work directory, `<output>.local/`, holds the knowledge folder, prompts and outputs between steps and is removed after export; every prompt and output is kept in `trace/calls.json`, and the rules used (source, files and hashes) in `trace/review.json`. If the spec, the guidelines or the repository change mid-run, `local` refuses to continue; delete the work directory to start again.
 
-Results are directly in `spec.reviewed/` beside the source spec unless an output directory was supplied:
+## Reporting
 
-- `spec.original.md`: unchanged source spec.
-- `spec.reviewed.md`: proposed revised spec, only when valid edits were produced.
-- `run-analysis.md`: wall time and reported cost per agent and model turn, plus totals. A `--local` report says the work ran in the session and itemizes no cost.
-- `trace/`: all debugging records, including `findings.md`, `decisions.md`, `checks.md`, `review.json`, `calls.json` and `guidelines.md` (the agent also writes `usage.json`). Prompts, outputs, tool activity and errors are retained here.
-
-Reruns archive previous results in `spec.reviewed/trace/history/run-*/`. The source spec remains unchanged. Read the completed report, summarize findings and unresolved decisions, and link the reviewed spec, run analysis and trace/findings.md. `incomplete` or `needs-author` is not approval; consult `trace/review.json` even when the command exits successfully. If a run fails before exporting, show its log or error and do not present an earlier report as the new result. Say which mode produced the report: a `--local` review ran on this session's model, so it is not an independent review.
+The completed report's layout and what to report from it are in `agent/instructions.md`. Read `trace/review.json` for the status even when the command exits successfully. If a run fails before exporting, show its log or error and do not present an earlier report as the new result. Say which mode produced the report: a `--local` review ran on this session's model, so it is not an independent review.
