@@ -25,7 +25,15 @@ function safePath(path: string) {
   return !isAbsolute(path) && !/^[A-Za-z]:/.test(path) && !path.includes('\\') && !path.split('/').some((part) => !part || part === '.' || part === '..') && allowedPath(path)
 }
 
-export function validatePlan(plan: Plan, spec: string, files: Map<string, string>): string[] {
+/** Paths a plan may change. Lockfiles and .npmrc are not indexed (allowedPath) but features legitimately edit
+ * them; secrets, keys, VCS internals, dependencies and build output stay off-limits. */
+export function writablePath(path: string) {
+  const structural = !isAbsolute(path) && !/^[A-Za-z]:/.test(path) && !path.includes('\\') && !path.split('/').some((part) => !part || part === '.' || part === '..')
+  const managed = /(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|\.npmrc)$/.test(path)
+  return structural && (allowedPath(path) || (managed && !path.split('/').some((part) => /^(?:\.git|node_modules|\.eve|\.next|dist|\.output|coverage|vendor)$/i.test(part))))
+}
+
+export function validatePlan(plan: Plan, spec: string, files: Map<string, string>, tracked: Set<string> = new Set(files.keys())): string[] {
   const errors: string[] = []
   const features = new Set(specFeatures(spec).items.map((item) => item.id))
   const tasks = new Map(plan.tasks.map((task) => [task.id, task]))
@@ -38,7 +46,7 @@ export function validatePlan(plan: Plan, spec: string, files: Map<string, string
   for (const kind of ['unit', 'integration']) if (!plan.tests.some((test) => test.kind === kind)) errors.push(`Missing ${kind} tests`)
   const seen = new Set<string>()
   const ancestors = new Map<string, Set<string>>()
-  const existing = new Set(files.keys())
+  const existing = new Set([...files.keys(), ...tracked])
   for (const task of plan.tasks) {
     const prior = new Set<string>()
     for (const id of task.dependsOn) {
@@ -68,9 +76,12 @@ export function validatePlan(plan: Plan, spec: string, files: Map<string, string
       if (!testedFirst) errors.push(`Implementation ${task.id} needs an earlier test dependency for ${id}`)
     }
     for (const change of task.changes) {
-      if (!safePath(change.path)) { errors.push(`Unsafe path: ${change.path}`); continue }
+      if (!writablePath(change.path)) { errors.push(`Unsafe path: ${change.path}`); continue }
       if (change.operation === 'create' && existing.has(change.path)) errors.push(`Create target already exists: ${change.path}`)
-      if (change.operation !== 'create' && !existing.has(change.path)) errors.push(`Missing ${change.operation} target: ${change.path}`)
+      if (change.operation !== 'create' && !existing.has(change.path)) {
+        const directory = [...existing].some((path) => path.startsWith(`${change.path}/`))
+        errors.push(directory ? `Target is a directory, not a file; name each file to ${change.operation}: ${change.path}` : `Missing ${change.operation} target: ${change.path}`)
+      }
       // Citations are `path:line` or `path:start-end`; a range must sit inside the file.
       const sources = change.evidence.map((citation) => citation.match(/^(.+?):(\d+)(?:-(\d+))?(?::|\s|$)/)).filter((match) => match !== null)
       const valid = sources.filter((match) => {

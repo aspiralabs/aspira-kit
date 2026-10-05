@@ -63,7 +63,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
     if (!research) problems.push('Research unavailable')
     if (!plan) problems.push('No structured plan produced')
     if (research?.gaps.length) problems.push(...research.gaps.map((gap) => `Research gap: ${gap}`))
-    if (plan) { problems.push(...validatePlan(plan, spec, repo.files), ...plan.gaps.map((gap) => `Plan gap: ${gap}`)) }
+    if (plan) { problems.push(...validatePlan(plan, spec, repo.files, repo.tracked), ...plan.gaps.map((gap) => `Plan gap: ${gap}`)) }
     if (uiRequired && !['list_components', 'get_component'].every((name) => mcp.reads.some((read) => read.ok && read.tool.endsWith(`__${name}`)))) problems.push('UI planning requires successful list_components and get_component MCP reads')
     if (options.signal?.aborted) problems.push('Planning cancelled')
     const requiredRules = [...new Set([...guidelines.matchAll(/^(?:#{1,6}\s+|\*\*|[-*]\s+)?([A-Z]{2,10}-\d+)\b/gm)].map((match) => match[1]!))]
