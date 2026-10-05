@@ -5,7 +5,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import type { ToolSet } from 'ai'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 
-const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, brokenPlans: 0, uiPlan: false, refusals: [] as unknown[], close: vi.fn() }))
+const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, brokenPlans: 0, uiPlan: false, refusals: [] as unknown[], close: vi.fn() }))
 vi.mock('@aspiralabs/agent-common/lib/repository', () => ({ repository: async () => ({ files, instructions: '', packet: () => 'src/items.ts:1: existing save', gaps: [], commit: 'abc', dirty: false, tools: { read_files: {} } }), allowedPath: (path: string) => !path.includes('.env') }))
 vi.mock('@aspiralabs/agent-common/lib/mcp', () => ({ connectReadTools: async () => ({ tools: {}, reads: [], sources: [], close: state.close }) }))
 vi.mock('ai', async (original) => {
@@ -21,6 +21,12 @@ vi.mock('ai', async (original) => {
         // response.messages holds only the last step; responseMessages holds every step.
         return { response: { messages: [prose] }, responseMessages: [{ role: 'assistant', content: 'read src/items.ts' }, { role: 'tool', content: 'EARLIER READ' }, prose] }
       }
+      if (state.gapResearch) {
+        const withGaps = { facts: [], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: ['Did not read src/items.ts'], decisions: [] }
+        state.refusals.push(await args.tools.submit_research!.execute!(withGaps, { toolCallId: 'gaps', messages: [], context: {} }))
+        state.refusals.push(await args.tools.submit_research!.execute!(withGaps, { toolCallId: 'gaps-again', messages: [], context: {} }))
+        return {}
+      }
       if (state.partialChecks) state.refusals.push(await args.tools.submit_research!.execute!({ facts: ['src/items.ts:1 establishes save'], checks: [], gaps: [], decisions: [] }, { toolCallId: 'early', messages: [], context: {} }))
       await args.tools.submit_research!.execute!({ facts: ['src/items.ts:1 establishes save'], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] }, { toolCallId: 'test', messages: [], context: {} })
       return {}
@@ -34,7 +40,7 @@ vi.mock('ai', async (original) => {
 })
 import { runPlan } from './runner.ts'
 
-beforeEach(() => { Object.assign(state, { failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, brokenPlans: 0, uiPlan: false, refusals: [] }); state.close.mockClear() })
+beforeEach(() => { Object.assign(state, { failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, brokenPlans: 0, uiPlan: false, refusals: [] }); state.close.mockClear() })
 async function input() {
   const dir = await mkdtemp(join(tmpdir(), 'planner-test-'))
   const specPath = join(dir, 'spec.reviewed.md')
@@ -183,4 +189,14 @@ it('stops correcting when a pass does not improve the plan, after at most two pa
   expect(result.status).toBe('incomplete')
   const trace = JSON.parse(await readFile(join(result.dir, 'trace/calls.json'), 'utf8'))
   expect(trace.calls.map((call: { phase: string }) => call.phase)).toEqual(['research', 'planning', 'repair-1'])
+})
+
+it('refuses research\'s first gaps once while it has turns left, telling it to read them; a second submission stands', async () => {
+  state.gapResearch = true
+  const result = await runPlan(await input())
+  expect(state.refusals).toEqual([
+    expect.objectContaining({ accepted: false, reason: expect.stringContaining('read these now instead of listing them as gaps') }),
+    { accepted: true },
+  ])
+  expect(result.problems).toContain('Research gap: Did not read src/items.ts')
 })

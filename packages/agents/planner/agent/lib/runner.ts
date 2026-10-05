@@ -63,6 +63,12 @@ export function researchContinue(turnsLeft: number): string {
   return `You replied without calling submit_research, and you have ${turnsLeft} turns left. Research gathers evidence; it does not write the plan. Keep reading: open the files, guideline topic pages and kit configuration you have not read yet that the plan will depend on, batching reads. Then call submit_research.`
 }
 
+/** Why research's gaps were sent back: it still has turns, so it reads them instead. */
+export function researchGapsRefusal(gaps: string[], turnsLeft: number, guidelineTools: string[]): string {
+  const pages = guidelineTools.length ? ` Read guideline topic pages with ${guidelineTools.join(' and ')}.` : ''
+  return `Not accepted: you have ${turnsLeft} turns left, so read these now instead of listing them as gaps.${pages} Kit configuration is under node_modules/@aspiralabs/config/ and readable with read_files. Then submit again, keeping as gaps only what you tried and failed to read:\n${gaps.map((gap) => `- ${gap}`).join('\n')}`
+}
+
 /** The research phase's user prompt. */
 export function researchPrompt(context: string, instructions: string = researchInstructions): string {
   return `${context}\n\n${instructions}`
@@ -154,10 +160,20 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       let submitted: Research | undefined
       // Until its last turn, research cannot submit checks that leave a required rule out: the
       // refusal names the missing rules and research continues. The last turn takes what it has.
+      // A first submission that lists gaps while turns remain is refused once: research reads them
+      // instead, and keeps only what it tried and failed to read.
       let lastTurn = false
+      let turn = 0
+      let gapsRefused = false
+      const guidelineTools = Object.keys(mcp.tools).filter((name) => /guideline/i.test(name))
       const submit = async (value: Research) => {
         const missing = uncoveredRules(guidelines, value.checks)
         if (missing.length && !lastTurn) return { accepted: false, reason: `Checks must name every required rule ID. Add a check for each of these, with how it applies or evidence that it does not, then submit again: ${missing.join(', ')}` }
+        const turnsLeft = RESEARCH_STEPS - turn - 1
+        if (value.gaps.length && !gapsRefused && turnsLeft >= 2) {
+          gapsRefused = true
+          return { accepted: false, reason: researchGapsRefusal(value.gaps, turnsLeft, guidelineTools) }
+        }
         submitted = value
         return { accepted: true }
       }
@@ -169,7 +185,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       while (!submitted && RESEARCH_STEPS - used > 1 && !signal.aborted) {
         const remaining = RESEARCH_STEPS - used
         const first = used === 0
-        const result = await generateText({ model: gateway(models.research), system: researchSystem, ...(first ? { prompt } : { messages }), tools, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', stopWhen: [stepCountIs(remaining - 1), () => submitted !== undefined], prepareStep: ({ stepNumber }) => first && stepNumber === 0 ? { activeTools: Object.keys(tools).filter((name) => name !== 'submit_research'), toolChoice: 'required' as const } : {}, ...hooks })
+        const result = await generateText({ model: gateway(models.research), system: researchSystem, ...(first ? { prompt } : { messages }), tools, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', stopWhen: [stepCountIs(remaining - 1), () => submitted !== undefined], prepareStep: ({ stepNumber }) => { turn = used + stepNumber; return first && stepNumber === 0 ? { activeTools: Object.keys(tools).filter((name) => name !== 'submit_research'), toolChoice: 'required' as const } : {} }, ...hooks })
         used += Math.max(1, result.steps?.length ?? 1)
         messages = [...messages, ...(result.responseMessages ?? [])]
         if (!submitted) messages.push({ role: 'user', content: researchContinue(RESEARCH_STEPS - used) })
