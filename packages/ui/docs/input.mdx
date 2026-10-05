@@ -89,6 +89,19 @@ export const FormStateDemo = () => {
     );
 };
 
+export const RefDemo = () => {
+    const ref = useRef(null);
+    return (
+        <div className="max-w-sm flex flex-col gap-3">
+            <Input aria-label="Step title" placeholder="Step title" defaultValue="Chop the onions" ref={ref} size="sm" />
+            <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => ref.current?.focus()}>Focus</Button>
+                <Button size="sm" variant="outline" onClick={() => { ref.current?.focus(); ref.current?.setSelectionRange(0, 4); }}>Select first word</Button>
+            </div>
+        </div>
+    );
+};
+
 ## Usage
 
 ```tsx
@@ -253,6 +266,32 @@ const schema = z.object({
     <FormStateDemo />
 </Demo>
 
+## Refs
+
+A `ref` (object or callback) receives the underlying `<input>`, and the mask keeps working. Use it to focus the field, read or set the selection, or move focus between fields from the keyboard.
+
+```tsx
+const ref = useRef<HTMLInputElement>(null);
+
+<Input ref={ref} aria-label="Step title" />
+<Button onClick={() => ref.current?.focus()}>Focus</Button>
+```
+
+<Demo>
+    <RefDemo />
+</Demo>
+
+## Hidden
+
+`type="hidden"` renders a bare hidden `<input>` with no label, wrapper, mask or styling. It posts its `name` and `value` with a native form.
+
+```tsx
+<form action="/api/gate" method="POST">
+    <Input type="hidden" name="redirectTo" value={redirectTo} />
+    ...
+</form>
+```
+
 ## Props
 
 Accepts all native `input` attributes plus the props below.
@@ -265,6 +304,7 @@ Accepts all native `input` attributes plus the props below.
 | `icon`          | `string`                                                   | —         | Material icon name rendered inside the input on the left.                                            |
 | `size`          | `default \| sm \| xs`                                      | `default` | Height tier (56 / 40 / 32 px).                                                                       |
 | `mask`          | `FactoryOpts`                                              | —         | IMask mask config. See `imask`'s FactoryOpts docs. Keyed by contents, so an inline `mask={{...}}` literal is safe. |
-| `type`          | `string`                                                   | `text`    | `password` renders as a password field with a show/hide toggle; every other type renders as `text` (masks handle the rest). |
+| `type`          | `string`                                                   | `text`    | `password` renders as a password field with a show/hide toggle; `hidden` renders a bare hidden input; every other type renders as `text` (masks handle the rest). For files use `FileInput`. |
+| `ref`           | `Ref<HTMLInputElement>`                                    | —         | Receives the underlying `<input>`. Merged with the mask's own ref.                                   |
 | `onValueChange` | `({ value, typedValue }) => void`                          | —         | Fires on value change with masked `value` and coerced `typedValue`.                                  |
 | `onBlur`        | `(event, { unmaskedValue, typedValue }) => void`           | —         | Fires on blur with the event + unmasked / typed values.                                              |
