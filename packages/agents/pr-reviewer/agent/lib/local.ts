@@ -6,9 +6,10 @@
 // the review is exported in the agent's layout and, for a GitHub PR, posted.
 
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { INDEX_FILE, KNOWLEDGE_ENV, KNOWLEDGE_PATH, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED_FILE, parseRequired } from '@aspiralabs/agent-common/lib/knowledge'
 import { z } from 'zod'
 import { countsFromFindings, reviewCommentBody, upsertReviewComment, type GithubPr } from './github-comment.ts'
 import {
@@ -35,6 +36,7 @@ import {
   checkFindingsPrompt,
   normalizeCounts,
   openingPrompt,
+  rehome,
   reviewDocPrompt,
   roundFilesInOrder,
   slugify,
@@ -206,14 +208,20 @@ export type LocalInput = {
   noComment?: boolean
   /** Export what exists now, with the missing turns recorded. */
   finish?: boolean
+  /** The engineering guidelines folder. Default: <work>/knowledge, where load-knowledge's /workspace/knowledge maps. */
+  knowledge?: string
 }
 
-/** Seams for tests: GitHub, the token, the clone remote and where reviews/ lives. */
+/** Seams for tests: GitHub, the token, the clone remote, where reviews/ lives and where the agent's sources are. */
 export type LocalDeps = {
   fetch?: Fetch
   githubToken?: () => Promise<string | undefined>
   cloneUrl?: (owner: string, name: string) => string
   packageDir?: string
+  /** The pr-reviewer package whose agent/ files and env files are read. Default: this package. */
+  agentDir?: string
+  /** The process environment, for the knowledge configuration. Default: process.env. */
+  env?: Record<string, string | undefined>
   now?: () => Date
 }
 
@@ -224,7 +232,17 @@ export type LocalTask = { id: string; agent: Reviewer; prompt: string; output: s
 export type CommentResult = { posted: true; action: 'created' | 'updated'; url: string } | { posted: false; reason: string }
 
 /** A stage for the session to run. */
-export type LocalPending = { pending: true; status: 'pending'; stage: Stage; round: number; maxRounds: number; workDir: string; tasks: LocalTask[] }
+export type LocalPending = {
+  pending: true
+  status: 'pending'
+  stage: Stage
+  round: number
+  maxRounds: number
+  workDir: string
+  /** The agent's orchestrator instructions, which the session follows as the orchestrator. */
+  orchestrator: string
+  tasks: LocalTask[]
+}
 
 /** The exported review. */
 export type LocalDone = {
@@ -248,6 +266,8 @@ export type LocalDone = {
   gitignore: { path: string; added: boolean; error?: string } | null
   /** Null for a local repository: there is no PR to post to. */
   comment: CommentResult | null
+  /** agent/instructions.md as it is now: the session reports the review by it. */
+  orchestrator: { path: string; text: string }
 }
 
 /** Either the next stage or the finished review. */
@@ -268,6 +288,8 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 
 type State = {
   fingerprint: string
+  /** The guidelines folder the run started with, and a hash of its files. */
+  knowledge: { path: string; fingerprint: string }
   label: string
   maxRounds: number
   startedAt: string
@@ -277,6 +299,7 @@ type State = {
 
 const stateSchema: z.ZodType<State> = z.object({
   fingerprint: z.string(),
+  knowledge: z.object({ path: z.string(), fingerprint: z.string() }),
   label: z.string(),
   maxRounds: z.number(),
   startedAt: z.string(),
@@ -294,25 +317,30 @@ type Loaded = {
   repoDir: string | null
 }
 
-/** The seat's system prompt, as eve gives it: its instructions.md. */
-async function systemPrompt(who: Reviewer): Promise<string> {
-  return readFile(join(PACKAGE_DIR, 'agent', 'subagents', who, 'instructions.md'), 'utf8')
-}
+/** The agent's own instruction files, read from disk on every call so the skill never carries a copy. */
+export const agentSources = (agentDir: string) => ({
+  orchestrator: join(agentDir, 'agent', 'instructions.md'),
+  seat: (who: Reviewer) => join(agentDir, 'agent', 'subagents', who, 'instructions.md'),
+})
 
-/** The file a subagent reads: the seat's system prompt, review.ts's prompt verbatim, the output contract. */
-export function renderTaskPrompt(task: PlanTask, output: string, system: string, workDir: string, repoPath: string | null): string {
+/**
+ * The file a subagent reads. Everything the seat is told comes from the agent: System is its
+ * instructions.md and Task is review.ts's prompt, both verbatim, and the schema is review.ts's.
+ * The only text added here is how a session runs a turn instead of eve: real paths, and
+ * where to write the structured result.
+ */
+export function renderTaskPrompt(task: PlanTask, output: string, system: { path: string; text: string }): string {
   return [
-    `# Aspira PR review: ${task.id} (--local)`,
+    `# pr-reviewer --local: ${task.id}`,
     '',
-    `You are ${DISPLAY_NAME[task.agent]}, running as a subagent of a Claude Code session instead of inside pr-reviewer. The System and Task sections below are the exact prompt the agent sends this seat. Follow them.`,
+    `System below is ${system.path} and Task is the prompt agent/lib/review.ts builds for this turn: exactly what the agent sends ${DISPLAY_NAME[task.agent]}.`,
     '',
-    '- The sandbox in the Task is this machine, and every path it names is a real local path. Where it says read_file, use the Read tool; search with Grep, Glob or read-only shell commands (`rg`, `grep`, `find`, `ls`, `git log`, `git show`).',
-    `- Write only the files the Task tells you to write (all under ${workDir}) and your output file. Do not modify ${repoPath === null ? 'anything else' : `the repository at ${repoPath}`}, and do not run the project.`,
-    `- Finish by writing ONE JSON object to \`${output}\` that validates against the output schema at the end. No markdown fences and no prose in that file. Then reply with one line: \`done\`, or what stopped you.`,
+    '- This turn runs as a subagent of a Claude Code session, not in the agent\'s sandbox, so every path in the Task is a real path on this machine. read_file is the Read tool, and the shell commands the Task names run through Bash.',
+    `- The structured result the Task asks for goes into \`${output}\` as ONE JSON object valid against the output schema at the end (review.ts's own). No fences and no prose in that file. Then reply with one line.`,
     '',
     '## System',
     '',
-    system.trim(),
+    system.text.trim(),
     '',
     '## Task',
     '',
@@ -341,7 +369,7 @@ async function load(input: LocalInput, deps: Required<Pick<LocalDeps, 'fetch' | 
   }
   const branch = await resolveLocalBranch(source.path, input.branch, input.base)
   const outputDir = input.output === undefined ? resolve(branch.repoDir, REVIEW_DIR, slugify(branch.headRef)) : resolve(input.output)
-  const diff = await localDiff(branch, [workDirFor(outputDir), outputDir])
+  const diff = await localDiff(branch, [workDirFor(outputDir), outputDir, ...(input.knowledge === undefined ? [] : [resolve(input.knowledge)])])
   if (diff.patch.trim() === '') throw new Error(`Nothing to review: ${branch.headRef} is identical to ${branch.baseRef} in ${branch.dir}.`)
   const tree = join(workDirFor(outputDir), 'repo')
   return {
@@ -365,6 +393,114 @@ async function githubOutputDir(packageDir: string, slug: string, now: Date): Pro
   return join(reviews, `${now.toISOString().slice(0, 10)}-${slug}`)
 }
 
+/** What load-knowledge would load, from the agent's configuration: what the session fetches with the Notion MCP. */
+export type KnowledgePlan = {
+  /** The folder to build, the local equivalent of load-knowledge's /workspace/knowledge. */
+  dir: string
+  /** The agent's KNOWLEDGE_PAGE: the page INDEX.md is, and the walk starts from. Null when the agent has none configured. */
+  root: string | null
+  /** The pages REQUIRED.md holds, in order (KNOWLEDGE_REQUIRED, or load-knowledge's default). */
+  required: string[]
+  maxDepth: number
+  maxPages: number
+  /** Where the configuration was read. */
+  configuredIn: string[]
+  files: { index: string; required: string; pages: string }
+}
+
+/** A run that cannot start because the guidelines folder is missing or incomplete. */
+export class KnowledgeRequired extends Error {
+  /** The pages to fetch and the folder to write them to. */
+  readonly plan: KnowledgePlan
+  constructor(reason: string, plan: KnowledgePlan) {
+    super(reason)
+    this.name = 'KnowledgeRequired'
+    this.plan = plan
+  }
+}
+
+const ENV_FILES = ['.env.development.local', '.env.local', '../.env.local']
+
+/**
+ * load-knowledge's configuration, as eve gives it to the agent: the environment first, then the
+ * agent's env files in eve's priority order. Only the knowledge keys are read; the token never is.
+ */
+export async function knowledgeConfig(agentDir: string, env: Record<string, string | undefined>): Promise<{ root: string | null; required: string[]; configuredIn: string[] }> {
+  const files: { path: string; values: Map<string, string> }[] = []
+  for (const name of ENV_FILES) {
+    const path = resolve(agentDir, name)
+    const text = await readFile(path, 'utf8').catch(() => null)
+    if (text === null) continue
+    const values = new Map<string, string>()
+    for (const line of text.split('\n')) {
+      const match = line.match(/^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/)
+      if (match?.[1] === undefined || (match[1] !== KNOWLEDGE_ENV.page && match[1] !== REQUIRED_ENV)) continue
+      values.set(match[1], (match[2] ?? '').replace(/^(['"])(.*)\1$/, '$2'))
+    }
+    files.push({ path, values })
+  }
+  const configuredIn: string[] = []
+  const lookup = (key: string): string | undefined => {
+    if (env[key] !== undefined) {
+      configuredIn.push(`${key} from the environment`)
+      return env[key]
+    }
+    const file = files.find((f) => f.values.has(key))
+    if (file !== undefined) configuredIn.push(`${key} from ${file.path}`)
+    return file?.values.get(key)
+  }
+  const root = lookup(KNOWLEDGE_ENV.page)?.trim()
+  return { root: root === undefined || root === '' ? null : root, required: parseRequired(lookup(REQUIRED_ENV)), configuredIn }
+}
+
+/** Every file under the folder, by path relative to it, sorted. */
+async function readFolder(dir: string): Promise<Map<string, string>> {
+  const files = new Map<string, string>()
+  const names = await readdir(dir, { recursive: true }).catch(() => [])
+  for (const name of [...names].sort()) {
+    const text = await readFile(join(dir, name), 'utf8').catch(() => null)
+    if (text !== null) files.set(name, text)
+  }
+  return files
+}
+
+/**
+ * The guidelines are mandatory: the folder must hold a non-empty INDEX.md and a REQUIRED.md with
+ * every configured required page under its own heading, or the run does not start.
+ */
+async function checkKnowledge(dir: string, agentDir: string, env: Record<string, string | undefined>): Promise<{ files: Map<string, string>; fingerprint: string }> {
+  const files = await readFolder(dir)
+  const indexName = basename(INDEX_FILE)
+  const requiredName = basename(REQUIRED_FILE)
+  const config = await knowledgeConfig(agentDir, env)
+  const problems: string[] = []
+  const required = files.get(requiredName)
+  if ((files.get(indexName) ?? '').trim() === '') problems.push(`${indexName} is missing or empty`)
+  if ((required ?? '').trim() === '') problems.push(`${requiredName} is missing or empty`)
+  else {
+    const headings = new Set((required ?? '').split('\n').flatMap((line) => (line.startsWith('# ') ? [line.slice(2).trim().toLowerCase()] : [])))
+    const absent = config.required.filter((title) => !headings.has(title.trim().toLowerCase()))
+    if (absent.length > 0) problems.push(`${requiredName} has no \`# <title>\` section for ${absent.join(', ')}`)
+  }
+  if (problems.length > 0) {
+    throw new KnowledgeRequired(`The engineering guidelines are required and ${dir} is not ready: ${problems.join('; ')}. Build the folder from Notion as the knowledge plan says, then run local again.`, {
+      dir,
+      root: config.root,
+      required: config.required,
+      maxDepth: MAX_DEPTH,
+      maxPages: MAX_PAGES,
+      configuredIn: config.configuredIn,
+      files: {
+        index: `${join(dir, indexName)}: the root page`,
+        required: `${join(dir, requiredName)}: the required pages in full, in order, each under # <page title>, separated by ---`,
+        pages: `${dir}/<name>.md for every other page: the title lowercased, each run of other characters replaced by -, trimmed of -, at most 60 characters; a second page with the same name gets -2`,
+      },
+    })
+  }
+  const fingerprint = createHash('sha256').update(JSON.stringify([dir, [...files]])).digest('hex')
+  return { files, fingerprint }
+}
+
 /** One step of a --local review: the next stage's tasks, or the exported review. */
 export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise<LocalResult> {
   if (input.maxRounds !== undefined && (!Number.isInteger(input.maxRounds) || input.maxRounds < 1 || input.maxRounds > MAX_ROUNDS_LIMIT)) {
@@ -386,6 +522,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   const { meta, outputDir } = loaded
   const work = workDirFor(outputDir)
   const paths = workspacePaths(work)
+  const agentDir = deps.agentDir ?? PACKAGE_DIR
+  const sources = agentSources(agentDir)
 
   // What load-pr's finish() writes: the patch cut to size, the changed paths it still holds, pr.md.
   const { patch, truncated } = truncatePatch(loaded.diff.patch)
@@ -401,10 +539,19 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   if (saved !== null && saved.fingerprint !== fingerprint) {
     throw new Error(`${meta.label} changed since this local review started. Delete ${work} to start over.`)
   }
+  // The guidelines: where load-knowledge's folder maps, or --knowledge; fixed by the first call.
+  const knowledgeDir = input.knowledge !== undefined ? resolve(input.knowledge) : (saved?.knowledge.path ?? rehome(KNOWLEDGE_PATH, work))
+  if (saved !== null && knowledgeDir !== saved.knowledge.path) {
+    throw new Error(`--knowledge ${knowledgeDir} differs from the ${saved.knowledge.path} this review started with. Drop it, or delete ${work} to start over.`)
+  }
+  const knowledge = await checkKnowledge(knowledgeDir, agentDir, deps.env ?? process.env)
+  if (saved !== null && knowledge.fingerprint !== saved.knowledge.fingerprint) {
+    throw new Error(`The engineering guidelines in ${knowledgeDir} changed since this local review started. Delete ${work} to start over.`)
+  }
   if (saved !== null && input.maxRounds !== undefined && input.maxRounds !== saved.maxRounds) {
     throw new Error(`--max-rounds ${input.maxRounds} differs from the ${saved.maxRounds} this review started with. Drop it, or delete ${work} to start over.`)
   }
-  const state: State = saved ?? { fingerprint, label: meta.label, maxRounds: input.maxRounds ?? DEFAULT_MAX_ROUNDS, startedAt: new Date().toISOString(), rejections: {} }
+  const state: State = saved ?? { fingerprint, knowledge: { path: knowledgeDir, fingerprint: knowledge.fingerprint }, label: meta.label, maxRounds: input.maxRounds ?? DEFAULT_MAX_ROUNDS, startedAt: new Date().toISOString(), rejections: {} }
   if (saved === null) {
     await mkdir(join(work, 'prompts'), { recursive: true })
     await mkdir(join(work, 'outputs'), { recursive: true })
@@ -417,7 +564,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     await writeFile(stateFile, JSON.stringify(state, null, 2))
   }
 
-  const pr: PrContext = { label: meta.label, repoPath: loaded.repoPath, knowledgePath: null, knowledgeRequiredFile: null, paths }
+  const pr: PrContext = { label: meta.label, repoPath: loaded.repoPath, knowledgePath: knowledgeDir, knowledgeRequiredFile: join(knowledgeDir, basename(REQUIRED_FILE)), paths }
   const outputFile = (id: string) => join(work, 'outputs', `${id}.json`)
   const raw = new Map<string, unknown>()
   const unparsable = new Map<string, string>()
@@ -447,14 +594,16 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
         retry = rejected.length < 2
       }
       const prompt = join(work, 'prompts', `${task.id}.md`)
-      await writeFile(prompt, renderTaskPrompt(task, output, await systemPrompt(task.agent), work, pr.repoPath))
+      const system = sources.seat(task.agent)
+      await writeFile(prompt, renderTaskPrompt(task, output, { path: system, text: await readFile(system, 'utf8') }))
       tasks.push({ id: task.id, agent: task.agent, prompt, output, schema: SCHEMA_NAMES[task.kind], ...(task.error === undefined ? {} : { error: task.error }), ...(retry === undefined ? {} : { retry }) })
     }
     await writeFile(stateFile, JSON.stringify(state, null, 2))
-    return { pending: true, status: 'pending', stage: plan.stage, round: plan.round, maxRounds: state.maxRounds, workDir: work, tasks }
+    return { pending: true, status: 'pending', stage: plan.stage, round: plan.round, maxRounds: state.maxRounds, workDir: work, orchestrator: sources.orchestrator, tasks }
   }
 
-  return exportReview({ input, deps: { fetch: request, token }, loaded, state, plan, work, pr })
+  const orchestrator = { path: sources.orchestrator, text: await readFile(sources.orchestrator, 'utf8') }
+  return exportReview({ input, deps: { fetch: request, token }, loaded, state, plan, work, pr, knowledge: knowledge.files, orchestrator })
 }
 
 async function exportReview(args: {
@@ -465,6 +614,8 @@ async function exportReview(args: {
   plan: DonePlan
   work: string
   pr: PrContext
+  knowledge: Map<string, string>
+  orchestrator: { path: string; text: string }
 }): Promise<LocalDone> {
   const { input, loaded, state, plan, work, pr } = args
   const paths = pr.paths ?? SANDBOX_PATHS
@@ -509,7 +660,11 @@ async function exportReview(args: {
   written.push(join(dir, 'cost.md'))
 
   await mkdir(join(dir, 'trace'), { recursive: true })
-  const trace = { mode: 'local', label: state.label, startedAt: state.startedAt, maxRounds: state.maxRounds, rejections: state.rejections, calls: plan.calls }
+  // The rules the review ran under, as they were when it started.
+  await cp(state.knowledge.path, join(dir, 'trace', 'guidelines'), { recursive: true })
+  written.push(join(dir, 'trace', 'guidelines'))
+  const knowledge = { path: state.knowledge.path, fingerprint: state.knowledge.fingerprint, files: [...args.knowledge.keys()] }
+  const trace = { mode: 'local', label: state.label, startedAt: state.startedAt, maxRounds: state.maxRounds, knowledge, rejections: state.rejections, calls: plan.calls }
   await writeFile(join(dir, 'trace', 'calls.json'), JSON.stringify(trace, null, 2), 'utf8')
   written.push(join(dir, 'trace', 'calls.json'))
 
@@ -546,6 +701,7 @@ async function exportReview(args: {
     written,
     gitignore,
     comment,
+    orchestrator: args.orchestrator,
   }
 }
 

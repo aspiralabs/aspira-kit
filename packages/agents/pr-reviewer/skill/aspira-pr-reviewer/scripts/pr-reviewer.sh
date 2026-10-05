@@ -24,7 +24,7 @@ absolute_source() {
 absolute_path() {
   if [[ $1 = /* ]]; then printf '%s\n' "$1"; else printf '%s/%s\n' "$PWD" "$1"; fi
 }
-SOURCE="" BRANCH="" BASE="" ROUNDS="" OUT="" NO_COMMENT="" FINISH=""
+SOURCE="" BRANCH="" BASE="" ROUNDS="" OUT="" KNOWLEDGE="" NO_COMMENT="" FINISH=""
 parse() {
   local mode=$1; shift
   while [ $# -gt 0 ]; do
@@ -33,6 +33,7 @@ parse() {
       --base) [ $# -ge 2 ] || die "--base needs a ref"; BASE=$2; shift 2 ;;
       --max-rounds) [ $# -ge 2 ] || die "--max-rounds needs a number"; ROUNDS=$2; shift 2 ;;
       --output) [ $# -ge 2 ] || die "--output needs a path"; OUT=$(absolute_path "$2"); shift 2 ;;
+      --knowledge) [ "$mode" = local ] || die "--knowledge is for local; the agent loads the guidelines itself"; [ $# -ge 2 ] || die "--knowledge needs a path"; KNOWLEDGE=$(absolute_path "$2"); shift 2 ;;
       --no-comment) NO_COMMENT=1; shift ;;
       --local) shift ;;
       --finish) [ "$mode" = local ] || die "--finish is for local"; FINISH=1; shift ;;
@@ -40,7 +41,7 @@ parse() {
       *) [ -z "$SOURCE" ] || die "one PR at a time"; SOURCE=${1#@}; shift ;;
     esac
   done
-  [ -n "$SOURCE" ] || die "usage: pr-reviewer.sh $mode <github-pr | repo-path> [--branch B] [--base main] [--max-rounds N] [--no-comment] [--output DIR]$([ "$mode" = local ] && echo ' [--finish]')"
+  [ -n "$SOURCE" ] || die "usage: pr-reviewer.sh $mode <github-pr | repo-path> [--branch B] [--base main] [--max-rounds N] [--no-comment] [--output DIR]$([ "$mode" = local ] && echo ' [--knowledge DIR] [--finish]')"
   if [ -n "$ROUNDS" ]; then
     [[ $ROUNDS =~ ^[0-9]+$ ]] && [ "$ROUNDS" -ge 1 ] && [ "$ROUNDS" -le 10 ] || die "--max-rounds must be 1..10"
   fi
@@ -86,6 +87,7 @@ cmd_local() {
   [ -z "$ROUNDS" ] || args+=(--max-rounds "$ROUNDS")
   [ -z "$NO_COMMENT" ] || args+=(--no-comment)
   [ -z "$OUT" ] || args+=(--output "$OUT")
+  [ -z "$KNOWLEDGE" ] || args+=(--knowledge "$KNOWLEDGE")
   [ -z "$FINISH" ] || args+=(--finish)
   command -v pnpm >/dev/null || die "pnpm is not installed"
   pnpm -C "$(agent_dir)" --silent run review:local "${args[@]}"
@@ -116,5 +118,5 @@ case ${1:-} in
   local) shift; cmd_local "$@" ;;
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
-  *) die "usage: pr-reviewer.sh start SOURCE [--branch B] [--base main] [--max-rounds N] [--no-comment] [--output DIR] | status RUN | wait RUN [--max SECONDS] | local SOURCE [--branch B] [--base main] [--max-rounds N] [--no-comment] [--output DIR] [--finish]" ;;
+  *) die "usage: pr-reviewer.sh start SOURCE [--branch B] [--base main] [--max-rounds N] [--no-comment] [--output DIR] | status RUN | wait RUN [--max SECONDS] | local SOURCE [--branch B] [--base main] [--max-rounds N] [--no-comment] [--output DIR] [--knowledge DIR] [--finish]" ;;
 esac

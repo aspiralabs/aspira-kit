@@ -43,12 +43,13 @@ it('starts the eve agent detached, with the PR, the caps and the comment choice 
   const local = await captured()
   expect(local[5]).toContain(`Review the branch feat/x in ${repo} against develop`)
   await expect(exec('bash', [launcher, 'start', '.', '--rounds', '2'], { cwd: repo, env })).rejects.toThrow('unknown option')
+  await expect(exec('bash', [launcher, 'start', '.', '--knowledge', 'rules'], { cwd: repo, env })).rejects.toThrow('--knowledge is for local')
 })
 
 it('steps a --local review synchronously, with no screen and no gateway key, passing absolute paths', async () => {
   const { dir, repo, env, captured } = await stubs(false)
-  await exec('bash', [launcher, 'local', '.', '--branch', 'feat/x', '--base', 'main', '--max-rounds', '3', '--no-comment', '--output', 'out'], { cwd: repo, env })
-  expect(await captured()).toEqual(['-C', root, '--silent', 'run', 'review:local', repo, '--branch', 'feat/x', '--base', 'main', '--max-rounds', '3', '--no-comment', '--output', join(repo, 'out')])
+  await exec('bash', [launcher, 'local', '.', '--branch', 'feat/x', '--base', 'main', '--max-rounds', '3', '--no-comment', '--output', 'out', '--knowledge', 'rules'], { cwd: repo, env })
+  expect(await captured()).toEqual(['-C', root, '--silent', 'run', 'review:local', repo, '--branch', 'feat/x', '--base', 'main', '--max-rounds', '3', '--no-comment', '--output', join(repo, 'out'), '--knowledge', join(repo, 'rules')])
   await exec('bash', [launcher, 'local', 'acme/app#7', '--finish'], { cwd: dir, env })
   expect(await captured()).toEqual(['-C', root, '--silent', 'run', 'review:local', 'acme/app#7', '--finish'])
   await expect(exec('bash', [launcher, 'local'], { cwd: repo, env })).rejects.toThrow('usage')

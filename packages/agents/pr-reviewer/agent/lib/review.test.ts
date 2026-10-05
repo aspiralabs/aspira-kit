@@ -8,6 +8,7 @@ import {
   SEATS,
   checkFindingsPrompt,
   openingPrompt,
+  rehome,
   reviewDocPrompt,
   roundFilesInOrder,
   turnPrompt,
@@ -56,6 +57,16 @@ describe('workspace paths', () => {
       expect(after[i]).not.toContain('/workspace/')
       expect(after[i]).toBe(prompt.replaceAll('/workspace', root))
     }
+  })
+
+  it('maps the knowledge section the same way: load-knowledge\'s folder rehomed under the root', () => {
+    const withKnowledge: PrContext = { ...sandbox, knowledgePath: '/workspace/knowledge', knowledgeRequiredFile: '/workspace/knowledge/REQUIRED.md' }
+    const local: PrContext = { ...mapped, knowledgePath: rehome('/workspace/knowledge', root), knowledgeRequiredFile: rehome('/workspace/knowledge/REQUIRED.md', root) }
+    const before = prompts(withKnowledge)
+    const after = prompts(local)
+    for (const [i, prompt] of before.entries()) expect(after[i]).toBe(prompt.replaceAll('/workspace', root))
+    expect(after[0]).toContain(`Your first command is \`cat ${root}/knowledge/REQUIRED.md\``)
+    expect(after[0]).toContain(`indexed in ${root}/knowledge/INDEX.md`)
   })
 
   it('keeps the sandbox layout when no paths are given', () => {

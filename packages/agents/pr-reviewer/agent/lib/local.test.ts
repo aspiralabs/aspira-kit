@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { REVIEW_COMMENT_MARKER } from './github-comment.ts'
-import { planStep, runLocal, workDirFor, type LocalDeps, type LocalInput, type LocalResult, type LocalTask, type PendingPlan } from './local.ts'
+import { KnowledgeRequired, knowledgeConfig, planStep, runLocal, workDirFor, type LocalDeps, type LocalInput, type LocalResult, type LocalTask, type PendingPlan } from './local.ts'
 import {
   SEATS,
   checkFindingsPrompt,
@@ -20,6 +20,16 @@ import {
 } from './review.ts'
 
 const exec = promisify(execFile)
+const PACKAGE_DIR = join(import.meta.dirname, '..', '..')
+
+// The folder the session builds from Notion before the first step, in load-knowledge's shape.
+const REQUIRED_MD = '# Agent Instructions\n\nREV-001 Read the rules.\n\n---\n\n# Review Verification\n\nREV-002 Verify.\n'
+async function seedKnowledge(dir: string, required = REQUIRED_MD) {
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, 'REQUIRED.md'), required)
+  await writeFile(join(dir, 'INDEX.md'), '# Engineering\n\n- [Testing](testing.md)\n')
+  await writeFile(join(dir, 'testing.md'), '# Testing\n\nTST-001 Tests first.\n')
+}
 
 const turn = (agreed: boolean, openPoints: string[] = []) => ({ agreed, openPoints, note: 'n' })
 const verify = (agreed: boolean, openPoints: string[] = []) => ({ agreed, openPoints, rejected: ['COLE1.1'], duplicates: [], note: 'n' })
@@ -147,7 +157,7 @@ describe('planStep', () => {
 // ---------------------------------------------------------------------------------------------
 // End to end over real git, with the session's subagents simulated by writing their files.
 
-async function gitRepo() {
+async function gitRepo(options: { knowledge?: boolean } = {}) {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'pr-review-local-')))
   const repo = join(dir, 'repo')
   await mkdir(repo)
@@ -164,7 +174,9 @@ async function gitRepo() {
   await writeFile(join(repo, 'b.ts'), 'export const b = 1\n')
   await git('add', '.')
   await git('commit', '-qm', 'feat: change a')
-  return { dir, repo, git }
+  const knowledge = join(repo, '.pr-review', 'feat-x.local', 'knowledge')
+  if (options.knowledge !== false) await seedKnowledge(knowledge)
+  return { dir, repo, git, knowledge }
 }
 
 const FINDINGS_MD = '# Findings: test\n\nTotals: 0 critical · 1 high · 0 medium · 0 low · 0 info\n\n## High\n\n### [AVA1.1] Unchecked input\n- **Location:** `a.ts:1`\n'
@@ -218,7 +230,13 @@ describe('runLocal, local repository', () => {
     const work = join(repo, '.pr-review', 'feat-x.local')
     expect(first).toMatchObject({ stage: 'seats', round: 1, maxRounds: 4, workDir: work })
     expect(first.tasks.map((t) => t.agent)).toEqual([...SEATS])
-    const pr: PrContext = { label: `${repo} @ feat/x vs main`, repoPath: repo, paths: workspacePaths(work) }
+    const pr: PrContext = {
+      label: `${repo} @ feat/x vs main`,
+      repoPath: repo,
+      knowledgePath: join(work, 'knowledge'),
+      knowledgeRequiredFile: join(work, 'knowledge', 'REQUIRED.md'),
+      paths: workspacePaths(work),
+    }
     for (const task of first.tasks) {
       expect(task.output).toBe(join(work, 'outputs', `${task.id}.json`))
       expect(task.schema).toBe('TURN_OUTPUT_SCHEMA')
@@ -227,7 +245,11 @@ describe('runLocal, local repository', () => {
       expect(text).toContain(`# ${task.agent[0]!.toUpperCase()}${task.agent.slice(1)}\n`)
       expect(text).toContain(task.output)
       expect(text).not.toContain('/workspace/')
+      expect(text).toContain(`Your first command is \`cat ${join(work, 'knowledge', 'REQUIRED.md')}\``)
+      // The seat's system prompt is its instructions.md, byte for byte, read on this call.
+      expect(text).toContain(`## System\n\n${(await readFile(join(PACKAGE_DIR, 'agent', 'subagents', task.agent, 'instructions.md'), 'utf8')).trim()}\n\n## Task`)
     }
+    expect(first.orchestrator).toBe(join(PACKAGE_DIR, 'agent', 'instructions.md'))
     expect(await readFile(join(work, 'pr.patch'), 'utf8')).toContain('b/b.ts')
     expect(await readFile(join(work, 'changed_files.txt'), 'utf8')).toBe('a.ts\nb.ts\n')
     expect(await readFile(join(work, 'pr.md'), 'utf8')).toContain('# feat: change a')
@@ -267,6 +289,12 @@ describe('runLocal, local repository', () => {
     expect(trace.calls[0]).toMatchObject({ id: 'round-1-ava', agent: 'ava', output: { agreed: true } })
     expect(trace.calls[0].prompt).toContain('You are Ava, the security seat')
     expect(await readFile(join(repo, '.gitignore'), 'utf8')).toContain('.pr-review/')
+    // The review records the rules it ran under.
+    expect(await readFile(join(dir, 'trace', 'guidelines', 'REQUIRED.md'), 'utf8')).toBe(REQUIRED_MD)
+    expect(await readFile(join(dir, 'trace', 'guidelines', 'testing.md'), 'utf8')).toContain('TST-001')
+    expect(trace.knowledge).toMatchObject({ path: join(repo, '.pr-review', 'feat-x.local', 'knowledge'), files: ['INDEX.md', 'REQUIRED.md', 'testing.md'] })
+    // As the orchestrator, the session reports by the agent's own instructions, read at export.
+    expect(done.orchestrator.text).toBe(await readFile(join(PACKAGE_DIR, 'agent', 'instructions.md'), 'utf8'))
     await expect(stat(workDirFor(dir))).rejects.toThrow()
   })
 
@@ -338,6 +366,7 @@ async function githubFixture() {
   const diff = await git('diff', '--no-color', 'main...feat/x')
   const github = fakeGithub({ head, base, diff: `${diff}\n` })
   const deps: LocalDeps = { fetch: github.request, cloneUrl: () => `file://${repo}`, githubToken: async () => 'tok', packageDir: dir }
+  await seedKnowledge(join(dir, 'reviews', `${new Date().toISOString().slice(0, 10)}-feat-x.local`, 'knowledge'))
   return { dir, repo, github, deps, head }
 }
 
@@ -392,5 +421,98 @@ describe('runLocal, GitHub PR', () => {
       },
     }
     await expect(runLocal({ source: 'acme/app#7' }, moved)).rejects.toThrow('changed since this local review started')
+  })
+})
+
+describe('runLocal, engineering guidelines', () => {
+  const refusal = async (promise: Promise<unknown>) => {
+    const error = await promise.then(
+      () => null,
+      (cause: unknown) => cause,
+    )
+    if (!(error instanceof KnowledgeRequired)) throw new Error(`expected a KnowledgeRequired refusal, got ${String(error)}`)
+    return error
+  }
+
+  it('refuses to start without REQUIRED.md and INDEX.md, and starts nothing', async () => {
+    const { repo, knowledge } = await gitRepo({ knowledge: false })
+    const missing = await refusal(runLocal({ source: repo }))
+    expect(missing.message).toContain('REQUIRED.md')
+    expect(missing.plan.dir).toBe(knowledge)
+    await expect(stat(join(repo, '.pr-review', 'feat-x.local', 'state.json'))).rejects.toThrow()
+
+    await mkdir(knowledge, { recursive: true })
+    await writeFile(join(knowledge, 'REQUIRED.md'), REQUIRED_MD)
+    await writeFile(join(knowledge, 'INDEX.md'), '  \n')
+    expect((await refusal(runLocal({ source: repo }))).message).toContain('INDEX.md')
+
+    await writeFile(join(knowledge, 'INDEX.md'), '# Engineering\n')
+    await writeFile(join(knowledge, 'REQUIRED.md'), '# Agent Instructions\n\nREV-001\n')
+    expect((await refusal(runLocal({ source: repo }))).message).toContain('Review Verification')
+
+    await writeFile(join(knowledge, 'REQUIRED.md'), REQUIRED_MD)
+    expect(pending(await runLocal({ source: repo })).stage).toBe('seats')
+  })
+
+  it('names the pages to fetch from the agent\'s own load-knowledge configuration', async () => {
+    const agentDir = await realpath(await mkdtemp(join(tmpdir(), 'pr-review-agent-')))
+    const root = 'https://www.notion.so/Engineering-0123456789abcdef0123456789abcdef'
+    await writeFile(join(agentDir, '.env.local'), `AI_GATEWAY_API_KEY=x\nKNOWLEDGE_PAGE=${root}\nNOTION_TOKEN=secret\n`)
+    expect(await knowledgeConfig(agentDir, {})).toMatchObject({ root, required: ['Agent Instructions', 'Review Verification'] })
+    await writeFile(join(agentDir, '.env.development.local'), 'KNOWLEDGE_REQUIRED="Agent Instructions, Security Rules"\n')
+    expect((await knowledgeConfig(agentDir, {})).required).toEqual(['Agent Instructions', 'Security Rules'])
+    expect((await knowledgeConfig(agentDir, { KNOWLEDGE_REQUIRED: 'Only This' })).required).toEqual(['Only This'])
+
+    const { repo } = await gitRepo({ knowledge: false })
+    const error = await refusal(runLocal({ source: repo }, { agentDir, env: {} }))
+    expect(error.plan).toMatchObject({ root, required: ['Agent Instructions', 'Security Rules'], maxDepth: 3, maxPages: 80 })
+    expect(JSON.stringify(error.plan)).not.toContain('secret')
+    // A REQUIRED.md without a configured required page is refused too.
+    await seedKnowledge(join(repo, '.pr-review', 'feat-x.local', 'knowledge'))
+    expect((await refusal(runLocal({ source: repo }, { agentDir, env: {} }))).message).toContain('Security Rules')
+  })
+
+  it('puts the knowledge section in every prompt, byte-equal to review.ts for a --knowledge folder', async () => {
+    const { repo, dir } = await gitRepo({ knowledge: false })
+    const folder = join(dir, 'rules')
+    await seedKnowledge(folder)
+    const first = pending(await runLocal({ source: repo, knowledge: folder }))
+    const work = first.workDir
+    const pr: PrContext = { label: `${repo} @ feat/x vs main`, repoPath: repo, knowledgePath: folder, knowledgeRequiredFile: join(folder, 'REQUIRED.md'), paths: workspacePaths(work) }
+    for (const task of first.tasks) {
+      expect(await readFile(task.prompt, 'utf8')).toContain(`\n## Task\n\n${openingPrompt(task.agent === 'quinn' ? 'ava' : task.agent, pr)}\n\n## Output schema\n`)
+    }
+    for (const task of first.tasks) await answer(task, work)
+    const quinn = pending(await runLocal({ source: repo, knowledge: folder }))
+    expect(await readFile(quinn.tasks[0]!.prompt, 'utf8')).toContain(verifyPrompt(1, pr))
+    // Later calls keep the folder the run started with; a different one is refused.
+    expect(pending(await runLocal({ source: repo })).stage).toBe('verifier')
+    await seedKnowledge(join(dir, 'other'))
+    await expect(runLocal({ source: repo, knowledge: join(dir, 'other') })).rejects.toThrow('--knowledge')
+  })
+
+  it('refuses to continue when the guidelines change mid-run', async () => {
+    const { repo, knowledge } = await gitRepo()
+    await runLocal({ source: repo })
+    await writeFile(join(knowledge, 'testing.md'), '# Testing\n\nTST-001 Tests last.\n')
+    await expect(runLocal({ source: repo })).rejects.toThrow('guidelines')
+  })
+})
+
+describe('runLocal, the agent\'s own sources', () => {
+  it('reads each seat\'s instructions.md from the agent on every call', async () => {
+    const agentDir = await realpath(await mkdtemp(join(tmpdir(), 'pr-review-agent-')))
+    await cp(join(PACKAGE_DIR, 'agent'), join(agentDir, 'agent'), { recursive: true })
+    const ava = join(agentDir, 'agent', 'subagents', 'ava', 'instructions.md')
+    await writeFile(ava, '# Ava\n\nVersion one of the security seat.\n')
+    const { repo } = await gitRepo()
+    const first = pending(await runLocal({ source: repo }, { agentDir }))
+    expect(await readFile(first.tasks[0]!.prompt, 'utf8')).toContain('## System\n\n# Ava\n\nVersion one of the security seat.\n\n## Task')
+    await writeFile(ava, '# Ava\n\nVersion two.\n')
+    const again = pending(await runLocal({ source: repo }, { agentDir }))
+    const text = await readFile(again.tasks[0]!.prompt, 'utf8')
+    expect(text).toContain('Version two.')
+    expect(text).not.toContain('Version one')
+    expect(again.orchestrator).toBe(join(agentDir, 'agent', 'instructions.md'))
   })
 })
