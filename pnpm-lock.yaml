@@ -257,6 +257,9 @@ importers:
 
   packages/agents/code-analyzer:
     dependencies:
+      '@aspiralabs/agent-common':
+        specifier: workspace:*
+        version: link:../common
       ai:
         specifier: ^7.0.105
         version: 7.0.107(zod@4.5.4)

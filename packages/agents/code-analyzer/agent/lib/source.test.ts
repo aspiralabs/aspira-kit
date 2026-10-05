@@ -15,11 +15,13 @@ describe('parseSource', () => {
       expect(source).toMatchObject({ kind: 'remote', owner: 'aspiralabs', name: 'kit', url: 'https://github.com/aspiralabs/kit.git' })
     }
   })
-  it('resolves a local path to its git root and rejects non-repositories', async () => {
+  it('keeps a local path as the analyzed directory, with its git root beside it, and rejects non-repositories', async () => {
     const dir = await realpath(await mkdtemp(join(tmpdir(), 'sa-source-')))
     await exec('git', ['init', '-q', dir])
     await exec('mkdir', ['-p', join(dir, 'packages/a')])
-    expect(await parseSource(join(dir, 'packages/a'))).toEqual({ kind: 'local', root: dir })
+    expect(await parseSource(dir)).toEqual({ kind: 'local', root: dir, gitRoot: dir })
+    expect(await parseSource(join(dir, 'packages/a'))).toEqual({ kind: 'local', root: join(dir, 'packages/a'), gitRoot: dir })
+    expect(await parseSource('packages/a/', dir)).toEqual({ kind: 'local', root: join(dir, 'packages/a'), gitRoot: dir })
     const plain = await mkdtemp(join(tmpdir(), 'sa-plain-'))
     await expect(parseSource(plain)).rejects.toThrow('Not a git repository')
     await expect(parseSource('./nope/x', dir)).rejects.toThrow('Not a directory or a GitHub repository')

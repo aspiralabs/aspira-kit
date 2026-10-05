@@ -51,11 +51,12 @@ cmd_start() {
   run=$(mktemp -d "${TMPDIR:-/tmp}/spec-writer.XXXXXX")
   prompt="Write a spec from the idea at $idea for the local repository $repo. Write results directly to $out. Use load-knowledge for the required guidelines, then call write-spec once. Report status, spec.md, spec.draft.md, run-analysis.md and open author decisions."
   printf '%s\n' "$out" > "$run/output"
+  printf '%s\n' "$agent/agent/instructions.md" > "$run/instructions"
   date +%s > "$run/started"
   cat > "$run/run.sh" <<'RUNNER'
 #!/bin/bash
 if [ -n "$GUIDELINES" ]; then
-  pnpm -C "$AGENT" write "$IDEA" "$REPO" "$GUIDELINES" "$OUTPUT" > "$RUN/log" 2>&1
+  pnpm -C "$AGENT" run write "$IDEA" "$REPO" "$GUIDELINES" "$OUTPUT" > "$RUN/log" 2>&1
 else
   pnpm -C "$AGENT" exec eve invoke "$PROMPT" > "$RUN/log" 2>&1
 fi
@@ -64,18 +65,19 @@ printf '%s\n' "$code" > "$RUN/exit"
 RUNNER
   chmod +x "$run/run.sh"
   AGENT="$agent" IDEA="$idea" REPO="$repo" GUIDELINES="$guidelines" OUTPUT="$out" PROMPT="$prompt" RUN="$run" screen -dmS "spec-writer-$(basename "$run")" "$run/run.sh"
-  printf 'started\nrun: %s\nidea: %s\nrepo: %s\noutput: %s\n' "$run" "$idea" "$repo" "$out"
+  printf 'started\nrun: %s\nidea: %s\nrepo: %s\noutput: %s\ninstructions: %s\n' "$run" "$idea" "$repo" "$out" "$agent/agent/instructions.md"
 }
 # One synchronous step of a --local run: no model calls here, so no screen, gateway key or wait.
-# Prints the pending phases (prompt + output file each) or the finished report as JSON.
+# Prints the knowledge stage, the pending phases (prompt + output file each) or the finished report as JSON.
+# Without --guidelines the driver checks the knowledge folder the session builds from Notion.
 cmd_local() {
   parse "$@"
-  # Without --guidelines, the session writes REQUIRED.md from Notion into the local work directory.
-  guidelines=${guidelines:-"$out.local/REQUIRED.md"}
-  [ -f "$guidelines" ] || die "no guidelines snapshot at $guidelines; write REQUIRED.md there from Notion (Agent Instructions + Review Verification) or pass --guidelines"
-  guidelines=$(absolute_file "$guidelines")
+  local args=("$idea" "$repo" --output "$out")
+  [ -z "$guidelines" ] || args+=(--guidelines "$(absolute_file "$guidelines")")
+  [ -z "$finish" ] || args+=("$finish")
   command -v pnpm >/dev/null || die "pnpm is not installed"
-  pnpm -C "$(agent_dir)" --silent write:local "$idea" "$repo" "$guidelines" "$out" $finish
+  # `run` is explicit: pnpm 12 reports "Command not found" for a bare script name after --silent.
+  pnpm -C "$(agent_dir)" --silent run write:local "${args[@]}"
 }
 cmd_status() {
   local run=${1:?usage: spec-writer.sh status RUN} elapsed output
@@ -89,6 +91,7 @@ cmd_status() {
   output=$(cat "$run/output")
   printf 'finished (%ss), exit %s\noutput: %s\n' "$elapsed" "$(cat "$run/exit")" "$output"
   tail -n 40 "$run/log"
+  [ ! -f "$run/instructions" ] || printf 'Instructions: %s\n' "$(cat "$run/instructions")"
   printf 'Spec: %s/spec.md (only if the review produced valid edits)\nDraft: %s/spec.draft.md\nDecisions: %s/trace/decisions.md\nRun analysis: %s/run-analysis.md\n' "$output" "$output" "$output" "$output"
 }
 cmd_wait() {

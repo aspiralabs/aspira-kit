@@ -116,3 +116,19 @@ it('keeps product decisions explicit and blocks cancelled runs', async () => {
   expect(cancelled.problems).toContain('Planning cancelled')
   expect(await readdir(cancelled.dir)).not.toContain('plan.reviewed.md')
 })
+
+it('sends research and planning the exact default prompt bytes', async () => {
+  // Built here by hand, not from runner helpers: --local shares those helpers, so this pins
+  // the default path's bytes independently of them.
+  const { system, researchInstructions, planningInstructions } = await import('./prompts.ts')
+  const { generateText } = await import('ai')
+  vi.mocked(generateText).mockClear()
+  const args = await input()
+  await runPlan(args)
+  const sent = vi.mocked(generateText).mock.calls.map(([call]) => call as { system?: string; prompt?: string })
+  const context = `BUSINESS SPEC:\n${spec}\n\nREQUIRED GUIDELINES:\nREV-001 Inspect source evidence\n\nREPOSITORY INSTRUCTIONS:\n\n\nsrc/items.ts:1: existing save`
+  const research = { facts: ['src/items.ts:1 establishes save'], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] }
+  expect(sent.map((call) => call.system)).toEqual([system, system])
+  expect(sent[0]!.prompt).toBe(`${context}\n\n${researchInstructions}`)
+  expect(sent[1]!.prompt).toBe(`${context}\n\nRESEARCH:\n${JSON.stringify(research)}\n\n${planningInstructions}`)
+})

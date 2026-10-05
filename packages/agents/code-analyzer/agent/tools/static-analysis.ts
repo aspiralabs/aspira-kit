@@ -13,6 +13,8 @@ export default defineTool({
     maxCostUsd: z.number().min(0).optional(),
     outputDir: z.string().optional().describe('Absolute output directory. Default: <repo>/.static-analysis for local, a temp directory for remote.'),
     fixWarnings: z.boolean().optional().describe('Also fix warning-severity diagnostics. Default: report them only.'),
+    knowledge: z.string().optional().describe('Absolute path of an engineering-guidelines folder (REQUIRED.md, INDEX.md, one file per page). Default: loaded from Notion (NOTION_TOKEN, KNOWLEDGE_PAGE).'),
+    guidelines: z.string().optional().describe('Absolute path of a REQUIRED.md guidelines snapshot. Default: loaded from Notion.'),
   }),
   async execute(input, ctx) {
     return runStaticAnalysis(input, { getSandbox: () => ctx.getSandbox(), signal: ctx.abortSignal })
