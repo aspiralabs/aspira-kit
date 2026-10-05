@@ -130,7 +130,7 @@ A reviewed plan skips this section. For a spec or a ticket, you are the planner,
 2. **Write `<work dir>/plan.json`** in the planner's shape:
    - `summary`: the intent in two or three sentences.
    - `tests`: `{ id: "T1", kind: "unit" | "integration", path, featureIds, setup, action, assertions[] }`. Every `F` needs at least one test, and the plan needs both kinds when the feature crosses a boundary (API, database, UI flow).
-   - `tasks`: `{ id: "P1", title, kind: "tests" | "implementation" | "verification", featureIds, dependsOn, testIds, changes: [{ operation: "create" | "modify" | "delete", path, symbols[], instructions, evidence[] }], commands, outcome }`. A tests task writes only its test files and has a command that runs them. Every implementation task depends on the tests task that covers its features. The last task is a `verification` task that depends on every implementation task and runs the full checks.
+   - `tasks`: `{ id: "P1", title, kind: "tests" | "implementation" | "verification", featureIds, dependsOn, testIds, changes: [{ operation: "create" | "modify" | "delete", path, symbols[], instructions, evidence[] }], commands, outcome }`. A tests task lists only its test files and has a command that runs them; each test's `setup` says what fixtures, sample data or helpers it needs, and those support files are not listed. Every implementation task depends on the tests task that covers its features. The last task is a `verification` task that depends on every implementation task and runs the full checks.
    - `decisions`: product questions you could not answer from the source. `gaps`: missing evidence.
    - Paths are repository-relative. `modify`/`delete` targets must exist and `create` targets must not.
 3. **Write `<work dir>/plan.md`**, the same plan for humans: ordered tasks with prerequisites, files and "done when", then the unit and integration checklists.
@@ -182,7 +182,7 @@ Start `<work dir>/implementation.md` (the progress log, format in section 7) and
 
 ### Discipline for every task, yours or a worker's
 
-1. **Tests first.** For a tests task, write exactly the test cases in the plan (`setup`, `action`, `assertions`) in the planned file. Run the task's test command. The new tests must fail, and they must fail for the reason the plan predicts (missing behavior, not a typo or an import error). Record the failing output.
+1. **Tests first.** For a tests task, write exactly the test cases in the plan (`setup`, `action`, `assertions`) in the planned file. The plan describes what the tests need but does not list their support files: create the test-only fixtures, sample data and helpers the cases need yourself, beside the test files and following the repository's test conventions. Run the task's test command. The new tests must fail, and they must fail for the reason the plan predicts (missing behavior, not a typo or an import error). Record the failing output.
 2. **Implement** the implementation task's `changes`: the named files and symbols, following `instructions`. Read the cited `evidence` lines and the neighbouring code first, and match their style.
 3. **Green.** Run the task's `commands` until they pass. Then run the project's typecheck and lint for the files you touched.
 4. **Done when** the task's `outcome` is true, not when the code compiles.
@@ -208,6 +208,7 @@ UI: <for UI lanes: the components to use and their get_component docs, or the no
 
 WRITE SCOPE (the only files you may create or modify):
 <exact paths>
+plus, for a tests task, new test-only support files (fixtures, sample data, helpers) beside those test files.
 If finishing needs any other file (a barrel export, a manifest, a shared type, a config), STOP and report it as a blocker. Do not edit it.
 
 Process: write the planned tests first, run the task's test command, and confirm they fail for the planned reason. Then implement and run the task commands until they pass. Run typecheck/lint scoped to your files.

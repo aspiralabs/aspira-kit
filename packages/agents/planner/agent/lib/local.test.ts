@@ -8,7 +8,7 @@ import { DEFAULT_REQUIRED, MAX_DEPTH, MAX_PAGES } from '@aspiralabs/agent-common
 import { expect, it } from 'vitest'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 import { runLocal, type LocalPending, type LocalResult } from './local.ts'
-import { planningInstructions, researchInstructions, system } from './prompts.ts'
+import { planningInstructions, researchInstructions, researchSystem } from './prompts.ts'
 
 const exec = promisify(execFile)
 const PACKAGE_DIR = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
@@ -92,7 +92,7 @@ it('writes prompt files from the live agent files, so editing the agent changes 
   const research = pending(await runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }, { env }))
   expect(research.stage).toBe('research')
   const prompt = await readFile(research.tasks[0]!.prompt, 'utf8')
-  expect(prompt).toContain(`## System\n\n${system}\n`)
+  expect(prompt).toContain(`## System\n\n${researchSystem}\n`)
   expect(prompt).toContain(`REQUIRED GUIDELINES:\n${await readFile(join(f.knowledge, 'REQUIRED.md'), 'utf8')}`)
   expect(prompt).toContain(`\n\n${researchInstructions}\n`)
   expect(prompt).toContain(join(f.knowledge, 'api-design.md'))
@@ -126,7 +126,9 @@ it('validates outputs against the agent schemas, refuses a mid-run knowledge cha
   const planning = pending(await runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }, { env }))
   expect(planning.stage).toBe('planning')
   const planPrompt = await readFile(planning.tasks[0]!.prompt, 'utf8')
-  expect(planPrompt).toContain(`\n\nRESEARCH:\n${JSON.stringify(evidence)}\n\n${planningInstructions}\n`)
+  expect(planPrompt).toContain(`\n\nRESEARCH:\n${JSON.stringify(evidence)}\n\nGUIDELINE PAGES READ DURING RESEARCH (full text):\nSOURCE ${join(f.knowledge, 'testing-standards.md')}\n`)
+  expect(planPrompt).toContain('TEST-001 Write the failing test first.')
+  expect(planPrompt).toContain(`API-001 Version every route.\n\n\n${planningInstructions}\n`)
 
   const original = await readFile(join(f.knowledge, 'api-design.md'), 'utf8')
   await writeFile(join(f.knowledge, 'api-design.md'), `${original}API-002 Added mid-run.\n`)

@@ -70,15 +70,12 @@ it('lets a plan change tracked lockfiles and .npmrc that are not indexed, but ne
   expect(validatePlan(directory, spec, files, tracked)).toContain('Target is a directory, not a file; name each file to modify: src')
 })
 
-it('lets a tests task write fixtures and helpers, and create a new package\'s scaffolding, but nothing else', () => {
-  const withChange = (operation: 'create' | 'modify', path: string) => {
+it('keeps support files out of a tests task: the plan lists test files and the implementer creates their fixtures and helpers', () => {
+  for (const [operation, path] of [['create', 'packages/format/fixtures/agent.yaml'], ['create', 'src/fixture-helper.ts'], ['create', 'packages/cli/package.json'], ['modify', 'package.json']] as const) {
     const plan = validPlan()
-    plan.tasks[0]!.changes.push({ operation, path, symbols: ['fixture'], instructions: 'Support the cases.', evidence: ['tests/example.test.ts:1'] })
-    return validatePlan(plan, spec, files).filter((error) => error.startsWith('Test task changes a non-test target'))
+    plan.tasks[0]!.changes.push({ operation, path, symbols: ['support'], instructions: 'Support the cases.', evidence: ['tests/example.test.ts:1'] })
+    expect(validatePlan(plan, spec, files)).toContain(`Test task changes a non-test target: P1/${path}`)
   }
-  for (const path of ['packages/format/fixtures/agent.yaml', 'tests/__fixtures__/a.json', 'src/test-fixtures.ts', 'src/items.test-helper.ts', 'packages/cli/package.json', 'packages/cli/tsconfig.json', 'packages/cli/eslint.config.mjs']) expect(withChange('create', path)).toEqual([])
-  expect(withChange('modify', 'package.json')).toEqual(['Test task changes a non-test target: P1/package.json'])
-  expect(withChange('create', 'src/feature.ts')).toEqual(['Test task changes a non-test target: P1/src/feature.ts'])
 })
 
 it('treats a plan as UI work only when it writes UI files', () => {

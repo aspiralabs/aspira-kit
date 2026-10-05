@@ -15,7 +15,7 @@ import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
 import { z } from 'zod'
 import { fingerprintKnowledge, inspectKnowledge, knowledgeConfig, knowledgeFiles, knowledgeFormats, REQUIRED_NAME, type KnowledgeConfig, type KnowledgeFile, type KnowledgePage } from './local-knowledge.ts'
 import { planSchema, researchSchema, type Plan, type Research } from './plan.ts'
-import { assertPlannableSpec, assessPlan, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, uncoveredRules, type PreparedPlan } from './runner.ts'
+import { assertPlannableSpec, assessPlan, type GuidelinePage, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, uncoveredRules, type PreparedPlan } from './runner.ts'
 
 /** The phases of a --local run, in order. */
 export type Stage = 'knowledge' | 'research' | 'planning'
@@ -59,7 +59,7 @@ export const workDirFor = (outputDir: string) => `${outputDir}.local`
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-const promptsModule = z.object({ system: z.string().min(1), researchInstructions: z.string().min(1), planningInstructions: z.string().min(1), repairInstructions: z.string().min(1) })
+const promptsModule = z.object({ system: z.string().min(1), researchSystem: z.string().min(1), researchInstructions: z.string().min(1), planningInstructions: z.string().min(1), repairInstructions: z.string().min(1) })
 /** The agent's prompt texts, loaded from its prompt module when the step runs. */
 export type AgentPrompts = z.infer<typeof promptsModule>
 
@@ -203,7 +203,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       retry = rejected.length < 2
     }
     const promptFile = join(work, 'prompts', `${id}.md`)
-    await writeFile(promptFile, renderTaskPrompt({ id, system: prompts.system, prompt, output, reads: readsFile, repo: resolve(input.repoPath), knowledge: topics, schema }))
+    await writeFile(promptFile, renderTaskPrompt({ id, system: id === 'research' ? prompts.researchSystem : prompts.system, prompt, output, reads: readsFile, repo: resolve(input.repoPath), knowledge: topics, schema }))
     return { task: { id, prompt: promptFile, output, schema: id === 'research' ? 'researchSchema' : 'planSchema', ...(readsFile === null ? {} : { reads: readsFile }), ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) } }
   }
 
@@ -216,14 +216,17 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   const research: Research | null = researched.value ?? null
   let plan: Plan | null = null
   if (research !== null) {
-    const planned = await resolvePhase('planning', planningPrompt(context, research, prompts.planningInstructions), planSchema)
+    // The agent hands planning the guideline pages research read; here research reads the
+    // knowledge folder's topic pages, so planning gets all of them.
+    const pages: GuidelinePage[] = await Promise.all(topics.map(async (file) => ({ source: file, markdown: await readFile(file, 'utf8') })))
+    const planned = await resolvePhase('planning', planningPrompt(context, research, prompts.planningInstructions, pages), planSchema)
     if (planned.task !== undefined) return { ...base, stage: 'planning', tasks: [planned.task] }
     plan = planned.value ?? null
     // The agent's correction passes: the same rounds, kept only while each one improves the plan.
     for (let round = 1; plan !== null && round <= REPAIR_ROUNDS; round++) {
       const issues = planIssues({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan })
       if (!issues.length) break
-      const repaired = await resolvePhase(`repair-${round}`, repairPrompt(context, research, plan, issues, prompts.repairInstructions), planSchema)
+      const repaired = await resolvePhase(`repair-${round}`, repairPrompt(context, research, plan, issues, prompts.repairInstructions, pages), planSchema)
       if (repaired.task !== undefined) return { ...base, stage: 'planning', tasks: [repaired.task] }
       if (repaired.value === undefined || planIssues({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan: repaired.value }).length >= issues.length) break
       plan = repaired.value
@@ -264,7 +267,7 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
     : new Map([[REQUIRED_NAME, prepared.guidelines]])
   const files: Record<string, string> = {
     ...planReportFiles({ prepared, specPath: input.specPath, research, plan, status, problems }),
-    'trace/calls.json': JSON.stringify({ mode: 'local', system: prompts.system, models: { all: 'Claude Code session subagents' }, rejections: state.rejections, calls }, null, 2),
+    'trace/calls.json': JSON.stringify({ mode: 'local', system: { research: prompts.researchSystem, planning: prompts.system }, models: { all: 'Claude Code session subagents' }, rejections: state.rejections, calls }, null, 2),
     'trace/usage.json': JSON.stringify({ scope: '--local run: model work ran in a Claude Code session; no usage is itemized.', turns: [] }, null, 2),
     'trace/knowledge.json': JSON.stringify({ ...knowledge, pages: knowledge.files.filter((file) => file.url !== null).map((file) => ({ file: file.name, title: file.title, url: file.url })).concat(knowledge.source === 'notion' ? requiredUrls(knowledgeContents.get(REQUIRED_NAME) ?? '') : []) }, null, 2),
     ...Object.fromEntries([...knowledgeContents].map(([name, text]) => [`trace/knowledge/${name}`, text])),

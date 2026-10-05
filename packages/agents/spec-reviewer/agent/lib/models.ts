@@ -1,5 +1,5 @@
 import { generateText, Output, hasToolCall, tool, stepCountIs, type ToolSet } from 'ai'
-import { gateway } from '@aspiralabs/agent-common/lib/gateway'
+import { gateway, streamStructured } from '@aspiralabs/agent-common/lib/gateway'
 import type { z } from 'zod'
 import type { Call } from './pipeline.ts'
 import { reviewSchema, synthesisSchema, systemPrompt } from './review.ts'
@@ -33,7 +33,7 @@ export function modelSession(started: number) {
   /** One native structured generation, no tools. */
   async function structured(options: { phase: string; model: string; system: string; prompt: string; schema: z.ZodType; signal: AbortSignal; reasoning: Reasoning; maxOutputTokens: number }): Promise<unknown> {
     const { phase, model, system, prompt, schema, signal, reasoning, maxOutputTokens } = options
-    return (await generateText({ model: gateway(model), system, prompt, abortSignal: signal, maxRetries: 0, reasoning, maxOutputTokens, output: Output.object({ schema }), ...hooks(phase, model) })).output
+    return streamStructured({ model: gateway(model), system, prompt, abortSignal: signal, maxRetries: 0, reasoning, maxOutputTokens, output: Output.object({ schema }), ...hooks(phase, model) })
   }
   /** Tool exploration that must end with a structured submit call within the step budget. */
   async function toolLoop(options: { phase: string; model: string; system: string; prompt: string; schema: z.ZodType; tools: ToolSet; signal: AbortSignal; maxSteps: number; maxOutputTokens: number; submitName: string; firstTool?: string }): Promise<unknown> {
