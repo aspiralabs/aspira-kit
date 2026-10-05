@@ -43,6 +43,35 @@ export async function runAnalyzers(executor: Executor, analyzers: Analyzer[], op
   return { diagnostics, runs }
 }
 
+/** Every analyzer's whole-tree auto-fix, in order, recorded per analyzer. */
+export async function runAutofix(executor: Executor, analyzers: Analyzer[], options: Pick<LoopOptions, 'commandTimeoutMs' | 'signal' | 'progress'>): Promise<Round['autofix']> {
+  const autofix: Round['autofix'] = []
+  for (const analyzer of analyzers) {
+    if (!analyzer.fix) continue
+    options.progress?.(`autofix ${analyzer.id}`)
+    const fixStarted = Date.now()
+    const result = await executor.run(analyzer.fix, { cwd: analyzer.cwd, timeoutMs: options.commandTimeoutMs, signal: options.signal })
+    autofix.push({ id: analyzer.id, exitCode: result.exitCode, ms: Date.now() - fixStarted })
+  }
+  return autofix
+}
+
+/** The loop's stop reasons, shared with --local so both runs report the same words. */
+export const STOP = {
+  none: 'no analyzers detected',
+  allFailed: 'every analyzer failed to run',
+  clean: 'analyzers clean',
+  noProgress: 'no progress: diagnostics unchanged after a full round',
+  roundCap: (maxRounds: number) => `round cap (${maxRounds}) reached`,
+  cancelled: 'cancelled',
+} as const
+
+/** What the loop tries to fix: errors only, or warnings too. */
+export const targetsOf = (all: Diagnostic[], fixWarnings: boolean): Diagnostic[] => (fixWarnings ? all : errors(all))
+
+/** clean only when nothing targeted remains and every analyzer ran: an analyzer that could not run leaves its verdict unknown. */
+export const finalStatus = (remainingTargets: Diagnostic[], problems: string[]): Status => (remainingTargets.length === 0 && !problems.length ? 'clean' : 'partial')
+
 async function mapConcurrent<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results: R[] = []
   let next = 0
@@ -61,38 +90,32 @@ export async function runLoop(executor: Executor, analyzers: Analyzer[], fixer: 
   const editedFiles = new Set<string>()
   const finish = (status: Status, reason: string, initial: Diagnostic[], remaining: Diagnostic[]): LoopResult =>
     ({ status, reason, rounds, initial, remaining, problems: [...new Set(problems)], editedFiles: [...editedFiles].sort(), rejected, ms: Date.now() - started })
-  if (!analyzers.some((a) => a.check)) return finish('nothing-detected', 'no analyzers detected', [], [])
+  if (!analyzers.some((a) => a.check)) return finish('nothing-detected', STOP.none, [], [])
 
   const initialRun = await runAnalyzers(executor, analyzers, options)
   for (const run of initialRun.runs) if (run.problem) problems.push(run.problem)
-  if (initialRun.runs.length && initialRun.runs.every((r) => r.problem)) return finish('failed', 'every analyzer failed to run', [], [])
-  const targetsOf = (all: Diagnostic[]) => (options.fixWarnings ? all : errors(all))
+  if (initialRun.runs.length && initialRun.runs.every((r) => r.problem)) return finish('failed', STOP.allFailed, [], [])
+  const targetsIn = (all: Diagnostic[]) => targetsOf(all, options.fixWarnings)
   let current = initialRun.diagnostics
   let previous: Diagnostic[] | null = null
-  let reason = `round cap (${options.maxRounds}) reached`
+  let reason: string = STOP.roundCap(options.maxRounds)
 
   for (let round = 1; round <= options.maxRounds; round++) {
-    if (options.signal?.aborted) { reason = 'cancelled'; break }
+    if (options.signal?.aborted) { reason = STOP.cancelled; break }
     if (options.costSoFar() >= options.maxCostUsd) { reason = `cost cap ($${options.maxCostUsd}) reached`; break }
     const roundStarted = Date.now()
     const record: Round = { round, autofix: [], analyzers: [], targets: 0, batches: 0, edits: 0, rejected: 0, unresolved: [], ms: 0 }
     rounds.push(record)
-    for (const analyzer of analyzers) {
-      if (!analyzer.fix) continue
-      options.progress?.(`autofix ${analyzer.id}`)
-      const fixStarted = Date.now()
-      const result = await executor.run(analyzer.fix, { cwd: analyzer.cwd, timeoutMs: options.commandTimeoutMs, signal: options.signal })
-      record.autofix.push({ id: analyzer.id, exitCode: result.exitCode, ms: Date.now() - fixStarted })
-    }
+    record.autofix = await runAutofix(executor, analyzers, options)
     const analyzed = await runAnalyzers(executor, analyzers, options)
     record.analyzers = analyzed.runs
     for (const run of analyzed.runs) if (run.problem) problems.push(run.problem)
     current = analyzed.diagnostics
-    const targets = targetsOf(current)
+    const targets = targetsIn(current)
     record.targets = targets.length
     record.ms = Date.now() - roundStarted
-    if (!targets.length) { reason = 'analyzers clean'; break }
-    if (previous && sameSet(targets, previous)) { reason = 'no progress: diagnostics unchanged after a full round'; break }
+    if (!targets.length) { reason = STOP.clean; break }
+    if (previous && sameSet(targets, previous)) { reason = STOP.noProgress; break }
     previous = targets
     if (options.costSoFar() >= options.maxCostUsd) { reason = `cost cap ($${options.maxCostUsd}) reached`; break }
     const batches = batch(targets)
@@ -119,8 +142,6 @@ export async function runLoop(executor: Executor, analyzers: Analyzer[], fixer: 
       current = final.diagnostics
     }
   }
-  const remainingTargets = targetsOf(current)
   // An analyzer that could not run leaves its verdict unknown, so a run with problems is never clean.
-  const status: Status = remainingTargets.length === 0 && !problems.length ? 'clean' : 'partial'
-  return finish(status, reason, initialRun.diagnostics, current)
+  return finish(finalStatus(targetsIn(current), [...new Set(problems)]), reason, initialRun.diagnostics, current)
 }

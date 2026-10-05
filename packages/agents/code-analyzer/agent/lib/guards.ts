@@ -42,8 +42,28 @@ export function applyGuardedEdit(root: string, edit: Edit, current: string | nul
   if (start < 0) return { reason: 'anchor text not found; re-read the file' }
   if (current.indexOf(edit.before, start + 1) >= 0) return { reason: 'anchor text is ambiguous; include more surrounding lines' }
   const content = current.slice(0, start) + edit.after + current.slice(start + edit.before.length)
-  if (!content.trim() && current.trim()) return { reason: 'edit would empty the file' }
-  if (suppressionCount(content) > suppressionCount(current)) return { reason: 'edit adds a suppression directive; fix the code instead' }
-  if (current.trim().length > 200 && content.trim().length < current.trim().length * 0.4) return { reason: 'edit removes most of the file; make a targeted fix' }
-  return { content }
+  const rejected = contentRejection(current, content)
+  return rejected === null ? { content } : { reason: rejected }
+}
+
+/** The checks on a file's new content against its current content, shared by edit_file and --local. */
+export function contentRejection(current: string, content: string): string | null {
+  if (!content.trim() && current.trim()) return 'edit would empty the file'
+  if (suppressionCount(content) > suppressionCount(current)) return 'edit adds a suppression directive; fix the code instead'
+  if (current.trim().length > 200 && content.trim().length < current.trim().length * 0.4) return 'edit removes most of the file; make a targeted fix'
+  return null
+}
+
+/**
+ * The same guards for a whole-file change made outside edit_file (the session's own edits in
+ * --local): `before` is null for a file that did not exist, `after` null for one that was removed.
+ */
+export function changeRejection(root: string, path: string, before: string | null, after: string | null): string | null {
+  const rel = insideRoot(root, path)
+  if (rel === null) return 'path is outside the repository'
+  const protectedReason = isProtected(rel)
+  if (protectedReason) return `protected path (${protectedReason})`
+  if (before === null) return 'file does not exist; the fixer may not create files'
+  if (after === null) return 'file was deleted; the fixer may not delete files'
+  return contentRejection(before, after)
 }
