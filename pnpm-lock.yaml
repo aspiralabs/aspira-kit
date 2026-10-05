@@ -444,6 +444,43 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.6)(jiti@2.7.0)(jsdom@26.1.0(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)
 
+  packages/agents/spec-writer:
+    dependencies:
+      '@aspiralabs/agent-common':
+        specifier: workspace:*
+        version: link:../common
+      '@aspiralabs/spec-reviewer':
+        specifier: workspace:*
+        version: link:../spec-reviewer
+      '@modelcontextprotocol/sdk':
+        specifier: 1.30.0
+        version: 1.30.0(patch_hash=d2fd74c9e0e90c7259edb90d1912a9accb806dc9603bbadf411d22771da99ee8)(supports-color@7.2.0)(zod@4.5.4)
+      ai:
+        specifier: ^7.0.105
+        version: 7.0.107(zod@4.5.4)
+      eve:
+        specifier: ^0.63.0
+        version: 0.63.0(ai@7.0.107(zod@4.5.4))
+      zod:
+        specifier: 4.5.4
+        version: 4.5.4
+    devDependencies:
+      '@aspiralabs/config':
+        specifier: workspace:*
+        version: link:../../config
+      '@types/node':
+        specifier: ^24
+        version: 24.13.6
+      eslint:
+        specifier: ^9.39.0
+        version: 9.39.5(jiti@2.7.0)(supports-color@7.2.0)
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.6)(jiti@2.7.0)(jsdom@26.1.0(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)
+
   packages/config:
     dependencies:
       '@eslint/js':

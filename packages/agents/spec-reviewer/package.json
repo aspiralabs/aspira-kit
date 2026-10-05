@@ -4,6 +4,9 @@
   "private": true,
   "description": "Spec review: research, concurrent audits, deterministic reconciliation checks.",
   "type": "module",
+  "exports": {
+    "./lib/*": "./agent/lib/*.ts"
+  },
   "scripts": {
     "dev": "eve dev",
     "build": "eve info",

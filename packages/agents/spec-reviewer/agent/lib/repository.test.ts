@@ -93,6 +93,8 @@ it('blocks secret files and symlinks outside the root from the readable snapshot
   expect(allowedPath('credentials.json')).toBe(false)
   expect(allowedPath('.npmrc')).toBe(false)
   expect(allowedPath('docs/spec.debate.10-v2-run5/conversation.md')).toBe(false)
+  expect(allowedPath('specs/han-14/spec.written/trace/calls.json')).toBe(false)
+  expect(allowedPath('specs/han-14/spec.written.local/outputs/explore.json')).toBe(false)
   expect(allowedPath('docs/spec.reviewed/findings.md')).toBe(false)
   expect(allowedPath('docs/spec.reviewed.history/run-a/findings.md')).toBe(false)
 })

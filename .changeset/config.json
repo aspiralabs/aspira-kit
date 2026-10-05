@@ -15,6 +15,7 @@
   "ignore": [
     "docs",
     "@aspiralabs/spec-reviewer",
+    "@aspiralabs/spec-writer",
     "@aspiralabs/pr-reviewer",
     "@aspiralabs/agent-common",
     "@aspiralabs/planner",

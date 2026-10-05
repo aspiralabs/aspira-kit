@@ -12,6 +12,8 @@ Research, parallel audits, reconciliation and preparation have no elapsed-time l
 
 Code assigns finding IDs, checks every disposition and evidence-gap resolution, applies exact original-text edits and renders artifacts. A missing finding, missing rule coverage, invalid edit, failed phase or missing UI evidence returns `incomplete`. Unresolved product choices return `needs-author`. `ready` means the review checks passed, not that a human approved the spec or its tests were run. Semantic evidence quality remains a model judgment; deterministic checks cannot prove that a proposed fix resolves a business issue.
 
+`agent/lib` is exported as `@aspiralabs/spec-reviewer/lib/*`. The spec writer (`packages/agents/spec-writer`) runs its review phases through `pipeline`, `review` and `models`, so a change to those modules changes both agents; run both packages' tests.
+
 ## Run
 
 Node 24+, dependencies installed with `pnpm install`. The direct CLI needs no Docker or eve server. `pnpm review` loads the shared `.env.local` and optional package `.env.development.local` for MCP/model settings. It accepts a local Git repository and a complete required-guidelines markdown snapshot. The snapshot is loaded once and included in every review context; repo data is indexed once, with paths and line numbers available to read-only tools.

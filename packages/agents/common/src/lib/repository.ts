@@ -7,7 +7,7 @@ import { z } from 'zod'
 
 const run = promisify(execFile)
 export function allowedPath(path: string): boolean {
-  return !/(?:^|\/)[^/]*\.(?:debate|review)[^/]*\//i.test(path) && !/(?:^|\/)(?:package-lock\.json|pnpm-lock\.yaml|bun\.lockb?|yarn\.lock)$/.test(path) && !path.split('/').some((part) => /^(?:\.env(?:\..*)?|\.git|node_modules|\.eve|\.next|dist|\.output|coverage|vendor|(?:secrets?|credentials?)(?:\..*)?|\.npmrc|\.pypirc|\.netrc|id_rsa|id_ed25519)$/i.test(part)) && !/\.(?:pem|key|p12|pfx|lock|avif|webp|svg|png|jpe?g|gif|pdf|woff2?|zip|gz|mp4)$/i.test(path)
+  return !/(?:^|\/)[^/]*\.(?:debate|review|written)[^/]*\//i.test(path) && !/(?:^|\/)(?:package-lock\.json|pnpm-lock\.yaml|bun\.lockb?|yarn\.lock)$/.test(path) && !path.split('/').some((part) => /^(?:\.env(?:\..*)?|\.git|node_modules|\.eve|\.next|dist|\.output|coverage|vendor|(?:secrets?|credentials?)(?:\..*)?|\.npmrc|\.pypirc|\.netrc|id_rsa|id_ed25519)$/i.test(part)) && !/\.(?:pem|key|p12|pfx|lock|avif|webp|svg|png|jpe?g|gif|pdf|woff2?|zip|gz|mp4)$/i.test(path)
 }
 
 
@@ -75,7 +75,10 @@ export function evidencePacket(spec: string, files: Map<string, string>): string
 export async function repository(root: string, signal?: AbortSignal) {
   const base = await realpath(root)
   const listing = await run('git', ['-C', base, 'ls-files', '-z', '-co', '--exclude-standard'], { maxBuffer: 16 * 1024 * 1024, signal })
-  const paths = [...new Set(listing.stdout.split('\0').filter((p) => p && allowedPath(p)))].sort()
+  const listed = [...new Set(listing.stdout.split('\0').filter(Boolean))]
+  // Every tracked or unignored path, including files deliberately not indexed (lockfiles, .npmrc).
+  const tracked = new Set(listed)
+  const paths = listed.filter((p) => allowedPath(p)).sort()
   const files = new Map<string, string>()
   const gaps: string[] = []
   let bytes = 0
@@ -97,7 +100,7 @@ export async function repository(root: string, signal?: AbortSignal) {
   const status = (await run('git', ['-C', base, 'status', '--porcelain'], { signal })).stdout.trim()
   const instructions = [...files].filter(([p]) => /(^|\/)(AGENTS|CLAUDE)\.md$/.test(p) || /agent\/constraints\.md$/.test(p)).map(([p, text]) => `SOURCE ${p}\n${text}`).join('\n\n')
   return {
-    files, commit, dirty: status.length > 0, gaps, instructions, packet: (spec: string) => evidencePacket(spec, files),
+    files, tracked, commit, dirty: status.length > 0, gaps, instructions, packet: (spec: string) => evidencePacket(spec, files),
     tools: {
       list_files: tool({ description: 'List available snapshot paths matching a substring. Refine when truncated.', inputSchema: z.object({ contains: z.string() }), execute: async ({ contains }) => {
         const matches = [...files.keys()].filter((p) => p.toLowerCase().includes(contains.toLowerCase()))

@@ -29,14 +29,17 @@ const phaseNotes: Record<string, (repo: string) => string> = {
   synthesis: () => 'No tool reads in this phase: reconcile from the review record in the task.',
   ui: (repo) => `Read-only tools only: Read, Grep, Glob and non-mutating git commands, in the repository at ${repo}. First call the aspiralabs-ui MCP: list_components, then get_component for every control the spec proposes, and record each read in uiEvidence. If that MCP is not available in this session, record it as a gap; do not substitute other evidence for the catalog.`,
 }
+/** Tool phases read the engineering guidelines the snapshot routes to, as the agent's Notion MCP connection allows. */
+export const notionNote = 'Engineering guidelines: the required snapshot in the task routes to topic pages (its "Which pages to read" table). For every row that matches this spec\'s work, read the linked page with the Notion MCP (notion-fetch, read-only) before running the checks it bears on, and cite its rules by ID and page URL. Read only Engineering Central pages linked from the guidelines. Never create, edit, move or comment on anything in Notion. If the Notion MCP is not available in this session, record each unread page as a gap; do not assume compliance with rules you could not read.'
 const specialistNote = (repo: string) => `Read-only tools only: Read, Grep, Glob and non-mutating git commands, in the repository at ${repo}. The agent gives this phase six tool rounds; be as efficient: batch reads and searches.`
 
 export function renderPhasePrompt(phase: string, prompt: string, output: string, repo: string, schema: z.ZodType): string {
   return [
     `# Aspira spec review: ${phase} (--local)`, '',
     `You are the \`${phase}\` phase of the Aspira spec review, running as a subagent of a Claude Code session instead of inside spec-reviewer. The System and Task sections below are the exact prompt the agent sends. Follow them.`, '',
-    '- Do not edit, create or delete any file in the repository. The only file you write is your output file.',
+    '- Do not edit, create or delete any file in the repository or in Notion. The only file you write is your output file.',
     `- ${(phaseNotes[phase] ?? specialistNote)(repo)}`,
+    ...(phase === 'research' || phase === 'synthesis' ? [] : [`- ${notionNote}`]),
     `- Finish by writing ONE JSON object to \`${output}\` that validates against the output schema at the end. No markdown fences and no prose in that file. Then reply with one line: \`done\`, or what stopped you.`, '',
     '## System', '', systemPrompt, '',
     '## Task', '', prompt, '',
