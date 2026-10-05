@@ -9,7 +9,7 @@ vi.mock('./repository.ts', () => ({ repository: async () => ({ instructions: '',
 vi.mock('./mcp.ts', () => ({ connectReadTools: async () => ({ tools: {}, sources: [], reads: [], close: async () => {} }) }))
 vi.mock('ai', async (original) => {
   const actual = await original<typeof import('ai')>()
-  return { ...actual, gateway: vi.fn(() => ({})), generateText: vi.fn(async (args: { prompt: string; tools: ToolSet; prepareStep: (input: { stepNumber: number }) => { activeTools?: string[] }; output?: unknown; onStepStart: (value: { stepNumber: number; messages: unknown[] }) => void; onStepEnd: (value: { usage: { inputTokens: number; outputTokens: number }; finishReason: string; text: string; toolCalls: unknown[]; toolResults: unknown[] }) => void }) => {
+  const mock = { ...actual, gateway: vi.fn(() => ({})), generateText: vi.fn(async (args: { prompt: string; tools: ToolSet; prepareStep: (input: { stepNumber: number }) => { activeTools?: string[] }; output?: unknown; onStepStart: (value: { stepNumber: number; messages: unknown[] }) => void; onStepEnd: (value: { usage: { inputTokens: number; outputTokens: number }; finishReason: string; text: string; toolCalls: unknown[]; toolResults: unknown[] }) => void }) => {
     args.onStepStart({ stepNumber: 0, messages: [{ role: 'user', content: args.prompt }] })
     const synthesis = args.prompt.includes('Reconcile once')
     if (!synthesis && args.output === undefined) expect(args.prepareStep({ stepNumber: 0 }).activeTools).not.toContain('submit_review')
@@ -20,6 +20,11 @@ vi.mock('ai', async (original) => {
     if (args.output !== undefined) return { output: result }
     await args.tools.submit_review!.execute!(result, { toolCallId: 'test', messages: [], context: {} })
     return {}
+  }) }
+  // The agents stream structured output; the stand-in streams the same generateText result, so its calls stay recorded there.
+  return { ...mock, streamText: vi.fn((args: Parameters<typeof mock.generateText>[0]) => {
+    const run = mock.generateText(args) as Promise<{ output?: unknown }>
+    return { output: run.then((value) => value.output), consumeStream: () => run.then(() => undefined) }
   }) }
 })
 import { runReview } from './runner.ts'

@@ -10,7 +10,7 @@ vi.mock('@aspiralabs/agent-common/lib/repository', () => ({ repository: async ()
 vi.mock('@aspiralabs/agent-common/lib/mcp', () => ({ connectReadTools: async () => ({ tools: state.guidelineTool ? { notion__read_guideline: { execute: async () => ({ content: [{ type: 'text', text: JSON.stringify({ source: 'https://www.notion.so/topic', markdown: 'TEST-001 Write the failing test first.' }) }] }) } } : {}, reads: [], sources: [], close: state.close }) }))
 vi.mock('ai', async (original) => {
   const actual = await original<typeof import('ai')>()
-  return { ...actual, gateway: vi.fn(() => ({})), generateText: vi.fn(async (args: { tools?: ToolSet; toolChoice?: unknown; messages?: unknown[]; output?: unknown; onStepStart: (value: { stepNumber: number; messages: unknown[] }) => void; onStepEnd: (value: { usage: { inputTokens: number; outputTokens: number }; providerMetadata: unknown; finishReason: string; text: string; toolCalls: unknown[]; toolResults: unknown[] }) => void }) => {
+  const mock = { ...actual, gateway: vi.fn(() => ({})), generateText: vi.fn(async (args: { tools?: ToolSet; toolChoice?: unknown; messages?: unknown[]; output?: unknown; onStepStart: (value: { stepNumber: number; messages: unknown[] }) => void; onStepEnd: (value: { usage: { inputTokens: number; outputTokens: number }; providerMetadata: unknown; finishReason: string; text: string; toolCalls: unknown[]; toolResults: unknown[] }) => void }) => {
     args.onStepStart({ stepNumber: 0, messages: [] })
     if (state.failResearch && args.tools) throw new Error('Research provider unavailable')
     args.onStepEnd({ usage: { inputTokens: 10, outputTokens: 5 }, providerMetadata: { gateway: { cost: '0.10' } }, finishReason: 'stop', text: 'mock output', toolCalls: [], toolResults: [] })
@@ -40,6 +40,11 @@ vi.mock('ai', async (original) => {
     if (state.uiPlan) plan.tasks[1]!.changes[0]!.path = 'src/components/item-card.tsx'
     if (state.needsAuthor) plan.decisions = ['Choose retention duration before implementing deletion.']
     return { output: plan }
+  }) }
+  // The agents stream structured output; the stand-in streams the same generateText result, so its calls stay recorded there.
+  return { ...mock, streamText: vi.fn((args: Parameters<typeof mock.generateText>[0]) => {
+    const run = mock.generateText(args) as Promise<{ output?: unknown }>
+    return { output: run.then((value) => value.output), consumeStream: () => run.then(() => undefined) }
   }) }
 })
 import { runPlan } from './runner.ts'

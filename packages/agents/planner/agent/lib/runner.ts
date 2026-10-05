@@ -1,7 +1,7 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import { generateText, Output, stepCountIs, tool, type ModelMessage, type ToolSet } from 'ai'
-import { gateway } from '@aspiralabs/agent-common/lib/gateway'
+import { gateway, streamStructured } from '@aspiralabs/agent-common/lib/gateway'
 import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
 import { connectReadTools } from '@aspiralabs/agent-common/lib/mcp'
 import { modelTrace } from '@aspiralabs/agent-common/lib/model-trace'
@@ -232,8 +232,8 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       options.progress?.('planning')
       const prompt = planningPrompt(context, research, planningInstructions, pages)
       const draftPlan = (phase: string, prompt: string) => trace.invoke({ phase, model: models.planning, prompt }, async (signal, hooks) => {
-        const result = await generateText({ model: gateway(models.planning), system, prompt, output: Output.object({ schema: planSchema }), abortSignal: signal, maxRetries: 0, maxOutputTokens: 24_000, reasoning: 'medium', ...hooks })
-        return planSchema.parse(result.output)
+        const output = await streamStructured({ model: gateway(models.planning), system, prompt, output: Output.object({ schema: planSchema }), abortSignal: signal, maxRetries: 0, maxOutputTokens: 24_000, reasoning: 'medium', ...hooks })
+        return planSchema.parse(output)
       })
       plan = await draftPlan('planning', prompt)
       // Correction passes: hand the plan back with the checks it failed. Keep a revision only when
