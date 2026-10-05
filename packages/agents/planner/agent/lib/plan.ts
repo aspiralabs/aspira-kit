@@ -33,6 +33,19 @@ export function writablePath(path: string) {
   return structural && (allowedPath(path) || (managed && !path.split('/').some((part) => /^(?:\.git|node_modules|\.eve|\.next|dist|\.output|coverage|vendor)$/i.test(part))))
 }
 
+/** Files a tests task may write besides its test files: the fixtures and helpers its cases load, and the
+ * scaffolding a new package needs before any test in it can run (created, never modified). */
+export function testSupportPath(path: string, operation: 'create' | 'modify' | 'delete'): boolean {
+  if (operation === 'delete') return false
+  if (/(?:^|\/)(?:fixtures|__fixtures__|__mocks__|testdata)\//.test(path) || /(?:^|\/)[^/]*(?:test-helper|test-fixtures|test-utils?)\.[^/]+$/.test(path)) return true
+  return operation === 'create' && /(?:^|\/)(?:package\.json|tsconfig(?:\.[\w-]+)?\.json|(?:eslint|vitest)\.config\.[cm]?[jt]s)$/.test(path)
+}
+
+/** True when a plan writes UI code, which needs the Aspira UI kit's component docs. */
+export function touchesUi(plan: Plan): boolean {
+  return plan.tasks.some((task) => task.changes.some((change) => /\.(?:tsx|jsx|css|scss)$/.test(change.path) || /(?:^|\/)components\//.test(change.path)))
+}
+
 export function validatePlan(plan: Plan, spec: string, files: Map<string, string>, tracked: Set<string> = new Set(files.keys())): string[] {
   const errors: string[] = []
   const features = new Set(specFeatures(spec).items.map((item) => item.id))
@@ -61,7 +74,7 @@ export function validatePlan(plan: Plan, spec: string, files: Map<string, string
     if (task.kind === 'tests') {
       if (!task.testIds.length) errors.push(`Test task has no cases: ${task.id}`)
       if (!task.commands.length) errors.push(`Test task has no test command: ${task.id}`)
-      for (const change of task.changes) if (change.operation === 'delete' || !task.testIds.some((id) => tests.get(id)?.path === change.path)) errors.push(`Test task changes a non-test target: ${task.id}/${change.path}`)
+      for (const change of task.changes) if (change.operation === 'delete' || (!task.testIds.some((id) => tests.get(id)?.path === change.path) && !testSupportPath(change.path, change.operation))) errors.push(`Test task changes a non-test target: ${task.id}/${change.path}`)
       for (const id of task.testIds) {
         const test = tests.get(id)
         if (test && !task.changes.some((change) => change.path === test.path && change.operation !== 'delete')) errors.push(`Test file not written by ${task.id}: ${id}`)
