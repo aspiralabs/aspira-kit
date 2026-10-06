@@ -136,10 +136,72 @@ const offset = (ms: number): string => {
 
 const pct = (part: number, whole: number) => (whole === 0 ? '—' : `${Math.round((100 * part) / whole)}%`)
 
+/** The share of every input token that was served from cache: the number the packet is meant to raise. */
+export function cacheReadShare(totals: Pick<UsageTotals, 'inputTokens' | 'cacheReadTokens'>): number | null {
+  return totals.inputTokens === 0 ? null : totals.cacheReadTokens / totals.inputTokens
+}
+
+/** One child invocation attributed to a round: a seat's or Quinn's k-th session is round k; the rest are the documents. */
+export type RoundCall = { agent: string; round: number | null }
+
+/**
+ * Model calls per agent per round. For the agent's ledger, where a session is one child turn,
+ * a seat's k-th session (in start order) is its round-k turn while k is within the rounds, and
+ * anything after is the document work. For --local, the driver knows the round of every call.
+ */
+export function callsPerRound(calls: RoundCall[], rounds: number): Record<string, { rounds: number[]; documents: number }> {
+  const table: Record<string, { rounds: number[]; documents: number }> = {}
+  for (const call of calls) {
+    const row = (table[call.agent] ??= { rounds: Array.from({ length: rounds }, () => 0), documents: 0 })
+    if (call.round === null || call.round < 1 || call.round > rounds) row.documents += 1
+    else row.rounds[call.round - 1] = (row.rounds[call.round - 1] ?? 0) + 1
+  }
+  return table
+}
+
+/** The sessions of the ledger as round calls, by the k-th-session rule above. Each session counts its steps. */
+export function roundCallsFromTurns(turns: TurnTotals[], rounds: number): RoundCall[] {
+  const seen = new Map<string, number>()
+  return turns.map((turn) => {
+    const k = (seen.get(turn.agent) ?? 0) + 1
+    seen.set(turn.agent, k)
+    return { agent: turn.agent, round: k <= rounds ? k : null, steps: turn.steps }
+  }).flatMap((call) => Array.from({ length: call.steps }, () => ({ agent: call.agent, round: call.round })))
+}
+
+export function renderCallsPerRound(table: Record<string, { rounds: number[]; documents: number }>, rounds: number): string {
+  const header = `| Agent | ${Array.from({ length: rounds }, (_, i) => `Round ${i + 1}`).join(' | ')} | Documents | Total |`
+  const divider = `| --- | ${Array.from({ length: rounds }, () => '---:').join(' | ')} | ---: | ---: |`
+  const rows = Object.entries(table)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([agent, row]) => `| ${agent} | ${row.rounds.map((n) => String(n)).join(' | ')} | ${row.documents} | ${row.rounds.reduce((sum, n) => sum + n, 0) + row.documents} |`)
+  return `## Calls per seat per round
+
+One row per agent: model calls in each round, then in the document stage (writing and checking findings.md and review.md).
+
+${header}
+${divider}
+${rows.join('\n')}
+`
+}
+
+export type CostExtras = {
+  rounds: number
+  /** Added plus deleted lines of the diff reviewed; what the estimate scales by. */
+  changedLines?: number
+  /** The packet every prompt started with; null when none was built. */
+  packet: { chars: number; tokens: number } | null
+  /** The --max-cost budget, and whether the run stopped at it. */
+  budget: { maxCostUsd: number; stopped: boolean } | null
+  /** The loop ended by the stopping rule rather than at the cap. */
+  settled?: boolean
+}
+
 export function renderCostMarkdown(
   title: string,
   summary: ReturnType<typeof summarizeUsage>,
   models: Record<string, string>,
+  extras: CostExtras = { rounds: 0, packet: null, budget: null },
 ): string {
   const t = summary.total
   const wallMs = t.lastMs - t.firstMs
@@ -162,6 +224,20 @@ export function renderCostMarkdown(
   )
   const costCaveat =
     t.unpriced > 0 ? `\n${t.unpriced} of ${t.steps} model calls reported no cost, so the totals are a lower bound.\n` : ''
+  const share = cacheReadShare(t)
+  const budget =
+    extras.budget === null
+      ? 'Budget: none.'
+      : extras.budget.stopped
+        ? `Budget: $${extras.budget.maxCostUsd.toFixed(2)} (--max-cost). **The run stopped after the call that crossed it, at ${usd(t.costUsd)}; the review is incomplete.**`
+        : `Budget: $${extras.budget.maxCostUsd.toFixed(2)} (--max-cost); the run stayed under it.`
+  const packet =
+    extras.packet === null
+      ? 'Packet: none (the seats read the changed files themselves).'
+      : `Packet: ${num(extras.packet.chars)} characters, about ${num(extras.packet.tokens)} tokens, at the start of every prompt.`
+  const roundsLine = extras.rounds > 0 ? `Rounds: ${extras.rounds}${extras.settled === true ? ', ended by the stopping rule (a round with no dispute and no new finding)' : ''}. ` : ''
+  const linesLine = extras.changedLines === undefined ? '' : `Changed lines: ${num(extras.changedLines)}. `
+  const perRound = extras.rounds > 0 ? `\n${renderCallsPerRound(callsPerRound(roundCallsFromTurns(summary.byTurn, extras.rounds), extras.rounds), extras.rounds)}` : ''
   const timeCaveat =
     t.untimed > 0 ? `\n${t.untimed} of ${t.steps} model calls have no recorded duration, so model time is a lower bound.\n` : ''
 
@@ -175,6 +251,9 @@ ${costCaveat}
 Model token cost as reported by the Vercel AI Gateway per call. Excludes sandbox compute.
 Input counts every token sent on every call, so a turn's context is billed again each step; \`cache read\` is the part that was served from cache.
 
+${roundsLine}${linesLine}Cache-read share: ${share === null ? '—' : `${Math.round(100 * share)}%`} of input tokens. ${packet}
+${budget}
+${perRound}
 ## Timing
 
 Wall clock: **${duration(wallMs)}**.

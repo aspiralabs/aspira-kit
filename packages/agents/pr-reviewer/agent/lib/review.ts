@@ -2,6 +2,8 @@
 // the seats, prompts, schemas, and the verdict can be tested without a runtime.
 
 import { z } from 'zod'
+import { DEFAULT_MAX_SEAT_CALLS } from './call-cap.ts'
+import { reviewedLine, type ReviewTarget } from './target.ts'
 
 /** The sandbox files every seat reads or writes, at the agent's paths. */
 export const FILES = {
@@ -11,6 +13,8 @@ export const FILES = {
   conversation: '/workspace/conversation.md',
   findings: '/workspace/findings.md',
   review: '/workspace/review.md',
+  /** A re-review: the previous review's findings.md, verbatim. */
+  previousFindings: '/workspace/previous-findings.md',
 } as const
 
 /** Where load-pr checks out the tree in the sandbox. */
@@ -38,6 +42,7 @@ export function workspacePaths(root: string): WorkspacePaths {
     conversation: rehome(FILES.conversation, root),
     findings: rehome(FILES.findings, root),
     review: rehome(FILES.review, root),
+    previousFindings: rehome(FILES.previousFindings, root),
   }
   return { files, roundsDir: rehome(ROUNDS_DIR, root) }
 }
@@ -121,7 +126,17 @@ export const TURN_OUTPUT_SCHEMA = {
     agreed: {
       type: 'boolean',
       description:
-        'true only if every open finding — yours and everyone else’s — is accepted, withdrawn, or rejected, and you raised nothing new this turn.',
+        'true once every finding you raised has a ruling from Quinn (confirmed, adjusted, rejected or duplicate) and you are disputing none of them. Whether the author has fixed anything does not matter; a ruled-on finding is settled. false while a finding of yours has no ruling yet or you are disputing one.',
+    },
+    raised: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'The ids of the findings you raised this turn, exactly as written in your round file. Empty when you raised none.',
+    },
+    disputed: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'The ids of the Quinn rulings you disputed this turn. Empty when you accepted every ruling on your findings.',
     },
     openPoints: {
       type: 'array',
@@ -130,7 +145,7 @@ export const TURN_OUTPUT_SCHEMA = {
     },
     note: { type: 'string', description: 'One sentence on where the review stands from your seat.' },
   },
-  required: ['agreed', 'openPoints', 'note'],
+  required: ['agreed', 'raised', 'disputed', 'openPoints', 'note'],
   additionalProperties: false,
 } as const
 
@@ -192,8 +207,8 @@ export const FINDINGS_OUTPUT_SCHEMA = {
   additionalProperties: false,
 } as const
 
-export type TurnOutput = { agreed: boolean; openPoints: string[]; note: string }
-export type VerifyOutput = TurnOutput & { rejected: string[]; duplicates: string[] }
+export type TurnOutput = { agreed: boolean; raised: string[]; disputed: string[]; openPoints: string[]; note: string }
+export type VerifyOutput = { agreed: boolean; openPoints: string[]; note: string; rejected: string[]; duplicates: string[] }
 export type DocOutput = { path: string; changed: boolean; note: string }
 export type FindingsOutput = DocOutput & { counts: Counts }
 
@@ -209,7 +224,7 @@ export const OUTPUT_VALIDATORS: {
   doc: z.ZodType<DocOutput>
   findings: z.ZodType<FindingsOutput>
 } = {
-  turn: z.strictObject({ agreed: z.boolean(), openPoints: z.array(z.string()), note: z.string() }),
+  turn: z.strictObject({ agreed: z.boolean(), raised: z.array(z.string()), disputed: z.array(z.string()), openPoints: z.array(z.string()), note: z.string() }),
   verify: z.strictObject({
     agreed: z.boolean(),
     openPoints: z.array(z.string()),
@@ -232,6 +247,21 @@ export const OUTPUT_SCHEMAS = {
 /** Which structured result a turn returns. */
 export type OutputKind = keyof typeof OUTPUT_SCHEMAS
 
+/**
+ * The stopping rule, shared by pr-debator and the --local driver. A round in which no seat
+ * disputed a ruling and no seat raised a finding has nothing left to argue: the review ends.
+ * Round 1 with findings is never settled (they have no ruling to answer yet), so round 2 runs
+ * for the seats to accept or dispute Quinn's rulings; a dispute buys one more round.
+ */
+export function roundSettled(seats: readonly TurnOutput[]): boolean {
+  return seats.every((seat) => seat.raised.length === 0 && seat.disputed.length === 0)
+}
+
+/** Whether the review is agreed: it settled, or every seat and Quinn said so in the last round. */
+export function reviewAgreed(seats: readonly TurnOutput[], quinn: VerifyOutput, settled: boolean): boolean {
+  return settled || (seats.every((seat) => seat.agreed) && quinn.agreed)
+}
+
 export type PrContext = {
   /** Human label for the transcript header: `owner/name#123` or a local path with its base ref. */
   label: string
@@ -243,21 +273,50 @@ export type PrContext = {
   knowledgeRequiredFile?: string | null
   /** Where the prompts say the files are. The sandbox layout when absent. */
   paths?: WorkspacePaths
+  /** The review packet, built once by load-pr: the first thing in every prompt. Null when none was built. */
+  packet?: string | null
+  /** The shas the verdict applies to, and the previous head for a re-review. */
+  target?: ReviewTarget | null
+  /** Tool calls a seat may make per round. DEFAULT_MAX_SEAT_CALLS when absent. */
+  maxSeatCalls?: number
 }
 
 const pathsOf = (pr: PrContext): WorkspacePaths => pr.paths ?? SANDBOX_PATHS
+const sinceOf = (pr: PrContext) => pr.target?.since ?? null
+const capOf = (pr: PrContext) => pr.maxSeatCalls ?? DEFAULT_MAX_SEAT_CALLS
+
+/** The packet, verbatim, first: every call that carries it shares the prefix. */
+const packetSection = (pr: PrContext) => (pr.packet === undefined || pr.packet === null ? '' : `${pr.packet}\n\n---\n\n`)
 
 const knowledgeSection = (pr: PrContext) =>
   pr.knowledgePath === undefined || pr.knowledgePath === null
     ? ''
     : `
 
-${pr.knowledgeRequiredFile === undefined || pr.knowledgeRequiredFile === null ? '' : `Required reading is ${pr.knowledgeRequiredFile}: the pages every reviewer must ingest in full. Your first command is \`cat ${pr.knowledgeRequiredFile}\`. Read every line; never pipe a knowledge file through \`head\` or grep it for headings. A rule there that names a check is a step you run before writing a finding. `}The org's engineering guidelines are at ${pr.knowledgePath}, indexed in ${pr.knowledgePath}/INDEX.md. Read the pages that cover what this diff touches. A guideline is a rule, not a preference: a change that contradicts one is a finding at the severity the guideline implies, citing the file. Where the guidelines are silent, review on the merits as usual. Cite guideline files; do not quote them at length.`
+${pr.knowledgeRequiredFile === undefined || pr.knowledgeRequiredFile === null ? '' : `Required reading is ${pr.knowledgeRequiredFile}: the pages every reviewer must ingest in full.${pr.packet === undefined || pr.packet === null ? ` Your first command is \`cat ${pr.knowledgeRequiredFile}\`.` : ' It is in the packet above under "Required reading"; do not read the file again.'} Read every line; never pipe a knowledge file through \`head\` or grep it for headings. A rule there that names a check is a step you run before writing a finding. `}The org's engineering guidelines are at ${pr.knowledgePath}, indexed in ${pr.knowledgePath}/INDEX.md. Read the pages that cover what this diff touches. A guideline is a rule, not a preference: a change that contradicts one is a finding at the severity the guideline implies, citing the file. Where the guidelines are silent, review on the merits as usual. Cite guideline files; do not quote them at length.`
 
 const repoSection = (pr: PrContext) =>
   pr.repoPath === null
     ? `There is no checked-out tree for this review — you have the diff and nothing else. Review the patch alone. Do not guess at code you cannot see: if a finding depends on how something outside the diff behaves, say that the finding is conditional and on what.`
-    : `The repository is checked out at ${pr.repoPath}. Read it. The diff shows what changed; the tree shows what it changed *into*, and a diff read without its surroundings produces confident nonsense. Search with \`rg\` or \`grep -rn\`, list with \`ls\`/\`find\`, open files with read_file. Do not modify the tree and do not run the project.`
+    : `The repository is checked out at ${pr.repoPath}. The diff shows what changed; the tree shows what it changed *into*, and a diff read without its surroundings produces confident nonsense. Do not modify the tree and do not run the project.`
+
+const readRules = (pr: PrContext) => {
+  const cap = capOf(pr)
+  const packet = pr.packet === undefined || pr.packet === null
+  return `Reading, all seats:
+
+- ${packet ? `Read ${pathsOf(pr).files.patch} and the changed files first.` : 'The packet above is complete for the changed files. Do not read a changed file again. Reads are for unchanged files only: what a changed file calls, who calls it, the test beside it.'}
+- Decide what you need before you read, then make one \`read_files\` call with every path you want, not one call per file. \`search(pattern, globs?)\` finds definitions and callers, with two lines of context. \`read_file\` is for a one-off. Searching with \`rg\` or \`grep -rn\` in a shell counts as a call too.
+- You have at most ${cap} tool calls this round. At the cap, stop reading: write your round file with what you have and list every path you wanted and did not read under a \`### Not read\` heading.`
+}
+
+const sinceSection = (pr: PrContext) => {
+  const since = sinceOf(pr)
+  if (since === null || pr.target === undefined || pr.target === null) return ''
+  return `
+
+This is a re-review. The previous review of this change, in ${since.dir}, was of head \`${since.sha}\`; the head is now \`${pr.target.headSha}\`, and the diff is only what changed between the two. Its findings are in ${pathsOf(pr).files.previousFindings}${pr.packet === undefined || pr.packet === null ? '' : ' and in the packet above under "Previous findings"'}. You do two things, and nothing else: for each previous finding, say whether the new diff fixes it, with the line that fixes it as evidence, or leaves it open; and raise new findings only on the delta. Code the delta does not touch is out of scope, previous findings included — a previous finding on code this delta leaves alone is simply still open.`
+}
 
 const context = (pr: PrContext) => `What you are reviewing, in the sandbox:
 
@@ -265,21 +324,35 @@ const context = (pr: PrContext) => `What you are reviewing, in the sandbox:
 - ${pathsOf(pr).files.patch} — the unified diff. This is the change. Everything you flag lives in here.
 - ${pathsOf(pr).files.changed} — the changed paths, one per line.
 
-${repoSection(pr)}${knowledgeSection(pr)}`
+${repoSection(pr)}${knowledgeSection(pr)}${sinceSection(pr)}
 
-const findingRules = (files: WorkspacePaths['files']) => `Finding rules, all seats:
+${readRules(pr)}`
 
-- Review only what the diff changes. A finding about code the diff does not touch is out of scope and Quinn will reject it.
+const findingRules = (pr: PrContext) => {
+  const { files } = pathsOf(pr)
+  const scope = sinceOf(pr) === null ? 'Review only what the diff changes. A finding about code the diff does not touch is out of scope and Quinn will reject it.' : 'Review only what the delta changes. A new finding about code the delta does not touch is out of scope and Quinn will reject it; a previous finding is answered, not re-raised.'
+  return `Finding rules, all seats:
+
+- ${scope}
 - Every finding cites a path from ${files.changed} and a line or line range, and quotes the evidence from the diff.
-- Copy paths from ${files.changed} or ${files.patch}. Never assemble one from memory of how the project is probably laid out: \`components/ui/core/alert.tsx\` and \`components/ui/core/alert/alert.tsx\` are different files, and only one of them exists. If read_file says a path is not there, the path was wrong — find the real one with \`rg --files | rg <name>\` before you write anything about it.
+- Copy paths from ${files.changed} or ${files.patch}. Never assemble one from memory of how the project is probably laid out: \`components/ui/core/alert.tsx\` and \`components/ui/core/alert/alert.tsx\` are different files, and only one of them exists. If a read says a path is not there, the path was wrong — find the real one with \`search\` before you write anything about it.
 - Severity is one of \`critical\`, \`high\`, \`medium\`, \`low\`, \`info\`. Confidence is a number from 0 to 1. Both are yours to defend.
 - Prefer the exploitable, reachable, and concrete over the theoretical. Three real findings beat ten vague ones.
 - Do not spend a finding on what typecheck, lint, or prettier already catches. Those gates run before you do.
 - Nothing to say is a result. Write "None." and mean it.`
+}
 
-const sectionShape = (who: Seat, round: number) => `## Round ${round} — ${DISPLAY_NAME[who]} (${LENS[who]})
+const previousShape = (pr: PrContext) =>
+  sinceOf(pr) === null
+    ? ''
+    : `### Previous findings
+One line per finding in the previous fix list, every one of them: \`[ID] fixed — <path>:<line>, what the delta does\`, \`[ID] still open — why\`, or \`[ID] withdrawn — why it no longer applies\`. Only the lenses you own; "not my lens" for the rest.
 
-### Responses
+`
+
+const sectionShape = (who: Seat, round: number, pr: PrContext) => `## Round ${round} — ${DISPLAY_NAME[who]} (${LENS[who]})
+
+${previousShape(pr)}### Responses
 One line per open finding from another seat that touches your lens, and one line per ruling Quinn made on *your* findings: \`[ID] accept\`, \`[ID] withdraw — reason\`, or \`[ID] dispute — evidence from the diff or the tree\`. Disputing Quinn is allowed when you have evidence; saying nothing is not. Skip this heading in round 1.
 
 ### Findings
@@ -293,44 +366,58 @@ then three short blocks: what is wrong, the evidence quoted from the diff, and t
 One short paragraph: what you now believe must change in this PR, across every point that was ever raised in your lens.
 
 ### Status
-\`agreed\` or \`open\`, followed by the ids still open. An accepted, withdrawn, or rejected finding is closed; do not list it.`
+\`agreed\` or \`open\`, followed by the ids still open. A ruled-on finding is closed whether or not anyone has fixed it; do not list it.
 
-const protocol = (who: Seat, round: number, { files, roundsDir }: WorkspacePaths) => `Protocol, every turn:
+### Not read
+Only when you hit the call cap: the paths you wanted and did not read. Omit the heading otherwise.`
 
-1. Read ${files.meta}, ${files.patch}, and ${files.changed} in full. Then read every file under ${roundsDir}/ — every seat's rounds and every one of Quinn's verification files. Do not rely on memory; the files are the record. \`find ${roundsDir} -type f | sort\` lists them.
+const protocol = (who: Seat, round: number, pr: PrContext) => {
+  const { files, roundsDir } = pathsOf(pr)
+  const packet = pr.packet !== undefined && pr.packet !== null
+  return `Protocol, every turn:
+
+1. ${packet ? `The packet above is ${files.meta}, ${files.patch} and ${files.changed}; do not read them again.` : `Read ${files.meta}, ${files.patch}, and ${files.changed} in full.`} ${round === 1 ? 'Round 1 has no record yet.' : `Then read every file under ${roundsDir}/ — every seat's rounds and every one of Quinn's verification files — in one \`read_files\` call. Do not rely on memory; the files are the record. \`find ${roundsDir} -type f | sort\` lists them.`}
 2. Write ${roundFile(round, who, roundsDir)}. One file, yours alone, this round only. Never edit another seat's file and never edit your own earlier rounds. The shape:
 
-${sectionShape(who, round)}
+${sectionShape(who, round, pr)}
 
-3. Return the structured result. \`agreed\` is true only when nothing in your lens is still open and you raised no new findings this turn.`
+3. Return the structured result. \`raised\` is the ids you wrote under Findings this turn; \`disputed\` is the ids of the rulings you disputed. \`agreed\` is true once every finding you ever raised has a ruling and you dispute none of them. The review ends after a round in which no seat raised or disputed anything, so do not hold out for fixes: a ruled-on finding is settled.`
+}
 
 export function openingPrompt(who: Seat, pr: PrContext): string {
-  return `You are ${DISPLAY_NAME[who]}, the ${LENS[who]} seat. This is round 1 of a review of ${pr.label}. Five other seats are reviewing the same diff in parallel through their own lenses, and Quinn verifies all of it after every round. You do not know which model any of them is. Do not defer to them.
+  return `${packetSection(pr)}You are ${DISPLAY_NAME[who]}, the ${LENS[who]} seat. This is round 1 of a review of ${pr.label}. Five other seats are reviewing the same diff in parallel through their own lenses, and Quinn verifies all of it after every round. You do not know which model any of them is. Do not defer to them.
 
 ${context(pr)}
 
-${findingRules(pathsOf(pr).files)}
+${findingRules(pr)}
 
-${protocol(who, 1, pathsOf(pr))}`
+${protocol(who, 1, pr)}`
 }
 
 export function turnPrompt(who: Seat, round: number, pr: PrContext): string {
-  return `You are ${DISPLAY_NAME[who]}, the ${LENS[who]} seat, in round ${round} of the review of ${pr.label}. Every other seat has written since you last read the record, and Quinn has ruled on round ${round - 1}.
+  return `${packetSection(pr)}You are ${DISPLAY_NAME[who]}, the ${LENS[who]} seat, in round ${round} of the review of ${pr.label}. Every other seat has written since you last read the record, and Quinn has ruled on round ${round - 1}. Answer every ruling on your findings: accept it, or dispute it with evidence. If you accept them all and have nothing new, say so and mark \`agreed\`; the review ends when every seat does.
 
 ${context(pr)}
 
-${findingRules(pathsOf(pr).files)}
+${findingRules(pr)}
 
-${protocol(who, round, pathsOf(pr))}`
+${protocol(who, round, pr)}`
 }
 
 export function verifyPrompt(round: number, pr: PrContext): string {
   const { files, roundsDir } = pathsOf(pr)
-  return `You are Quinn, the verification seat for the review of ${pr.label}. You are independent of the six reviewers twice over: they hunt and you check, and you run on a different model family than any of them. You raise no findings of your own. Your job is to keep the list honest.
+  const packet = pr.packet !== undefined && pr.packet !== null
+  const since = sinceOf(pr)
+  const previous =
+    since === null
+      ? ''
+      : `
+- This is a re-review of \`${since.sha}\`..\`${pr.target?.headSha ?? ''}\`. Rule on each seat's answer to each previous finding too: \`[ID] fixed — confirmed\` when the line it cites is in the delta and does what the seat says, else \`[ID] still open\`. REJECT a new finding on code the delta does not change, as always.`
+  return `${packetSection(pr)}You are Quinn, the verification seat for the review of ${pr.label}. You are independent of the six reviewers twice over: they hunt and you check, and you run on a different model family than any of them. You raise no findings of your own. Your job is to keep the list honest.
 
 ${context(pr)}
 
-Read every file under ${roundsDir}/ — all seats, all rounds including your own earlier rulings. For every finding that is still open, read the actual code at the path and lines it cites, cross-reference it against ${files.patch}, and rule on it.
+Read every file under ${roundsDir}/ — all seats, all rounds including your own earlier rulings — in one \`read_files\` call. For every finding that is still open, check the actual code at the path and lines it cites${packet ? ' (a changed file is in the packet; read only what is not)' : ''}, cross-reference it against ${files.patch}, and rule on it. Read the unchanged files you need in one \`read_files\` call before you write.
 
 Write ${roundFile(round, 'quinn', roundsDir)}:
 
@@ -352,8 +439,8 @@ Rules for rulings:
 - ADJUST confidence down when the evidence is weak or speculative, up when the code confirms it more strongly than the seat claimed.
 - Mark DUPLICATE when two findings share a root cause in the same place and one fix closes both, even if the titles, categories, or severities differ. Name the id that survives — the most accurate description, then the highest confidence, then the highest severity. Do not fold together findings that merely touch the same file.
 - When in doubt between confirming and rejecting, lean towards confirming.
-- **A failed read is not evidence against a finding.** If read_file cannot open the path a finding cites, the citation may be wrong while the finding is right. Locate the real file first — \`rg --files | rg <name>\` — and rule on the code. Reject for a bad path only after you have looked and the code is not there under any name. Never spend two calls on a path that has already failed once.
-- A seat may dispute your ruling with evidence. Read the dispute and rule again; change your mind when the evidence is better than yours, and say so. Do not hold a ruling out of consistency.
+- **A failed read is not evidence against a finding.** If a read cannot open the path a finding cites, the citation may be wrong while the finding is right. Locate the real file first with \`search\` and rule on the code. Reject for a bad path only after you have looked and the code is not there under any name. Never spend two calls on a path that has already failed once.
+- A seat may dispute your ruling with evidence. Read the dispute and rule again; change your mind when the evidence is better than yours, and say so. Do not hold a ruling out of consistency.${previous}
 
 ### Standing
 The current list: every surviving finding id with its final severity, grouped by severity, highest first. Then one line per finding still contested and who is contesting it.
@@ -361,18 +448,26 @@ The current list: every surviving finding id with its final severity, grouped by
 Return the structured result. \`agreed\` is true only when every finding has a settled ruling that no seat is still disputing.`
 }
 
+/** The line the writers put under the title; export stamps it in whether or not they did. */
+const reviewedSection = (pr: PrContext) => (pr.target === undefined || pr.target === null ? '' : ` Then, as its own line right under the title: \`${reviewedLine(pr.target)}\`.`)
+
 export function writeFindingsPrompt(pr: PrContext, agreed: boolean): string {
   const unresolved = agreed
     ? ''
     : `\n\nThe review hit its round cap without full agreement. End the file with \`## Unresolved\`: one entry per finding still contested, both positions stated plainly, and what a human has to decide. Do not pick a side and do not count these in \`counts\`.`
   const { files, roundsDir } = pathsOf(pr)
-  return `You are Nova. The review of ${pr.label} is over. Write the fix list.
+  const since = sinceOf(pr)
+  const shape =
+    since === null
+      ? `\`# Findings: ${pr.label}\`,${reviewedSection(pr)} then exactly one totals line in this form: \`Totals: <n> critical · <n> high · <n> medium · <n> low · <n> info\`, then \`## Critical\` / \`## High\` / \`## Medium\` / \`## Low\` / \`## Info\` — skip a heading with nothing under it. Under each, one \`### [ID] <one-line title>\` per finding with: location as \`path:line\`, what is wrong, the evidence quoted from the diff, the fix, who raised it, and Quinn's ruling in a few words.`
+      : `\`# Findings: ${pr.label}\`,${reviewedSection(pr)} then exactly one totals line in this form: \`Totals: <n> critical · <n> high · <n> medium · <n> low · <n> info\` counting the still-open previous findings and the new ones together. Then \`## Previous findings\`: a table with one row per finding of the previous fix list (${files.previousFindings}), columns ID, severity, state (\`fixed\`, \`still open\`, \`withdrawn\`) and evidence (\`path:line\` for fixed, the reason otherwise), as Quinn ruled them. Then \`## New findings\`: one line saying how many, and \`None.\` when there are none. Then \`## Critical\` / \`## High\` / \`## Medium\` / \`## Low\` / \`## Info\` — skip a heading with nothing under it — holding the still-open previous findings, each marked \`(previous, still open)\`, and the new findings, each marked \`(new)\`, one \`### [ID] <one-line title>\` per finding with: location as \`path:line\`, what is wrong, the evidence quoted from the diff, the fix, who raised it, and Quinn's ruling in a few words. Fixed and withdrawn findings appear only in the table.`
+  return `${packetSection(pr)}You are Nova. The review of ${pr.label} is over. Write the fix list.
 
-Read ${files.patch}, ${files.changed}, and every file under ${roundsDir}/ in full, then write ${files.findings}: what this PR has to fix, settled, deduplicated, in severity order.
+Read ${files.patch}, ${files.changed}, and every file under ${roundsDir}/ in full${pr.packet === undefined || pr.packet === null ? '' : ' (the first two are in the packet above; the round files in one `read_files` call)'}, then write ${files.findings}: what this PR has to fix, settled, deduplicated, in severity order.
 
 Shape:
 
-\`# Findings: ${pr.label}\`, then exactly one totals line in this form: \`Totals: <n> critical · <n> high · <n> medium · <n> low · <n> info\`, then \`## Critical\` / \`## High\` / \`## Medium\` / \`## Low\` / \`## Info\` — skip a heading with nothing under it. Under each, one \`### [ID] <one-line title>\` per finding with: location as \`path:line\`, what is wrong, the evidence quoted from the diff, the fix, who raised it, and Quinn's ruling in a few words.
+${shape}
 
 Rules:
 
@@ -388,14 +483,16 @@ Return the structured result with the path, \`changed: true\`, and \`counts\`: h
 export function writeReviewPrompt(pr: PrContext, agreed: boolean): string {
   const unresolved = agreed ? '' : ` Say plainly that the seats did not settle everything, and name what is still open in one line each.`
   const { files, roundsDir } = pathsOf(pr)
-  return `You are Dex. The review of ${pr.label} is over. Write the summary the author reads first.
+  const since = sinceOf(pr)
+  const again = since === null ? '' : ` Say in the first sentence that this was a re-review of \`${since.sha}\`..\`${pr.target?.headSha ?? ''}\`, and add \`## Previous findings\` before the fix sections: one line per previous finding, fixed, still open or withdrawn.`
+  return `${packetSection(pr)}You are Dex. The review of ${pr.label} is over. Write the summary the author reads first.
 
-Read ${files.meta}, ${files.patch}, and every file under ${roundsDir}/ in full, then write ${files.review}: plain English, for the person who opened this PR and will not read the transcript.
+Read ${files.meta}, ${files.patch}, and every file under ${roundsDir}/ in full${pr.packet === undefined || pr.packet === null ? '' : ' (the first two are in the packet above; the round files in one `read_files` call)'}, then write ${files.review}: plain English, for the person who opened this PR and will not read the transcript.
 
 Sections:
 
-- \`# Review: ${pr.label}\`
-- \`## What this change does\` — two to four sentences, from the diff, not from the PR description.
+- \`# Review: ${pr.label}\`${reviewedSection(pr)}
+- \`## What this change does\` — two to four sentences, from the diff, not from the PR description.${again}
 - \`## Fix before merge\` — the critical and high findings, one bullet each, in the author's words: what breaks, where, and what to do. No ids in the sentence; put the id in brackets at the end.
 - \`## Worth fixing\` — medium and low, same shape. One line saying "nothing" if there is nothing.
 - \`## Checked and clean\` — what the seats looked at and found nothing wrong with, one line per lens. This is what makes the rest trustworthy.${unresolved}
@@ -406,9 +503,9 @@ Return the structured result with the path and \`changed: true\`.`
 }
 
 export function reviewDocPrompt(who: Reviewer, path: string, pr: PrContext): string {
-  return `You are ${DISPLAY_NAME[who]}. ${path} has been written for the review of ${pr.label}.
+  return `${packetSection(pr)}You are ${DISPLAY_NAME[who]}. ${path} has been written for the review of ${pr.label}.
 
-Read every file under ${pathsOf(pr).roundsDir}/ and then ${path}. Check it against the record: nothing invented, nothing dropped, no side taken on a point that was left open, and no finding described as worse or milder than it was settled to be. If it drifts, fix the document in place and keep its structure. If it is accurate, leave it alone.
+Read every file under ${pathsOf(pr).roundsDir}/ in one \`read_files\` call, and then ${path}. Check it against the record: nothing invented, nothing dropped, no side taken on a point that was left open, and no finding described as worse or milder than it was settled to be. If it drifts, fix the document in place and keep its structure. If it is accurate, leave it alone.
 
 Return the structured result with the path and whether you changed it.`
 }
@@ -416,15 +513,17 @@ Return the structured result with the path and whether you changed it.`
 /** Quinn's last pass: the fix list is the deliverable, so the verifier signs it off, counts and all. */
 export function checkFindingsPrompt(pr: PrContext): string {
   const { files, roundsDir } = pathsOf(pr)
-  return `You are Quinn. Nova has written ${files.findings} for the review of ${pr.label}. Sign it off.
+  const since = sinceOf(pr)
+  const previous = since === null ? '' : `\n- The \`## Previous findings\` table has one row per finding in ${files.previousFindings}, in the state you ruled, and a \`fixed\` row cites a line the delta changes.`
+  return `${packetSection(pr)}You are Quinn. Nova has written ${files.findings} for the review of ${pr.label}. Sign it off.
 
-Read ${files.patch}, ${files.changed}, every file under ${roundsDir}/, and then ${files.findings}. Check that:
+Read ${files.patch}, ${files.changed}, every file under ${roundsDir}/, and then ${files.findings}${pr.packet === undefined || pr.packet === null ? '' : ' (the first two are in the packet above; the rest in one `read_files` call)'}. Check that:
 
 - Every entry cites a path the diff actually changes.
 - Every severity is where it finally landed after your rulings, not where it started.
 - Nothing you rejected or folded into another id survived.
 - Nothing the seats settled is missing.
-- No two entries describe one fix.
+- No two entries describe one fix.${previous}
 
 Fix the file in place where it drifts; keep its structure. Leave it alone if it is right.
 

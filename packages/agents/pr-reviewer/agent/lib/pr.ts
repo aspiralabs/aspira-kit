@@ -2,6 +2,7 @@
 // the markdown the seats read. No eve or node imports.
 
 import { REPO_PATH, FILES } from './review.ts'
+import { reviewedLine, type ReviewTarget } from './target.ts'
 
 export { REPO_PATH }
 
@@ -39,6 +40,11 @@ function github(match: RegExpMatchArray): PrSource {
 
 export function prApiUrl(owner: string, name: string, number: number): string {
   return `https://api.github.com/repos/${owner}/${name}/pulls/${number}`
+}
+
+/** The compare endpoint: with the diff media type it serves `from...to` as a unified diff. */
+export function compareApiUrl(owner: string, name: string, from: string, to: string): string {
+  return `https://api.github.com/repos/${owner}/${name}/compare/${from}...${to}`
 }
 
 export type PrMeta = {
@@ -86,18 +92,23 @@ export function prMetaFromApi(owner: string, name: string, number: number, paylo
  * the sandbox. A blobless partial clone keeps a large repo from costing a minute.
  * The token stays inside the command; it never reaches a tool result.
  */
-export function clonePrCommand(source: Extract<PrSource, { kind: 'github' }>, meta: PrMeta, token: string | undefined): string {
+export function clonePrCommand(source: Extract<PrSource, { kind: 'github' }>, meta: PrMeta, token: string | undefined, since?: string): string {
   const url = `https://github.com/${source.owner}/${source.name}.git`
   const authed = token ? url.replace('https://', `https://x-access-token:${token}@`) : url
+  // A re-review diffs from the previous head, which must still be in the PR's history.
+  const from =
+    since === undefined
+      ? ['MB=$(git merge-base __base __pr)', 'FROM="$MB"']
+      : [`git cat-file -e ${shellQuote(since)}^{commit} || { echo "the previous head ${since.slice(0, 7)} is not in the repository; was the branch rewritten? Review in full instead." >&2; exit 3; }`, `FROM=${shellQuote(since)}`]
   return [
     'set -e',
     `rm -rf ${REPO_PATH}`,
     `git clone --filter=blob:none --quiet ${shellQuote(authed)} ${REPO_PATH}`,
     `cd ${REPO_PATH}`,
     `git fetch --quiet origin pull/${source.number}/head:__pr refs/heads/${meta.baseRef}:__base`,
-    'MB=$(git merge-base __base __pr)',
-    `git diff --patch --no-color "$MB" __pr > ${FILES.patch}`,
-    `git diff --name-only "$MB" __pr > ${FILES.changed}`,
+    ...from,
+    `git diff --patch --no-color "$FROM" __pr > ${FILES.patch}`,
+    `git diff --name-only "$FROM" __pr > ${FILES.changed}`,
     'git checkout --quiet __pr',
     'git log -1 --format=%h __pr',
   ].join('\n')
@@ -262,7 +273,7 @@ export function truncatePatch(patch: string, maxBytes = MAX_PATCH_BYTES): { patc
 }
 
 /** /workspace/pr.md: the first thing every seat reads. */
-export function renderPrMeta(meta: PrMeta, stats: PatchStats, changed: string[], dropped: string[] = []): string {
+export function renderPrMeta(meta: PrMeta, stats: PatchStats, changed: string[], dropped: string[] = [], target: ReviewTarget | null = null): string {
   const lines = [
     `# ${meta.title}`,
     '',
@@ -270,6 +281,10 @@ export function renderPrMeta(meta: PrMeta, stats: PatchStats, changed: string[],
     `- Base: ${meta.baseRef}${meta.baseSha ? ` (${meta.baseSha.slice(0, 7)})` : ''}`,
     `- Head: ${meta.headRef}${meta.headSha ? ` (${meta.headSha.slice(0, 7)})` : ''}`,
   ]
+  if (target !== null) lines.push(`- ${reviewedLine(target)}`)
+  if (target?.since !== null && target?.since !== undefined) {
+    lines.push(`- **Re-review.** The previous review in \`${target.since.dir}\` was of \`${target.since.sha.slice(0, 7)}\`. The diff below is only what changed since; the previous findings are in \`${FILES.previousFindings}\`.`)
+  }
   if (meta.author !== null) lines.push(`- Author: ${meta.author}`)
   if (meta.url !== null) lines.push(`- URL: ${meta.url}`)
   lines.push(`- Diff: ${stats.files} file${stats.files === 1 ? '' : 's'}, +${stats.additions}/-${stats.deletions}`)

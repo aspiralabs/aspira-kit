@@ -31,7 +31,7 @@ async function seedKnowledge(dir: string, required = REQUIRED_MD) {
   await writeFile(join(dir, 'testing.md'), '# Testing\n\nTST-001 Tests first.\n')
 }
 
-const turn = (agreed: boolean, openPoints: string[] = []) => ({ agreed, openPoints, note: 'n' })
+const turn = (agreed: boolean, openPoints: string[] = [], over: { raised?: string[]; disputed?: string[] } = {}) => ({ agreed, raised: over.raised ?? [], disputed: over.disputed ?? [], openPoints, note: 'n' })
 const verify = (agreed: boolean, openPoints: string[] = []) => ({ agreed, openPoints, rejected: ['COLE1.1'], duplicates: [], note: 'n' })
 const doc = (path: string) => ({ path, changed: true, note: 'n' })
 const counts = (high: number, medium = 0) => ({ critical: 0, high, medium, low: 0, info: 0 })
@@ -56,18 +56,20 @@ describe('planStep', () => {
     expect(seats).toMatchObject({ stage: 'seats', round: 1 })
     expect(seats.tasks.map((t) => t.id)).toEqual(SEATS.map((seat) => `round-1-${seat}`))
     expect(seats.tasks.map((t) => t.prompt)).toEqual(SEATS.map((seat) => openingPrompt(seat, pr)))
-    for (const seat of SEATS) outputs.set(`round-1-${seat}`, turn(true))
+    // Round 1: Ava raises a finding, so the round is not settled and round 2 runs for the rulings to be answered.
+    for (const seat of SEATS) outputs.set(`round-1-${seat}`, turn(seat !== 'ava', [], seat === 'ava' ? { raised: ['AVA1.1'] } : {}))
 
     const quinn = pending()
     expect(quinn).toMatchObject({ stage: 'verifier', round: 1 })
     expect(quinn.tasks).toEqual([expect.objectContaining({ id: 'round-1-quinn', agent: 'quinn', kind: 'verify', prompt: verifyPrompt(1, pr) })])
-    outputs.set('round-1-quinn', verify(false, ['AVA1.1 disputed']))
+    outputs.set('round-1-quinn', verify(true))
 
     const second = pending()
     expect(second).toMatchObject({ stage: 'seats', round: 2 })
     expect(second.tasks.map((t) => t.prompt)).toEqual(SEATS.map((seat) => turnPrompt(seat, 2, pr)))
+    // Round 2: every ruling accepted, nothing new: settled, whatever Quinn's flag says.
     for (const seat of SEATS) outputs.set(`round-2-${seat}`, turn(true))
-    outputs.set('round-2-quinn', verify(true))
+    outputs.set('round-2-quinn', verify(false, ['AVA1.1 waiting for the fix']))
 
     const docs = pending()
     expect(docs).toMatchObject({ stage: 'documents', round: 2 })
@@ -90,14 +92,15 @@ describe('planStep', () => {
     const done = plan()
     if (!done.done) throw new Error('expected done')
     // Quinn's sign-off counts win over Nova's, and the verdict is arithmetic on them.
-    expect(done).toMatchObject({ agreed: true, rounds: 2, counts: counts(0, 1), verdict: 'comment', openPoints: [], missing: [], rejected: ['COLE1.1'] })
+    expect(done).toMatchObject({ agreed: true, settled: true, rounds: 2, counts: counts(0, 1), verdict: 'comment', openPoints: [], missing: [], rejected: ['COLE1.1'] })
     expect(done.calls.map((c) => c.id)).toEqual([...SEATS.map((s) => `round-1-${s}`), 'round-1-quinn', ...SEATS.map((s) => `round-2-${s}`), 'round-2-quinn', 'findings', 'review', 'check-findings', 'check-review'])
   })
 
   it('stops at the round cap without agreement and tells the writers so', () => {
     const { outputs, pending } = setup(2)
     for (const round of [1, 2]) {
-      for (const seat of SEATS) outputs.set(`round-${round}-${seat}`, turn(seat !== 'ava', seat === 'ava' ? ['AVA1.1 open'] : []))
+      // Ava disputes Quinn every round: the review never settles and runs to the cap.
+      for (const seat of SEATS) outputs.set(`round-${round}-${seat}`, turn(seat !== 'ava', seat === 'ava' ? ['AVA1.1 open'] : [], seat === 'ava' ? { disputed: ['AVA1.1'] } : {}))
       outputs.set(`round-${round}-quinn`, verify(false, ['AVA1.1 open', 'IRIS1.2 open']))
     }
     const docs = pending()
@@ -109,7 +112,7 @@ describe('planStep', () => {
 
   it('reports the open points from the seats and Quinn when the cap is hit', () => {
     const { outputs, plan } = setup(1)
-    for (const seat of SEATS) outputs.set(`round-1-${seat}`, turn(seat !== 'ava', seat === 'ava' ? ['AVA1.1 open'] : []))
+    for (const seat of SEATS) outputs.set(`round-1-${seat}`, turn(seat !== 'ava', seat === 'ava' ? ['AVA1.1 open'] : [], seat === 'ava' ? { raised: ['AVA1.1'] } : {}))
     outputs.set('round-1-quinn', verify(false, ['AVA1.1 open', 'IRIS1.2 open']))
     outputs.set('findings', findingsOut('/w/findings.md', 1))
     outputs.set('review', doc('/w/review.md'))
@@ -117,13 +120,13 @@ describe('planStep', () => {
     outputs.set('check-review', doc('/w/review.md'))
     const done = plan()
     if (!done.done) throw new Error('expected done')
-    expect(done).toMatchObject({ agreed: false, rounds: 1, verdict: 'block', openPoints: ['AVA1.1 open', 'IRIS1.2 open'] })
+    expect(done).toMatchObject({ agreed: false, settled: false, rounds: 1, verdict: 'block', openPoints: ['AVA1.1 open', 'IRIS1.2 open'] })
   })
 
   it('returns only the tasks still missing or invalid, with the schema error', () => {
     const { outputs, pending } = setup(4)
     for (const seat of SEATS.slice(1)) outputs.set(`round-1-${seat}`, turn(true))
-    outputs.set('round-1-ava', { agreed: 'yes', openPoints: [], note: '' })
+    outputs.set('round-1-ava', { agreed: 'yes', raised: [], disputed: [], openPoints: [], note: '' })
     const retry = pending()
     expect(retry.tasks.map((t) => t.id)).toEqual(['round-1-ava'])
     expect(retry.tasks[0]!.error).toContain('agreed')
@@ -190,7 +193,8 @@ async function answer(task: LocalTask, workDir: string, options: { agreeAt?: num
   let output: unknown
   if (round > 0) {
     await write(join(workDir, 'review', `round-${round}`, `${task.agent}.md`), `## Round ${round} — ${task.agent}\n\nNone.\n`)
-    output = task.agent === 'quinn' ? verify(round >= agreeAt) : turn(round >= agreeAt)
+    // Before the agreeing round a seat keeps disputing, so the stopping rule does not end the review early.
+    output = task.agent === 'quinn' ? verify(round >= agreeAt) : turn(round >= agreeAt, [], round >= agreeAt ? {} : { disputed: [`${task.agent.toUpperCase()}1.1`] })
   } else if (task.id === 'findings') {
     await write(join(workDir, 'findings.md'), FINDINGS_MD)
     output = findingsOut(join(workDir, 'findings.md'), 1)
@@ -225,7 +229,7 @@ const finished = (result: LocalResult) => {
 
 describe('runLocal, local repository', () => {
   it('writes each task\'s exact review.ts prompt, with the sandbox paths mapped to the work directory', async () => {
-    const { repo } = await gitRepo()
+    const { repo, git } = await gitRepo()
     const first = pending(await runLocal({ source: repo }))
     const work = join(repo, '.work', 'x', 'pr-review.local')
     expect(first).toMatchObject({ stage: 'seats', round: 1, maxRounds: 4, workDir: work })
@@ -236,7 +240,16 @@ describe('runLocal, local repository', () => {
       knowledgePath: join(work, 'knowledge'),
       knowledgeRequiredFile: join(work, 'knowledge', 'REQUIRED.md'),
       paths: workspacePaths(work),
+      packet: await readFile(join(work, 'packet.md'), 'utf8'),
+      target: first.target,
+      maxSeatCalls: 8,
     }
+    expect(first.target).toEqual({ baseSha: await git('rev-parse', 'main'), headSha: await git('rev-parse', 'feat/x'), since: null })
+    // The packet: built once, every changed file at HEAD, the required reading, the first thing in every prompt.
+    expect(first.packet).toMatchObject({ full: ['a.ts', 'b.ts'], excerpted: [], omitted: [], missing: [] })
+    expect(pr.packet).toContain('1 | export const a = 2\n')
+    expect(pr.packet).toContain('1 | export const b = 1\n')
+    expect(pr.packet).toContain(REQUIRED_MD.trim())
     for (const task of first.tasks) {
       expect(task.output).toBe(join(work, 'outputs', `${task.id}.json`))
       expect(task.schema).toBe('TURN_OUTPUT_SCHEMA')
@@ -245,7 +258,9 @@ describe('runLocal, local repository', () => {
       expect(text).toContain(`# ${task.agent[0]!.toUpperCase()}${task.agent.slice(1)}\n`)
       expect(text).toContain(task.output)
       expect(text).not.toContain('/workspace/')
-      expect(text).toContain(`Your first command is \`cat ${join(work, 'knowledge', 'REQUIRED.md')}\``)
+      expect(text).toContain(`Required reading is ${join(work, 'knowledge', 'REQUIRED.md')}`)
+      expect(text).toContain('## Task\n\n# Review packet: ')
+      expect(text).toContain('read_files is the Read tool over each path listed')
       // The seat's system prompt is its instructions.md, byte for byte, read on this call.
       expect(text).toContain(`## System\n\n${(await readFile(join(PACKAGE_DIR, 'agent', 'subagents', task.agent, 'instructions.md'), 'utf8')).trim()}\n\n## Task`)
     }
@@ -262,7 +277,7 @@ describe('runLocal, local repository', () => {
     const first = pending(await runLocal({ source: repo }))
     const [ava, ...rest] = first.tasks
     for (const task of rest) await answer(task, first.workDir)
-    await writeFile(ava!.output, '{"agreed": "yes", "openPoints": [], "note": ""}')
+    await writeFile(ava!.output, '{"agreed": "yes", "raised": [], "disputed": [], "openPoints": [], "note": ""}')
     const retry = pending(await runLocal({ source: repo }))
     expect(retry.tasks).toHaveLength(1)
     expect(retry.tasks[0]).toMatchObject({ id: 'round-1-ava', retry: true })
@@ -279,13 +294,25 @@ describe('runLocal, local repository', () => {
     const { repo } = await gitRepo()
     const done = finished(await complete({ source: repo }))
     const dir = join(repo, '.work', 'x', 'pr-review')
-    expect(done).toMatchObject({ status: 'complete', dir, verdict: 'block', counts: counts(1), agreed: true, rounds: 1, comment: null })
+    expect(done).toMatchObject({ status: 'complete', dir, verdict: 'block', counts: counts(1), agreed: true, settled: true, rounds: 1, comment: null })
     expect((await readdir(dir)).sort()).toEqual(['changed_files.txt', 'conversation.md', 'cost.md', 'findings.md', 'pr.md', 'pr.patch', 'review.md', 'trace'])
-    expect(await readFile(join(dir, 'findings.md'), 'utf8')).toBe(FINDINGS_MD)
+    // Round one with no dispute and no new finding ends the review in one round: seats + Quinn + the two writers and two checks.
+    const reviewed = `Reviewed: base \`${done.target.baseSha}\` → head \`${done.target.headSha}\``
+    expect(await readFile(join(dir, 'findings.md'), 'utf8')).toBe(FINDINGS_MD.replace('# Findings: test\n\n', `# Findings: test\n\n${reviewed}\n\n`))
+    expect(await readFile(join(dir, 'review.md'), 'utf8')).toContain(`# Review: test\n\n${reviewed}\n\n## What`)
+    expect(await readFile(join(dir, 'pr.md'), 'utf8')).toContain(`- ${reviewed}`)
     expect(await readFile(join(dir, 'conversation.md'), 'utf8')).toMatch(/^# Review: .* @ feat\/x vs main\n\n## Round 1 — ava/)
-    expect(await readFile(join(dir, 'cost.md'), 'utf8')).toContain('Claude Code session')
+    const costMd = await readFile(join(dir, 'cost.md'), 'utf8')
+    expect(costMd).toContain('Claude Code session')
+    expect(costMd).toContain('over 1 round of 4 (ended by the stopping rule: a round with no dispute and no new finding)')
+    expect(costMd).toMatch(/Packet: [\d,]+ characters, about [\d,]+ tokens/)
+    expect(costMd).toContain('Budget: none.')
+    expect(costMd).toContain('| ava | 1 | 0 | 1 |')
+    expect(costMd).toContain('| quinn | 1 | 1 | 2 |')
     const trace = JSON.parse(await readFile(join(dir, 'trace', 'calls.json'), 'utf8'))
-    expect(trace.calls).toHaveLength(11)
+    expect(trace.calls).toHaveLength(SEATS.length + 1 + 4)
+    expect(trace.target).toEqual(done.target)
+    expect(trace.packet).toEqual(done.packet)
     expect(trace.calls[0]).toMatchObject({ id: 'round-1-ava', agent: 'ava', output: { agreed: true } })
     expect(trace.calls[0].prompt).toContain('You are Ava, the security seat')
     expect(await readFile(join(repo, '.gitignore'), 'utf8')).toContain('.work/')
@@ -372,7 +399,7 @@ async function githubFixture() {
 
 describe('runLocal, GitHub PR', () => {
   it('loads the PR from the API, shallow-clones its head, exports to reviews/<date>-<slug>/ and posts the comment', async () => {
-    const { dir, github, deps, head } = await githubFixture()
+    const { dir, repo, github, deps, head } = await githubFixture()
     const first = pending(await runLocal({ source: 'acme/app#7' }, deps))
     const date = new Date().toISOString().slice(0, 10)
     expect(first.workDir).toBe(join(dir, 'reviews', `${date}-feat-x.local`))
@@ -390,7 +417,8 @@ describe('runLocal, GitHub PR', () => {
     expect(post?.url).toBe('https://api.github.com/repos/acme/app/issues/7/comments')
     expect(post?.body?.body.startsWith(REVIEW_COMMENT_MARKER)).toBe(true)
     expect(post?.body?.body).toContain('**Verdict: block**')
-    expect(post?.body?.body).toContain(REVIEW_MD.trim())
+    expect(post?.body?.body).toContain(`Reviewed: base \`${await (await exec('git', ['-C', repo, 'rev-parse', 'main'])).stdout.trim()}\` → head \`${head}\``)
+    expect(post?.body?.body).toContain(`# Review: test\n\nReviewed: base \`${(await exec('git', ['-C', repo, 'rev-parse', 'main'])).stdout.trim()}\` → head \`${head}\`\n\n## What this change does`)
     expect(github.calls.every((c) => c.auth === 'Bearer tok')).toBe(true)
     expect(github.calls.filter((c) => c.method !== 'GET').every((c) => c.url.includes('/repos/acme/app/'))).toBe(true)
   })
@@ -478,7 +506,7 @@ describe('runLocal, engineering guidelines', () => {
     await seedKnowledge(folder)
     const first = pending(await runLocal({ source: repo, knowledge: folder }))
     const work = first.workDir
-    const pr: PrContext = { label: `${repo} @ feat/x vs main`, repoPath: repo, knowledgePath: folder, knowledgeRequiredFile: join(folder, 'REQUIRED.md'), paths: workspacePaths(work) }
+    const pr: PrContext = { label: `${repo} @ feat/x vs main`, repoPath: repo, knowledgePath: folder, knowledgeRequiredFile: join(folder, 'REQUIRED.md'), paths: workspacePaths(work), packet: await readFile(join(work, 'packet.md'), 'utf8'), target: first.target, maxSeatCalls: 8 }
     for (const task of first.tasks) {
       expect(await readFile(task.prompt, 'utf8')).toContain(`\n## Task\n\n${openingPrompt(task.agent === 'quinn' ? 'ava' : task.agent, pr)}\n\n## Output schema\n`)
     }
@@ -514,5 +542,84 @@ describe('runLocal, the agent\'s own sources', () => {
     expect(text).toContain('Version two.')
     expect(text).not.toContain('Version one')
     expect(again.orchestrator).toBe(join(agentDir, 'agent', 'instructions.md'))
+  })
+})
+
+describe('runLocal, re-review with --since', () => {
+  // A repo that already ignores .work/, as every Aspira project does, so the export changes nothing in the tree.
+  async function ignoringRepo() {
+    const fixture = await gitRepo()
+    await writeFile(join(fixture.repo, '.gitignore'), '.work/\n')
+    await fixture.git('add', '.gitignore')
+    await fixture.git('commit', '-qm', 'chore: ignore .work')
+    return fixture
+  }
+
+  it('diffs from the previous head, puts the previous findings in front of the seats, and stamps the shas in all three outputs', async () => {
+    const { repo, git } = await ignoringRepo()
+    const first = finished(await complete({ source: repo }))
+    const previousHead = first.target.headSha
+    expect(await readFile(join(first.dir, 'findings.md'), 'utf8')).toContain(`head \`${previousHead}\``)
+
+    // The author pushes a fix: a.ts changes again, b.ts does not.
+    await writeFile(join(repo, 'a.ts'), 'export const a = 3 // fixed\n')
+    await git('commit', '-qam', 'fix: a')
+    const newHead = await git('rev-parse', 'HEAD')
+    await seedKnowledge(join(repo, '.work', 'x', 'pr-review.local', 'knowledge'))
+
+    const again = pending(await runLocal({ source: repo, since: first.dir }))
+    expect(again.target).toEqual({ baseSha: await git('rev-parse', 'main'), headSha: newHead, since: { sha: previousHead, dir: first.dir } })
+    // The delta only: a.ts changed since the previous head, b.ts did not.
+    expect(await readFile(join(again.workDir, 'changed_files.txt'), 'utf8')).toBe('a.ts\n')
+    expect(await readFile(join(again.workDir, 'pr.patch'), 'utf8')).not.toContain('b.ts')
+    expect(await readFile(join(again.workDir, 'previous-findings.md'), 'utf8')).toContain('[AVA1.1] Unchecked input')
+    const prompt = await readFile(again.tasks[0]!.prompt, 'utf8')
+    expect(prompt).toContain('## Previous findings')
+    expect(prompt).toContain('[AVA1.1] Unchecked input')
+    expect(prompt).toContain(`This is a re-review. The previous review of this change, in ${first.dir}, was of head \`${previousHead}\``)
+    expect(prompt).toContain('raise new findings only on the delta')
+    expect(prompt).toContain('### Previous findings\nOne line per finding in the previous fix list')
+    // Quinn's and the writers' prompts carry the re-review rules and the stamp line.
+    for (const task of again.tasks) await answer(task, again.workDir)
+    const quinn = pending(await runLocal({ source: repo, since: first.dir }))
+    expect(await readFile(quinn.tasks[0]!.prompt, 'utf8')).toContain(`This is a re-review of \`${previousHead}\`..\`${newHead}\`. Rule on each seat's answer to each previous finding too`)
+    await answer(quinn.tasks[0]!, quinn.workDir)
+    const docs = pending(await runLocal({ source: repo, since: first.dir }))
+    const findingsPrompt = await readFile(docs.tasks[0]!.prompt, 'utf8')
+    expect(findingsPrompt).toContain('`## Previous findings`: a table with one row per finding of the previous fix list')
+    expect(findingsPrompt).toContain('`## New findings`')
+    expect(findingsPrompt).toContain(`Re-review: \`${previousHead}\`..\`${newHead}\` (base \`${await git('rev-parse', 'main')}\`)`)
+    expect(await readFile(docs.tasks[1]!.prompt, 'utf8')).toContain(`this was a re-review of \`${previousHead}\`..\`${newHead}\``)
+
+    const done = finished(await complete({ source: repo, since: first.dir }))
+    const stamp = `Re-review: \`${previousHead}\`..\`${newHead}\` (base \`${await git('rev-parse', 'main')}\`)`
+    expect(await readFile(join(done.dir, 'findings.md'), 'utf8')).toContain(`# Findings: test\n\n${stamp}\n\n`)
+    expect(await readFile(join(done.dir, 'review.md'), 'utf8')).toContain(`# Review: test\n\n${stamp}\n\n`)
+    expect(await readFile(join(done.dir, 'pr.md'), 'utf8')).toContain(`- ${stamp}`)
+    expect((await readdir(done.dir)).sort()).toContain('previous-findings.md')
+  })
+
+  it('refuses a previous review with no recorded head, and a branch that has not moved', async () => {
+    const { repo, dir } = await ignoringRepo()
+    const stale = join(dir, 'old-review')
+    await mkdir(stale, { recursive: true })
+    await writeFile(join(stale, 'findings.md'), '# Findings: x\n\nTotals: 0\n')
+    await expect(runLocal({ source: repo, since: stale })).rejects.toThrow('records no head sha')
+    await expect(runLocal({ source: repo, since: join(dir, 'nowhere') })).rejects.toThrow('has no findings.md')
+    const first = finished(await complete({ source: repo }))
+    await seedKnowledge(join(repo, '.work', 'x', 'pr-review.local', 'knowledge'))
+    await expect(runLocal({ source: repo, since: first.dir })).rejects.toThrow('has not changed since')
+  })
+})
+
+describe('runLocal, budget and call cap', () => {
+  it('records --max-cost and the call cap in the run, without enforcing a cost it cannot see', async () => {
+    const { repo } = await gitRepo()
+    const first = pending(await runLocal({ source: repo, maxCost: 3 }, { env: { MAX_SEAT_CALLS: '5' } }))
+    expect(await readFile(first.tasks[0]!.prompt, 'utf8')).toContain('You have at most 5 tool calls this round')
+    for (const task of first.tasks) await answer(task, first.workDir)
+    const done = finished(await complete({ source: repo, maxCost: 3 }, { env: { MAX_SEAT_CALLS: '5' } }))
+    expect(await readFile(join(done.dir, 'cost.md'), 'utf8')).toContain('Budget: $3.00 (--max-cost). Not enforced in --local, where no cost is itemized.')
+    await expect(runLocal({ source: repo, maxCost: -1 })).rejects.toThrow('--max-cost')
   })
 })
