@@ -4,11 +4,12 @@ import { fileURLToPath } from 'node:url'
 import { join, basename } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { deepMerge, readJson, writeIfAbsent, writeJson, type Log } from '../fs.js'
+import { AGENTS_PACKAGE, installSkills } from '../skills.js'
 
 export type InitOptions = { projectRoot: string; dryRun: boolean; log: Log }
 
 const DEPS = ['@aspiralabs/ui']
-const DEV_DEPS = ['@aspiralabs/config', '@aspiralabs/kit', 'eslint', 'prettier', 'typescript']
+const DEV_DEPS = ['@aspiralabs/config', '@aspiralabs/kit', AGENTS_PACKAGE, 'eslint', 'prettier', 'typescript']
 
 export function packageManager(root: string): 'pnpm' | 'npm' | 'yarn' {
   if (existsSync(join(root, 'pnpm-lock.yaml'))) {
@@ -218,6 +219,8 @@ export async function initNext(opts: InitOptions): Promise<void> {
   tsconfig(opts)
   css(opts)
   agentFiles(opts)
+  // The /aspira-* skills, copied from the installed agent packages and pinned to their version.
+  installSkills(opts)
   gitignore(opts)
   opts.log('done   run `pnpm lint` to see what the org rules think of the codebase')
 }

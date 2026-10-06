@@ -1,7 +1,6 @@
 {
   "name": "@aspiralabs/planner",
   "version": "0.2.1",
-  "private": true,
   "description": "Turn business specs into grounded, test-first implementation plans.",
   "type": "module",
   "scripts": {
@@ -19,6 +18,7 @@
     "@aspiralabs/agent-common": "workspace:*",
     "@modelcontextprotocol/sdk": "1.30.0",
     "ai": "^7.0.105",
+    "amaro": "^1.2.1",
     "eve": "^0.63.0",
     "zod": "4.5.4"
   },
@@ -31,5 +31,22 @@
   },
   "engines": {
     "node": ">=24"
+  },
+  "license": "MIT",
+  "files": [
+    "agent",
+    "skill",
+    "scripts",
+    "README.md",
+    ".env.example"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aspiralabs/aspira-kit.git",
+    "directory": "packages/agents/planner"
+  },
+  "homepage": "https://github.com/aspiralabs/aspira-kit/tree/main/packages/agents/planner",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   }
 }

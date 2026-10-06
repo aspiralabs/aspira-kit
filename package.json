@@ -1,7 +1,7 @@
 {
   "name": "aspira-kit",
   "private": true,
-  "description": "The Aspira Labs development kit: ui, config, and the kit CLI. One repo, one version, every project.",
+  "description": "The Aspira Labs development kit: ui, config, the kit CLI and the agents. One repo, one version, every project.",
   "packageManager": "pnpm@12.4.1",
   "scripts": {
     "dev": "pnpm -r --parallel --filter @aspiralabs/ui --filter docs dev",
@@ -10,7 +10,7 @@
     "lint": "pnpm -r lint",
     "check": "pnpm build && pnpm typecheck && pnpm lint && pnpm test",
     "changeset": "changeset",
-    "test": "pnpm --filter @aspiralabs/ui test && node packages/ui/scripts/mcp-smoke.mjs && pnpm -r --filter \"./packages/*\" exec pnpm pack --pack-destination ../../.packs",
+    "test": "pnpm --filter @aspiralabs/ui test && pnpm --filter @aspiralabs/kit test && node packages/ui/scripts/mcp-smoke.mjs && pnpm -r --filter \"./packages/*\" --filter \"./packages/agents/*\" exec pnpm pack --pack-destination \"$PWD/.packs\"",
     "changeset:version": "changeset version && pnpm install --lockfile-only",
     "changeset:publish": "changeset publish"
   },

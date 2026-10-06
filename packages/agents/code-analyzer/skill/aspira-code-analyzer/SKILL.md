@@ -8,7 +8,7 @@ argument-hint: <repo-path | app-dir | github-url | owner/name> [--local] [--push
 
 This skill only calls the official `code-analyzer`: do not run the linters or fix diagnostics yourself. The agent's rules (what the fix model may change, what counts as clean, how to report) live in its own files: `agent/instructions.md` in the code-analyzer package is the authority for how a run is reported, and `agent/lib/fixer.ts` holds the fix model's prompt. This file describes only the mechanics.
 
-Both modes use `scripts/code-analyzer.sh` beside this file (use its absolute path). It resolves the package from `CODE_ANALYZER_AGENT_DIR`, then `$ASPIRA_KIT/packages/agents/code-analyzer`, then its own location.
+Both modes use `scripts/code-analyzer.sh` beside this file (use its absolute path). It resolves the package from `CODE_ANALYZER_AGENT_DIR` (kit development only; the report says so), then the installed `@aspiralabs/code-analyzer` under the project's `node_modules`, then its own location. A launcher that resolves to a kit checkout prints one line saying it is running kit source, not the installed version. Every `start`, `status` and `local` output names the agent package and version that ran (`agent:` line, or `agent` in the JSON), and an export records it in `trace/agent-version.json`.
 
 A local path is analyzed as the directory you name. For a repository with several apps and no root `package.json` (for example `apps/web`, `apps/mobile`, `services/infra`), name the app directory, and run once per app. The repository root still works and is analyzed as a whole. Output goes to `<that directory>/.static-analysis/` unless `--output` says otherwise.
 

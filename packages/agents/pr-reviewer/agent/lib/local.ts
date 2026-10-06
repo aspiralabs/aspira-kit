@@ -308,6 +308,18 @@ const SCHEMA_NAMES: Record<OutputKind, string> = {
   findings: 'FINDINGS_OUTPUT_SCHEMA',
 }
 
+/**
+ * Local only: the turns that leave a document behind, which file, and the kind of output they
+ * return. A session can refuse a helper's write of a report file, so these turns may hand the
+ * document back as `document` in their output instead. The driver writes it once, in this order.
+ */
+const DOCUMENT_TURNS = [
+  { id: 'findings', file: 'findings', kind: 'findings' },
+  { id: 'review', file: 'review', kind: 'doc' },
+  { id: 'check-findings', file: 'findings', kind: 'findings' },
+  { id: 'check-review', file: 'review', kind: 'doc' },
+] as const
+
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
@@ -323,6 +335,8 @@ type State = {
   target: ReviewTarget
   packet: PacketStats
   maxCost: number | null
+  /** The document turns whose handed-back document the driver has written. */
+  documents: string[]
 }
 
 const targetSchema: z.ZodType<ReviewTarget> = reviewTargetSchema
@@ -337,6 +351,7 @@ const stateSchema: z.ZodType<State> = z.object({
   target: targetSchema,
   packet: packetSchema,
   maxCost: z.number().nullable(),
+  documents: z.array(z.string()).default([]),
 })
 
 type Loaded = {
@@ -365,7 +380,13 @@ export const agentSources = (agentDir: string) => ({
  * The only text added here is how a session runs a turn instead of eve: real paths, and
  * where to write the structured result.
  */
-export function renderTaskPrompt(task: PlanTask, output: string, system: { path: string; text: string }): string {
+export function renderTaskPrompt(task: PlanTask, output: string, system: { path: string; text: string }, document?: string): string {
+  const handBack =
+    document === undefined
+      ? []
+      : [
+          `- Do not write \`${document}\` yourself: a session can refuse a helper's write of a report file. Put the complete text the Task would leave in that file into the JSON result as one extra string field, \`document\`, and keep \`path\` as that file's path. Leave \`document\` out when you change nothing. The driver writes the file.`,
+        ]
   return [
     `# pr-reviewer --local: ${task.id}`,
     '',
@@ -373,6 +394,7 @@ export function renderTaskPrompt(task: PlanTask, output: string, system: { path:
     '',
     '- This turn runs as a subagent of a Claude Code session, not in the agent\'s sandbox, so every path in the Task is a real path on this machine. read_file is the Read tool, read_files is the Read tool over each path listed (one call per path counts as one read_files call), search is the Grep tool with two lines of context, and the shell commands the Task names run through Bash.',
     `- The structured result the Task asks for goes into \`${output}\` as ONE JSON object valid against the output schema at the end (review.ts's own). No fences and no prose in that file. Then reply with one line.`,
+    ...handBack,
     '',
     '## System',
     '',
@@ -651,6 +673,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       target: loaded.target,
       packet: stats,
       maxCost: input.maxCost ?? null,
+      documents: [],
     }
     // Written last: a first call that failed half way starts over rather than resuming a broken setup.
     await writeFile(stateFile, JSON.stringify(state, null, 2))
@@ -671,17 +694,36 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   }
   const outputFile = (id: string) => join(work, 'outputs', `${id}.json`)
   const raw = new Map<string, unknown>()
+  const handedBack = new Map<string, string>()
   const unparsable = new Map<string, string>()
   for (const name of await readdir(join(work, 'outputs'))) {
     if (!name.endsWith('.json') || name.includes('.rejected-')) continue
     const id = name.slice(0, -'.json'.length)
     const text = await readFile(join(work, 'outputs', name), 'utf8')
     try {
-      raw.set(id, JSON.parse(text))
+      const parsed: unknown = JSON.parse(text)
+      // A handed-back document is the driver's to write; the rest is the agent's output.
+      if (typeof parsed === 'object' && parsed !== null && 'document' in parsed && typeof parsed.document === 'string') {
+        const { document, ...rest } = parsed
+        handedBack.set(id, document)
+        raw.set(id, rest)
+      } else {
+        raw.set(id, parsed)
+      }
     } catch (cause) {
       unparsable.set(id, `The output is not valid JSON: ${message(cause)}`)
     }
   }
+
+  let wrote = false
+  for (const turn of DOCUMENT_TURNS) {
+    const document = handedBack.get(turn.id)
+    if (document === undefined || state.documents.includes(turn.id) || !OUTPUT_VALIDATORS[turn.kind].safeParse(raw.get(turn.id)).success) continue
+    await writeFile(paths.files[turn.file], document)
+    state.documents.push(turn.id)
+    wrote = true
+  }
+  if (wrote) await writeFile(stateFile, JSON.stringify(state, null, 2))
 
   const plan = planStep({ pr, maxRounds: state.maxRounds, finish: input.finish === true, outputs: (id) => raw.get(id), invalid: (id) => unparsable.get(id) })
 
@@ -699,7 +741,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       }
       const prompt = join(work, 'prompts', `${task.id}.md`)
       const system = sources.seat(task.agent)
-      await writeFile(prompt, renderTaskPrompt(task, output, { path: system, text: await readFile(system, 'utf8') }))
+      const document = DOCUMENT_TURNS.find((turn) => turn.id === task.id)
+      await writeFile(prompt, renderTaskPrompt(task, output, { path: system, text: await readFile(system, 'utf8') }, document && paths.files[document.file]))
       tasks.push({ id: task.id, agent: task.agent, prompt, output, schema: SCHEMA_NAMES[task.kind], ...(task.error === undefined ? {} : { error: task.error }), ...(retry === undefined ? {} : { retry }) })
     }
     await writeFile(stateFile, JSON.stringify(state, null, 2))

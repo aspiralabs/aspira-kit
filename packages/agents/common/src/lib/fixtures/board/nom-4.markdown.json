@@ -1,0 +1,7 @@
+{
+ "object": "page_markdown",
+ "id": "3ec3e59b-2258-8102-becf-ce78d66142e1",
+ "markdown": "## Idea\nEvery list stops at 10 and the default Explore order is effectively random. Unblocks find-cooks, cookbook-detail, search-filters, and My Recipes Phase 1.\n## Docs\n<page url=\"https://app.notion.com/p/3ec3e59b225881189d69d3151595999b\">Spec</page>\n<page url=\"https://app.notion.com/p/3ec3e59b22588123961cce4ccd8e662a\">Spec Reviewed</page>\n<page url=\"https://app.notion.com/p/3ec3e59b225881cab6dfc2971beacd06\">Plan</page>\n<page url=\"https://app.notion.com/p/3ec3e59b22588147b6ebdfd217fd8628\">NOM-4 run log (manual AI-DLC, 2026-09-30 to 2026-10-01)</page>\n<page url=\"https://app.notion.com/p/3f13e59b2258817b987fd8d166223735\">Implementation</page>",
+ "truncated": false,
+ "unknown_block_ids": []
+}

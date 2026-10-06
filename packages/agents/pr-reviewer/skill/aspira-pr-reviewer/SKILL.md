@@ -28,7 +28,7 @@ Flags both modes take: `--max-rounds N` caps the rounds; `--max-cost USD` is the
 | Cost | Vercel AI Gateway, itemized in `cost.md`; `--max-cost` stops the run | this session's usage, not itemized; `--max-cost` is recorded, not enforced |
 | Needs | Node 24, pnpm, screen, the agent's `.env.local` | Node 24, pnpm, git, the Notion MCP; `GITHUB_TOKEN` or `gh` for a GitHub PR |
 
-The launcher resolves the package from `PR_REVIEWER_AGENT_DIR`, then `$ASPIRA_KIT/packages/agents/pr-reviewer`, then its own location. That package's files are the ones that run.
+The launcher resolves the package from `PR_REVIEWER_AGENT_DIR` (kit development only; the report says so), then the installed `@aspiralabs/pr-reviewer` under the project's `node_modules`, then its own location. A launcher that resolves to a kit checkout prints one line saying it is running kit source, not the installed version. Every `start`, `status` and `local` output names the agent package and version that ran (`agent:` line, or `agent` in the JSON), and an export records it in `trace/agent-version.json`. That package's files are the ones that run.
 
 ## Default: launch the agent
 

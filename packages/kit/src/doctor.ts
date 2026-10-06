@@ -2,6 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readJson, type Log } from './fs.js'
+import { AGENTS_PACKAGE, checkSkills } from './skills.js'
 
 type Pkg = { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
 
@@ -13,7 +14,7 @@ export function doctor(projectRoot: string, log: Log): number {
   }
   let problems = 0
   const all = { ...pkg.dependencies, ...pkg.devDependencies }
-  for (const name of ['@aspiralabs/ui', '@aspiralabs/config', '@aspiralabs/kit']) {
+  for (const name of ['@aspiralabs/ui', '@aspiralabs/config', '@aspiralabs/kit', AGENTS_PACKAGE]) {
     const declared = all[name]
     const installed = readJson<{ version: string }>(join(projectRoot, 'node_modules', name, 'package.json'))?.version
     if (!declared) {
@@ -33,6 +34,10 @@ export function doctor(projectRoot: string, log: Log): number {
     ['.gitignore ignores .work/ (per-ticket working folders)', () => existsSync(join(projectRoot, '.gitignore')) && /^\.work\/?$/m.test(readFileSync(join(projectRoot, '.gitignore'), 'utf8'))],
     ['no committed feature folders (specs, docs/plans, docs/working-feature)', () => !['specs', 'docs/plans', 'docs/working-feature'].some((p) => existsSync(join(projectRoot, p)))],
   ]
+  // The /aspira-* skills: present, complete, and from the installed @aspiralabs/agents version.
+  for (const skill of checkSkills(projectRoot)) {
+    checks.push([skill.ok ? `.claude/skills/aspira-${skill.agent} matches ${AGENTS_PACKAGE}` : skill.reason ?? `.claude/skills/aspira-${skill.agent}`, () => skill.ok])
+  }
   for (const [label, ok] of checks) {
     const pass = ok()
     if (!pass) {
