@@ -263,6 +263,9 @@ importers:
       ai:
         specifier: ^7.0.105
         version: 7.0.107(zod@4.5.4)
+      amaro:
+        specifier: ^1.2.1
+        version: 1.2.1
       eve:
         specifier: ^0.63.0
         version: 0.63.0(ai@7.0.107(zod@4.5.4))
@@ -325,6 +328,9 @@ importers:
       '@aspiralabs/agent-common':
         specifier: workspace:*
         version: link:../common
+      amaro:
+        specifier: ^1.2.1
+        version: 1.2.1
       eve:
         specifier: ^0.63.0
         version: 0.63.0(ai@7.0.107(zod@4.5.4))
@@ -348,6 +354,30 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.6)(jiti@2.7.0)(jsdom@26.1.0(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)
 
+  packages/agents/meta:
+    dependencies:
+      '@aspiralabs/agent-common':
+        specifier: workspace:*
+        version: link:../common
+      '@aspiralabs/code-analyzer':
+        specifier: workspace:*
+        version: link:../code-analyzer
+      '@aspiralabs/implementor':
+        specifier: workspace:*
+        version: link:../implementor
+      '@aspiralabs/planner':
+        specifier: workspace:*
+        version: link:../planner
+      '@aspiralabs/pr-reviewer':
+        specifier: workspace:*
+        version: link:../pr-reviewer
+      '@aspiralabs/spec-reviewer':
+        specifier: workspace:*
+        version: link:../spec-reviewer
+      '@aspiralabs/spec-writer':
+        specifier: workspace:*
+        version: link:../spec-writer
+
   packages/agents/planner:
     dependencies:
       '@aspiralabs/agent-common':
@@ -359,6 +389,9 @@ importers:
       ai:
         specifier: ^7.0.105
         version: 7.0.107(zod@4.5.4)
+      amaro:
+        specifier: ^1.2.1
+        version: 1.2.1
       eve:
         specifier: ^0.63.0
         version: 0.63.0(ai@7.0.107(zod@4.5.4))
@@ -393,6 +426,9 @@ importers:
       ai:
         specifier: ^7.0.105
         version: 7.0.107(zod@4.5.4)
+      amaro:
+        specifier: ^1.2.1
+        version: 1.2.1
       eve:
         specifier: ^0.63.0
         version: 0.63.0(ai@7.0.107(zod@4.5.4))
@@ -427,6 +463,9 @@ importers:
       ai:
         specifier: ^7.0.105
         version: 7.0.107(zod@4.5.4)
+      amaro:
+        specifier: ^1.2.1
+        version: 1.2.1
       eve:
         specifier: ^0.63.0
         version: 0.63.0(ai@7.0.107(zod@4.5.4))
@@ -464,6 +503,9 @@ importers:
       ai:
         specifier: ^7.0.105
         version: 7.0.107(zod@4.5.4)
+      amaro:
+        specifier: ^1.2.1
+        version: 1.2.1
       eve:
         specifier: ^0.63.0
         version: 0.63.0(ai@7.0.107(zod@4.5.4))
@@ -522,10 +564,13 @@ importers:
         version: 22.20.3
       eslint:
         specifier: ^9.39.0
-        version: 9.39.5(supports-color@7.2.0)
+        version: 9.39.5(jiti@2.7.0)(supports-color@7.2.0)
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.3)(jiti@2.7.0)(jsdom@26.1.0(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)
 
   packages/ui:
     dependencies:
@@ -2689,6 +2734,10 @@ packages:
 
   ajv@8.20.0:
     resolution: {integrity: sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA==}
+
+  amaro@1.2.1:
+    resolution: {integrity: sha512-RXNB1/mbpbpwr4mVlQgYZVdY4CHl7rFExwov+XOTWfghpsM1s2sD/5u4oTQkKL4Pt0BGNIExSVjRcLMjcytIDQ==}
+    engines: {node: '>=22'}
 
   ansi-colors@4.1.3:
     resolution: {integrity: sha512-/6w/C21Pm1A7aZitlI5Ni/2J6FFQN8i1Cvz3kHABAAbw93v/NlvKdVOqz7CCWz/3iv/JplRSEEZ83XION15ovw==}
@@ -7338,6 +7387,8 @@ snapshots:
       fast-uri: 3.1.8
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
+
+  amaro@1.2.1: {}
 
   ansi-colors@4.1.3: {}
 

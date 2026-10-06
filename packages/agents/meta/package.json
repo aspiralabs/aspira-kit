@@ -1,0 +1,36 @@
+{
+  "name": "@aspiralabs/agents",
+  "version": "0.4.2",
+  "description": "The Aspira Labs agents for a project, in one dependency: spec-writer, spec-reviewer, planner, implementor, code-analyzer and pr-reviewer at the kit's version. `kit init` adds it and installs the matching /aspira-* skills.",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "README.md"
+  ],
+  "scripts": {
+    "build": "echo '@aspiralabs/agents has no build step'",
+    "typecheck": "echo '@aspiralabs/agents has no typecheck step'",
+    "lint": "echo '@aspiralabs/agents has no lint step'"
+  },
+  "dependencies": {
+    "@aspiralabs/agent-common": "workspace:*",
+    "@aspiralabs/code-analyzer": "workspace:*",
+    "@aspiralabs/implementor": "workspace:*",
+    "@aspiralabs/planner": "workspace:*",
+    "@aspiralabs/pr-reviewer": "workspace:*",
+    "@aspiralabs/spec-reviewer": "workspace:*",
+    "@aspiralabs/spec-writer": "workspace:*"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aspiralabs/aspira-kit.git",
+    "directory": "packages/agents/meta"
+  },
+  "homepage": "https://github.com/aspiralabs/aspira-kit/tree/main/packages/agents/meta",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

@@ -6,20 +6,21 @@
     [
       "@aspiralabs/ui",
       "@aspiralabs/config",
-      "@aspiralabs/kit"
+      "@aspiralabs/kit",
+      "@aspiralabs/agents",
+      "@aspiralabs/agent-common",
+      "@aspiralabs/spec-writer",
+      "@aspiralabs/spec-reviewer",
+      "@aspiralabs/planner",
+      "@aspiralabs/implementor",
+      "@aspiralabs/code-analyzer",
+      "@aspiralabs/pr-reviewer"
     ]
   ],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": [
-    "docs",
-    "@aspiralabs/spec-reviewer",
-    "@aspiralabs/spec-writer",
-    "@aspiralabs/pr-reviewer",
-    "@aspiralabs/agent-common",
-    "@aspiralabs/planner",
-    "@aspiralabs/code-analyzer",
-    "@aspiralabs/implementor"
+    "docs"
   ]
 }
