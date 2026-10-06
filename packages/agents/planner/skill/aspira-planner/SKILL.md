@@ -7,7 +7,7 @@ description: Turn a reviewed business spec into concrete implementation tasks an
 
 This skill only calls the `planner` agent. `agent/instructions.md` in the planner package is the authority for what the planner does, what it needs and what to report; this file covers only the mechanics of calling it. The planner researches the repository and the Notion engineering rules, then writes a test-first implementation plan mapped to the spec's business criteria.
 
-Use the absolute path to `scripts/planner.sh` beside this file. Run from the target repository, or pass `--repo`. The helper needs Node 24 and pnpm. It resolves the agent through `PLANNER_AGENT_DIR`, then `$ASPIRA_KIT/packages/agents/planner`, then its own package location.
+Use the absolute path to `scripts/planner.sh` beside this file. Run from the target repository, or pass `--repo`. The helper needs Node 24 and pnpm. It resolves the agent through `PLANNER_AGENT_DIR` (kit development only; the report says so), then the installed `@aspiralabs/planner` under the project's `node_modules`, then its own package location. A launcher that resolves to a kit checkout prints one line saying it is running kit source, not the installed version. Every `start`, `status` and `local` output names the agent package and version that ran (`agent:` line, or `agent` in the JSON), and an export records it in `trace/agent-version.json`.
 
 ## Default: the agent as a separate process
 
