@@ -26,6 +26,12 @@ const rules = [
   { reason: 'no tests run; the human must know the diff is unverified behaviorally', file: instructions, phrase: 'static analysis passing does not mean behavior is unchanged' },
   { reason: 'partial is never rounded up to clean', file: instructions, phrase: '`partial` means the analyzers still fail or one could not run' },
   { reason: 'no run without the engineering rules: a refusal is reported, not worked around', file: instructions, phrase: 'do not retry without them' },
+  { reason: 'the ticket is the argument; a path is the exception and must be asked for', file: skill, phrase: 'A path or a GitHub repository only works with `--no-ticket`' },
+  { reason: 'the gate runs before any model call, so a wrong Status costs nothing', file: skill, phrase: 'refused before any model call' },
+  { reason: 'the analyzer owns no move; a session that moves cards on its own drifts from the board', file: skill, phrase: 'never move a card anywhere the stage does not list' },
+  { reason: 'a human owns every Ready column (BOARD-004)', file: skill, phrase: 'It never moves a card to a Ready column' },
+  { reason: 'the report starts with the ticket, the moves, the pages pushed and the working folder', file: skill, phrase: 'Start the report with the ticket ID and title' },
+  { reason: 'the launcher owns the board step around a cloud run; the agent must not move the card', file: instructions, phrase: 'do not move the card yourself' },
   // The report rules of specs/agents-human-lists.md F5 live in the agent, where every mode reads them.
   { reason: 'a human reads the errors first; an unsorted list buries them', file: instructions, phrase: 'in severity order (errors, then warnings)' },
   { reason: 'the plain-English line is what the human reads; the evidence is there when asked', file: instructions, phrase: 'each with its plain-English line first and its evidence (file, line, rule) available on request' },

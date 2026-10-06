@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { writeAspira } from './aspira.js'
 import { doctor } from './doctor.js'
 import { AGENTS, skillDir } from './skills.js'
 import { initNext } from './stacks/next.js'
@@ -74,6 +75,19 @@ describe('an installed project', () => {
     expect(report.some((l) => l.startsWith('@aspiralabs/agents') && l.includes(`installed ${version}`))).toBe(true)
   })
 
+  it('kit init --board writes aspira.json, and kit doctor fails without it', () => {
+    const before: string[] = []
+    doctor(app, (line) => before.push(line))
+    expect(before).toContain('FAIL aspira.json is missing; run kit init --board <Feature Board URL>')
+    const lines: string[] = []
+    writeAspira({ projectRoot: app, board: 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6', dryRun: false, log: (line) => lines.push(line) })
+    expect(lines[0]).toContain('write  ')
+    expect(JSON.parse(readFileSync(join(app, 'aspira.json'), 'utf8'))).toEqual({ board: 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6' })
+    const after: string[] = []
+    doctor(app, (line) => after.push(line))
+    expect(after).toContain('ok   aspira.json names the Feature Board')
+  })
+
   it('runs planner.sh local from node_modules through its knowledge stage with no ASPIRA_KIT set', () => {
     const launcher = join(skillDir(app, 'planner'), 'scripts', 'planner.sh')
     expect(existsSync(launcher)).toBe(true)
@@ -87,7 +101,7 @@ describe('an installed project', () => {
     for (const name of ['ASPIRA_KIT', 'PLANNER_AGENT_DIR', 'SPEC_TO_PLAN_AGENT_DIR']) delete env[name]
     const out = join(scratch, 'plan.review')
     // Without a snapshot, the first stage is knowledge: the pages the agent's configuration loads.
-    const first = spawnSync('bash', [launcher, 'local', spec, '--output', out], { cwd: app, env, encoding: 'utf8' })
+    const first = spawnSync('bash', [launcher, 'local', spec, '--no-ticket', '--output', out], { cwd: app, env, encoding: 'utf8' })
     expect(first.status, first.stderr).toBe(0)
     expect(first.stderr).not.toContain('kit source')
     const knowledge = JSON.parse(first.stdout) as { stage: string; agent: { name: string; path: string; installed: boolean }; instructions: string }
@@ -98,13 +112,13 @@ describe('an installed project', () => {
     // With a snapshot the knowledge is satisfied and the next stage is research: the whole runtime loaded from node_modules.
     const guidelines = join(scratch, 'REQUIRED.md')
     writeFileSync(guidelines, 'REV-001 Inspect source evidence\n')
-    const second = spawnSync('bash', [launcher, 'local', spec, '--output', out, '--guidelines', guidelines], { cwd: app, env, encoding: 'utf8' })
+    const second = spawnSync('bash', [launcher, 'local', spec, '--no-ticket', '--output', out, '--guidelines', guidelines], { cwd: app, env, encoding: 'utf8' })
     expect(second.status, second.stderr).toBe(0)
     const research = JSON.parse(second.stdout) as { stage: string; tasks: { prompt: string }[] }
     expect(research.stage).toBe('research')
     expect(readFileSync(research.tasks[0]!.prompt, 'utf8')).toContain('REV-001')
     // The launcher runs from the installed package, not a checkout, even with a stale ASPIRA_KIT exported.
-    const stale = spawnSync('bash', [launcher, 'local', spec, '--output', out, '--guidelines', guidelines], { cwd: app, env: { ...env, ASPIRA_KIT: join(scratch, 'nowhere') }, encoding: 'utf8' })
+    const stale = spawnSync('bash', [launcher, 'local', spec, '--no-ticket', '--output', out, '--guidelines', guidelines], { cwd: app, env: { ...env, ASPIRA_KIT: join(scratch, 'nowhere') }, encoding: 'utf8' })
     expect(stale.status, stale.stderr).toBe(0)
     expect(readdirSync(join(app, 'node_modules', '@aspiralabs'))).toContain('agents')
   })

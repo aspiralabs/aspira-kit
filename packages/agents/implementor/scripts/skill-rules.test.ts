@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
-import { PINNED_RULES } from './pinned-rules.ts'
+import { PINNED_RULES, PINNED_SKILL_RULES } from './pinned-rules.ts'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -13,7 +13,7 @@ it('pins each rule with a distinctive phrase', () => {
   for (const phrase of phrases) expect(phrase.length).toBeGreaterThanOrEqual(20)
 })
 
-for (const { reason, file, phrase } of PINNED_RULES) {
+for (const { reason, file, phrase } of [...PINNED_RULES, ...PINNED_SKILL_RULES]) {
   it(`${file} keeps: ${reason}`, () => {
     expect(readFileSync(join(root, file), 'utf8')).toContain(phrase)
   })

@@ -29,7 +29,7 @@ Two rules that apply to every command below:
 
 Every agent needs Node 24 and a Vercel AI Gateway key in the shared `.env.local`. The PR reviewer and Notion snapshot loader use Docker; direct spec review with an existing guidelines snapshot does not.
 
-Every agent below also has a skill: `/aspira-<agent>` launches the agent as a separate process, and `/aspira-<agent> --local` runs the same pipeline inside your Claude Code session, with no model call made from the script. Both paths load the Notion engineering rules. The skill carries no rules of its own; the agent's files are the authority. Install the skills and read the pattern under **Skills** in `README.md`.
+Every agent below also has a skill: `/aspira-<agent> <ticket>` launches the agent as a separate process, and `/aspira-<agent> <ticket> --local` runs the same pipeline inside your Claude Code session, with no model call made from the script. The ticket is a Feature Board ID such as `NOM-4`, a Notion page URL, or nothing when `.work/` holds one ticket; the skill gates on the ticket's Status, pulls its pages into `.work/<id>-<slug>/`, makes its own board moves and pushes its output back to the ticket. A file path still works with `--no-ticket`. Both paths load the Notion engineering rules. The skill carries no rules of its own; the agent's files are the authority. Install the skills and read the pattern under **Skills** in `README.md`.
 
 ## spec-writer
 
@@ -39,7 +39,7 @@ Turns an idea (a file, a Notion card or inline text) into a spec: it explores th
 agent spec-writer "Write a spec from $PWD/ideas/checkout.md for $PWD"
 ```
 
-**Skill:** `/aspira-spec-writer <idea.md | Notion URL | "idea text"> [--guidelines FILE] [--repo DIR] [--output DIR]` launches this agent. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `spec-writer/skill/aspira-spec-writer/`; see **Skills** in `README.md`. Also see `spec-writer/README.md` for outputs and models.
+**Skill:** `/aspira-spec-writer <ticket> [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR]` launches this agent on the ticket's Idea (from `Ready: Idea`; it claims the card and pushes the spec as the page Spec); `<idea.md> --no-ticket` runs it on a file with no board. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `spec-writer/skill/aspira-spec-writer/`; see **Skills** in `README.md`. Also see `spec-writer/README.md` for outputs and models.
 
 ## spec-reviewer
 
@@ -58,11 +58,11 @@ pnpm -C "$ASPIRA_KIT/packages/agents/spec-reviewer" review \
 
 Results are written beside the source in `spec.reviewed/`. Only `spec.original.md`, `spec.reviewed.md` (when edits are valid), and `run-analysis.md` are at the top level, plus the `trace/` directory. Run analysis shows cost and wall time per agent/turn and totals. All findings, decisions, checks, prompts, outputs and tool records are in `trace/`. Prior results move to `spec.reviewed/trace/history/run-*/` on rerun. An incomplete review is not approval; consult `trace/checks.md` and `trace/decisions.md`.
 
-**Skill:** `/aspira-spec-reviewer <spec.md> [--guidelines /absolute/REQUIRED.md] [--repo DIR] [--output DIR]` launches this agent. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `spec-reviewer/skill/aspira-spec-reviewer/`; see **Skills** in `README.md`. A `--local` review lands in the same `spec.reviewed/` layout, with no itemized cost, and is not independent of the session. See `spec-reviewer/README.md` for MCP setup and model overrides.
+**Skill:** `/aspira-spec-reviewer <ticket> [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo DIR] [--output DIR]` launches this agent on the ticket's Spec page (from `In Review: Spec`; no move; it pushes Spec Reviewed and, for `needs-author`, Spec Review Decisions); `<spec.md> --no-ticket` runs it on a file with no board. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `spec-reviewer/skill/aspira-spec-reviewer/`; see **Skills** in `README.md`. A `--local` review lands in the same `spec.reviewed/` layout, with no itemized cost, and is not independent of the session. See `spec-reviewer/README.md` for MCP setup and model overrides.
 
 ## planner
 
-**Skill:** `/aspira-planner /absolute/path/to/spec.reviewed.md [--guidelines /absolute/REQUIRED.md]` launches this agent. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `planner/skill/aspira-planner/`; see **Skills** in `README.md`.
+**Skill:** `/aspira-planner <ticket> [--force-pull] [--guidelines /absolute/REQUIRED.md]` launches this agent on the ticket's Spec Reviewed page (from `Ready: Spec`; it claims the card and pushes the plan as the page Plan, then moves it to `In Review: Plan`); `<spec.reviewed.md> --no-ticket` runs it on a file with no board. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `planner/skill/aspira-planner/`; see **Skills** in `README.md`.
 
 Or invoke the agent directly to turn a reviewed business spec into concrete implementation tasks and unit/integration test checklists:
 
@@ -110,7 +110,7 @@ agent-dev pr-reviewer
 
 Reviewing the checked-out branch includes your uncommitted and untracked files. Naming any other branch reviews committed history only.
 
-**Skill:** `/aspira-pr-reviewer <github-pr | repo-path> [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--yes]` launches this agent, after printing a cost estimate (`--yes` skips it). `--max-cost` stops a cloud run at a dollar amount (default `MAX_COST_USD`); `--since` re-reviews only what changed since the review in DIR. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `pr-reviewer/skill/aspira-pr-reviewer/`; see **Skills** in `README.md`. A `--local` review exports the same files; Quinn then runs on the session's model, so it is not a second vendor.
+**Skill:** `/aspira-pr-reviewer <ticket> [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--yes]` launches this agent on the ticket's PR (from `In Review: Implementation` with the PR property set; no move; it pushes `review.md` as the page PR Review), after printing a cost estimate (`--yes` skips it); `<github-pr | repo-path> --no-ticket [--branch B] [--base main]` reviews without a board. `--max-cost` stops a cloud run at a dollar amount (default `MAX_COST_USD`); `--since` re-reviews only what changed since the review in DIR. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `pr-reviewer/skill/aspira-pr-reviewer/`; see **Skills** in `README.md`. A `--local` review exports the same files; Quinn then runs on the session's model, so it is not a second vendor.
 
 ## code-analyzer
 
@@ -132,7 +132,7 @@ agent code-analyzer "Run static analysis on owner/name and open a pull request"
 
 Status `clean` means every analyzer passed; `partial` means diagnostics remain or an analyzer could not run; `nothing-detected` means no supported ecosystem. Review the diff before merging: passing static analysis does not prove behavior is unchanged, and no tests are run. Caps: 6 rounds and 5 USD by default (`STATIC_ANALYSIS_MAX_ROUNDS`, `STATIC_ANALYSIS_MAX_COST_USD`); model `STATIC_ANALYSIS_FIX_MODEL` (default `openai/gpt-6.1-sol`).
 
-**Skill:** `/aspira-code-analyzer <repo | subdirectory | url | owner/name> [--push]` launches this agent. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `code-analyzer/skill/aspira-code-analyzer/`; see **Skills** in `README.md`. A subdirectory is accepted, so a repository with several apps and no root `package.json` can be analyzed one app at a time.
+**Skill:** `/aspira-code-analyzer <ticket> [--app DIR]` launches this agent (from `In Progress: Implementation` or `In Review: Implementation`; no move, no push); `<repo | subdirectory | url | owner/name> --no-ticket [--push]` runs it without a board. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `code-analyzer/skill/aspira-code-analyzer/`; see **Skills** in `README.md`. A subdirectory is accepted, so a repository with several apps and no root `package.json` can be analyzed one app at a time.
 
 ## implementor
 
@@ -144,7 +144,7 @@ agent implementor "Implement docs/plans/feature/plan.review in the GitHub reposi
 agent implementor "Implement specs/feature.md in the GitHub repository owner/name. Push the branch and open a draft pull request."
 ```
 
-**Skill:** `/aspira-implementor <plan.review | spec.md> [--repo owner/name] [--ref BRANCH] [--pr]` launches this agent. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `implementor/skill/aspira-implementor/`; see **Skills** in `README.md`. Without `--repo`, the launcher builds the current checkout's GitHub `origin` from the current branch, which must be pushed. `--local` builds the local checkout and pushes nothing. It also takes a ticket, which the session first restates as a spec. Review the result with `pr-reviewer`.
+**Skill:** `/aspira-implementor <ticket> [--repo owner/name] [--ref BRANCH] [--pr]` launches this agent on the ticket's Plan page (from `Ready: Plan`; it claims the card, pushes `implementation.md` as the page Implementation and, when it opened the PR, sets PR and moves to `In Review: Implementation`); `<plan.review | spec.md> --no-ticket` builds a file with no board. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `implementor/skill/aspira-implementor/`; see **Skills** in `README.md`. Without `--repo`, the launcher builds the current checkout's GitHub `origin` from the current branch, which must be pushed. `--local` builds the local checkout and pushes nothing. It also takes a ticket, which the session first restates as a spec. Review the result with `pr-reviewer`.
 
 ## Checking an agent is healthy
 

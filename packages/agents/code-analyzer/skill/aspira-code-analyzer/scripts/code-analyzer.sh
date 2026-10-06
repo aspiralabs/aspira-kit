@@ -108,24 +108,57 @@ local_dir() {
 absolute_path() {
   case $1 in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac
 }
+# The board step before a separate-process run: resolve the ticket, check its Status (a refusal exits 3
+# before anything is launched) and pull its pages into .work/<id>-<slug>/. The analyzer claims nothing.
+# Reads the key=value lines of scripts/ticket.ts into T_FOLDER, T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS.
+ticket_start() {
+  local ticket=$1 top=$2 out code line key value
+  out=$(mktemp "${TMPDIR:-/tmp}/code-analyzer-ticket.XXXXXX")
+  agent_node scripts/ticket.ts start "$ticket" --repo "$top" ${FORCE_PULL:+--force-pull} > "$out"; code=$?
+  if [ "$code" != 0 ]; then rm -f "$out"; exit "$code"; fi
+  T_FOLDER="" T_ID="" T_TITLE="" T_URL="" T_BEFORE="" T_STATUS=""
+  while IFS= read -r line; do
+    key=${line%%=*}; value=${line#*=}
+    case $key in
+      folder) T_FOLDER=$value ;; id) T_ID=$value ;; title) T_TITLE=$value ;; url) T_URL=$value ;;
+      before) T_BEFORE=$value ;; status) T_STATUS=$value ;;
+    esac
+  done < "$out"
+  rm -f "$out"
+  [ -n "$T_FOLDER" ] || die "the ticket step printed no working folder"
+}
+# The repository root the ticket's working folder lives under: the git top of the working directory.
+repo_top() { git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$PWD"; }
 cmd_start() {
-  local source="" push="" ref="" out="" rounds="" warnings="" knowledge="" guidelines=""
+  local source="" push="" ref="" out="" rounds="" warnings="" knowledge="" guidelines="" no_ticket="" app="" FORCE_PULL=""
   while [ $# -gt 0 ]; do
     case $1 in
       --push) push=1; shift ;;
       --fix-warnings) warnings=1; shift ;;
+      --no-ticket) no_ticket=1; shift ;;
+      --force-pull) FORCE_PULL=1; shift ;;
+      --app) [ $# -ge 2 ] || die "--app needs a directory"; app=$2; shift 2 ;;
       --ref) [ $# -ge 2 ] || die "--ref needs a branch"; ref=$2; shift 2 ;;
       --output) [ $# -ge 2 ] || die "--output needs a path"; out=$2; shift 2 ;;
       --knowledge) [ $# -ge 2 ] || die "--knowledge needs a folder"; [ -d "$2" ] || die "--knowledge is a folder (REQUIRED.md, INDEX.md, pages): $2"; knowledge=$(cd "$2" && pwd -P); shift 2 ;;
       --guidelines) [ $# -ge 2 ] || die "--guidelines needs a file"; [ -f "$2" ] || die "--guidelines is a REQUIRED.md file: $2"; guidelines=$(absolute_path "$2"); shift 2 ;;
       --max-rounds) [ $# -ge 2 ] || die "--max-rounds needs a number"; rounds=$2; shift 2 ;;
       --local) die "--local runs in this session: use the local command, not start" ;;
+      --verify) die "--verify is for local" ;;
       -*) die "unknown option: $1" ;;
-      *) [ -z "$source" ] || die "one repository at a time"; source=${1#@}; shift ;;
+      *) [ -z "$source" ] || die "one ticket at a time (or one repository with --no-ticket)"; source=${1#@}; shift ;;
     esac
   done
-  [ -n "$source" ] || die "usage: code-analyzer.sh start <repo-path | github-url | owner/name> [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output DIR] [--max-rounds N] [--fix-warnings]"
-  local run mode slug prompt eve=""
+  local run mode slug prompt eve="" ticket="" folder="" top=""
+  if [ -n "$no_ticket" ]; then
+    [ -n "$source" ] || die "usage: code-analyzer.sh start <repo-path | github-url | owner/name> --no-ticket [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output DIR] [--max-rounds N] [--fix-warnings]"
+    [ -z "$app" ] || die "--app goes with a ticket; with --no-ticket name the directory as the argument"
+  else
+    [ -z "$source" ] || [ ! -e "$source" ] || die "$source is a file path, not a ticket; pass --no-ticket to run on a path with no board"
+    ticket=$source
+    source=${app:-$(repo_top)}
+    [ -z "$push$ref" ] || die "--push and --ref apply to remote repositories, which a ticket run never analyzes; pass --no-ticket"
+  fi
   resolve_agent
   node_args
   command -v node >/dev/null || die "node is not installed"
@@ -144,6 +177,12 @@ cmd_start() {
     out=${out:-"${TMPDIR:-/tmp}/static-analysis/${slug//\//-}"}
   fi
   [[ $out = /* ]] || out="$PWD/$out"
+  if [ -z "$no_ticket" ]; then
+    top=$(git -C "$source" rev-parse --show-toplevel)
+    ticket_start "$ticket" "$top"
+    folder=$T_FOLDER
+    printf 'ticket: %s %s (%s)\nstatus: %s -> %s\nfolder: %s\n' "$T_ID" "$T_TITLE" "$T_URL" "$T_BEFORE" "$T_STATUS" "$folder"
+  fi
   [ "$mode" = local ] || eve=$(eve_bin)
   run=$(mktemp -d "${TMPDIR:-/tmp}/code-analyzer.XXXXXX")
   prompt="Run static analysis on the repository $source and fix everything it reports. Call static-analysis once with source exactly \"$source\" and outputDir \"$out\"."
@@ -153,6 +192,7 @@ cmd_start() {
   [ -z "$warnings" ] || prompt="$prompt Also fix warnings (fixWarnings: true)."
   [ -z "$knowledge" ] || prompt="$prompt Use the guidelines folder knowledge \"$knowledge\"."
   [ -z "$guidelines" ] || prompt="$prompt Use the guidelines file guidelines \"$guidelines\"."
+  [ -z "$folder" ] || prompt="$prompt The ticket's board moves and pushes are made by the launcher around this run; do not call board yourself."
   prompt="$prompt Report the status, counts, edited files and the report path."
   printf '%s\n' "$out" > "$run/output"
   printf '%s\n' "${NODE_ARGS[@]}" > "$run/node-args"
@@ -178,31 +218,50 @@ code=$?
 printf '%s\n' "$code" > "$RUN/exit"
 # The report folder records which agent package ran.
 [ ! -d "$OUTPUT" ] || cp "$RUN/agent.json" "$OUTPUT/agent-version.json"
+# The board step after the run: the analyzer pushes nothing and makes no move; the trace records the run.
+if [ -n "$FOLDER" ]; then
+  if [ "$code" = 0 ]; then outcome=--ok; status=clean; else outcome=--failed; status=partial; fi
+  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO_TOP" --folder "$FOLDER" "$outcome" --run-status "$status" --export "$OUTPUT" >> "$RUN/log" 2>&1
+fi
 RUNNER
   chmod +x "$run/run.sh"
-  MODE="$mode" AGENT="$AGENT" EVE="$eve" SOURCE="$source" OUTPUT="$out" ROUNDS="$rounds" WARNINGS="$warnings" KNOWLEDGE="$knowledge" GUIDELINES="$guidelines" PROMPT="$prompt" RUN="$run" screen -dmS "static-analysis-$(basename "$run")" "$run/run.sh"
+  MODE="$mode" AGENT="$AGENT" EVE="$eve" SOURCE="$source" OUTPUT="$out" ROUNDS="$rounds" WARNINGS="$warnings" KNOWLEDGE="$knowledge" GUIDELINES="$guidelines" PROMPT="$prompt" RUN="$run" FOLDER="$folder" REPO_TOP="$top" screen -dmS "static-analysis-$(basename "$run")" "$run/run.sh"
   printf 'started\nrun: %s\nmode: %s\nsource: %s\noutput: %s\n' "$run" "$mode" "$source" "$out"
   agent_line
 }
 # One synchronous step of a --local run: no model call here, so no screen, gateway key or wait.
+# With a ticket the driver prints the board stage first (the ticket's resolve and pull for the
+# session to perform), then the knowledge and fix stages, then the exported run with the board trace.
 cmd_local() {
-  local source="" args=()
+  local source="" args=() no_ticket="" app="" ticket="" top
   while [ $# -gt 0 ]; do
     case $1 in
       --local) shift ;;
-      --no-fix|--fix-warnings|--finish) args+=("$1"); shift ;;
+      --no-ticket) no_ticket=1; shift ;;
+      --app) [ $# -ge 2 ] || die "--app needs a directory"; app=$2; shift 2 ;;
+      --no-fix|--fix-warnings|--finish|--force-pull|--verify) args+=("$1"); shift ;;
       --knowledge|--guidelines|--output) [ $# -ge 2 ] || die "$1 needs a path"; args+=("$1" "$(absolute_path "$2")"); shift 2 ;;
       --max-rounds) [ $# -ge 2 ] || die "--max-rounds needs a number"; args+=("$1" "$2"); shift 2 ;;
       -*) die "unknown option: $1" ;;
-      *) [ -z "$source" ] || die "one repository at a time"; source=${1#@}; shift ;;
+      *) [ -z "$source" ] || die "one ticket at a time (or one repository with --no-ticket)"; source=${1#@}; shift ;;
     esac
   done
-  [ -n "$source" ] || die "usage: code-analyzer.sh local <repo-path> [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish]"
-  [ -d "$source" ] || die "--local needs a local path; a GitHub repository is fixed in the eve sandbox (use start): $source"
+  if [ -n "$no_ticket" ]; then
+    [ -n "$source" ] || die "usage: code-analyzer.sh local <repo-path> --no-ticket [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish]"
+    [ -z "$app" ] || die "--app goes with a ticket; with --no-ticket name the directory as the argument"
+    [ -d "$source" ] || die "--local needs a local path; a GitHub repository is fixed in the eve sandbox (use start): $source"
+  else
+    [ -z "$source" ] || [ ! -e "$source" ] || die "$source is a file path, not a ticket; pass --no-ticket to run on a path with no board"
+    ticket=$source
+    source=${app:-$(repo_top)}
+    [ -d "$source" ] || die "--app needs a local directory: $source"
+  fi
   source=$(local_dir "$source") || exit 1
+  top=$(git -C "$source" rev-parse --show-toplevel)
+  if [ -n "$no_ticket" ]; then args+=(--no-ticket); elif [ -n "$ticket" ]; then args+=(--ticket "$ticket"); fi
   command -v node >/dev/null || die "node is not installed"
   resolve_agent
-  agent_node scripts/local.ts "$source" ${args[@]+"${args[@]}"}
+  agent_node scripts/local.ts --repo "$top" ${args[@]+"${args[@]}"} "$source"
 }
 cmd_status() {
   local run=${1:?usage: code-analyzer.sh status RUN} elapsed
@@ -232,5 +291,5 @@ case ${1:-} in
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
   local) shift; cmd_local "$@" ;;
-  *) die "usage: code-analyzer.sh start SOURCE [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output DIR] [--max-rounds N] [--fix-warnings] | status RUN | wait RUN [--max SECONDS] | local REPO-PATH [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish]" ;;
+  *) die "usage: code-analyzer.sh start [TICKET [--app DIR] | SOURCE --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output DIR] [--max-rounds N] [--fix-warnings] | status RUN | wait RUN [--max SECONDS] | local [TICKET [--app DIR] | REPO-PATH --no-ticket] [--force-pull] [--verify] [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish]" ;;
 esac

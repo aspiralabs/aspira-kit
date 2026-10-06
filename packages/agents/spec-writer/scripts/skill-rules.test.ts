@@ -25,6 +25,13 @@ const rules = [
   { reason: 'local mode runs on one vendor and one session; it must be labelled as not independent', file: skill, phrase: 'its review is not independent of the writer' },
   { reason: 'a failed rerun must not be papered over with the previous report', file: skill, phrase: 'do not present an earlier report as the new result' },
   { reason: 'the idea file is never edited in place', file: skill, phrase: 'The idea file is never modified' },
+  { reason: 'the ticket is the argument; a path is the exception and must be asked for', file: skill, phrase: 'A file path only works with `--no-ticket`' },
+  { reason: 'the gate runs before any model call, so a wrong Status costs nothing', file: skill, phrase: 'refused before any model call' },
+  { reason: 'the skill owns its moves; a session that moves cards on its own drifts from the board', file: skill, phrase: 'Never move a card anywhere the stage does not list' },
+  { reason: 'a human owns every Ready column (BOARD-004)', file: skill, phrase: 'It never moves a card to a Ready column' },
+  { reason: 'a push failure is reported with the local path and the success move is still made', file: skill, phrase: 'say so with the local path of the spec and still make the move' },
+  { reason: 'the report starts with the ticket, the moves, the pages pushed and the working folder', file: skill, phrase: 'Start the report with the ticket ID and title' },
+  { reason: 'the launcher owns the board work around a cloud run; the agent must not make a third move', file: instructions, phrase: 'do not move the card yourself' },
   // The report rules of specs/agents-human-lists.md F5 live in the agent, where every mode reads them.
   { reason: 'a human reads the worst finding first; an unsorted list buries it', file: instructions, phrase: 'present the findings in severity order (critical, high, medium, low, info)' },
   { reason: 'the plain-English line is what a product owner reads; the evidence is there when asked', file: instructions, phrase: 'each with its plain-English line first and its evidence available on request' },

@@ -97,36 +97,80 @@ absolute_file() {
   [ -f "$1" ] || die "no such file: $1"
   echo "$(cd "$(dirname "$1")" && pwd -P)/$(basename "$1")"
 }
-cmd_start() {
-  local spec="" guidelines="" repo="" out=""
+# The ticket argument (F1 of the ticket flow): a board ID such as NOM-4, a Notion page URL, nothing
+# (the one folder under .work/ that holds a ticket.md), or a spec path with --no-ticket. Sets
+# POSITIONAL, NO_TICKET, FORCE_PULL, VERIFY, GUIDELINES, REPO, OUT, FINISH and, with --no-ticket, SPEC.
+parse() {
+  POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" SPEC=""
   while [ $# -gt 0 ]; do
     case $1 in
-      --guidelines) [ $# -ge 2 ] || die "--guidelines needs a path"; guidelines=$2; shift 2 ;;
-      --repo) [ $# -ge 2 ] || die "--repo needs a path"; repo=$2; shift 2 ;;
-      --output) [ $# -ge 2 ] || die "--output needs a path"; out=$2; shift 2 ;;
+      --no-ticket) NO_TICKET=1; shift ;;
+      --force-pull) FORCE_PULL=1; shift ;;
+      --verify) VERIFY=1; shift ;;
+      --guidelines) [ $# -ge 2 ] || die "--guidelines needs a path"; GUIDELINES=$2; shift 2 ;;
+      --repo) [ $# -ge 2 ] || die "--repo needs a path"; REPO=$2; shift 2 ;;
+      --output) [ $# -ge 2 ] || die "--output needs a path"; OUT=$2; shift 2 ;;
+      --finish) FINISH=1; shift ;;
       -*) die "unknown option: $1" ;;
-      *) [ -z "$spec" ] || die "one spec at a time"; spec=${1#@}; shift ;;
+      *) [ -z "$POSITIONAL" ] || die "one ticket at a time (or one spec with --no-ticket)"; POSITIONAL=${1#@}; shift ;;
     esac
   done
-  [ -n "$spec" ] || die "usage: planner.sh start <spec.md> [--guidelines FILE] [--repo DIR] [--output DIR]"
-  spec=$(absolute_file "$spec")
-  [ -z "$guidelines" ] || guidelines=$(absolute_file "$guidelines")
-  repo=$(git -C "${repo:-$PWD}" rev-parse --show-toplevel) || die "run inside a Git repo or pass --repo"
-  local feature_dir
-  feature_dir="$(dirname "$spec")"
-  if [ "$(basename "$feature_dir")" = spec.reviewed ]; then feature_dir="$(dirname "$feature_dir")"; fi
-  out=${out:-"$feature_dir/plan.review"}
-  [[ $out = /* ]] || out="$PWD/$out"
-  local run prompt eve=""
+  REPO=$(git -C "${REPO:-$PWD}" rev-parse --show-toplevel) || die "run inside a Git repo or pass --repo"
+  [ -z "$GUIDELINES" ] || GUIDELINES=$(absolute_file "$GUIDELINES")
+  if [ -n "$NO_TICKET" ]; then
+    [ -n "$POSITIONAL" ] || die "--no-ticket runs the planner on a spec path with no board: planner.sh start|local <spec.md> --no-ticket"
+    SPEC=$(absolute_file "$POSITIONAL")
+    local feature_dir
+    feature_dir="$(dirname "$SPEC")"
+    if [ "$(basename "$feature_dir")" = spec.reviewed ]; then feature_dir="$(dirname "$feature_dir")"; fi
+    OUT=${OUT:-"$feature_dir/plan.review"}
+  elif [ -n "$POSITIONAL" ] && [ -e "$POSITIONAL" ]; then
+    die "$POSITIONAL is a file path, not a ticket; pass --no-ticket to run on a path with no board"
+  fi
+  [ -z "$OUT" ] || [[ $OUT = /* ]] || OUT="$PWD/$OUT"
+}
+# The board step before a separate-process run: resolve the ticket, check its Status (a refusal exits 3
+# before anything is launched), pull its pages into .work/<id>-<slug>/ and claim it. Reads the key=value
+# lines of scripts/ticket.ts into T_FOLDER, T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS, T_INPUT.
+ticket_start() {
+  local out code line key value
+  out=$(mktemp "${TMPDIR:-/tmp}/planner-ticket.XXXXXX")
+  agent_node scripts/ticket.ts start "$POSITIONAL" --repo "$REPO" ${FORCE_PULL:+--force-pull} > "$out"; code=$?
+  if [ "$code" != 0 ]; then rm -f "$out"; exit "$code"; fi
+  T_FOLDER="" T_ID="" T_TITLE="" T_URL="" T_BEFORE="" T_STATUS="" T_INPUT=""
+  while IFS= read -r line; do
+    key=${line%%=*}; value=${line#*=}
+    case $key in
+      folder) T_FOLDER=$value ;; id) T_ID=$value ;; title) T_TITLE=$value ;; url) T_URL=$value ;;
+      before) T_BEFORE=$value ;; status) T_STATUS=$value ;; input) T_INPUT=$value ;;
+    esac
+  done < "$out"
+  rm -f "$out"
+  [ -n "$T_FOLDER" ] || die "the ticket step printed no working folder"
+}
+cmd_start() {
+  parse "$@"
+  [ -z "$FINISH$VERIFY" ] || die "--finish and --verify are for local"
+  local run prompt eve="" folder="" spec
   resolve_agent
   node_args
   command -v node >/dev/null || die "node is not installed"
   command -v screen >/dev/null || die "screen is not installed"
   [ -e "$PROJECT/.env.local" ] || [ -e "$AGENT/.env.local" ] || [ -n "${AI_GATEWAY_API_KEY:-}" ] || die "missing $PROJECT/.env.local (or the agent's .env.local) or AI_GATEWAY_API_KEY"
-  [ -n "$guidelines" ] || eve=$(eve_bin)
+  if [ -n "$NO_TICKET" ]; then
+    spec=$SPEC
+  else
+    ticket_start
+    folder=$T_FOLDER
+    spec=$T_INPUT
+    [ -n "$spec" ] && [ -f "$spec" ] || die "$T_ID has no Spec Reviewed page yet (expected $folder/spec.reviewed/spec.reviewed.md); the spec reviewer puts it there"
+    OUT=${OUT:-"$folder/plan.review"}
+    printf 'ticket: %s %s (%s)\nstatus: %s -> %s\nfolder: %s\n' "$T_ID" "$T_TITLE" "$T_URL" "$T_BEFORE" "$T_STATUS" "$folder"
+  fi
+  [ -n "$GUIDELINES" ] || eve=$(eve_bin)
   run=$(mktemp -d "${TMPDIR:-/tmp}/planner.XXXXXX")
-  prompt="Plan implementation of the business spec at $spec against the local repository $repo. Write results directly to $out. Use load-knowledge for the required guidelines, then call create-plan once. Report status, plan.reviewed.md, run-analysis.md and trace/checks.md paths."
-  printf '%s\n' "$out" > "$run/output"
+  prompt="Plan implementation of the business spec at $spec against the local repository $REPO. Write results directly to $OUT. Use load-knowledge for the required guidelines, then call create-plan once. The ticket's board moves and pushes are made by the launcher around this run; do not call board yourself. Report status, plan.reviewed.md, run-analysis.md and trace/checks.md paths."
+  printf '%s\n' "$OUT" > "$run/output"
   printf '%s\n' "${NODE_ARGS[@]}" > "$run/node-args"
   agent_json > "$run/agent.json"
   agent_line > "$run/agent"
@@ -145,39 +189,32 @@ code=$?
 printf '%s\n' "$code" > "$RUN/exit"
 # The trace records which agent package ran.
 [ ! -d "$OUTPUT/trace" ] || cp "$RUN/agent.json" "$OUTPUT/trace/agent-version.json"
+# The board step after the run: push the plan and make the success move, or leave the card In Progress.
+if [ -n "$FOLDER" ]; then
+  status=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).status ?? 'incomplete' } catch { 'incomplete' }" "$OUTPUT/trace/review.json" 2>/dev/null || echo incomplete)
+  case $status in ready|needs-author) outcome=--ok ;; *) outcome=--failed ;; esac
+  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" "$outcome" --run-status "$status" --export "$OUTPUT" >> "$RUN/log" 2>&1
+fi
 RUNNER
   chmod +x "$run/run.sh"
-  AGENT="$AGENT" EVE="$eve" SPEC="$spec" REPO="$repo" GUIDELINES="$guidelines" OUTPUT="$out" PROMPT="$prompt" RUN="$run" screen -dmS "planner-$(basename "$run")" "$run/run.sh"
-  printf 'started\nrun: %s\nspec: %s\nrepo: %s\noutput: %s\n' "$run" "$spec" "$repo" "$out"
+  AGENT="$AGENT" EVE="$eve" SPEC="$spec" REPO="$REPO" GUIDELINES="$GUIDELINES" OUTPUT="$OUT" PROMPT="$prompt" RUN="$run" FOLDER="$folder" screen -dmS "planner-$(basename "$run")" "$run/run.sh"
+  printf 'started\nrun: %s\nspec: %s\nrepo: %s\noutput: %s\n' "$run" "$spec" "$REPO" "$OUT"
   agent_line
 }
 # One synchronous step of a --local plan: no model calls here, so no screen, gateway key or wait.
-# The driver prints the next stage as JSON (knowledge, research or planning) or the exported plan.
+# The driver prints the board stage first (the ticket's resolve, pull and claim for the session to
+# perform), then knowledge, research or planning, then the exported plan with the end board actions;
+# --verify is the last step, once the session made the moves.
 cmd_local() {
-  local spec="" guidelines="" repo="" out="" finish=""
-  while [ $# -gt 0 ]; do
-    case $1 in
-      --guidelines) [ $# -ge 2 ] || die "--guidelines needs a path"; guidelines=$2; shift 2 ;;
-      --repo) [ $# -ge 2 ] || die "--repo needs a path"; repo=$2; shift 2 ;;
-      --output) [ $# -ge 2 ] || die "--output needs a path"; out=$2; shift 2 ;;
-      --finish) finish=--finish; shift ;;
-      -*) die "unknown option: $1" ;;
-      *) [ -z "$spec" ] || die "one spec at a time"; spec=${1#@}; shift ;;
-    esac
-  done
-  [ -n "$spec" ] || die "usage: planner.sh local <spec.md> [--guidelines FILE] [--repo DIR] [--output DIR] [--finish]"
-  spec=$(absolute_file "$spec")
-  [ -z "$guidelines" ] || guidelines=$(absolute_file "$guidelines")
-  repo=$(git -C "${repo:-$PWD}" rev-parse --show-toplevel) || die "run inside a Git repo or pass --repo"
-  local feature_dir
-  feature_dir="$(dirname "$spec")"
-  if [ "$(basename "$feature_dir")" = spec.reviewed ]; then feature_dir="$(dirname "$feature_dir")"; fi
-  out=${out:-"$feature_dir/plan.review"}
-  [[ $out = /* ]] || out="$PWD/$out"
+  parse "$@"
   command -v node >/dev/null || die "node is not installed"
-  local args=("$spec" "$repo" --output "$out")
-  [ -z "$guidelines" ] || args+=(--guidelines "$guidelines")
-  [ -z "$finish" ] || args+=("$finish")
+  local args=(--repo "$REPO")
+  if [ -n "$NO_TICKET" ]; then args+=(--no-ticket "$SPEC"); elif [ -n "$POSITIONAL" ]; then args+=(--ticket "$POSITIONAL"); fi
+  [ -z "$OUT" ] || args+=(--output "$OUT")
+  [ -z "$GUIDELINES" ] || args+=(--guidelines "$GUIDELINES")
+  [ -z "$FORCE_PULL" ] || args+=(--force-pull)
+  [ -z "$VERIFY" ] || args+=(--verify)
+  [ -z "$FINISH" ] || args+=(--finish)
   resolve_agent
   agent_node scripts/local.ts "${args[@]}"
 }
@@ -209,5 +246,5 @@ case ${1:-} in
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
   local) shift; cmd_local "$@" ;;
-  *) die "usage: planner.sh start SPEC [--guidelines FILE] [--repo DIR] [--output DIR] | status RUN | wait RUN [--max SECONDS] | local SPEC [--guidelines FILE] [--repo DIR] [--output DIR] [--finish]" ;;
+  *) die "usage: planner.sh start [TICKET | SPEC --no-ticket] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] | status RUN | wait RUN [--max SECONDS] | local [TICKET | SPEC --no-ticket] [--force-pull] [--verify] [--guidelines FILE] [--repo DIR] [--output DIR] [--finish]" ;;
 esac

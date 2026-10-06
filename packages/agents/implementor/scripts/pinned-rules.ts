@@ -46,6 +46,19 @@ export const PINNED_RULES: PinnedRule[] = [
   { reason: 'lane copies share the sandbox; a second checkout or publish corrupts the run', file: INSTRUCTIONS, phrase: 'Copies do not call `checkout-repo`, `load-knowledge` or `publish-branch`' },
   { reason: 'work that exists only in a dead sandbox was never done', file: INSTRUCTIONS, phrase: 'call `publish-branch` once, even for a partial or blocked build' },
   { reason: 'the cloud path has no driver; the tool schema is what stops a report without the three sections', file: INSTRUCTIONS, phrase: 'Call `record-verification` once' },
+  { reason: 'the launcher owns the board moves around a cloud run; the agent must not make a third', file: INSTRUCTIONS, phrase: 'do not move the card yourself' },
+]
+
+/** The skill's own mechanics for the ticket flow, pinned the same way; these live in the skill, not the agent. */
+export const PINNED_SKILL_RULES: PinnedRule[] = [
+  { reason: 'the ticket is the argument; a path is the exception and must be asked for', file: 'skill/aspira-implementor/SKILL.md', phrase: 'A file path only works with `--no-ticket`' },
+  { reason: 'the gate runs before any model call, so a wrong Status costs nothing', file: 'skill/aspira-implementor/SKILL.md', phrase: 'refused before any model call' },
+  { reason: 'the skill owns exactly two moves; a session that moves cards on its own drifts from the board', file: 'skill/aspira-implementor/SKILL.md', phrase: 'Never move a card anywhere the stage does not list' },
+  { reason: 'a human owns every Ready column (BOARD-004)', file: 'skill/aspira-implementor/SKILL.md', phrase: 'It never moves a card to a Ready column' },
+  { reason: 'the implementor moves to In Review: Implementation only with the PR open and set (BOARD-005)', file: 'skill/aspira-implementor/SKILL.md', phrase: 'only when it opened the PR' },
+  { reason: 'a local build pushes nothing, so the PR is the human\'s remaining step and the report must say so', file: 'skill/aspira-implementor/SKILL.md', phrase: 'opening the PR is the remaining step' },
+  { reason: 'a push failure is reported with the local path and the move is still made', file: 'skill/aspira-implementor/SKILL.md', phrase: 'say so with the local path of the implementation report and still make the move' },
+  { reason: 'the report starts with the ticket, the moves, the pages pushed and the working folder', file: 'skill/aspira-implementor/SKILL.md', phrase: 'Start the report with the ticket ID and title' },
   // The report rules of specs/agents-human-lists.md F5 live in the agent, where every mode reads them.
   { reason: 'an assumption the human cannot see as a choice is a choice made for them', file: INSTRUCTIONS, phrase: 'Present every assumption as a decision with its recommended answer already taken' },
   { reason: 'a human reads the worst blocker first; an unsorted list buries it', file: INSTRUCTIONS, phrase: 'in severity order (critical, high, medium, low, info)' },
