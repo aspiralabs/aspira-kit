@@ -5,6 +5,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import type { ToolSet } from 'ai'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 
+const retention = { question: 'Choose retention duration before implementing deletion?', options: ['Keep forever', 'Delete after 30 days'], recommended: 'Keep forever', reasoning: 'nothing else in the app expires', whyYours: 'storage cost is a product choice' }
 const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [] as unknown[], close: vi.fn() }))
 vi.mock('@aspiralabs/agent-common/lib/repository', () => ({ repository: async () => ({ files, instructions: '', packet: () => 'src/items.ts:1: existing save', gaps: [], commit: 'abc', dirty: false, tools: { read_files: {} } }), allowedPath: (path: string) => !path.includes('.env') }))
 vi.mock('@aspiralabs/agent-common/lib/mcp', () => ({ connectReadTools: async () => ({ tools: state.guidelineTool ? { notion__read_guideline: { execute: async () => ({ content: [{ type: 'text', text: JSON.stringify({ source: 'https://www.notion.so/topic', markdown: 'TEST-001 Write the failing test first.' }) }] }) } } : {}, reads: [], sources: [], close: state.close }) }))
@@ -38,7 +39,7 @@ vi.mock('ai', async (original) => {
     const plan = validPlan()
     if (state.brokenPlans > 0) { state.brokenPlans--; plan.tasks[1]!.dependsOn = [] }
     if (state.uiPlan) plan.tasks[1]!.changes[0]!.path = 'src/components/item-card.tsx'
-    if (state.needsAuthor) plan.decisions = ['Choose retention duration before implementing deletion.']
+    if (state.needsAuthor) plan.decisions = [retention]
     return { output: plan }
   }) }
   // The agents stream structured output; the stand-in streams the same generateText result, so its calls stay recorded there.
@@ -141,7 +142,22 @@ it('keeps product decisions explicit and blocks cancelled runs', async () => {
   const args = await input()
   const result = await runPlan(args)
   expect(result.status).toBe('needs-author')
-  expect(await readFile(join(result.dir, 'plan.reviewed.md'), 'utf8')).toContain('Choose retention duration')
+  expect(result.decisions).toEqual([{ ...retention, id: 'D1', decidedBy: 'open', answer: null }])
+  const rendered = await readFile(join(result.dir, 'plan.reviewed.md'), 'utf8')
+  expect(rendered).toContain('### D1 — Choose retention duration before implementing deletion?')
+  expect(rendered).toContain('- [ ] Keep forever _(recommended: nothing else in the app expires)_')
+  const decisionsFile = join(result.dir, 'trace/decisions.md')
+  const text = await readFile(decisionsFile, 'utf8')
+  expect(text).toContain('1 decision: 1 open · 0 answered')
+  expect(text).toContain('## D1 — Choose retention duration before implementing deletion?\n\n- [ ] Keep forever _(recommended: nothing else in the app expires)_\n- [ ] Delete after 30 days\n\nWhy it is yours to decide: storage cost is a product choice')
+  // The author ticks an option and reruns the planner: the decision is theirs and the plan is ready.
+  await writeFile(decisionsFile, text.replace('- [ ] Delete after 30 days', '- [x] Delete after 30 days'))
+  const again = await runPlan(args)
+  expect(again.status).toBe('ready')
+  expect(again.decisions).toEqual([{ ...retention, id: 'D1', decidedBy: 'author', answer: 'Delete after 30 days' }])
+  const review = JSON.parse(await readFile(join(again.dir, 'trace/review.json'), 'utf8'))
+  expect(review.decisions).toEqual([expect.objectContaining({ id: 'D1', decidedBy: 'author', answer: 'Delete after 30 days' })])
+  expect(await readFile(join(again.dir, 'trace/decisions.md'), 'utf8')).toContain('Decided by the author: Delete after 30 days.')
   const controller = new AbortController()
   controller.abort(new Error('User cancelled'))
   const cancelled = await runPlan(args, { signal: controller.signal })

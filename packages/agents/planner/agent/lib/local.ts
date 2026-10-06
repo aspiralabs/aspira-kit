@@ -12,9 +12,10 @@ import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promis
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
+import type { DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
 import { z } from 'zod'
 import { fingerprintKnowledge, inspectKnowledge, knowledgeConfig, knowledgeFiles, knowledgeFormats, REQUIRED_NAME, type KnowledgeConfig, type KnowledgeFile, type KnowledgePage } from './local-knowledge.ts'
-import { planSchema, researchSchema, type Plan, type Research } from './plan.ts'
+import { planSchema, readAnswers, researchSchema, type Plan, type Research } from './plan.ts'
 import { assertPlannableSpec, assessPlan, type GuidelinePage, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, uncoveredRules, type PreparedPlan } from './runner.ts'
 
 /** The phases of a --local run, in order. */
@@ -48,7 +49,7 @@ export type LocalKnowledge = { dir: string; config: KnowledgeConfig; pages: Know
 export type LocalPending = { pending: true; status: 'pending'; stage: Stage; workDir: string; router: string; instructions: string; tasks: LocalTask[]; knowledge?: LocalKnowledge }
 
 /** The exported plan. */
-export type LocalDone = { pending: false; status: 'ready' | 'needs-author' | 'incomplete'; dir: string; problems: string[]; decisions: string[]; totalMs: number }
+export type LocalDone = { pending: false; status: 'ready' | 'needs-author' | 'incomplete'; dir: string; problems: string[]; decisions: DecisionRecord[]; totalMs: number }
 
 /** Either the next stage or the exported plan. */
 export type LocalResult = LocalPending | LocalDone
@@ -250,7 +251,9 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
   const parsedReads = readsSchema.safeParse(safeJson(readsText))
   const reads = parsedReads.success ? parsedReads.data : []
   const phaseErrors = calls.filter((call) => call.error !== undefined).map((call) => ({ phase: call.phase, error: call.error ?? null }))
-  const { status, problems, decisions } = assessPlan({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan, phaseErrors, uiRequired: prepared.uiRequired, reads, cancelled: false })
+  // The previous plan's trace/decisions.md, with the options the author ticked, is read before the export replaces it.
+  const answers = await readAnswers(prepared.dir)
+  const { status, problems, decisions } = assessPlan({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan, phaseErrors, uiRequired: prepared.uiRequired, reads, cancelled: false, answers })
   const totalMs = Date.now() - Date.parse(state.startedAt)
   const phaseRows = (['research', 'planning', ...calls.map((call) => call.phase).filter((phase) => phase.startsWith('repair-'))] as PhaseId[]).map((phase) => {
     const call = calls.find((item) => item.phase === phase)
@@ -266,7 +269,7 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
     ? (await fingerprintKnowledge(await knowledgeFiles(knowledge.dir))).contents
     : new Map([[REQUIRED_NAME, prepared.guidelines]])
   const files: Record<string, string> = {
-    ...planReportFiles({ prepared, specPath: input.specPath, research, plan, status, problems }),
+    ...planReportFiles({ prepared, specPath: input.specPath, research, plan, status, problems, decisions }),
     'trace/calls.json': JSON.stringify({ mode: 'local', system: { research: prompts.researchSystem, planning: prompts.system }, models: { all: 'Claude Code session subagents' }, rejections: state.rejections, calls }, null, 2),
     'trace/usage.json': JSON.stringify({ scope: '--local run: model work ran in a Claude Code session; no usage is itemized.', turns: [] }, null, 2),
     'trace/knowledge.json': JSON.stringify({ ...knowledge, pages: knowledge.files.filter((file) => file.url !== null).map((file) => ({ file: file.name, title: file.title, url: file.url })).concat(knowledge.source === 'notion' ? requiredUrls(knowledgeContents.get(REQUIRED_NAME) ?? '') : []) }, null, 2),

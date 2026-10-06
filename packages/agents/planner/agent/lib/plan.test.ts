@@ -1,5 +1,5 @@
-import { expect, it } from 'vitest'
-import { renderPlan, touchesUi, validatePlan } from './plan.ts'
+import { describe, expect, it } from 'vitest'
+import { decisionSchema, mergeDecisions, planSchema, problemSeverity, renderChecks, renderPlan, researchSchema, touchesUi, validatePlan } from './plan.ts'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 
 it('accepts concrete test-first tasks and renders separate unit/integration checklists', () => {
@@ -91,4 +91,47 @@ it('accepts a handoff for work a named person does: no file changes, and its cri
   expect(validatePlan(plan, specWithPage, files).filter((error) => /F2|P4/.test(error))).toEqual([])
   plan.tasks[2]!.changes.push({ operation: 'create', path: 'docs/page.md', symbols: ['page'], instructions: 'x', evidence: ['src/items.ts:1'] })
   expect(validatePlan(plan, specWithPage, files)).toContain('A handoff changes no files; the person makes the change: P4')
+})
+
+const retention = { question: 'Keep saved items forever?', options: ['Keep forever', 'Expire after 30 days'], recommended: 'Keep forever', reasoning: 'nothing else expires', whyYours: 'storage cost' }
+
+describe('decisions', () => {
+  it('requires every decision to carry options, a recommended option among them and why it is the author\'s', () => {
+    expect(decisionSchema.safeParse(retention).success).toBe(true)
+    expect(researchSchema.safeParse({ facts: [], checks: [], gaps: [], decisions: ['Choose retention'] }).success).toBe(false)
+    expect(researchSchema.safeParse({ facts: [], checks: [], gaps: [], decisions: [retention] }).success).toBe(true)
+    expect(planSchema.safeParse({ ...validPlan(), decisions: [{ ...retention, options: ['Keep forever'] }] }).success).toBe(false)
+    expect(planSchema.safeParse({ ...validPlan(), decisions: [{ ...retention, recommended: 'Never' }] }).success).toBe(false)
+    expect(planSchema.safeParse({ ...validPlan(), decisions: [{ ...retention, whyYours: '' }] }).success).toBe(false)
+  })
+
+  it('merges research and planning decisions by question, numbers them, and applies the author\'s ticked answers', () => {
+    const merged = mergeDecisions([[retention], [{ ...retention, question: 'Keep saved items forever' }, { ...retention, question: 'Which list is mine?' }]])
+    expect(merged.map((d) => [d.id, d.question, d.decidedBy])).toEqual([['D1', 'Keep saved items forever?', 'open'], ['D2', 'Which list is mine?', 'open']])
+    const answered = mergeDecisions([[retention]], [{ id: 'D1', question: 'Keep saved items forever?', answer: 'Expire after 30 days' }])
+    expect(answered[0]).toMatchObject({ decidedBy: 'author', answer: 'Expire after 30 days' })
+  })
+
+  it('renders each decision in the plan with a checkbox per option, recommended first, and the count of open ones', () => {
+    const plan = validPlan()
+    const text = renderPlan(plan, 'needs-author', { specPath: '/spec.md', commit: 'abc', dirty: false }, [], mergeDecisions([[{ ...retention, options: ['Expire after 30 days', 'Keep forever'] }]]))
+    expect(text).toContain('1 decision: 1 open · 0 answered')
+    expect(text).toContain('### D1 — Keep saved items forever?\n\n- [ ] Keep forever _(recommended: nothing else expires)_\n- [ ] Expire after 30 days\n\nWhy it is yours to decide: storage cost')
+  })
+})
+
+describe('checks', () => {
+  it('orders the readiness problems critical, high, medium with a header count equal to the list', () => {
+    const problems = ['Uncovered guideline: TEST-001', 'Missing modify target: src/x.ts', 'planning: provider down', 'Research gap: did not read src/y.ts', 'No structured plan produced']
+    expect(problems.map(problemSeverity)).toEqual(['medium', 'high', 'critical', 'medium', 'critical'])
+    const text = renderChecks('incomplete', problems)
+    expect(text).toContain('5 problems: 2 critical · 1 high · 2 medium · 0 low · 0 info')
+    expect(text.indexOf('## Critical')).toBeLessThan(text.indexOf('## High'))
+    expect(text.indexOf('## High')).toBeLessThan(text.indexOf('## Medium'))
+    expect(text.indexOf('- planning: provider down')).toBeLessThan(text.indexOf('- No structured plan produced'))
+    expect(text.match(/^- /gm)).toHaveLength(5)
+    expect(renderChecks('ready', [])).toContain('0 problems: 0 critical · 0 high · 0 medium · 0 low · 0 info')
+    const plan = renderPlan(validPlan(), 'incomplete', { specPath: '/spec.md', commit: 'abc', dirty: false }, problems)
+    expect(plan.indexOf('- **critical** · planning: provider down')).toBeLessThan(plan.indexOf('- **medium** · Uncovered guideline: TEST-001'))
+  })
 })
