@@ -1,7 +1,7 @@
 {
   "name": "@aspiralabs/kit",
   "version": "0.4.2",
-  "description": "The Aspira Labs kit CLI. `kit init --stack next` wires a project to @aspiralabs/ui and @aspiralabs/config; `kit add auth` writes a base Better Auth setup; `kit doctor` reports drift.",
+  "description": "The Aspira Labs kit CLI. `kit init --stack next` wires a project to @aspiralabs/ui, @aspiralabs/config and the @aspiralabs/agents skills; `kit add auth` writes a base Better Auth setup; `kit doctor` reports drift.",
   "type": "module",
   "license": "MIT",
   "files": [
@@ -15,15 +15,17 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint src",
+    "test": "vitest run"
   },
   "dependencies": {},
   "devDependencies": {
     "@aspiralabs/config": "workspace:*",
     "@types/node": "^22",
     "eslint": "^9.39.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.4"
   },
   "repository": {
     "type": "git",

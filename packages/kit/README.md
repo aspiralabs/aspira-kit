@@ -1,6 +1,6 @@
 # @aspiralabs/kit
 
-The CLI that puts a project on the kit: it installs `@aspiralabs/ui` and `@aspiralabs/config`, wires them in, scaffolds shared features like auth, and reports drift.
+The CLI that puts a project on the kit: it installs `@aspiralabs/ui`, `@aspiralabs/config` and `@aspiralabs/agents`, wires them in, installs the `/aspira-*` agent skills, scaffolds shared features like auth, and reports drift.
 
 ```bash
 pnpm dlx @aspiralabs/kit init --stack next   # first run, before the kit is installed
@@ -16,7 +16,7 @@ Installing needs a GitHub Packages token in `~/.npmrc`; see the [repo README](..
 |---|---|
 | `kit init --stack next` | Installs the kit packages and wires the project to them |
 | `kit add auth` | Writes a base Better Auth setup the project then owns |
-| `kit doctor` | Prints the kit versions in use and checks the wiring |
+| `kit doctor` | Prints the kit versions in use and checks the wiring, including the agent skills |
 
 Every command takes `--cwd <path>` to run against another directory. `init` and `add` take `--dry-run`, which prints the plan and changes nothing.
 
@@ -45,7 +45,7 @@ Puts a Next.js project on the kit. `next` is the only stack so far.
 | Step | Result |
 |---|---|
 | `.npmrc` | Maps `@aspiralabs` to GitHub Packages. Warns if `~/.npmrc` has no token |
-| Install | `@aspiralabs/ui`; dev: `@aspiralabs/config`, `@aspiralabs/kit`, `eslint`, `prettier`, `typescript`. Uses the project's package manager (pnpm, npm or yarn, from the lockfile) |
+| Install | `@aspiralabs/ui`; dev: `@aspiralabs/config`, `@aspiralabs/kit`, `@aspiralabs/agents`, `eslint`, `prettier`, `typescript`. Uses the project's package manager (pnpm, npm or yarn, from the lockfile) |
 | `eslint.config.mjs` | `@aspiralabs/config/eslint/next`, if the file doesn't exist |
 | `prettier.config.mjs` | `@aspiralabs/config/prettier`, if the file doesn't exist |
 | `tsconfig.json` | `extends` the kit's `next.json`; adds `paths: { "@/*": ["./*"] }` if there are none |
@@ -54,9 +54,25 @@ Puts a Next.js project on the kit. `next` is the only stack so far.
 | `CLAUDE.md` | `@AGENTS.md`, if the file doesn't exist |
 | `.mcp.json` | Registers the `aspiralabs-ui` docs server, merged into your servers |
 | `.claude/settings.json` | Adds the session-start, deny-tier3 and audit-log hooks (from `node_modules/@aspiralabs/kit/hooks/`), merged into your settings; entries pointing at the retired `@aspiralabs/config/agent/hooks/` path are dropped |
+| `.claude/skills/aspira-<agent>/` | One folder per agent (spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer): a copy of the installed package's `skill/aspira-<agent>/` (`SKILL.md` and `scripts/`) plus `.kit-version`, the installed `@aspiralabs/agents` version. Commit them. A re-run after a bump rewrites them |
 | `.gitignore` | Adds `.work/`, the per-ticket working folder, if missing |
 
 The `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and settings templates ship in this package (`templates/agent/`), and the hooks in `hooks/`, so re-running `init` after an upgrade brings them up to that version. The managed `AGENTS.md` block and the session-start hook only point at the rules in Notion; they restate none.
+
+### The agent skills
+
+`@aspiralabs/agents` is one dependency that brings every agent package (`@aspiralabs/spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer` and `agent-common`) into the project at the kit's version. Each agent's skill is copied into `.claude/skills/aspira-<agent>/`, so `/aspira-planner` and friends run the agent installed in `node_modules`, never a source checkout. The launcher resolves its agent as `<AGENT>_AGENT_DIR` (kit development only; the run says so), then the installed package walking up from the project root, then its own location; `$ASPIRA_KIT` is not consulted. Agent environment comes from the project's `.env.local` (`AI_GATEWAY_API_KEY`, `NOTION_TOKEN`, `KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`), then the agent's own folder.
+
+Updating an agent is a kit release, a bump of `@aspiralabs/agents` in the project, and `kit init` again; `kit doctor` fails until the skills match the installed version. Each run reports the agent package and version it ran, and writes `trace/agent-version.json` into its export.
+
+**Removing the old `~/.claude/skills` symlinks.** Before this, the skills were symlinks from `~/.claude/skills/aspira-*` into one kit checkout, and `ASPIRA_KIT` pointed the launchers at it. Those links now shadow nothing useful and can point at a stale checkout, so remove them once per machine:
+
+```bash
+for a in spec-writer spec-reviewer planner implementor code-analyzer pr-reviewer; do
+  [ -L ~/.claude/skills/aspira-$a ] && rm ~/.claude/skills/aspira-$a
+done
+# and drop `export ASPIRA_KIT=...` from your shell profile; the launchers no longer read it
+```
 
 ## `kit add auth`
 
@@ -125,7 +141,7 @@ If you already have `lib/prisma.ts` or `lib/redis.ts`, they're kept. The command
 pnpm kit doctor [--cwd <path>]
 ```
 
-Prints the version of each kit package the project declares and has installed, then checks each part of the `init` wiring: ESLint, `tsconfig.json`, the tokens import, the `AGENTS.md` block, the MCP server and the hooks. It exits `1` if anything is missing and tells you to re-run `init`.
+Prints the version of each kit package the project declares and has installed (`@aspiralabs/ui`, `config`, `kit` and `agents`), then checks each part of the `init` wiring: ESLint, `tsconfig.json`, the tokens import, the `AGENTS.md` block, the MCP server, the hooks, and each `.claude/skills/aspira-<agent>/` folder (present, complete, and its `.kit-version` equal to the installed `@aspiralabs/agents` version). It exits `1` if anything is missing and tells you to re-run `init`.
 
 ## Working on the CLI
 
@@ -137,3 +153,4 @@ node packages/kit/dist/cli.js add auth --dry-run --cwd ../some-app
 - **Stacks** are profiles in `src/stacks/`, one per ecosystem (`next.ts`). Add one as projects need it.
 - **Feature templates** live in `templates/<stack>/<feature>/` and ship in the package. `// #if flag` … `// #endif` (`# #if` in env files) keeps lines only when the flag is on, and `{{name}}` is replaced with a value. The command for a feature lives next to its stack (`src/stacks/next-auth.ts`).
 - **Before changing a template**, generate it into a scratch project and typecheck it against the version of the library it targets. The templates aren't compiled as part of this package.
+- **Tests** are `src/*.test.ts` (`pnpm test`). `install.integration.test.ts` packs every agent package, installs the tarballs into a scratch project, runs `kit init` there and then a launcher from `node_modules`; `release.integration.test.ts` runs `changeset version` on a fixture to check every package bumps together.
