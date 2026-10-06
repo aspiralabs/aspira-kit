@@ -15,6 +15,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { z } from 'zod'
+import { dependenciesAdded, renderDependencies, type DependencyReport } from './dependencies.ts'
 import {
   agentEnv,
   inspectKnowledge,
@@ -41,6 +42,7 @@ import {
   type Plan,
   type SchemaName,
 } from './local-plan.ts'
+import { checkNotes, notesFilesIn, notesHeaderSha, repoSearcher, staleIdentifiers, type Finding } from './notes.ts'
 
 const run = promisify(execFile)
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -119,6 +121,8 @@ const stateSchema = z.object({
   maxParallel: z.number(),
   serial: z.boolean(),
   startedAt: z.string(),
+  /** HEAD when the run started: the branch base when the default branch cannot be resolved. */
+  startCommit: z.string().default(''),
   knowledge: z
     .object({
       source: z.enum(['notion', 'guidelines']),
@@ -195,6 +199,45 @@ async function defaultBranch(repo: string): Promise<string> {
   if (origin !== '') return origin.replace(/^origin\//, '')
   const configured = await git(repo, 'config', 'init.defaultBranch').catch(() => '')
   return configured === '' ? 'main' : configured
+}
+
+/** The branch base: the merge base with the default branch, else HEAD when the run started. */
+async function branchBase(repo: string, main: string, startCommit: string): Promise<string> {
+  const base = await git(repo, 'merge-base', main, 'HEAD').catch(() => '')
+  return base !== '' ? base : startCommit
+}
+
+/** The sections of the progress log the final verification must write, and the one that may not be empty. */
+export const LOG_SECTIONS = ['## Dependencies added', '## Mid-build notes', '## Proposed Slop Repo entries'] as const
+function sectionBody(log: string, heading: string): string | null {
+  const at = log.indexOf(`\n${heading}`)
+  if (at < 0 && !log.startsWith(heading)) return null
+  const start = at < 0 ? heading.length : at + heading.length + 1
+  const rest = log.slice(start)
+  const next = rest.search(/\n##? /)
+  return (next < 0 ? rest : rest.slice(0, next)).trim()
+}
+
+type NotesCheck = { file: string; findings: [string, Finding][] }
+const describeFinding = ([token, finding]: [string, Finding]) => (finding.status === 'renamed' ? `\`${token}\` (renamed: \`${finding.to}\`)` : `\`${token}\` (no rename found; remove its sentence)`)
+
+/** The stage input for the final verification: what the driver found for section 6, so the session copies instead of recalling. */
+function verificationInput(args: { base: string; dependencies: DependencyReport; notes: NotesCheck[]; workDir: string; slopAreas: string[] }): string {
+  const notes = args.notes.length === 0 ? [`No mid-build notes file under ${args.workDir}. Any the plan or you named elsewhere must still be rewritten or deleted and listed.`] : args.notes.map(({ file, findings }) => `- ${file}: ${findings.length === 0 ? 'every identifier is in the repository; rewrite it with the header, or delete it' : `not in the repository: ${findings.map(describeFinding).join(', ')}`}`)
+  return [
+    "The driver's findings for the Procedure's final verification, computed from the repository. Copy them; do not recompute them from memory.",
+    '',
+    `### Dependencies added (every manifest, ${args.base.slice(0, 12)}..HEAD)`,
+    '',
+    renderDependencies(args.dependencies).replace(/^## Dependencies added\n\n/, ''),
+    '### Mid-build notes',
+    '',
+    ...notes,
+    '',
+    '### Slop Repo areas (the topic pages the Agent Instructions routing table names)',
+    '',
+    args.slopAreas.length === 0 ? 'None routed; use the Area names of the AI Agent Slop Repo.' : args.slopAreas.join(', '),
+  ].join('\n')
 }
 
 /** Loads the knowledge (or says what to fetch); refuses a folder that changed mid-run. */
@@ -346,7 +389,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   for (const [flag, given, kept] of [['--max-parallel', input.maxParallel, saved?.maxParallel], ['--serial', input.serial === true ? true : undefined, saved?.serial === true ? true : undefined]] as const) {
     if (saved !== null && given !== undefined && given !== kept) throw new Error(`${flag} differs from the value this run started with. Drop it, or delete ${runDir} to start over.`)
   }
-  const state: State = saved ?? { source: source.path, sourceFingerprint: fingerprint, maxParallel: input.maxParallel ?? 4, serial: input.serial === true, startedAt: new Date().toISOString(), knowledge: null, gate: null, planAccepted: null, rejections: {} }
+  const head = await git(source.repo, 'rev-parse', 'HEAD')
+  const state: State = saved ?? { source: source.path, sourceFingerprint: fingerprint, maxParallel: input.maxParallel ?? 4, serial: input.serial === true, startedAt: new Date().toISOString(), startCommit: head, knowledge: null, gate: null, planAccepted: null, rejections: {} }
   await mkdir(join(runDir, 'outputs'), { recursive: true })
   const save = () => writeFile(stateFile, JSON.stringify(state, null, 2))
 
@@ -357,7 +401,6 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   }
   state.knowledge = knowledge.ready
   const knowledgeDir = join(runDir, 'knowledge')
-  const head = await git(source.repo, 'rev-parse', 'HEAD')
 
   const done = (status: LocalDone['status'], extra: Partial<LocalDone> = {}): LocalDone => ({ pending: false, status, workDir: source.workDir, export: null, missing: [], ...extra })
 
@@ -581,17 +624,63 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
 
   const features = [...new Set([...plan.tasks.flatMap((t) => t.featureIds), ...plan.tests.flatMap((t) => t.featureIds)])]
   const verifyOutput = outputFile('verification')
-  const verification = await resolveTask('verification', 'verification', verifyOutput, (value: z.infer<typeof SCHEMAS.VERIFICATION>) => {
+  // What the final verification must write down, found by the driver: the manifest diff since the
+  // branch base, the notes files and their stale identifiers, and the areas an entry may name.
+  const base = await branchBase(source.repo, main, state.startCommit === '' ? head : state.startCommit)
+  const dependencies = await dependenciesAdded({ repo: source.repo, base, knowledgeDir })
+  const searcher = repoSearcher(source.repo)
+  const notesFiles = await notesFilesIn(source.workDir, { exclude: [RUN_DIR] })
+  const notes: NotesCheck[] = []
+  for (const file of notesFiles) notes.push({ file, findings: [...(await checkNotes(await readFile(file, 'utf8'), searcher))].filter(([, f]) => f.status !== 'found') })
+  const slopAreas = state.knowledge.pages.filter((p) => p.role === 'topic').map((p) => p.title)
+  const logFile = join(source.workDir, 'implementation.md')
+  const notesPath = (file: string) => (file.startsWith('/') ? file : existsSync(resolve(source.workDir, file)) ? resolve(source.workDir, file) : resolve(source.repo, file))
+  const verification = await resolveTask('verification', 'verification', verifyOutput, async (value: z.infer<typeof SCHEMAS.VERIFICATION>) => {
     const problems: string[] = []
-    if (!existsSync(join(source.workDir, 'implementation.md'))) problems.push(`The progress log ${join(source.workDir, 'implementation.md')} does not exist.`)
+    const log = await readFile(logFile, 'utf8').catch(() => null)
+    if (log === null) problems.push(`The progress log ${logFile} does not exist.`)
+    else {
+      for (const heading of LOG_SECTIONS) {
+        const body = sectionBody(log, heading)
+        if (body === null) problems.push(`${logFile} has no \`${heading}\` section.`)
+        else if (body === '' && heading === '## Proposed Slop Repo entries') problems.push(`${logFile}: \`${heading}\` is empty; it lists entries or says None with the reason.`)
+      }
+    }
     const listed = new Set(value.features.map((f) => f.id))
     const absent = features.filter((f) => !listed.has(f))
     if (absent.length > 0) problems.push(`The feature table leaves out ${absent.join(', ')}.`)
+    for (const dep of dependencies.added) {
+      if (!value.dependenciesAdded.some((d) => d.name === dep.name && (d.app === dep.app || (dep.app === 'root' && d.app === '.')))) problems.push(`dependenciesAdded leaves out \`${dep.name}\` ${dep.version}, added in ${dep.manifest}.`)
+    }
+    const covered = new Set(value.notesRewritten.map((n) => notesPath(n.file)))
+    for (const file of notesFiles) if (!covered.has(file)) problems.push(`${file} is a mid-build notes file; notesRewritten must say whether it was rewritten or deleted.`)
+    for (const entry of value.notesRewritten) {
+      const file = notesPath(entry.file)
+      const text = await readFile(file, 'utf8').catch(() => null)
+      if (entry.action === 'deleted') {
+        if (text !== null) problems.push(`${file} is listed as deleted but still exists.`)
+        continue
+      }
+      if (text === null) {
+        problems.push(`${file} is listed as rewritten but does not exist.`)
+        continue
+      }
+      const sha = notesHeaderSha(text)
+      if (sha === null || !(await git(source.repo, 'cat-file', '-e', `${sha}^{commit}`).then(() => true, () => false))) problems.push(`${file} does not start with the rewritten-at-verification header carrying a commit SHA of this repository.`)
+      const stale = await staleIdentifiers(text, searcher)
+      if (stale.length > 0) problems.push(`${file} still names ${stale.map((t) => `\`${t}\``).join(', ')}, which ${stale.length === 1 ? 'is' : 'are'} not in the repository; correct or remove ${stale.length === 1 ? 'it' : 'them'}.`)
+    }
+    if (slopAreas.length > 0) {
+      const known = new Set(slopAreas.map((a) => a.toLowerCase()))
+      for (const entry of value.slopEntries) if (!known.has(entry.area.trim().toLowerCase())) problems.push(`Slop Repo entry "${entry.rule}" names the area ${entry.area}, which is none of: ${slopAreas.join(', ')}.`)
+    }
     return problems
   }, parser(SCHEMAS.VERIFICATION))
   if ('missing' in verification) return exportRun('incomplete')
   if (!('value' in verification)) {
-    return orchestrator({ id: 'verification', stage: 'verification', sections: [6, 7], does: `Write the progress log at ${join(source.workDir, 'implementation.md')} and record the feature table in the output.` }, 'VERIFICATION', verifyOutput, verification, { features })
+    const does = `Write the progress log at ${logFile} with its ${LOG_SECTIONS.map((h) => `\`${h}\``).join(', ')} sections, and record the feature table, the dependencies added, each notes file as rewritten or deleted, and the proposed Slop Repo entries (or the justification) in the output.`
+    const input = verificationInput({ base, dependencies, notes, workDir: source.workDir, slopAreas })
+    return orchestrator({ id: 'verification', stage: 'verification', sections: [6, 7], does, input }, 'VERIFICATION', verifyOutput, verification, { features, branchBase: base, notesFiles, slopAreas })
   }
   return exportRun('complete', { verification: verification.value })
 }

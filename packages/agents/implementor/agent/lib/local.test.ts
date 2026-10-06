@@ -7,6 +7,7 @@ import { promisify } from 'node:util'
 import { DEFAULT_REQUIRED } from '@aspiralabs/agent-common/lib/knowledge'
 import { afterEach, expect, it } from 'vitest'
 import { runLocal, workerBriefTemplate, type LocalResult } from './local.ts'
+import { rewriteNotesFile } from './notes.ts'
 
 const exec = promisify(execFile)
 const PACKAGE = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -40,6 +41,7 @@ async function fixture() {
   await writeFile(join(repo, 'AGENTS.md'), '# Project\n')
   await writeFile(join(repo, 'specs/cart/spec.md'), '# Cart\n\n- [ ] F1: totals\n- [ ] F2: badge\n')
   await writeFile(join(repo, 'src/price.ts'), 'export const price = 1\n')
+  await writeFile(join(repo, 'package.json'), JSON.stringify({ name: 'cart', dependencies: { zod: '4.5.4' } }))
   await git('add', '.')
   await git('commit', '-qm', 'init')
   const env = { KNOWLEDGE_PAGE: INDEX }
@@ -61,6 +63,7 @@ async function writeKnowledge(dir: string, options: { topics?: boolean } = {}) {
   if (options.topics !== false) {
     await writeFile(join(dir, 'common-patterns.md'), `${header('Common Patterns', 10)}CP-001 small functions.\n`)
     await writeFile(join(dir, 'testing-standards.md'), `${header('Testing Standards', 11)}TEST-001 tests first.\n`)
+    await writeFile(join(dir, 'approved-technologies.md'), `${header('Approved Technologies', 12)}| Name | Status |\n| --- | --- |\n| Zod | Adopt |\n| MSW | Trial |\n`)
   }
 }
 
@@ -241,7 +244,11 @@ it('runs the plan in waves: worker briefs from the procedure, schema checks with
   const unknownCommit = staged(await step())
   expect(unknownCommit.tasks[0]!.error).toMatch(/commit/)
   await writeFile(join(repo, 'src/badge.ts'), 'export const badge = 1\n')
-  await git('add', '.')
+  // The wave added a dependency the plan did not name, and the lanes left handoff notes that name a symbol that no longer exists.
+  await writeFile(join(repo, 'package.json'), JSON.stringify({ name: 'cart', dependencies: { zod: '4.5.4', 'left-pad': '1.3.0' }, devDependencies: { msw: '2.0.0' } }))
+  await mkdir(join(repo, 'node_modules/left-pad/ios'), { recursive: true })
+  await writeFile(join(work, 'handoff-notes.md'), '# Handoff\n\nLane A exports `price` from `src/price.ts`. Lane B reads `badgeCount` from `src/badge.ts`.\n')
+  await git('add', 'src', 'package.json')
   await git('commit', '-qm', 'wave 1')
   const sha = (await git('rev-parse', 'HEAD')).stdout.trim()
   await writeFile(commit.tasks[0]!.output, JSON.stringify({ status: 'committed', commit: sha, tasks: [{ id: 'P1', status: 'done' }, { id: 'P2', status: 'done' }, { id: 'P3', status: 'done' }, { id: 'P4', status: 'done' }] }))
@@ -253,22 +260,53 @@ it('runs the plan in waves: worker briefs from the procedure, schema checks with
 
   const verify = staged(await step())
   expect(verify.stage).toBe('verification')
-  expect(await readFile(verify.tasks[0]!.prompt, 'utf8')).toContain('## 6. Final verification')
+  const verifyPrompt = await readFile(verify.tasks[0]!.prompt, 'utf8')
+  expect(verifyPrompt).toContain('## 6. Final verification')
+  // The three requirements of the final verification, in the procedure's words, and the driver's own findings for them.
+  for (const requirement of ['Every dependency the build added is listed, with its native and approval flags', 'rewritten from the code at HEAD or deleted', 'The report cannot be done with the section empty or missing']) expect(verifyPrompt).toContain(requirement)
+  expect(verifyPrompt).toContain('`left-pad` 1.3.0 (root, runtime): native (ios/); approval: not listed.')
+  expect(verifyPrompt).toContain('`msw` 2.0.0 (root, dev): native unknown (not installed); approval: Trial.')
+  expect(verifyPrompt).toContain(join(work, 'handoff-notes.md'))
+  expect(verifyPrompt).toContain('badgeCount')
+  expect(verifyPrompt).toContain('"Testing Standards"')
   const features = [{ id: 'F1', tasks: ['P3'], tests: ['T1'], passing: true }, { id: 'F2', tasks: ['P4'], tests: ['T2'], passing: true }]
-  await writeFile(verify.tasks[0]!.output, JSON.stringify({ status: 'done', features, deviations: [], blockers: [], assumptions: [] }))
-  const noLog = staged(await step())
-  expect(noLog.tasks[0]!.error).toContain('implementation.md')
-  await writeFile(join(work, 'implementation.md'), '# Implementation\n')
-  await writeFile(verify.tasks[0]!.output, JSON.stringify({ status: 'done', features, deviations: [], blockers: [], assumptions: [] }))
+  const summary = { status: 'done', features, deviations: [], blockers: [], assumptions: [] }
+  // Without the three fields the output fails the schema like any other.
+  await writeFile(verify.tasks[0]!.output, JSON.stringify(summary))
+  const noFields = staged(await step())
+  expect(noFields.tasks[0]!.error).toContain('dependenciesAdded')
+  expect(noFields.tasks[0]!.retry).toBe(true)
+  // With them, the driver checks them against the tree: the additions it found, the notes files it found, the log's sections.
+  const claimed = { ...summary, dependenciesAdded: [], notesRewritten: [], slopEntries: [], slopJustification: 'None: no bugs were found and fixed' }
+  await writeFile(verify.tasks[0]!.output, JSON.stringify(claimed))
+  const unchecked = staged(await step())
+  expect(unchecked.tasks[0]!.error).toContain('left-pad')
+  expect(unchecked.tasks[0]!.error).toContain('handoff-notes.md')
+  expect(unchecked.tasks[0]!.error).toContain('implementation.md')
+  expect(unchecked.tasks[0]!.retry).toBe(false)
+  const dependenciesAdded = [{ name: 'left-pad', version: '1.3.0', app: 'root', scope: 'runtime', native: true, approval: 'not listed' }, { name: 'msw', version: '2.0.0', app: 'root', scope: 'dev', native: false, approval: 'Trial' }]
+  const notesRewritten = [{ file: join(work, 'handoff-notes.md'), action: 'rewritten' }]
+  await writeFile(join(work, 'implementation.md'), '# Implementation\n\n## Dependencies added\n\n- `left-pad`\n\n## Mid-build notes\n\n- handoff-notes.md: rewritten\n\n## Proposed Slop Repo entries\n\nNone: no bugs were found and fixed\n')
+  // A notes file that still names a missing symbol, or carries no header, is not rewritten.
+  await writeFile(verify.tasks[0]!.output, JSON.stringify({ ...claimed, dependenciesAdded, notesRewritten, slopEntries: [{ rule: 'x', area: 'Nowhere', whatWentWrong: 'y', source: 'z' }] }))
+  const stale = staged(await step())
+  expect(stale.tasks[0]!.error).toContain('badgeCount')
+  expect(stale.tasks[0]!.error).toContain('Nowhere')
+  await rewriteNotesFile({ repo, file: join(work, 'handoff-notes.md'), sha })
+  await writeFile(verify.tasks[0]!.output, JSON.stringify({ ...claimed, dependenciesAdded, notesRewritten }))
 
   const done = await step()
   expect(done).toMatchObject({ pending: false, status: 'complete' })
   if (done.pending) return
+  expect(done.verification).toMatchObject({ dependenciesAdded, notesRewritten, slopEntries: [], slopJustification: 'None: no bugs were found and fixed' })
+  const log = await readFile(join(work, 'implementation.md'), 'utf8')
+  for (const section of ['## Dependencies added', '## Mid-build notes', '## Proposed Slop Repo entries']) expect(log).toContain(section)
   const exported = JSON.parse(await readFile(done.export!, 'utf8'))
   expect(exported.knowledge.source).toBe('notion')
   expect(exported.knowledge.pages.map((p: { title: string }) => p.title)).toEqual(expect.arrayContaining(['Agent Instructions', 'Review Verification', 'Common Patterns', 'Testing Standards']))
   expect(exported.calls.map((c: { id: string }) => c.id)).toEqual(['plan', 'parallelize', 'wave-1-A', 'wave-1-B', 'wave-1', 'wave-2', 'verification'])
   expect(exported.rejections.parallelize).toHaveLength(1)
+  expect(exported.rejections.verification).toHaveLength(3)
   await expect(readdir(join(work, 'implementation.local'))).rejects.toThrow()
 })
 

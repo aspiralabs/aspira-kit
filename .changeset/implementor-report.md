@@ -1,0 +1,5 @@
+---
+'@aspiralabs/kit': patch
+---
+
+Implementor: the final verification writes down what the build changed and learned. The procedure's final verification now lists every dependency the build added (a manifest diff between the branch base and HEAD, each addition flagged native when the installed package carries native code and by its Approved Technologies status in the loaded knowledge), rewrites every mid-build notes file from the code at HEAD or deletes it (each backticked identifier checked with `git grep -F`, renames corrected, missing ones removed, a header with the commit SHA), and proposes Slop Repo entries for the bugs it fixed or says why none would recur. The verification output requires `dependenciesAdded`, `notesRewritten` and `slopEntries` (with `slopJustification` when empty): the `--local` driver computes the findings, puts them in the verification prompt and checks the output against the tree, and the cloud agent records the same shape through a new `record-verification` tool that `publish-branch` requires.

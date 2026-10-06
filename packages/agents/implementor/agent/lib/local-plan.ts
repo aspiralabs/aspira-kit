@@ -81,14 +81,59 @@ export const WAVE_RESULT = z.object({
   notes: z.string().default(''),
 })
 
-/** The final verification: the feature table and what is left open. */
-export const VERIFICATION = z.object({
-  status: z.enum(['done', 'partial', 'blocked']),
-  features: z.array(z.object({ id: text, tasks: ids, tests: ids, passing: z.boolean() })),
-  deviations: z.array(z.string()),
-  blockers: z.array(z.string()),
-  assumptions: z.array(z.string()),
+/** One dependency the build added, as the `## Dependencies added` section lists it. */
+export const DEPENDENCY_ADDED = z.object({
+  name: text,
+  version: z.string(),
+  /** The app whose manifest gained it (its directory), or `root`. */
+  app: text,
+  scope: z.enum(['runtime', 'dev']),
+  /** A React Native or Expo module with native code: the mobile app needs a store build. */
+  native: z.boolean(),
+  /** Its Approved Technologies status in the loaded knowledge: Adopt, Trial, Hold, Retired, or `not listed`. */
+  approval: text,
 })
+
+/** What happened to one mid-build notes file at verification. */
+export const NOTES_REWRITTEN = z.object({ file: text, action: z.enum(['rewritten', 'deleted']) })
+
+/** One proposed Slop Repo entry, in the Slop Repo's shape. */
+export const SLOP_ENTRY = z.object({
+  /** One imperative sentence. */
+  rule: text,
+  /** One of the Slop Repo areas: the topic pages the Agent Instructions routing table names. */
+  area: text,
+  /** Two sentences naming the file or symbol. */
+  whatWentWrong: text,
+  /** `implementor`, the repository and the ticket. */
+  source: text,
+})
+
+/**
+ * The final verification: the feature table, what is left open, and the three things a build
+ * must write down before it can say done: the dependencies it added, what it did with its
+ * mid-build notes, and the lessons it proposes (or why there are none).
+ */
+export const VERIFICATION = z
+  .object({
+    status: z.enum(['done', 'partial', 'blocked']),
+    features: z.array(z.object({ id: text, tasks: ids, tests: ids, passing: z.boolean() })),
+    deviations: z.array(z.string()),
+    blockers: z.array(z.string()),
+    assumptions: z.array(z.string()),
+    /** Every package a manifest gained between the branch base and HEAD; empty when none. */
+    dependenciesAdded: z.array(DEPENDENCY_ADDED),
+    /** Every mid-build notes file, rewritten from the code at HEAD or deleted; empty when the build wrote none. */
+    notesRewritten: z.array(NOTES_REWRITTEN),
+    /** One entry per bug that could happen again; empty only with a slopJustification. */
+    slopEntries: z.array(SLOP_ENTRY),
+    /** When slopEntries is empty: `None: ` and one sentence per bug saying why it would not recur, or `None: no bugs were found and fixed`. */
+    slopJustification: z.string().default(''),
+  })
+  .refine((value) => value.slopEntries.length > 0 || value.slopJustification.trim() !== '', {
+    path: ['slopJustification'],
+    message: 'slopEntries is empty, so slopJustification must say why no entry is proposed (one sentence per bug, or "None: no bugs were found and fixed").',
+  })
 
 /** The schemas by the name the driver prints. */
 export const SCHEMAS = { PLAN, PARALLELIZATION, WORKER_REPORT, WAVE_RESULT, VERIFICATION } as const

@@ -1,0 +1,260 @@
+{
+ "object": "list",
+ "results": [
+  {
+   "object": "block",
+   "id": "a1",
+   "parent": {
+    "type": "page_id",
+    "page_id": "3ec3e59b-2258-8102-becf-ce78d66142e1"
+   },
+   "created_time": "2026-10-01T01:46:44.340Z",
+   "last_edited_time": "2026-10-05T04:48:12.063Z",
+   "created_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "last_edited_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "has_children": false,
+   "in_trash": false,
+   "type": "heading_2",
+   "heading_2": {
+    "rich_text": [
+     {
+      "type": "text",
+      "text": {
+       "content": "Idea",
+       "link": null
+      },
+      "annotations": {
+       "bold": false,
+       "italic": false,
+       "strikethrough": false,
+       "underline": false,
+       "code": false,
+       "color": "default"
+      },
+      "plain_text": "Idea",
+      "href": null
+     }
+    ],
+    "is_toggleable": false,
+    "color": "default"
+   }
+  },
+  {
+   "object": "block",
+   "id": "a2",
+   "parent": {
+    "type": "page_id",
+    "page_id": "3ec3e59b-2258-8102-becf-ce78d66142e1"
+   },
+   "created_time": "2026-10-01T01:46:44.340Z",
+   "last_edited_time": "2026-10-05T04:48:12.063Z",
+   "created_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "last_edited_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "has_children": false,
+   "in_trash": false,
+   "type": "paragraph",
+   "paragraph": {
+    "rich_text": [
+     {
+      "type": "text",
+      "text": {
+       "content": "Every list stops at 10 and the default Explore order is effectively random. Unblocks find-cooks, cookbook-detail, search-filters, and My Recipes Phase 1.",
+       "link": null
+      },
+      "annotations": {
+       "bold": false,
+       "italic": false,
+       "strikethrough": false,
+       "underline": false,
+       "code": false,
+       "color": "default"
+      },
+      "plain_text": "Every list stops at 10 and the default Explore order is effectively random. Unblocks find-cooks, cookbook-detail, search-filters, and My Recipes Phase 1.",
+      "href": null
+     }
+    ],
+    "color": "default"
+   }
+  },
+  {
+   "object": "block",
+   "id": "a3",
+   "parent": {
+    "type": "page_id",
+    "page_id": "3ec3e59b-2258-8102-becf-ce78d66142e1"
+   },
+   "created_time": "2026-10-01T01:46:44.340Z",
+   "last_edited_time": "2026-10-05T04:48:12.063Z",
+   "created_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "last_edited_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "has_children": false,
+   "in_trash": false,
+   "type": "heading_2",
+   "heading_2": {
+    "rich_text": [
+     {
+      "type": "text",
+      "text": {
+       "content": "Docs",
+       "link": null
+      },
+      "annotations": {
+       "bold": false,
+       "italic": false,
+       "strikethrough": false,
+       "underline": false,
+       "code": false,
+       "color": "default"
+      },
+      "plain_text": "Docs",
+      "href": null
+     }
+    ],
+    "is_toggleable": false,
+    "color": "default"
+   }
+  },
+  {
+   "object": "block",
+   "id": "3ec3e59b-2258-8118-9d69-d3151595999b",
+   "parent": {
+    "type": "page_id",
+    "page_id": "3ec3e59b-2258-8102-becf-ce78d66142e1"
+   },
+   "created_time": "2026-10-01T01:46:44.340Z",
+   "last_edited_time": "2026-10-01T02:10:00.000Z",
+   "created_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "last_edited_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "has_children": true,
+   "in_trash": false,
+   "type": "child_page",
+   "child_page": {
+    "title": "Spec"
+   }
+  },
+  {
+   "object": "block",
+   "id": "3ec3e59b-2258-8123-961c-ce4ccd8e662a",
+   "parent": {
+    "type": "page_id",
+    "page_id": "3ec3e59b-2258-8102-becf-ce78d66142e1"
+   },
+   "created_time": "2026-10-01T01:46:44.340Z",
+   "last_edited_time": "2026-10-05T04:48:12.063Z",
+   "created_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "last_edited_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "has_children": true,
+   "in_trash": false,
+   "type": "child_page",
+   "child_page": {
+    "title": "Spec Reviewed"
+   }
+  },
+  {
+   "object": "block",
+   "id": "3ec3e59b-2258-81ca-b6df-c2971beacd06",
+   "parent": {
+    "type": "page_id",
+    "page_id": "3ec3e59b-2258-8102-becf-ce78d66142e1"
+   },
+   "created_time": "2026-10-01T01:46:44.340Z",
+   "last_edited_time": "2026-10-05T04:50:00.000Z",
+   "created_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "last_edited_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "has_children": true,
+   "in_trash": false,
+   "type": "child_page",
+   "child_page": {
+    "title": "Plan"
+   }
+  },
+  {
+   "object": "block",
+   "id": "3ec3e59b-2258-8147-b6eb-dfd217fd8628",
+   "parent": {
+    "type": "page_id",
+    "page_id": "3ec3e59b-2258-8102-becf-ce78d66142e1"
+   },
+   "created_time": "2026-10-01T01:46:44.340Z",
+   "last_edited_time": "2026-10-05T04:52:00.000Z",
+   "created_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "last_edited_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "has_children": true,
+   "in_trash": false,
+   "type": "child_page",
+   "child_page": {
+    "title": "NOM-4 run log (manual AI-DLC, 2026-09-30 to 2026-10-01)"
+   }
+  },
+  {
+   "object": "block",
+   "id": "3f13e59b-2258-817b-987f-d8d166223735",
+   "parent": {
+    "type": "page_id",
+    "page_id": "3ec3e59b-2258-8102-becf-ce78d66142e1"
+   },
+   "created_time": "2026-10-01T01:46:44.340Z",
+   "last_edited_time": "2026-10-05T04:55:44.354Z",
+   "created_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "last_edited_by": {
+    "object": "user",
+    "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+   },
+   "has_children": true,
+   "in_trash": false,
+   "type": "child_page",
+   "child_page": {
+    "title": "Implementation"
+   }
+  }
+ ],
+ "next_cursor": null,
+ "has_more": false,
+ "type": "block",
+ "block": {}
+}

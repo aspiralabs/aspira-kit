@@ -245,6 +245,9 @@ In the cloud, pass a matching `outputSchema` so the report comes back structured
 1. Run the plan's final `verification` task commands (full test suite, typecheck, lint, build as listed) and any repository-wide checks the project's AGENTS.md requires.
 2. Build the feature table: for every `F` ID in the spec, the implementation tasks and the tests that cover it, and whether those tests pass. A feature with a failing or missing test is not done.
 3. For UI work, check the result against the a11y standard below. If the app can be run and a browser tool is available, look at it.
+4. **Dependencies added.** Diff every package manifest (`package.json` at the root and in every app and service, plus the lockfiles) between the branch base and HEAD, and write `## Dependencies added` in the log: name, version, app, dev or runtime, **native** (a React Native or Expo module with native code: the installed package has an `ios/` or `android/` directory, an `expo-module.config.json` or a `react-native.config.js`) and **approval** (Adopt or Trial on the Approved Technologies page in the loaded knowledge, else not listed). A native addition says in one sentence that the mobile app needs a store build; one that is not listed says a human must approve it (Agent Instructions, Approved Technologies); a build with no additions writes "None". Every dependency the build added is listed, with its native and approval flags, before the build can say done. In `--local` the driver's diff is in the stage input: copy it, do not recompute it from memory.
+5. **Mid-build notes.** Any file the lanes wrote to hand off contracts (`handoff-notes.md`, or any file the plan or you named as inter-lane notes) is rewritten from the code at HEAD or deleted. Rewritten means: every backticked identifier, path, option name and signature in it is searched in the repository (`git grep -F`, one search per identifier); one that no longer exists is corrected to its current name, or its sentence is removed; and the file starts with a header saying it was rewritten at verification, with the commit SHA (`<!-- Rewritten from the code at verification · commit <sha> · <time> -->`). Notes are never committed as documentation of the result; kept notes stay in the work directory. Record each file and what happened to it under `## Mid-build notes` in the log.
+6. **Proposed Slop Repo entries.** For every bug found and fixed during the build (a red-to-green surprise, a reviewer-style finding you corrected, anything under `## Bugs found and fixed`), ask whether it could happen again in another feature or repository. If it could, write one entry under `## Proposed Slop Repo entries` in the Slop Repo's shape: **Rule** (one imperative sentence), **Area** (one of the topic pages the Agent Instructions routing table names), **What went wrong** (two sentences naming the file or symbol), **Source** (`implementor`, the repository and the ticket). If no bug qualifies, the section says `None:` followed by one sentence per bug saying why it would not recur; a build that found no bugs says `None: no bugs were found and fixed`. The report cannot be done with the section empty or missing.
 
 ## 7. Progress log and report
 
@@ -262,12 +265,15 @@ Parallelization: <the table from section 4>
 ## Deviations (rule ID, reason)
 ## Blockers and open decisions
 ## Assumptions (what was undecided, what you chose, why)
+## Bugs found and fixed (what failed, the file or symbol, the fix)
+## Dependencies added
+## Mid-build notes (each notes file: rewritten at <sha> | deleted)
 ## Proposed Slop Repo entries
 ```
 
 Finish with a short summary for the human: status, the feature table, commits, deviations, blockers, and next steps. Next steps are usually `/aspira-code-analyzer` and then `pr-reviewer`. The builder does not approve its own code; the review must be independent.
 
-**Writing back lessons (Agent Instructions).** If you made a mistake that a rule would have prevented, or the human corrected the same kind of mistake twice, add an entry to the AI Agent Slop Repo in Notion (Rule: one imperative sentence; Area; Status: Proposed; What Went Wrong; Source: implementor and the repo). Check for an existing entry first, and never edit topic pages. A cloud run has read-only Notion, so it lists proposed entries in the log instead.
+**Writing back lessons (Agent Instructions).** If you made a mistake that a rule would have prevented, or the human corrected the same kind of mistake twice, add an entry to the AI Agent Slop Repo in Notion (Rule: one imperative sentence; Area; Status: Proposed; What Went Wrong; Source: implementor and the repo). Check for an existing entry first, and never edit topic pages. The log's `## Proposed Slop Repo entries` (section 6) is the record either way: a cloud run has read-only Notion and only proposes there, and a human ratifies what is proposed.
 
 ## Building it right
 

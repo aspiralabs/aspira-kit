@@ -1,0 +1,316 @@
+{
+ "object": "data_source",
+ "id": "b4e393d4-a4a6-46b8-bbd1-3d6c0f45a01e",
+ "created_time": "2026-09-28T10:00:00.000Z",
+ "last_edited_time": "2026-10-05T04:55:00.000Z",
+ "title": [
+  {
+   "type": "text",
+   "text": {
+    "content": "Feature Board",
+    "link": null
+   },
+   "annotations": {
+    "bold": false,
+    "italic": false,
+    "strikethrough": false,
+    "underline": false,
+    "code": false,
+    "color": "default"
+   },
+   "plain_text": "Feature Board",
+   "href": null
+  }
+ ],
+ "description": [],
+ "is_inline": false,
+ "database_type": "collection",
+ "properties": {
+  "Feature": {
+   "id": "title",
+   "name": "Feature",
+   "description": null,
+   "type": "title",
+   "title": {}
+  },
+  "ID": {
+   "id": "%40tZq",
+   "name": "ID",
+   "description": null,
+   "type": "unique_id",
+   "unique_id": {
+    "prefix": "NOM"
+   }
+  },
+  "Status": {
+   "id": "bEBnag",
+   "name": "Status",
+   "description": null,
+   "type": "select",
+   "select": {
+    "options": [
+     {
+      "id": "idea",
+      "name": "Idea",
+      "color": "gray",
+      "description": null
+     },
+     {
+      "id": "grooming",
+      "name": "Grooming",
+      "color": "brown",
+      "description": null
+     },
+     {
+      "id": "shortlist",
+      "name": "Shortlist",
+      "color": "gray",
+      "description": null
+     },
+     {
+      "id": "ready-idea",
+      "name": "Ready: Idea",
+      "color": "orange",
+      "description": null
+     },
+     {
+      "id": "in-progress-spec",
+      "name": "In Progress: Spec",
+      "color": "yellow",
+      "description": null
+     },
+     {
+      "id": "in-review-spec",
+      "name": "In Review: Spec",
+      "color": "yellow",
+      "description": null
+     },
+     {
+      "id": "ready-spec",
+      "name": "Ready: Spec",
+      "color": "yellow",
+      "description": null
+     },
+     {
+      "id": "in-progress-plan",
+      "name": "In Progress: Plan",
+      "color": "purple",
+      "description": null
+     },
+     {
+      "id": "in-review-plan",
+      "name": "In Review: Plan",
+      "color": "purple",
+      "description": null
+     },
+     {
+      "id": "ready-plan",
+      "name": "Ready: Plan",
+      "color": "purple",
+      "description": null
+     },
+     {
+      "id": "in-progress-implementation",
+      "name": "In Progress: Implementation",
+      "color": "blue",
+      "description": null
+     },
+     {
+      "id": "in-review-implementation",
+      "name": "In Review: Implementation",
+      "color": "blue",
+      "description": null
+     },
+     {
+      "id": "ready-implementation",
+      "name": "Ready: Implementation",
+      "color": "blue",
+      "description": null
+     },
+     {
+      "id": "released",
+      "name": "Released",
+      "color": "pink",
+      "description": null
+     },
+     {
+      "id": "dropped",
+      "name": "Dropped",
+      "color": "red",
+      "description": null
+     }
+    ]
+   }
+  },
+  "Type": {
+   "id": "YH08dA",
+   "name": "Type",
+   "description": null,
+   "type": "select",
+   "select": {
+    "options": [
+     {
+      "id": "feature",
+      "name": "Feature",
+      "color": "blue",
+      "description": null
+     },
+     {
+      "id": "bug",
+      "name": "Bug",
+      "color": "red",
+      "description": null
+     }
+    ]
+   }
+  },
+  "Priority": {
+   "id": "eGBzcA",
+   "name": "Priority",
+   "description": null,
+   "type": "select",
+   "select": {
+    "options": [
+     {
+      "id": "p0---critical",
+      "name": "P0 - Critical",
+      "color": "red",
+      "description": null
+     },
+     {
+      "id": "p1---high",
+      "name": "P1 - High",
+      "color": "orange",
+      "description": null
+     },
+     {
+      "id": "p2---medium",
+      "name": "P2 - Medium",
+      "color": "yellow",
+      "description": null
+     },
+     {
+      "id": "p3---low",
+      "name": "P3 - Low",
+      "color": "gray",
+      "description": null
+     }
+    ]
+   }
+  },
+  "Area": {
+   "id": "WWFeWQ",
+   "name": "Area",
+   "description": null,
+   "type": "multi_select",
+   "multi_select": {
+    "options": [
+     {
+      "id": "collect",
+      "name": "Collect",
+      "color": "blue",
+      "description": null
+     },
+     {
+      "id": "discover",
+      "name": "Discover",
+      "color": "green",
+      "description": null
+     },
+     {
+      "id": "plan-&-shop",
+      "name": "Plan & shop",
+      "color": "pink",
+      "description": null
+     },
+     {
+      "id": "cook",
+      "name": "Cook",
+      "color": "purple",
+      "description": null
+     },
+     {
+      "id": "social",
+      "name": "Social",
+      "color": "orange",
+      "description": null
+     },
+     {
+      "id": "mobile-app",
+      "name": "Mobile app",
+      "color": "yellow",
+      "description": null
+     },
+     {
+      "id": "platform",
+      "name": "Platform",
+      "color": "gray",
+      "description": null
+     }
+    ]
+   }
+  },
+  "Dev": {
+   "id": "RHlNVA",
+   "name": "Dev",
+   "description": null,
+   "type": "select",
+   "select": {
+    "options": [
+     {
+      "id": "david",
+      "name": "David",
+      "color": "gray",
+      "description": null
+     },
+     {
+      "id": "claude",
+      "name": "Claude",
+      "color": "orange",
+      "description": null
+     },
+     {
+      "id": "codex",
+      "name": "Codex",
+      "color": "green",
+      "description": null
+     }
+    ]
+   }
+  },
+  "PR": {
+   "id": "PR",
+   "name": "PR",
+   "description": null,
+   "type": "url",
+   "url": {}
+  },
+  "Version": {
+   "id": "Ver",
+   "name": "Version",
+   "description": null,
+   "type": "select",
+   "select": {
+    "options": []
+   }
+  },
+  "Created": {
+   "id": "Crt",
+   "name": "Created",
+   "description": null,
+   "type": "created_time",
+   "created_time": {}
+  }
+ },
+ "parent": {
+  "type": "database_id",
+  "database_id": "d9e768e6-e796-4311-8781-14cbbe433ea1"
+ },
+ "database_parent": {
+  "type": "page_id",
+  "page_id": "3e93e59b-2258-817b-a968-d45bfa75604b"
+ },
+ "url": "https://www.notion.so/b4e393d4a4a646b8bbd13d6c0f45a01e",
+ "public_url": null,
+ "in_trash": false
+}
