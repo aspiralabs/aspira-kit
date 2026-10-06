@@ -1,7 +1,6 @@
-// The dollar budget. The usage hook adds every priced model call to the spend of its root
-// session (a seat's session names its root through ctx.session.parent); the review loop asks,
-// after every call, whether the spend has crossed the budget and stops there. Module state,
-// like the call cap: the hook and the workflow steps run in one app process.
+// The dollar budget, pure: what the budget is and when it is crossed. lib/loop.ts asks after every
+// stage, inside the eve workflow body, so nothing here may import a Node.js builtin. The spend
+// itself is kept by spend-ledger.ts, on the host, which only the usage hook and a "use step" touch.
 
 export const MAX_COST_ENV = 'MAX_COST_USD'
 
@@ -9,25 +8,6 @@ export const MAX_COST_ENV = 'MAX_COST_USD'
 export function maxCostFromEnv(env: Record<string, string | undefined> = process.env): number | null {
   const value = Number.parseFloat(env[MAX_COST_ENV] ?? '')
   return Number.isFinite(value) && value > 0 ? value : null
-}
-
-const spend = new Map<string, { costUsd: number; calls: number; unpriced: number }>()
-
-/** One model call's reported cost, added to its root session. A null cost is counted but adds nothing. */
-export function recordSpend(rootSessionId: string, costUsd: number | null): void {
-  const row = spend.get(rootSessionId) ?? { costUsd: 0, calls: 0, unpriced: 0 }
-  row.calls += 1
-  if (costUsd === null) row.unpriced += 1
-  else row.costUsd += costUsd
-  spend.set(rootSessionId, row)
-}
-
-export function spentSoFar(rootSessionId: string): { costUsd: number; calls: number; unpriced: number } {
-  return { ...(spend.get(rootSessionId) ?? { costUsd: 0, calls: 0, unpriced: 0 }) }
-}
-
-export function forgetSpend(rootSessionId: string): void {
-  spend.delete(rootSessionId)
 }
 
 /** True once the spend has reached the budget: the call that crossed it is the last one. */

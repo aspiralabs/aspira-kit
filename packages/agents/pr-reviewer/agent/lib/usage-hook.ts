@@ -1,5 +1,5 @@
 import { defineHook } from 'eve/hooks'
-import { forgetSpend, recordSpend } from './budget'
+import { forgetSpend, recordSpend } from './spend-ledger'
 import { forgetSession, recordCalls } from './call-cap'
 import { USAGE_LEDGER, type UsageLine } from './usage'
 
@@ -15,9 +15,10 @@ import { USAGE_LEDGER, type UsageLine } from './usage'
 // process, and a step cannot complete before it starts, so the map stays small;
 // it is still drained on completion to bound a long session.
 //
-// The same hook keeps two in-memory counters the review reads back: the spend
-// per root session, for the --max-cost budget, and the tool calls per child
-// session, for the per-round call cap that read_files and search enforce.
+// The same hook feeds two counters the review reads back: the spend per root
+// session, on disk (spend-ledger.ts), for the --max-cost budget that a
+// pr-debator step checks, and the tool calls per child session, in memory, for
+// the per-round call cap that read_files and search enforce from this process.
 const started = new Map<string, number>()
 const stepKey = (sessionId: string, turnId: string, stepIndex: number) => `${sessionId}:${turnId}:${stepIndex}`
 
@@ -29,10 +30,10 @@ export default defineHook({
     'actions.requested'(event, ctx) {
       recordCalls(ctx.session.id, event.data.actions.length)
     },
-    'session.completed'(_event, ctx) {
+    async 'session.completed'(_event, ctx) {
       forgetSession(ctx.session.id)
       // The root's spend is read by pr-debator during the run; a child's session end is not the root's.
-      if (ctx.session.parent === undefined) forgetSpend(ctx.session.id)
+      if (ctx.session.parent === undefined) await forgetSpend(ctx.session.id).catch(() => undefined)
     },
     async 'step.completed'(event, ctx) {
       const usage = event.data.usage
@@ -56,8 +57,8 @@ export default defineHook({
         cacheWriteTokens: usage.cacheWriteTokens ?? 0,
         costUsd: usage.costUsd ?? null,
       }
-      recordSpend(ctx.session.parent?.rootSessionId ?? ctx.session.id, line.costUsd)
       try {
+        await recordSpend(ctx.session.parent?.rootSessionId ?? ctx.session.id, line.costUsd)
         const sandbox = await ctx.getSandbox()
         const b64 = Buffer.from(JSON.stringify(line) + '\n', 'utf8').toString('base64')
         await sandbox.run({ command: `printf '%s' '${b64}' | base64 -d >> ${USAGE_LEDGER}` })
