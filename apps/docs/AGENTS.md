@@ -12,4 +12,4 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 The design-system site for `@aspiralabs/ui`. It renders the MDX that ships inside the package; it is never a second copy of the docs. To change what a component page says, edit `packages/ui/docs/<name>.mdx`, not this app.
 
-The org rules apply here as everywhere: `../../packages/config/agent/constraints.md`. How a doc renders, and why it is compiled the way it is, is in `README.md` next to this file. Changes to this app alone do not need a changeset.
+The org rules apply here as everywhere: Engineering Central › Agent Instructions in Notion (https://app.notion.com/p/3e73e59b2258813d9eece6ed89171bd3). How a doc renders, and why it is compiled the way it is, is in `README.md` next to this file. Changes to this app alone do not need a changeset.

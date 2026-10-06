@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname } from 'node:path'
 
 export type Log = (line: string) => void
 
@@ -45,10 +45,4 @@ export function deepMerge<T extends Record<string, unknown>>(base: T, extra: Rec
     out[k] = v
   }
   return out as T
-}
-
-// The installed @aspiralabs/config package, so templates come from the version the project has.
-export function configDir(projectRoot: string): string | undefined {
-  const p = join(projectRoot, 'node_modules', '@aspiralabs', 'config')
-  return existsSync(p) ? p : undefined
 }
