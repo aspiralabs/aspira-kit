@@ -9,7 +9,7 @@ export const researchSchema = z.object({ facts: z.array(text), checks: z.array(z
 export const planSchema = z.object({
   summary: text,
   tasks: z.array(z.object({
-    id: z.string().regex(/^P\d+$/), title: text, kind: z.enum(['tests', 'implementation', 'verification']),
+    id: z.string().regex(/^P\d+$/), title: text, kind: z.enum(['tests', 'implementation', 'verification', 'handoff']),
     featureIds: features, dependsOn: z.array(text), testIds: z.array(text),
     changes: z.array(z.object({ operation: z.enum(['create', 'modify', 'delete']), path: text, symbols: z.array(text).min(1), instructions: text, evidence: z.array(text).min(1) })),
     commands: z.array(text), outcome: text,
@@ -61,7 +61,9 @@ export function validatePlan(plan: Plan, spec: string, files: Map<string, string
     }
     ancestors.set(task.id, prior)
     if (new Set(task.testIds).size !== task.testIds.length || task.testIds.some((id) => !tests.has(id))) errors.push(`Invalid test references: ${task.id}`)
-    if (task.kind !== 'verification' && !task.changes.length) errors.push(`No file actions: ${task.id}`)
+    // A handoff is work the spec assigns to a named person (a protected file, a page outside the repo): no file actions.
+    if ((task.kind === 'tests' || task.kind === 'implementation') && !task.changes.length) errors.push(`No file actions: ${task.id}`)
+    if (task.kind === 'handoff' && task.changes.length) errors.push(`A handoff changes no files; the person makes the change: ${task.id}`)
     if (task.kind === 'verification' && !task.commands.length) errors.push(`No verification commands: ${task.id}`)
     if (task.kind === 'tests') {
       if (!task.testIds.length) errors.push(`Test task has no cases: ${task.id}`)
@@ -107,8 +109,10 @@ export function validatePlan(plan: Plan, spec: string, files: Map<string, string
     if (!plan.tasks.some((task) => task.kind === 'tests' && task.testIds.includes(test.id))) errors.push(`Test case has no writing task: ${test.id}`)
   }
   for (const id of features) {
-    if (!plan.tasks.some((task) => task.kind === 'implementation' && task.featureIds.includes(id))) errors.push(`No implementation maps to ${id}`)
-    if (!plan.tests.some((test) => test.featureIds.includes(id))) errors.push(`No test maps to ${id}`)
+    // A criterion met only by a person's handoff (a Notion page, say) has no code to test.
+    const handedOff = plan.tasks.some((task) => task.kind === 'handoff' && task.featureIds.includes(id))
+    if (!handedOff && !plan.tasks.some((task) => task.kind === 'implementation' && task.featureIds.includes(id))) errors.push(`No implementation maps to ${id}`)
+    if (!handedOff && !plan.tests.some((test) => test.featureIds.includes(id))) errors.push(`No test maps to ${id}`)
   }
   if (!plan.tasks.some((task) => task.kind === 'verification')) errors.push('Missing final verification task')
   const final = plan.tasks.at(-1)
