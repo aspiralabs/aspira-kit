@@ -29,12 +29,28 @@ project_root() {
   done
   git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || printf '%s\n' "$PWD"
 }
+# In a multi-app repository (apps/web owns package.json and node_modules, Claude Code runs at the
+# root) `kit init --app` records the app in the root's aspira.json. Prints that app's directory from
+# the nearest aspira.json at or above DIR (this script's location, under <root>/.claude/skills/),
+# or nothing when there is none: the single-app case, where the walk-up below finds the package.
+configured_app() {
+  local dir=$1 app_dir
+  while :; do
+    if [ -f "$dir/aspira.json" ]; then
+      app_dir=$(sed -nE 's/^[[:space:]]*"app"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$dir/aspira.json" | head -n 1)
+      if [ -n "$app_dir" ] && [ -d "$dir/$app_dir" ]; then (cd "$dir/$app_dir" && pwd -P); fi
+      return 0
+    fi
+    [ "$dir" != / ] || return 0
+    dir=$(dirname "$dir")
+  done
+}
 # Which planner runs, in this order: PLANNER_AGENT_DIR (kit development only; the report says so),
-# the @aspiralabs/planner installed under the project (walking up from the working directory, then
-# from this script's location), then this script's own package. $ASPIRA_KIT is never consulted.
+# the @aspiralabs/planner installed under the project (the app named in the root's aspira.json, then
+# walking up from the working directory, then from this script's location), then this script's own package. $ASPIRA_KIT is never consulted.
 # Sets AGENT, AGENT_SOURCE (env | installed | package), AGENT_VERSION and PROJECT.
 resolve_agent() {
-  local here dir
+  local here dir app_dir
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   AGENT="" AGENT_SOURCE="" PROJECT=""
   for dir in "${PLANNER_AGENT_DIR:-}" "${SPEC_TO_PLAN_AGENT_DIR:-}"; do
@@ -42,6 +58,10 @@ resolve_agent() {
     is_agent "$dir" || die "PLANNER_AGENT_DIR is not the $PKG package: $dir"
     AGENT=$(cd "$dir" && pwd -P); AGENT_SOURCE=env; break
   done
+  if [ -z "$AGENT" ]; then
+    app_dir=$(configured_app "$here")
+    if [ -n "$app_dir" ] && AGENT=$(installed_in "$app_dir"); then AGENT_SOURCE=installed; PROJECT=$app_dir; fi
+  fi
   if [ -z "$AGENT" ]; then
     for dir in "$PWD" "$here"; do
       while :; do
