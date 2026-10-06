@@ -83,3 +83,12 @@ it('treats a plan as UI work only when it writes UI files', () => {
   const ui = validPlan(); ui.tasks[1]!.changes[0]!.path = 'app/items/page.tsx'
   expect(touchesUi(ui)).toBe(true)
 })
+
+it('accepts a handoff for work a named person does: no file changes, and its criterion needs no code or test', () => {
+  const specWithPage = spec + '- [ ] F2: A format reference page exists in Notion.\n'
+  const plan = validPlan()
+  plan.tasks.splice(2, 0, { id: 'P4', title: 'Publish the Notion page', kind: 'handoff', featureIds: ['F2'], dependsOn: [], testIds: [], changes: [], commands: [], outcome: 'David confirms the page is linked from the Overview.' })
+  expect(validatePlan(plan, specWithPage, files).filter((error) => /F2|P4/.test(error))).toEqual([])
+  plan.tasks[2]!.changes.push({ operation: 'create', path: 'docs/page.md', symbols: ['page'], instructions: 'x', evidence: ['src/items.ts:1'] })
+  expect(validatePlan(plan, specWithPage, files)).toContain('A handoff changes no files; the person makes the change: P4')
+})
