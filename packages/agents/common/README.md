@@ -13,6 +13,7 @@ Tool names stay unprefixed and each agent chooses what it mounts. Pure helpers l
 
 | Tool | What it does |
 | --- | --- |
+| `board` | The project's Feature Board through `lib/board`: `resolve` a ticket; `start` gates the skill on the ticket's Status, pulls its pages into `<repo>/.work/<id>-<slug>/` and claims it; `finish` pushes the skill's outputs as child pages and makes the success move. The skill launchers run the same flow on the host around a run (`lib/ticket-cli`), so an agent calls it only when its request says the ticket was not claimed. Needs `NOTION_TOKEN` and `<repo>/aspira.json`. |
 | `load-knowledge` | Loads the org's engineering guidelines from Notion into the sandbox at `/workspace/knowledge` as markdown, one file per page, with `INDEX.md` as the entry point. Walks child pages from the page named in `KNOWLEDGE_PAGE` using `NOTION_TOKEN`. Returns `{ configured: false }` rather than failing when either is unset, so an agent runs without guidelines instead of not at all. Also writes `REQUIRED.md`, the pages every agent must read in full (`KNOWLEDGE_REQUIRED`, default "Agent Instructions, Review Verification"), and throws when one is not in the tree; returns its path as `requiredFile`. |
 
 ## Board and markdown helpers
@@ -25,5 +26,16 @@ Two pure modules under `src/lib/`, imported as `@aspiralabs/agent-common/lib/boa
 | `notion-markdown` | `notionToMarkdown` turns Notion markdown (the markdown endpoint and the MCP) into plain markdown: escapes removed, `<table>` to pipe tables, callouts to block quotes, mentions to links, and every block the plain form cannot hold becomes an html comment naming its type. `markdownToBlocks` turns plain markdown (headings 1 to 3, paragraphs, bulleted and numbered lists, to-dos, fenced code with language, pipe tables, block quotes, dividers, bold, italic, strikethrough, inline code, links) into Notion API blocks, with rich text chunked at 2000 characters. `blocksToMarkdown` renders blocks back. A round trip of the NOM-4 reviewed spec and plan (`src/lib/fixtures/notion/`) changes nothing. |
 
 Their tests run against recorded Notion API shapes in `src/lib/fixtures/board/` served by an in-process mock server, so `pnpm test` never reaches Notion.
+
+## The ticket flow
+
+Four modules under `src/lib/` carry F1, F5 to F8 and F10 of the same spec, once for the six skills:
+
+| Module | What it does |
+| --- | --- |
+| `ticket` | Pure. The gate table (`GATES`: which Status each skill runs from, its start and success moves, the pages it pushes with their fixed titles, its input file), `checkGate`, `endMove` and `pushesFor`; the page-to-file map (`TICKET_PAGES`); `renderTicketMd` and `parseTicketMd` for `.work/<id>-<slug>/ticket.md`; `pullDecision` (keep an unchanged file, refuse a newer local file without `--force-pull`); `ticketArgument` (ID, URL, the one working folder, or a path with `--no-ticket`); `reportHeader`. |
+| `ticket-flow` | On a file system and a board. `startFlow` and `finishFlow` perform the flow through `lib/board` for a separate-process run; `localBoardStep`, `localBoardEnd` and `localBoardVerify` list the same actions as data for a `--local` session and verify `ticket.md` between steps. Both write `trace/board.json` with every action and the Status before and after. `readAspira`, `findWorkFolders`, `inputFileFor`. |
+| `ticket-driver` | What every `scripts/local.ts` does around its `runLocal`: `beforeRun` (the board stage or the ticket and its input file), `afterRun` (the end actions and the trace) and `verifyRun` (`--verify`). |
+| `ticket-cli` | The `start`, `finish` and `resolve` commands the launchers run through each agent's `scripts/ticket.ts`, printing `key=value` lines; exit 3 is a refusal. `scripts/resolve-ticket.ts` is the same `resolve` for `kit next`. |
 
 eve's own way to share capabilities is an extension package (`eve extension build`, mounted under `agent/extensions/`, tools prefixed with the mount name). This package is the lighter form of the same idea; move to an extension if these tools are ever published outside the monorepo.

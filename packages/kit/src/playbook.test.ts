@@ -23,7 +23,7 @@ describe('the Playbook module', () => {
     for (const status of STATUSES) expect(nextStep(status), status).not.toBeNull()
     expect(nextStep('ready: spec')?.command).toBe('/aspira-planner <ID> --local')
     expect(nextStep('Nope')).toBeNull()
-    for (const row of PLAYBOOK) if (row.command !== null) expect(row.command).toMatch(/^\/aspira-[a-z-]+ <ID>( <app-dir>)? --local$/)
+    for (const row of PLAYBOOK) if (row.command !== null) expect(row.command).toMatch(/^\/aspira-[a-z-]+ <ID>( --app <app-dir>)? --local$/)
     expect(commandFor(nextStep('In Review: Implementation')!, 'NOM-4')).toBe('/aspira-pr-reviewer NOM-4 --local')
     expect(commandFor(nextStep('Released')!, 'NOM-4')).toBeNull()
   })
