@@ -9,20 +9,27 @@ pnpm kit doctor                              # what version you're on, what's wi
 pnpm kit next NOM-4                          # what to run next for a ticket
 ```
 
+In a repository where the app is not the root (no root `package.json`; the Next app, its `package.json` and `node_modules` are in `apps/web`; Claude Code runs at the root), run `init` at the root with `--app`:
+
+```bash
+pnpm dlx @aspiralabs/kit init --stack next --app apps/web --board <Feature Board URL>   # at the repository root
+pnpm -C apps/web kit doctor                  # the app is read from aspira.json; the root is found from inside the app
+```
+
 Installing needs a GitHub Packages token in `~/.npmrc`; see the [repo README](../../README.md#use-the-kit-in-an-app).
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `kit init --stack next` | Installs the kit packages and wires the project to them; `--board <url>` also writes `aspira.json` |
+| `kit init --stack next` | Installs the kit packages and wires the project to them; `--board <url>` also writes `aspira.json`; `--app <dir>` for a repository whose app is not the root |
 | `kit init --board <url>` | Writes or updates `aspira.json` (the Feature Board, and `--releases <url>`) in a project already on the kit |
 | `kit add auth` | Writes a base Better Auth setup the project then owns |
-| `kit doctor` | Prints the kit versions in use and checks the wiring, including `aspira.json` and the agent skills |
+| `kit doctor` | Prints the kit versions in use and checks the wiring, including `aspira.json` and the agent skills; `--app <dir>` (or `app` in `aspira.json`) names the app |
 | `kit next [<ticket>]` | Prints the ticket's Status and the Playbook step, command and owner that come next |
 | `kit playbook` | Prints the Playbook section of From Idea to Release as markdown, from the same table `kit next` reads |
 
-Every command takes `--cwd <path>` to run against another directory. `init` and `add` take `--dry-run`, which prints the plan and changes nothing.
+Every command takes `--cwd <path>` to run against another directory. `init` and `add` take `--dry-run`, which prints the plan and changes nothing. `init`, `doctor` and `next` take `--app <dir>`, the app that owns `package.json` and `node_modules` when it is not the root (see [`--app`](#--app-a-repository-whose-app-is-not-the-root)); `doctor` and `next` read it from `aspira.json` once `init` has recorded it.
 
 Every command is safe to re-run. Each line of output starts with what happened to one thing:
 
@@ -41,10 +48,10 @@ Exit codes: `0` success, `1` a failed step or `doctor` found problems, `2` bad a
 ## `kit init --stack next`
 
 ```bash
-pnpm kit init --stack next [--board <Feature Board URL>] [--releases <Releases page URL>] [--dry-run] [--cwd <path>]
+pnpm kit init --stack next [--app <dir>] [--board <Feature Board URL>] [--releases <Releases page URL>] [--dry-run] [--cwd <path>]
 ```
 
-Puts a Next.js project on the kit. `next` is the only stack so far.
+Puts a Next.js project on the kit. `next` is the only stack so far. Without `--app`, every step below runs in the project root. With `--app <dir>`, the package steps (`.npmrc`, the install, `eslint.config.mjs`, `prettier.config.mjs`, `tsconfig.json`, `globals.css`) run in `<dir>` and the rest at the root.
 
 | Step | Result |
 |---|---|
@@ -56,17 +63,32 @@ Puts a Next.js project on the kit. `next` is the only stack so far.
 | `globals.css` | Adds the `tokens.css` import and the `@source` lines Tailwind needs to scan the package. Looks in `app/`, `src/app/`, `styles/` |
 | `AGENTS.md` | Writes or replaces the block between `<!-- aspiralabs:begin -->` and `<!-- aspiralabs:end -->`. Everything outside it is yours and is kept |
 | `CLAUDE.md` | `@AGENTS.md`, if the file doesn't exist |
-| `.mcp.json` | Registers the `aspiralabs-ui` docs server, merged into your servers |
-| `.claude/settings.json` | Adds the session-start, deny-tier3 and audit-log hooks (from `node_modules/@aspiralabs/kit/hooks/`), merged into your settings; entries pointing at the retired `@aspiralabs/config/agent/hooks/` path are dropped |
+| `.mcp.json` | Registers the `aspiralabs-ui` docs server (`npx --no aspiralabs-ui-mcp`; with `--app`, `node <app>/node_modules/@aspiralabs/ui/bin/mcp.js`), merged into your servers. The kit's entry is replaced on a re-run, yours are kept |
+| `.claude/settings.json` | Adds the session-start, deny-tier3 and audit-log hooks (`sh node_modules/@aspiralabs/kit/hooks/<name>.sh`; with `--app`, `sh <app>/node_modules/...`), merged into your settings. The kit's hook groups are replaced on a re-run, including entries pointing at the retired `@aspiralabs/config/agent/hooks/` path or at a previous app directory; yours are kept |
 | `.claude/skills/aspira-<agent>/` | One folder per agent (spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer): a copy of the installed package's `skill/aspira-<agent>/` (`SKILL.md` and `scripts/`) plus `.kit-version`, the installed `@aspiralabs/agents` version. Commit them. A re-run after a bump rewrites them |
-| `.gitignore` | Adds `.work/`, the per-ticket working folder, if missing |
-| `aspira.json` | With `--board`: the project's Feature Board URL and, with `--releases`, its Releases page. The `/aspira-*` skills and `kit next` read it. Without `--board` the file is left as it is, and a project without one has no board: every skill then needs `--no-ticket` |
+| `.gitignore` | Adds `.work/` (the per-ticket working folder) and `.aspira/` (the audit log the hooks write, `.aspira/audit.jsonl`), whichever is missing |
+| `aspira.json` | With `--board`: the project's Feature Board URL and, with `--releases`, its Releases page. The `/aspira-*` skills and `kit next` read it. With `--app`: `"app": "<dir>"`, which `kit doctor`, `kit next` and the skill launchers read to find the installed packages. Without `--board` the board is left as it is, and a project without one has no board: every skill then needs `--no-ticket` |
+
+### `--app`: a repository whose app is not the root
+
+nomnomzz is the case: the Next app with its `package.json` and `node_modules` is `apps/web`, there is no root `package.json`, and Claude Code runs at the repository root, where it reads `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and `.claude/`. Run `init` at the root with `--app <dir>`, where `<dir>` is the app, relative to the root:
+
+```bash
+pnpm dlx @aspiralabs/kit init --stack next --app apps/web --board <Feature Board URL>
+```
+
+| Where | What |
+|---|---|
+| `apps/web/` | `.npmrc`, the install (`pnpm add` runs there, with its lockfile), `eslint.config.mjs`, `prettier.config.mjs`, `tsconfig.json`, `app/globals.css` |
+| the root | `AGENTS.md` (managed block, plus one line naming the app), `CLAUDE.md`, `.mcp.json`, `.claude/settings.json`, `.claude/skills/aspira-*/`, `.gitignore` (`.work/`, `.aspira/`), `aspira.json` with `"app": "apps/web"` |
+
+Every path inside the root files points into the app, relative to the root where Claude Code runs them: the hooks are `sh apps/web/node_modules/@aspiralabs/kit/hooks/<name>.sh`, the MCP server is `node apps/web/node_modules/@aspiralabs/ui/bin/mcp.js`, and the skills are copied from the agent packages under `apps/web/node_modules`. The launchers in `.claude/skills/` read `app` from the root's `aspira.json` and resolve the installed agents under `apps/web/node_modules` whatever the working directory is; the app's `.env.local` is the one they load. `kit doctor` and `kit next` read `app` from `aspira.json` too, so they need no flag after `init`, and run from inside the app (`pnpm -C apps/web kit doctor`, where the kit's bin is) they find the root that wired it. One app per repository: `--app` names the app the kit packages are installed in; other apps keep their own tooling.
 
 The `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and settings templates ship in this package (`templates/agent/`), and the hooks in `hooks/`, so re-running `init` after an upgrade brings them up to that version. The managed `AGENTS.md` block and the session-start hook only point at the rules in Notion; they restate none.
 
 ### The agent skills
 
-`@aspiralabs/agents` is one dependency that brings every agent package (`@aspiralabs/spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer` and `agent-common`) into the project at the kit's version. Each agent's skill is copied into `.claude/skills/aspira-<agent>/`, so `/aspira-planner` and friends run the agent installed in `node_modules`, never a source checkout. The launcher resolves its agent as `<AGENT>_AGENT_DIR` (kit development only; the run says so), then the installed package walking up from the project root, then its own location; `$ASPIRA_KIT` is not consulted. Agent environment comes from the project's `.env.local` (`AI_GATEWAY_API_KEY`, `NOTION_TOKEN`, `KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`), then the agent's own folder.
+`@aspiralabs/agents` is one dependency that brings every agent package (`@aspiralabs/spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer` and `agent-common`) into the project at the kit's version. Each agent's skill is copied into `.claude/skills/aspira-<agent>/`, so `/aspira-planner` and friends run the agent installed in `node_modules`, never a source checkout. The launcher resolves its agent as `<AGENT>_AGENT_DIR` (kit development only; the run says so), then the installed package under the app named in the root's `aspira.json` (`--app`), then walking up from the working directory, then from its own location; `$ASPIRA_KIT` is not consulted. Agent environment comes from the project's `.env.local` (`AI_GATEWAY_API_KEY`, `NOTION_TOKEN`, `KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`), then the agent's own folder.
 
 Updating an agent is a kit release, a bump of `@aspiralabs/agents` in the project, and `kit init` again; `kit doctor` fails until the skills match the installed version. Each run reports the agent package and version it ran, and writes `trace/agent-version.json` into its export.
 
@@ -143,19 +165,21 @@ If you already have `lib/prisma.ts` or `lib/redis.ts`, they're kept. The command
 ## `kit doctor`
 
 ```bash
-pnpm kit doctor [--cwd <path>]
+pnpm kit doctor [--app <dir>] [--cwd <path>]
 ```
 
-Prints the version of each kit package the project declares and has installed (`@aspiralabs/ui`, `config`, `kit` and `agents`), then checks each part of the `init` wiring: ESLint, `tsconfig.json`, the tokens import, the `AGENTS.md` block, the MCP server, the hooks, `aspira.json` (present, with a Notion URL as `board`), and each `.claude/skills/aspira-<agent>/` folder (present, complete, and its `.kit-version` equal to the installed `@aspiralabs/agents` version). It exits `1` if anything is missing and tells you to re-run `init`.
+Prints the version of each kit package the project declares and has installed (`@aspiralabs/ui`, `config`, `kit` and `agents`), then checks each part of the `init` wiring: ESLint, `tsconfig.json`, the tokens import, the `AGENTS.md` block, the MCP server, the hooks, `.gitignore` (`.work/` and `.aspira/`), `aspira.json` (present, with a Notion URL as `board`, and an `app` directory that has a `package.json` when set), and each `.claude/skills/aspira-<agent>/` folder (present, complete, and its `.kit-version` equal to the installed `@aspiralabs/agents` version). It exits `1` if anything is missing and tells you to re-run `init`.
+
+With an app (`--app <dir>`, or `app` in `aspira.json`), one run checks both places: the package-level items (`package.json`, `node_modules`, ESLint, `tsconfig.json`, `globals.css`) in the app, and the Claude-facing items at the root, where the hooks and the MCP server must point into `<app>/node_modules`. Run from inside the app with no `--cwd`, it works on the root whose `aspira.json` names that app.
 
 ## `kit next` and `kit playbook`
 
 ```bash
-pnpm kit next [<ticket>] [--cwd <path>]
+pnpm kit next [<ticket>] [--app <dir>] [--cwd <path>]
 pnpm kit playbook
 ```
 
-`kit next` answers "what is the next step" for a ticket. It reads the board from `aspira.json`, resolves the ticket (an ID such as `NOM-4`, a Notion page URL, or, with no argument, the one folder under `.work/` that holds a `ticket.md`; two is an error naming them) through the installed agents' board module with `NOTION_TOKEN` from `.env.local`, and prints its Status, the Playbook step for that Status, the exact command to run with the ID filled in, and who acts. When the board does not answer, the Status as pulled into the working folder stands in and the output says so.
+`kit next` answers "what is the next step" for a ticket. It reads the board (and the app) from `aspira.json`, resolves the ticket (an ID such as `NOM-4`, a Notion page URL, or, with no argument, the one folder under `.work/` that holds a `ticket.md`; two is an error naming them) through the agents installed under the app's `node_modules` with `NOTION_TOKEN` from `.env.local` (the root's, then the app's, which wins), and prints its Status, the Playbook step for that Status, the exact command to run with the ID filled in, and who acts. When the board does not answer, the Status as pulled into the working folder stands in and the output says so.
 
 The mapping is `src/playbook.ts`, the one source of the Status table. `kit playbook` renders it as the markdown of the "Playbook: what to run next" section of From Idea to Release in Notion; paste its output there when the table changes, so the page and the command stay in step.
 

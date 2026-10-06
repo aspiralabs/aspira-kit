@@ -2,8 +2,11 @@
 // skill/aspira-<agent>/ (SKILL.md and scripts/<agent>.sh); `kit init` copies that folder into the
 // project's .claude/skills/ and pins it to the installed @aspiralabs/agents version in .kit-version.
 // The copies are committed, so every clone has the same skills; `kit doctor` reports drift.
+// The skills live at the project root (where Claude Code looks); the packages are installed under
+// the app that owns package.json (`app` in aspira.json, the root itself for a single-app project).
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { appRoot } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 
 /** The agents a project gets through @aspiralabs/agents, each with a /aspira-<agent> skill. */
@@ -20,9 +23,9 @@ export const skillDir = (projectRoot: string, agent: Agent): string => join(proj
 
 const isPackage = (dir: string, name: string): boolean => readJson<{ name?: string }>(join(dir, 'package.json'))?.name === name
 
-/** The installed @aspiralabs/<agent> package, or undefined. Direct installs sit in the project's node_modules; with pnpm the agents sit beside @aspiralabs/agents in its own folder instead. */
-export function agentPackageDir(projectRoot: string, agent: Agent | 'agent-common'): string | undefined {
-  const scope = join(projectRoot, 'node_modules', '@aspiralabs')
+/** The installed @aspiralabs/<agent> package under `appDir` (the directory that owns node_modules), or undefined. Direct installs sit in that node_modules; with pnpm the agents sit beside @aspiralabs/agents in its own folder instead. */
+export function agentPackageDir(appDir: string, agent: Agent | 'agent-common'): string | undefined {
+  const scope = join(appDir, 'node_modules', '@aspiralabs')
   const direct = join(scope, agent)
   if (isPackage(direct, `@aspiralabs/${agent}`)) {
     return direct
@@ -37,9 +40,9 @@ export function agentPackageDir(projectRoot: string, agent: Agent | 'agent-commo
   return undefined
 }
 
-/** The installed version of @aspiralabs/agents, or undefined. */
-export function agentsVersion(projectRoot: string): string | undefined {
-  return readJson<{ version?: string }>(join(projectRoot, 'node_modules', '@aspiralabs', 'agents', 'package.json'))?.version
+/** The installed version of @aspiralabs/agents under `appDir`, or undefined. */
+export function agentsVersion(appDir: string): string | undefined {
+  return readJson<{ version?: string }>(join(appDir, 'node_modules', '@aspiralabs', 'agents', 'package.json'))?.version
 }
 
 /** Every file under `dir`, relative, sorted, with its contents. */
@@ -65,22 +68,24 @@ function sameTree(a: Map<string, Buffer>, b: Map<string, Buffer>): boolean {
   return true
 }
 
-export type InstallSkillsOptions = { projectRoot: string; dryRun: boolean; log: Log }
+export type InstallSkillsOptions = { projectRoot: string; app?: string; dryRun: boolean; log: Log }
 
 /**
- * Write .claude/skills/aspira-<agent>/ for every agent: a copy of the installed package's
- * skill folder plus .kit-version. A re-run after a bump rewrites them; an up-to-date copy is kept.
+ * Write <projectRoot>/.claude/skills/aspira-<agent>/ for every agent: a copy of the installed package's
+ * skill folder (from `<projectRoot>/<app>/node_modules`) plus .kit-version. A re-run after a bump
+ * rewrites them; an up-to-date copy is kept.
  * Returns the agents whose skill could not be found (the package is not installed).
  */
 export function installSkills(opts: InstallSkillsOptions): Agent[] {
-  const version = agentsVersion(opts.projectRoot)
+  const app = appRoot(opts.projectRoot, opts.app)
+  const version = agentsVersion(app)
   const missing: Agent[] = []
   if (version === undefined) {
-    opts.log(`skip   .claude/skills/aspira-* (${AGENTS_PACKAGE} is not installed; run the install step, then kit init again)`)
+    opts.log(`skip   .claude/skills/aspira-* (${AGENTS_PACKAGE} is not installed${opts.app ? ` in ${opts.app}` : ''}; run the install step, then kit init again)`)
     return [...AGENTS]
   }
   for (const agent of AGENTS) {
-    const pkg = agentPackageDir(opts.projectRoot, agent)
+    const pkg = agentPackageDir(app, agent)
     const source = pkg === undefined ? undefined : join(pkg, 'skill', `aspira-${agent}`)
     const target = skillDir(opts.projectRoot, agent)
     const shown = relative(opts.projectRoot, target)
@@ -112,9 +117,9 @@ export function installSkills(opts: InstallSkillsOptions): Agent[] {
 
 export type SkillCheck = { agent: Agent; ok: boolean; reason?: string }
 
-/** Each skill folder against the installed @aspiralabs/agents version: present, complete, and from that version. */
-export function checkSkills(projectRoot: string): SkillCheck[] {
-  const version = agentsVersion(projectRoot)
+/** Each skill folder at the project root against the @aspiralabs/agents version installed under the app: present, complete, and from that version. */
+export function checkSkills(projectRoot: string, app?: string): SkillCheck[] {
+  const version = agentsVersion(appRoot(projectRoot, app))
   return AGENTS.map((agent) => {
     const dir = skillDir(projectRoot, agent)
     const shown = relative(projectRoot, dir)

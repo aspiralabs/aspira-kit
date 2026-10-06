@@ -9,7 +9,7 @@ This project is on the Aspira Labs kit. The engineering rules and the process li
 - **Component docs:** the `aspiralabs-ui` MCP server. Call `get_component` before writing or editing component markup.
 - **Agents:** the `/aspira-*` skills in `.claude/skills/` run the agents installed with `@aspiralabs/agents`, pinned to this project's kit version. After a kit bump, run `kit init` again so they match.
 - **Lint, types and formatting** come from `@aspiralabs/config`. Run `pnpm check` before opening a PR.
-
+{{app-line}}
 Everything outside this block is project-specific: stack, commands, layout, and Gotchas.
 <!-- aspiralabs:end -->
 

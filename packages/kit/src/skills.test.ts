@@ -110,8 +110,8 @@ describe('checkSkills and kit doctor', () => {
     writeFileSync(join(root, 'AGENTS.md'), '<!-- aspiralabs:begin -->\n<!-- aspiralabs:end -->\n')
     writeFileSync(join(root, '.mcp.json'), JSON.stringify({ mcpServers: { 'aspiralabs-ui': {} } }))
     mkdirSync(join(root, '.claude'), { recursive: true })
-    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ command: 'session-start.sh' }] }] } }))
-    writeFileSync(join(root, '.gitignore'), '.work/\n')
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ command: 'sh node_modules/@aspiralabs/kit/hooks/session-start.sh' }] }] } }))
+    writeFileSync(join(root, '.gitignore'), '.work/\n.aspira/\n')
     writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6' }))
   }
 

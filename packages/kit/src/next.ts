@@ -5,15 +5,15 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { isNotionUrl, readAspira } from './aspira.js'
+import { appRoot, isNotionUrl, readAspira, readApp } from './aspira.js'
 import { type Log } from './fs.js'
 import { AGENTS, agentPackageDir } from './skills.js'
 import { commandFor, nextStep } from './playbook.js'
 
 export type ResolvedTicket = { id: string; title: string; url: string; status: string }
 
-/** Resolves a ticket on a board; null when it cannot (the agents are not installed, no token, no network). */
-export type Resolver = (board: string, ref: string, projectRoot: string) => ResolvedTicket | null
+/** Resolves a ticket on a board; null when it cannot (the agents are not installed, no token, no network). `appDir` owns node_modules: `<projectRoot>/<app>` from aspira.json, or the root. */
+export type Resolver = (board: string, ref: string, projectRoot: string, appDir: string) => ResolvedTicket | null
 
 /** A working folder's ticket.md, read the way the agents write it: the Field/Value table and the title line. */
 export function readWorkTicket(folder: string): ResolvedTicket | null {
@@ -51,15 +51,15 @@ function findUpModule(dir: string, relative: string): string | undefined {
   }
 }
 
-/** The default resolver: the installed @aspiralabs/agent-common's resolve script, with the project's .env.local. */
-export const liveResolver: Resolver = (board, ref, projectRoot) => {
-  const common = agentPackageDir(projectRoot, 'agent-common')
+/** The default resolver: the @aspiralabs/agent-common installed under the app's node_modules, run with its resolve script and the project's .env.local (the root's, then the app's, which wins). */
+export const liveResolver: Resolver = (board, ref, projectRoot, appDir) => {
+  const common = agentPackageDir(appDir, 'agent-common')
   if (common === undefined) return null
   const script = join(common, 'scripts', 'resolve-ticket.ts')
   // amaro is a dependency of the six agents, not of agent-common. Resolve it the way Node would from
   // an agent's real location: the first ancestor with node_modules/amaro (pnpm keeps a package's
-  // dependencies two levels up from a scoped package; npm and yarn hoist them to the project root).
-  const amaro = [common, ...AGENTS.map((agent) => agentPackageDir(projectRoot, agent)), projectRoot]
+  // dependencies two levels up from a scoped package; npm and yarn hoist them to the app's root).
+  const amaro = [common, ...AGENTS.map((agent) => agentPackageDir(appDir, agent)), appDir]
     .filter((dir): dir is string => dir !== undefined)
     .map((dir) => findUpModule(realpathSync(dir), join('amaro', 'dist', 'register-strip.mjs')))
     .find((candidate) => candidate !== undefined)
@@ -67,8 +67,8 @@ export const liveResolver: Resolver = (board, ref, projectRoot) => {
     process.stderr.write(`kit next: ${existsSync(script) ? 'amaro (the TypeScript loader the agents ship with) is not installed' : `${script} is missing`}\n`)
     return null
   }
-  const env = join(projectRoot, '.env.local')
-  const args = ['--import', amaro, '--experimental-strip-types', ...(existsSync(env) ? [`--env-file=${env}`] : []), script, ref, '--board', board]
+  const envFiles = [...new Set([join(projectRoot, '.env.local'), join(appDir, '.env.local')])].filter((file) => existsSync(file))
+  const args = ['--import', amaro, '--experimental-strip-types', ...envFiles.map((file) => `--env-file=${file}`), script, ref, '--board', board]
   const run = spawnSync('node', args, { cwd: projectRoot, encoding: 'utf8' })
   if (run.status !== 0) {
     process.stderr.write(`kit next: the board resolver failed:\n${run.stderr ?? ''}`)
@@ -79,8 +79,8 @@ export const liveResolver: Resolver = (board, ref, projectRoot) => {
   return { id: fields.id, title: fields.title ?? '', url: fields.url ?? '', status: fields.status }
 }
 
-/** Print the next step for a ticket. Exit 0 with a step, 1 when the ticket or the board cannot be found, 2 for a bad argument. */
-export function next(projectRoot: string, ref: string | undefined, log: Log, resolve: Resolver = liveResolver): number {
+/** Print the next step for a ticket. Exit 0 with a step, 1 when the ticket or the board cannot be found, 2 for a bad argument. `app` (--app) overrides the one in aspira.json. */
+export function next(projectRoot: string, ref: string | undefined, log: Log, resolve: Resolver = liveResolver, app?: string): number {
   const config = readAspira(projectRoot)
   if (!isNotionUrl(config?.board)) {
     log('no aspira.json with a Feature Board here; run kit init --board <Feature Board URL>')
@@ -106,10 +106,10 @@ export function next(projectRoot: string, ref: string | undefined, log: Log, res
     log(`no ticket given and ${folders.length} folders under .work/ hold a ticket.md: ${folders.map((entry) => entry.folder).join(', ')}; name the ticket`)
     return 1
   }
-  const live = resolve(config.board, wanted, projectRoot)
+  const live = resolve(config.board, wanted, projectRoot, appRoot(projectRoot, app ?? readApp(projectRoot)))
   const ticket = live ?? local
   if (ticket === null) {
-    log(`cannot resolve ${wanted}: the board did not answer (see the error above; NOTION_TOKEN goes in .env.local at the project root) and no working folder holds it`)
+    log(`cannot resolve ${wanted}: the board did not answer (see the error above; NOTION_TOKEN goes in .env.local at the project root or in the app's) and no working folder holds it`)
     return 1
   }
   const row = nextStep(ticket.status)
