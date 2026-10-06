@@ -15,7 +15,7 @@ import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
 import { z } from 'zod'
 import { fingerprintKnowledge, inspectKnowledge, knowledgeConfig, knowledgeFiles, knowledgeFormats, REQUIRED_NAME, type KnowledgeConfig, type KnowledgeFile, type KnowledgePage } from './local-knowledge.ts'
 import { planSchema, researchSchema, type Plan, type Research } from './plan.ts'
-import { assertPlannableSpec, assessPlan, outputDirFor, planContext, planningPrompt, planReportFiles, preparePlan, researchPrompt, type PreparedPlan } from './runner.ts'
+import { assertPlannableSpec, assessPlan, type GuidelinePage, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, uncoveredRules, type PreparedPlan } from './runner.ts'
 
 /** The phases of a --local run, in order. */
 export type Stage = 'knowledge' | 'research' | 'planning'
@@ -35,8 +35,11 @@ export type LocalInput = {
 /** Seams for tests: the agent's environment and the package the agent files are read from. */
 export type LocalDeps = { env?: Record<string, string | undefined>; packageDir?: string }
 
+/** The model phases: research, planning, then up to REPAIR_ROUNDS correction passes. */
+export type PhaseId = 'research' | 'planning' | `repair-${number}`
+
 /** A task as printed for the session: the prompt and output are file paths. */
-export type LocalTask = { id: 'research' | 'planning'; prompt: string; output: string; schema: string; reads?: string; error?: string; retry?: boolean }
+export type LocalTask = { id: PhaseId; prompt: string; output: string; schema: string; reads?: string; error?: string; retry?: boolean }
 
 /** The knowledge stage: which pages the agent's configuration loads, and which are still missing. */
 export type LocalKnowledge = { dir: string; config: KnowledgeConfig; pages: KnowledgePage[]; problems: string[]; formats: Record<string, string> }
@@ -56,7 +59,7 @@ export const workDirFor = (outputDir: string) => `${outputDir}.local`
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-const promptsModule = z.object({ system: z.string().min(1), researchInstructions: z.string().min(1), planningInstructions: z.string().min(1) })
+const promptsModule = z.object({ system: z.string().min(1), researchSystem: z.string().min(1), researchInstructions: z.string().min(1), planningInstructions: z.string().min(1), repairInstructions: z.string().min(1) })
 /** The agent's prompt texts, loaded from its prompt module when the step runs. */
 export type AgentPrompts = z.infer<typeof promptsModule>
 
@@ -78,7 +81,7 @@ const stateSchema = z.object({
 })
 type State = z.infer<typeof stateSchema>
 
-type Call = { phase: 'research' | 'planning'; prompt: string; output?: unknown; error?: string }
+type Call = { phase: PhaseId; prompt: string; output?: unknown; error?: string }
 
 /** The router file: the agent's instructions.md, verbatim, with how its tool calls map onto this driver. */
 export function renderRouter(instructions: string, script: string): string {
@@ -93,7 +96,7 @@ export function renderRouter(instructions: string, script: string): string {
 }
 
 /** The file a subagent reads: the agent's system prompt and phase prompt verbatim, the tool mapping and the output contract. */
-export function renderTaskPrompt(args: { id: 'research' | 'planning'; system: string; prompt: string; output: string; reads: string | null; repo: string; knowledge: string[]; schema: z.ZodType }): string {
+export function renderTaskPrompt(args: { id: PhaseId; system: string; prompt: string; output: string; reads: string | null; repo: string; knowledge: string[]; schema: z.ZodType }): string {
   const mechanics = args.id === 'research'
     ? [
       `- The agent's repository tools (list_files, read_files, search) are read-only reads of the repository at ${args.repo}: use Read, Grep, Glob and non-mutating git commands there. The agent gives research ten tool steps; be as efficient: batch reads and searches.`,
@@ -168,7 +171,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   await writeFile(stateFile, JSON.stringify(state, null, 2))
 
   const calls: Call[] = []
-  const resolvePhase = async <T>(id: 'research' | 'planning', prompt: string, schema: z.ZodType<T>): Promise<{ value?: T; task?: LocalTask }> => {
+  // check: what the agent refuses beyond the schema, such as research that leaves a required rule out.
+  const resolvePhase = async <T>(id: PhaseId, prompt: string, schema: z.ZodType<T>, check: (value: T) => string | undefined = () => undefined): Promise<{ value?: T; task?: LocalTask }> => {
     const output = join(work, 'outputs', `${id}.json`)
     const readsFile = id === 'research' ? join(work, 'outputs', 'research.reads.json') : null
     const raw = await readFile(output, 'utf8').catch(() => null)
@@ -176,11 +180,12 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     if (raw !== null) {
       try {
         const parsed = schema.safeParse(JSON.parse(raw))
-        if (parsed.success) {
+        if (parsed.success) error = check(parsed.data)
+        if (parsed.success && error === undefined) {
           calls.push({ phase: id, prompt, output: parsed.data })
           return { value: parsed.data }
         }
-        error = z.prettifyError(parsed.error).slice(0, 2000)
+        if (!parsed.success) error = z.prettifyError(parsed.error).slice(0, 2000)
       } catch (cause) { error = `The output is not valid JSON: ${message(cause)}` }
     }
     if (input.finish === true) {
@@ -198,18 +203,34 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       retry = rejected.length < 2
     }
     const promptFile = join(work, 'prompts', `${id}.md`)
-    await writeFile(promptFile, renderTaskPrompt({ id, system: prompts.system, prompt, output, reads: readsFile, repo: resolve(input.repoPath), knowledge: topics, schema }))
+    await writeFile(promptFile, renderTaskPrompt({ id, system: id === 'research' ? prompts.researchSystem : prompts.system, prompt, output, reads: readsFile, repo: resolve(input.repoPath), knowledge: topics, schema }))
     return { task: { id, prompt: promptFile, output, schema: id === 'research' ? 'researchSchema' : 'planSchema', ...(readsFile === null ? {} : { reads: readsFile }), ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) } }
   }
 
-  const researched = await resolvePhase('research', researchPrompt(context, prompts.researchInstructions), researchSchema)
+  const coversRules = (value: Research) => {
+    const missing = uncoveredRules(prepared.guidelines, value.checks)
+    return missing.length ? `Checks must name every required rule ID. Add a check for each of these, with how it applies or evidence that it does not: ${missing.join(', ')}` : undefined
+  }
+  const researched = await resolvePhase('research', researchPrompt(context, prompts.researchInstructions), researchSchema, coversRules)
   if (researched.task !== undefined) return { ...base, stage: 'research', tasks: [researched.task] }
   const research: Research | null = researched.value ?? null
   let plan: Plan | null = null
   if (research !== null) {
-    const planned = await resolvePhase('planning', planningPrompt(context, research, prompts.planningInstructions), planSchema)
+    // The agent hands planning the guideline pages research read; here research reads the
+    // knowledge folder's topic pages, so planning gets all of them.
+    const pages: GuidelinePage[] = await Promise.all(topics.map(async (file) => ({ source: file, markdown: await readFile(file, 'utf8') })))
+    const planned = await resolvePhase('planning', planningPrompt(context, research, prompts.planningInstructions, pages), planSchema)
     if (planned.task !== undefined) return { ...base, stage: 'planning', tasks: [planned.task] }
     plan = planned.value ?? null
+    // The agent's correction passes: the same rounds, kept only while each one improves the plan.
+    for (let round = 1; plan !== null && round <= REPAIR_ROUNDS; round++) {
+      const issues = planIssues({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan })
+      if (!issues.length) break
+      const repaired = await resolvePhase(`repair-${round}`, repairPrompt(context, research, plan, issues, prompts.repairInstructions, pages), planSchema)
+      if (repaired.task !== undefined) return { ...base, stage: 'planning', tasks: [repaired.task] }
+      if (repaired.value === undefined || planIssues({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan: repaired.value }).length >= issues.length) break
+      plan = repaired.value
+    }
   }
   return exportPlan({ input, prepared, prompts, knowledge, state, calls, research, plan, work })
 }
@@ -231,7 +252,7 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
   const phaseErrors = calls.filter((call) => call.error !== undefined).map((call) => ({ phase: call.phase, error: call.error ?? null }))
   const { status, problems, decisions } = assessPlan({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan, phaseErrors, uiRequired: prepared.uiRequired, reads, cancelled: false })
   const totalMs = Date.now() - Date.parse(state.startedAt)
-  const phaseRows = (['research', 'planning'] as const).map((phase) => {
+  const phaseRows = (['research', 'planning', ...calls.map((call) => call.phase).filter((phase) => phase.startsWith('repair-'))] as PhaseId[]).map((phase) => {
     const call = calls.find((item) => item.phase === phase)
     return `| ${phase} | ${call === undefined ? 'not run' : call.error === undefined ? 'completed' : `failed: ${call.error.replaceAll('|', '/').slice(0, 200)}`} |`
   })
@@ -246,7 +267,7 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
     : new Map([[REQUIRED_NAME, prepared.guidelines]])
   const files: Record<string, string> = {
     ...planReportFiles({ prepared, specPath: input.specPath, research, plan, status, problems }),
-    'trace/calls.json': JSON.stringify({ mode: 'local', system: prompts.system, models: { all: 'Claude Code session subagents' }, rejections: state.rejections, calls }, null, 2),
+    'trace/calls.json': JSON.stringify({ mode: 'local', system: { research: prompts.researchSystem, planning: prompts.system }, models: { all: 'Claude Code session subagents' }, rejections: state.rejections, calls }, null, 2),
     'trace/usage.json': JSON.stringify({ scope: '--local run: model work ran in a Claude Code session; no usage is itemized.', turns: [] }, null, 2),
     'trace/knowledge.json': JSON.stringify({ ...knowledge, pages: knowledge.files.filter((file) => file.url !== null).map((file) => ({ file: file.name, title: file.title, url: file.url })).concat(knowledge.source === 'notion' ? requiredUrls(knowledgeContents.get(REQUIRED_NAME) ?? '') : []) }, null, 2),
     ...Object.fromEntries([...knowledgeContents].map(([name, text]) => [`trace/knowledge/${name}`, text])),

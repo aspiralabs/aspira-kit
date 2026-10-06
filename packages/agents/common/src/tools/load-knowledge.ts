@@ -110,7 +110,7 @@ export default defineTool({
       const path = files.get(id)
       if (path === undefined) continue
       const markdown = rewriteLinks(body.markdown, files, titles)
-      loaded.push({ id, title: body.title, url: body.url, markdown })
+      loaded.push({ id, title: body.title, url: body.url, markdown, notionMarkdown: body.markdown })
       await write(sandbox, path, renderPage({ title: body.title, url: body.url, fetchedAt, truncated: body.truncated }, markdown))
       written.push(path)
       if (body.truncated) truncated.push(path)
@@ -132,9 +132,11 @@ export default defineTool({
       requiredFile = REQUIRED_FILE
       const markdown = renderRequired(resolved.found, fetchedAt)
       await write(sandbox, REQUIRED_FILE, markdown)
-      // The same text on the host, for a workflow that cannot read the sandbox. A path,
+      // The same pages on the host, for a workflow that cannot read the sandbox. A path,
       // not the text: the orchestrator would otherwise retype 2.5k tokens into a tool call.
-      requiredHostFile = await writeHandoff('required', markdown)
+      // Its links stay Notion links: a host reader follows them with the Notion read tool,
+      // where a /workspace/knowledge path would point into a sandbox it cannot open.
+      requiredHostFile = await writeHandoff('required', renderRequired(resolved.found.map((page) => ({ ...page, markdown: page.notionMarkdown ?? page.markdown })), fetchedAt))
     }
 
     return {

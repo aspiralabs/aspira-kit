@@ -113,7 +113,8 @@ export function parseRequired(value: string | undefined): string[] {
     .filter((s) => s !== '')
 }
 
-export type LoadedPage = { id: string; title: string; url: string; markdown: string }
+/** `markdown` has its links rewritten to the sandbox files; `notionMarkdown` keeps the Notion links, for readers outside the sandbox. */
+export type LoadedPage = { id: string; title: string; url: string; markdown: string; notionMarkdown?: string }
 
 /** Each required entry resolved to a loaded page, by id when the entry is a URL or id, else by case-insensitive title. Order follows `required`; duplicates collapse. */
 export function resolveRequired(required: string[], pages: LoadedPage[]): { found: LoadedPage[]; missing: string[] } {

@@ -174,7 +174,7 @@ async function gitRepo(options: { knowledge?: boolean } = {}) {
   await writeFile(join(repo, 'b.ts'), 'export const b = 1\n')
   await git('add', '.')
   await git('commit', '-qm', 'feat: change a')
-  const knowledge = join(repo, '.pr-review', 'feat-x.local', 'knowledge')
+  const knowledge = join(repo, '.work', 'x', 'pr-review.local', 'knowledge')
   if (options.knowledge !== false) await seedKnowledge(knowledge)
   return { dir, repo, git, knowledge }
 }
@@ -231,7 +231,7 @@ describe('runLocal, local repository', () => {
   it('writes each task\'s exact review.ts prompt, with the sandbox paths mapped to the work directory', async () => {
     const { repo } = await gitRepo()
     const first = pending(await runLocal({ source: repo }))
-    const work = join(repo, '.pr-review', 'feat-x.local')
+    const work = join(repo, '.work', 'x', 'pr-review.local')
     expect(first).toMatchObject({ stage: 'seats', round: 1, maxRounds: 4, workDir: work })
     expect(first.tasks.map((t) => t.agent)).toEqual([...SEATS])
     const pr: PrContext = {
@@ -279,10 +279,10 @@ describe('runLocal, local repository', () => {
     expect(pending(await runLocal({ source: repo }))).toMatchObject({ stage: 'verifier', round: 1 })
   })
 
-  it('exports the agent\'s layout into <repo>/.pr-review/<branch>/ and ignores it in git', async () => {
+  it('exports the agent\'s layout into <repo>/.work/<ticket>/pr-review/ and ignores .work/ in git', async () => {
     const { repo } = await gitRepo()
     const done = finished(await complete({ source: repo }))
-    const dir = join(repo, '.pr-review', 'feat-x')
+    const dir = join(repo, '.work', 'x', 'pr-review')
     expect(done).toMatchObject({ status: 'complete', dir, verdict: 'block', counts: counts(1), agreed: true, rounds: 1, comment: null })
     expect((await readdir(dir)).sort()).toEqual(['changed_files.txt', 'conversation.md', 'cost.md', 'findings.md', 'pr.md', 'pr.patch', 'review.md', 'trace'])
     expect(await readFile(join(dir, 'findings.md'), 'utf8')).toBe(FINDINGS_MD)
@@ -292,11 +292,11 @@ describe('runLocal, local repository', () => {
     expect(trace.calls).toHaveLength(11)
     expect(trace.calls[0]).toMatchObject({ id: 'round-1-ava', agent: 'ava', output: { agreed: true } })
     expect(trace.calls[0].prompt).toContain('You are Ava, the security seat')
-    expect(await readFile(join(repo, '.gitignore'), 'utf8')).toContain('.pr-review/')
+    expect(await readFile(join(repo, '.gitignore'), 'utf8')).toContain('.work/')
     // The review records the rules it ran under.
     expect(await readFile(join(dir, 'trace', 'guidelines', 'REQUIRED.md'), 'utf8')).toBe(REQUIRED_MD)
     expect(await readFile(join(dir, 'trace', 'guidelines', 'testing.md'), 'utf8')).toContain('TST-001')
-    expect(trace.knowledge).toMatchObject({ path: join(repo, '.pr-review', 'feat-x.local', 'knowledge'), files: ['INDEX.md', 'REQUIRED.md', 'testing.md'] })
+    expect(trace.knowledge).toMatchObject({ path: join(repo, '.work', 'x', 'pr-review.local', 'knowledge'), files: ['INDEX.md', 'REQUIRED.md', 'testing.md'] })
     // As the orchestrator, the session reports by the agent's own instructions, read at export.
     expect(done.orchestrator.text).toBe(await readFile(join(PACKAGE_DIR, 'agent', 'instructions.md'), 'utf8'))
     await expect(stat(workDirFor(dir))).rejects.toThrow()
@@ -471,7 +471,7 @@ describe('runLocal, engineering guidelines', () => {
     const missing = await refusal(runLocal({ source: repo }))
     expect(missing.message).toContain('REQUIRED.md')
     expect(missing.plan.dir).toBe(knowledge)
-    await expect(stat(join(repo, '.pr-review', 'feat-x.local', 'state.json'))).rejects.toThrow()
+    await expect(stat(join(repo, '.work', 'x', 'pr-review.local', 'state.json'))).rejects.toThrow()
 
     await mkdir(knowledge, { recursive: true })
     await writeFile(join(knowledge, 'REQUIRED.md'), REQUIRED_MD)
@@ -500,7 +500,7 @@ describe('runLocal, engineering guidelines', () => {
     expect(error.plan).toMatchObject({ root, required: ['Agent Instructions', 'Security Rules'], maxDepth: 3, maxPages: 80 })
     expect(JSON.stringify(error.plan)).not.toContain('secret')
     // A REQUIRED.md without a configured required page is refused too.
-    await seedKnowledge(join(repo, '.pr-review', 'feat-x.local', 'knowledge'))
+    await seedKnowledge(join(repo, '.work', 'x', 'pr-review.local', 'knowledge'))
     expect((await refusal(runLocal({ source: repo }, { agentDir, env: {} }))).message).toContain('Security Rules')
   })
 

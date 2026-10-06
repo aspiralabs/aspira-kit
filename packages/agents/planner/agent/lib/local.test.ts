@@ -8,7 +8,7 @@ import { DEFAULT_REQUIRED, MAX_DEPTH, MAX_PAGES } from '@aspiralabs/agent-common
 import { expect, it } from 'vitest'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 import { runLocal, type LocalPending, type LocalResult } from './local.ts'
-import { planningInstructions, researchInstructions, system } from './prompts.ts'
+import { planningInstructions, researchInstructions, researchSystem } from './prompts.ts'
 
 const exec = promisify(execFile)
 const PACKAGE_DIR = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
@@ -92,7 +92,7 @@ it('writes prompt files from the live agent files, so editing the agent changes 
   const research = pending(await runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }, { env }))
   expect(research.stage).toBe('research')
   const prompt = await readFile(research.tasks[0]!.prompt, 'utf8')
-  expect(prompt).toContain(`## System\n\n${system}\n`)
+  expect(prompt).toContain(`## System\n\n${researchSystem}\n`)
   expect(prompt).toContain(`REQUIRED GUIDELINES:\n${await readFile(join(f.knowledge, 'REQUIRED.md'), 'utf8')}`)
   expect(prompt).toContain(`\n\n${researchInstructions}\n`)
   expect(prompt).toContain(join(f.knowledge, 'api-design.md'))
@@ -126,7 +126,9 @@ it('validates outputs against the agent schemas, refuses a mid-run knowledge cha
   const planning = pending(await runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }, { env }))
   expect(planning.stage).toBe('planning')
   const planPrompt = await readFile(planning.tasks[0]!.prompt, 'utf8')
-  expect(planPrompt).toContain(`\n\nRESEARCH:\n${JSON.stringify(evidence)}\n\n${planningInstructions}\n`)
+  expect(planPrompt).toContain(`\n\nRESEARCH:\n${JSON.stringify(evidence)}\n\nGUIDELINE PAGES READ DURING RESEARCH (full text):\nSOURCE ${join(f.knowledge, 'testing-standards.md')}\n`)
+  expect(planPrompt).toContain('TEST-001 Write the failing test first.')
+  expect(planPrompt).toContain(`API-001 Version every route.\n\n\n${planningInstructions}\n`)
 
   const original = await readFile(join(f.knowledge, 'api-design.md'), 'utf8')
   await writeFile(join(f.knowledge, 'api-design.md'), `${original}API-002 Added mid-run.\n`)
@@ -160,4 +162,26 @@ it('takes a --guidelines snapshot instead of Notion, and --finish exports a miss
   expect(done.problems).toContain('planning: no output was produced in the session')
   expect(done.problems).toContain('No structured plan produced')
   expect(JSON.parse(await readFile(join(f.outputDir, 'trace/knowledge.json'), 'utf8'))).toMatchObject({ source: 'snapshot', snapshot })
+})
+
+it('refuses research that leaves a required rule out, and runs the agent\'s correction pass on a failing plan', async () => {
+  const f = await fixture()
+  const snapshot = join(f.dir, 'REQUIRED.md')
+  await writeFile(snapshot, RULES)
+  const args = { specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir, guidelinesPath: snapshot }
+  const research = pending(await runLocal(args, { env: {} }))
+  await writeFile(research.tasks[0]!.output, JSON.stringify({ facts: [], checks: [], gaps: [], decisions: [] }))
+  const refused = pending(await runLocal(args, { env: {} }))
+  expect(refused.tasks[0]).toMatchObject({ id: 'research', retry: true, error: expect.stringContaining('REV-001') })
+  await writeFile(research.tasks[0]!.output, JSON.stringify({ facts: [], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] }))
+  const planning = pending(await runLocal(args, { env: {} }))
+  const broken = validPlan(); broken.tasks[1]!.dependsOn = []
+  await writeFile(planning.tasks[0]!.output, JSON.stringify(broken))
+  const repair = pending(await runLocal(args, { env: {} }))
+  expect(repair).toMatchObject({ stage: 'planning', tasks: [{ id: 'repair-1' }] })
+  expect(await readFile(repair.tasks[0]!.prompt, 'utf8')).toContain('PLAN CHECKS:\n- Implementation P2 needs an earlier test dependency for F1')
+  await writeFile(repair.tasks[0]!.output, JSON.stringify(validPlan()))
+  const done = await runLocal(args, { env: {} })
+  if (done.pending) throw new Error('expected export')
+  expect(done.status).toBe('ready')
 })

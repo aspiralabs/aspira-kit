@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
-import { readFile, realpath, stat } from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { readdir, readFile, realpath, stat } from 'node:fs/promises'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { tool } from 'ai'
 import { z } from 'zod'
@@ -72,6 +72,25 @@ export function evidencePacket(spec: string, files: Map<string, string>): string
   return `Source packet selected from spec references, schemas, auth policy and first-hop imports. It is not exhaustive; specialists must inspect callers and missing paths.\nCURRENT PRODUCER LINKS (literal source observations; check applicability):\n${producerFacts.slice(0, 30).join('\n')}\n\n${parts.join('\n\n')}${links}`
 }
 
+/** The installed Aspira kit configuration the agents' rules point at (constraints.md, the shared
+ * tsconfig, eslint and prettier configs). It lives under node_modules, which is otherwise never read. */
+export const KIT_CONFIG_DIR = 'node_modules/@aspiralabs/config'
+
+/** Text files of the installed kit configuration, as repository-relative paths, without its own node_modules. */
+async function kitConfigPaths(base: string): Promise<string[]> {
+  const found: string[] = []
+  const walk = async (dir: string): Promise<void> => {
+    const entries = await readdir(join(base, dir), { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      const path = `${dir}/${entry.name}`
+      if (entry.isDirectory() && entry.name !== 'node_modules') await walk(path)
+      else if (entry.isFile() && /\.(?:md|json|js|mjs|cjs|ts|mts|cts)$/.test(entry.name)) found.push(path)
+    }
+  }
+  await walk(KIT_CONFIG_DIR)
+  return found.sort()
+}
+
 export async function repository(root: string, signal?: AbortSignal) {
   const base = await realpath(root)
   const listing = await run('git', ['-C', base, 'ls-files', '-z', '-co', '--exclude-standard'], { maxBuffer: 16 * 1024 * 1024, signal })
@@ -94,6 +113,14 @@ export async function repository(root: string, signal?: AbortSignal) {
     const text = await readFile(target, 'utf8')
     if (text.includes('\0')) continue
     files.set(path, text)
+    bytes += info.size
+  }
+  // The kit configuration is read-only evidence: never tracked, never a plan target (writablePath excludes node_modules).
+  for (const path of await kitConfigPaths(base)) {
+    signal?.throwIfAborted()
+    const info = await stat(join(base, path))
+    if (info.size > 256 * 1024 || bytes + info.size > 40 * 1024 * 1024) { gaps.push(`Not indexed (size budget): ${path}`); continue }
+    files.set(path, await readFile(join(base, path), 'utf8'))
     bytes += info.size
   }
   const commit = (await run('git', ['-C', base, 'rev-parse', 'HEAD'], { signal })).stdout.trim()

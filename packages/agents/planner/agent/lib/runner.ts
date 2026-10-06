@@ -1,17 +1,22 @@
-import { readFile } from 'node:fs/promises'
-import { basename, dirname, relative, resolve } from 'node:path'
-import { generateText, gateway, hasToolCall, Output, stepCountIs, tool, type ToolSet } from 'ai'
+import { readFile, realpath } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
+import { generateText, Output, stepCountIs, tool, type ModelMessage, type ToolSet } from 'ai'
+import { gateway, streamStructured } from '@aspiralabs/agent-common/lib/gateway'
 import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
 import { connectReadTools } from '@aspiralabs/agent-common/lib/mcp'
 import { modelTrace } from '@aspiralabs/agent-common/lib/model-trace'
 import { repository } from '@aspiralabs/agent-common/lib/repository'
 import { runAnalysis } from '@aspiralabs/agent-common/lib/run-analysis'
 import { checkBusinessSpec } from '@aspiralabs/agent-common/lib/spec'
-import { planSchema, researchSchema, renderPlan, validatePlan, type Plan, type Research } from './plan.ts'
-import { system, researchInstructions, planningInstructions } from './prompts.ts'
+import { pageIdFrom } from '@aspiralabs/agent-common/lib/knowledge'
+import { planSchema, researchSchema, renderPlan, touchesUi, validatePlan, type Plan, type Research } from './plan.ts'
+import { system, researchSystem, researchInstructions, planningInstructions, repairInstructions } from './prompts.ts'
 
 /** Research model turns, including the final forced `submit_research` turn. */
 const RESEARCH_STEPS = 10
+
+/** Correction passes planning gets when its plan fails the checks a model can fix. */
+export const REPAIR_ROUNDS = 2
 
 export type PlanInput = { specPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean }
 
@@ -19,7 +24,7 @@ export type PlanInput = { specPath: string; repoPath: string; guidelinesPath: st
 export type PlanRepository = Awaited<ReturnType<typeof repository>>
 
 /** Inputs read and checked before any model work: the same for the agent and for --local. */
-export type PreparedPlan = { dir: string; spec: string; guidelines: string; repo: PlanRepository; uiRequired: boolean }
+export type PreparedPlan = { dir: string; spec: string; specPath: string; guidelines: string; repo: PlanRepository; uiRequired: boolean }
 
 /** The export directory: an explicit one, else plan.review/ beside the spec (beside spec.reviewed/ for a reviewed spec). */
 export function outputDirFor(input: Pick<PlanInput, 'specPath' | 'outputDir'>): string {
@@ -46,12 +51,37 @@ export async function preparePlan(input: PlanInput, signal: AbortSignal): Promis
   assertPlannableSpec(spec)
   if (!guidelines.trim() || /TRUNCATED by the Notion API/i.test(guidelines)) throw new Error('A complete required-guidelines snapshot is required')
   const uiRequired = input.uiRequired ?? /\b(?:UI|screen|page|card|button|mobile|component|navigation)\b/i.test(spec)
-  return { dir, spec, guidelines, repo, uiRequired }
+  // The spec's path as commits cite it: repository-relative when the spec is inside the repository.
+  const specFromRepo = relative(await realpath(input.repoPath), await realpath(input.specPath))
+  const specPath = specFromRepo.startsWith('..') || isAbsolute(specFromRepo) ? resolve(input.specPath) : specFromRepo
+  return { dir, spec, specPath, guidelines, repo, uiRequired }
 }
 
 /** The evidence block both model phases start from: spec, required guidelines, repository instructions and source packet. */
-export function planContext(prepared: Pick<PreparedPlan, 'spec' | 'guidelines' | 'repo'>): string {
-  return `BUSINESS SPEC:\n${prepared.spec}\n\nREQUIRED GUIDELINES:\n${prepared.guidelines}\n\nREPOSITORY INSTRUCTIONS:\n${prepared.repo.instructions}\n\n${prepared.repo.packet(prepared.spec)}`
+export function planContext(prepared: Pick<PreparedPlan, 'spec' | 'specPath' | 'guidelines' | 'repo'>): string {
+  // A missing root instruction file is a fact the plan can state, not evidence it lacks.
+  const root = ['AGENTS.md', 'CLAUDE.md'].filter((name) => prepared.repo.files.has(name))
+  const rootNote = root.length ? '' : 'The repository has no AGENTS.md or CLAUDE.md at its root.\n'
+  return `BUSINESS SPEC (${prepared.specPath}):\n${prepared.spec}\n\nREQUIRED GUIDELINES:\n${prepared.guidelines}\n\nREPOSITORY INSTRUCTIONS:\n${rootNote}${prepared.repo.instructions}\n\n${prepared.repo.packet(prepared.spec)}`
+}
+
+/** A guideline page research read in full: Notion through the read tool, or a knowledge file in --local. */
+export type GuidelinePage = { source: string; markdown: string }
+
+/** The full text of the guideline pages research read, so planning (which has no tools) sees them too. */
+export function guidelinePagesSection(pages: GuidelinePage[]): string {
+  return pages.length ? `\n\nGUIDELINE PAGES READ DURING RESEARCH (full text):\n${pages.map((page) => `SOURCE ${page.source}\n${page.markdown}`).join('\n\n')}` : ''
+}
+
+/** What research is told when it replies without submitting while turns remain. */
+export function researchContinue(turnsLeft: number): string {
+  return `You replied without calling submit_research, and you have ${turnsLeft} turns left. Research gathers evidence; it does not write the plan. Keep reading: open the files, guideline topic pages and kit configuration you have not read yet that the plan will depend on, batching reads. Then call submit_research.`
+}
+
+/** Why research's gaps were sent back: it still has turns, so it reads them instead. */
+export function researchGapsRefusal(gaps: string[], turnsLeft: number, guidelineTools: string[]): string {
+  const pages = guidelineTools.length ? ` Read guideline topic pages with ${guidelineTools.join(' and ')}.` : ''
+  return `Not accepted: you have ${turnsLeft} turns left, so read these now instead of listing them as gaps.${pages} Kit configuration is under node_modules/@aspiralabs/config/ and readable with read_files. Then submit again, keeping as gaps only what you tried and failed to read:\n${gaps.map((gap) => `- ${gap}`).join('\n')}`
 }
 
 /** The research phase's user prompt. */
@@ -60,8 +90,67 @@ export function researchPrompt(context: string, instructions: string = researchI
 }
 
 /** The planning phase's user prompt, over the submitted research. */
-export function planningPrompt(context: string, research: Research, instructions: string = planningInstructions): string {
-  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}\n\n${instructions}`
+export function planningPrompt(context: string, research: Research, instructions: string = planningInstructions, pages: GuidelinePage[] = []): string {
+  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}\n\n${instructions}`
+}
+
+/** The planning prompt for a correction pass: the previous plan and the checks it failed. */
+export function repairPrompt(context: string, research: Research, plan: Plan, issues: string[], instructions: string = repairInstructions, pages: GuidelinePage[] = []): string {
+  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}\n\nPREVIOUS PLAN:\n${JSON.stringify(plan)}\n\nPLAN CHECKS:\n${issues.map((issue) => `- ${issue}`).join('\n')}\n\n${instructions}`
+}
+
+/** The rule IDs the required guidelines define. */
+export function requiredRules(guidelines: string): string[] {
+  return [...new Set([...guidelines.matchAll(/^(?:#{1,6}\s+|\*\*|[-*]\s+)?([A-Z]{2,10}-\d+)\b/gm)].map((match) => match[1]!))]
+}
+
+/** Required rule IDs no check names. A check may name several, as `REV-001/002`. */
+export function uncoveredRules(guidelines: string, checks: { rule: string }[]): string[] {
+  const covered = new Set(checks.flatMap((check) => [...check.rule.matchAll(/([A-Z]{2,10})-(\d+(?:\/\d+)*)/g)].flatMap((match) => match[2]!.split('/').map((n) => `${match[1]}-${n}`))))
+  return requiredRules(guidelines).filter((rule) => !covered.has(rule))
+}
+
+/** The problems a correction pass can fix: structural plan errors and required rules no check covers. */
+export function planIssues(args: { spec: string; guidelines: string; repo: Pick<PlanRepository, 'files' | 'tracked'>; research: Research | null; plan: Plan }): string[] {
+  const checks = [...(args.research?.checks ?? []), ...args.plan.checks]
+  return [...validatePlan(args.plan, args.spec, args.repo.files, args.repo.tracked), ...uncoveredRules(args.guidelines, checks).map((rule) => `Uncovered guideline: ${rule}`)]
+}
+
+/** The MCP tools, with every successful guideline-page read kept in `pages` (once per page) for planning. */
+export function readingGuidelines(tools: ToolSet, pages: GuidelinePage[]): ToolSet {
+  return Object.fromEntries(Object.entries(tools).map(([name, definition]) => {
+    if (!/read_guideline$/.test(name) || !definition.execute) return [name, definition]
+    const execute = definition.execute
+    return [name, { ...definition, execute: async (input: unknown, options: Parameters<typeof execute>[1]) => {
+      const output = await execute(input, options)
+      const text = (output as { content?: { type?: string; text?: string }[]; isError?: boolean })
+      const body = text.isError ? undefined : text.content?.find((part) => part.type === 'text')?.text
+      try {
+        const page = body === undefined ? undefined : JSON.parse(body) as { source?: string; markdown?: string }
+        if (page?.source && page.markdown && !pages.some((known) => known.source === page.source)) pages.push({ source: page.source, markdown: page.markdown })
+      } catch { /* not a page payload: nothing to keep */ }
+      return output
+    } }]
+  }))
+}
+
+/** Notion page ids the required guidelines link to, in order of first appearance. */
+export function linkedGuidelineIds(guidelines: string): string[] {
+  const ids = [...guidelines.matchAll(/https:\/\/(?:www\.|app\.)?notion\.(?:so|com)\/[^\s<>")\]]+/g)].map((match) => pageIdFrom(match[0])).filter((id) => id !== undefined)
+  return [...new Set(ids)]
+}
+
+/** Read each linked guideline page research did not, through the same read tool, so it lands in `pages`. */
+export async function readLinkedGuidelines(tools: ToolSet, guidelines: string, pages: GuidelinePage[], signal: AbortSignal): Promise<void> {
+  const reader = Object.entries(tools).find(([name]) => /read_guideline$/.test(name))?.[1]
+  if (!reader?.execute) return
+  const known = () => new Set(pages.map((page) => pageIdFrom(page.source)))
+  for (const id of linkedGuidelineIds(guidelines)) {
+    if (signal.aborted) return
+    if (known().has(id)) continue
+    // A page that cannot be read stays out; planning names what it lacks.
+    await Promise.resolve(reader.execute({ page: id }, { toolCallId: `linked-${id}`, messages: [], context: {}, abortSignal: signal })).catch(() => undefined)
+  }
 }
 
 /** True when a UI plan lacks the successful catalog and component-document reads it requires. */
@@ -81,12 +170,10 @@ export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<
   if (!plan) problems.push('No structured plan produced')
   if (research?.gaps.length) problems.push(...research.gaps.map((gap) => `Research gap: ${gap}`))
   if (plan) { problems.push(...validatePlan(plan, spec, repo.files, repo.tracked), ...plan.gaps.map((gap) => `Plan gap: ${gap}`)) }
-  if (missingUiReads(args.uiRequired, args.reads)) problems.push('UI planning requires successful list_components and get_component MCP reads')
+  // A spec that mentions a page or a card is not UI work; a plan that writes UI files is.
+  if (missingUiReads(args.uiRequired && (plan === null || touchesUi(plan)), args.reads)) problems.push('UI planning requires successful list_components and get_component MCP reads')
   if (args.cancelled) problems.push('Planning cancelled')
-  const requiredRules = [...new Set([...guidelines.matchAll(/^(?:#{1,6}\s+|\*\*|[-*]\s+)?([A-Z]{2,10}-\d+)\b/gm)].map((match) => match[1]!))]
-  const checks = [...(research?.checks ?? []), ...(plan?.checks ?? [])]
-  const covered = new Set(checks.flatMap((check) => [...check.rule.matchAll(/([A-Z]{2,10})-(\d+(?:\/\d+)*)/g)].flatMap((match) => match[2]!.split('/').map((n) => `${match[1]}-${n}`))))
-  for (const rule of requiredRules) if (!covered.has(rule)) problems.push(`Uncovered guideline: ${rule}`)
+  for (const rule of uncoveredRules(guidelines, [...(research?.checks ?? []), ...(plan?.checks ?? [])])) problems.push(`Uncovered guideline: ${rule}`)
   const decisions = [...new Set([...(research?.decisions ?? []), ...(plan?.decisions ?? [])])]
   if (plan) plan.decisions = decisions
   const status: PlanStatus = problems.length ? 'incomplete' : decisions.length ? 'needs-author' : 'ready'
@@ -118,33 +205,78 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   const context = planContext(prepared)
   let plan: Plan | null = null
   let research: Research | null = null
+  const pages: GuidelinePage[] = []
+  const readTools = readingGuidelines(mcp.tools, pages)
   try {
     options.progress?.('research')
     const prompt = researchPrompt(context)
     research = await trace.invoke({ phase: 'research', model: models.research, prompt }, async (signal, hooks) => {
       let submitted: Research | undefined
-      const tools: ToolSet = { ...repo.tools, ...mcp.tools, submit_research: tool({ description: 'Finish after gathering concrete repository and guideline evidence.', inputSchema: researchSchema, execute: async (value) => { submitted = value; return { accepted: true } } }) }
-      const result = await generateText({ model: gateway(models.research), system, prompt, tools, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', stopWhen: [stepCountIs(RESEARCH_STEPS), hasToolCall('submit_research')], prepareStep: ({ stepNumber }) => stepNumber >= RESEARCH_STEPS - 1 ? { toolChoice: { type: 'tool' as const, toolName: 'submit_research' } } : stepNumber === 0 ? { activeTools: Object.keys(tools).filter((name) => name !== 'submit_research'), toolChoice: 'required' as const } : {}, ...hooks })
-      // Research may stop early with prose. Its structured submission is the proof
-      // that it finished, so give it one turn that can only submit what it found.
-      if (!submitted) await generateText({ model: gateway(models.research), system, messages: [{ role: 'user', content: prompt }, ...(result?.responseMessages ?? []), { role: 'user', content: 'Submit the evidence you gathered with submit_research now. Cite only files and lines you actually read; list anything you did not read as a gap.' }], tools: { submit_research: tools.submit_research! }, toolChoice: { type: 'tool', toolName: 'submit_research' }, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', ...hooks })
+      // Until its last turn, research cannot submit checks that leave a required rule out: the
+      // refusal names the missing rules and research continues. The last turn takes what it has.
+      // A first submission that lists gaps while turns remain is refused once: research reads them
+      // instead, and keeps only what it tried and failed to read.
+      let lastTurn = false
+      let turn = 0
+      let gapsRefused = false
+      const guidelineTools = Object.keys(mcp.tools).filter((name) => /guideline/i.test(name))
+      const submit = async (value: Research) => {
+        const missing = uncoveredRules(guidelines, value.checks)
+        if (missing.length && !lastTurn) return { accepted: false, reason: `Checks must name every required rule ID. Add a check for each of these, with how it applies or evidence that it does not, then submit again: ${missing.join(', ')}` }
+        const turnsLeft = RESEARCH_STEPS - turn - 1
+        if (value.gaps.length && !gapsRefused && turnsLeft >= 2) {
+          gapsRefused = true
+          return { accepted: false, reason: researchGapsRefusal(value.gaps, turnsLeft, guidelineTools) }
+        }
+        submitted = value
+        return { accepted: true }
+      }
+      const tools: ToolSet = { ...repo.tools, ...readTools, submit_research: tool({ description: 'Finish after gathering concrete repository and guideline evidence.', inputSchema: researchSchema, execute: submit }) }
+      // Research that replies without submitting while turns remain is sent back to keep reading,
+      // told how many turns it has left. Only its last turn is forced to submit what it has.
+      let messages: ModelMessage[] = [{ role: 'user', content: prompt }]
+      let used = 0
+      while (!submitted && RESEARCH_STEPS - used > 1 && !signal.aborted) {
+        const remaining = RESEARCH_STEPS - used
+        const first = used === 0
+        const result = await generateText({ model: gateway(models.research), system: researchSystem, ...(first ? { prompt } : { messages }), tools, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', stopWhen: [stepCountIs(remaining - 1), () => submitted !== undefined], prepareStep: ({ stepNumber }) => { turn = used + stepNumber; return first && stepNumber === 0 ? { activeTools: Object.keys(tools).filter((name) => name !== 'submit_research'), toolChoice: 'required' as const } : {} }, ...hooks })
+        used += Math.max(1, result.steps?.length ?? 1)
+        messages = [...messages, ...(result.responseMessages ?? [])]
+        if (!submitted) messages.push({ role: 'user', content: researchContinue(RESEARCH_STEPS - used) })
+      }
+      lastTurn = true
+      if (!submitted && !signal.aborted) await generateText({ model: gateway(models.research), system: researchSystem, messages: [...messages.slice(0, -1), { role: 'user', content: 'Your turns are used up. Submit the evidence you gathered with submit_research now. Cite only files and lines you actually read; list anything you did not read as a gap.' }], tools: { submit_research: tools.submit_research! }, toolChoice: { type: 'tool', toolName: 'submit_research' }, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', ...hooks })
       if (!submitted) throw new Error('Research did not submit evidence within its turn budget')
       return researchSchema.parse(submitted)
     })
+    // Planning gets every page the required guidelines link to, not only the ones research
+    // chose to open: the routing table names the pages that bind every code change.
+    if (research && !options.signal?.aborted) await readLinkedGuidelines(readTools, guidelines, pages, preparation)
     if (research && !options.signal?.aborted) {
       options.progress?.('planning')
-      const prompt = planningPrompt(context, research)
-      plan = await trace.invoke({ phase: 'planning', model: models.planning, prompt }, async (signal, hooks) => {
-        const result = await generateText({ model: gateway(models.planning), system, prompt, output: Output.object({ schema: planSchema }), abortSignal: signal, maxRetries: 0, maxOutputTokens: 24_000, reasoning: 'medium', ...hooks })
-        return planSchema.parse(result.output)
+      const prompt = planningPrompt(context, research, planningInstructions, pages)
+      const draftPlan = (phase: string, prompt: string) => trace.invoke({ phase, model: models.planning, prompt }, async (signal, hooks) => {
+        const output = await streamStructured({ model: gateway(models.planning), system, prompt, output: Output.object({ schema: planSchema }), abortSignal: signal, maxRetries: 0, maxOutputTokens: 24_000, reasoning: 'medium', ...hooks })
+        return planSchema.parse(output)
       })
+      plan = await draftPlan('planning', prompt)
+      // Correction passes: hand the plan back with the checks it failed. Keep a revision only when
+      // it fails fewer of them, and stop at the first one that does not improve.
+      for (let round = 1; plan && round <= REPAIR_ROUNDS && !options.signal?.aborted; round++) {
+        const issues = planIssues({ spec, guidelines, repo, research, plan })
+        if (!issues.length) break
+        options.progress?.(`repair-${round}`)
+        const revised = await draftPlan(`repair-${round}`, repairPrompt(context, research, plan, issues, repairInstructions, pages))
+        if (!revised || planIssues({ spec, guidelines, repo, research, plan: revised }).length >= issues.length) break
+        plan = revised
+      }
     }
     const { status, problems, decisions } = assessPlan({ spec, guidelines, repo, research, plan, phaseErrors: trace.phases, uiRequired, reads: mcp.reads, cancelled: options.signal?.aborted === true })
     const reviewMs = Date.now() - started - prepareMs
     const exportStarted = Date.now()
     const files: Record<string, string> = {
       ...planReportFiles({ prepared, specPath: input.specPath, research, plan, status, problems }),
-      'trace/calls.json': JSON.stringify({ system, models, calls: trace.calls }, null, 2),
+      'trace/calls.json': JSON.stringify({ system: { research: researchSystem, planning: system }, models, calls: trace.calls }, null, 2),
       'trace/usage.json': JSON.stringify({ scope: 'Direct planner calls only; excludes eve routing and guideline loading before entry.', turns: trace.turns }, null, 2),
     }
     let totalMs = 0

@@ -61,9 +61,9 @@ Relative paths in your prompt resolve against the package directory, not your sh
 
 ## Output
 
-Markdown, written **into the repo you reviewed**, at `.pr-review/<branch>/` — one directory per branch, replaced by the next review of that branch. It goes to the git root, so reviewing `packages/ui` writes to the repo's `.pr-review`, not to `packages/ui/.pr-review`.
+Markdown, written **into the repo you reviewed**, at `.work/<ticket>/pr-review/`, where `<ticket>` is the branch name without its type prefix (`feat/nom-4-explore-pagination` reviews into `.work/nom-4-explore-pagination/pr-review/`). One directory per branch, replaced by the next review of that branch. It goes to the git root, so reviewing `packages/ui` writes to the repo's `.work`, not to `packages/ui/.work`. `.work/<ticket>/` is the ticket's working folder every Aspira project has; the spec, plan and build log of the same ticket sit beside the review.
 
-`.pr-review/` is added to that repo's `.gitignore` on the first review, so git never sees the output — and neither does the next review, which would otherwise find the last one sitting in its own diff. The rule is added once; nothing already in the file is touched. The one wart: that two-line `.gitignore` change is itself uncommitted, so it shows up in the next review of the branch until you commit it. (`.git/info/exclude` would avoid that and keep the rule off your teammates' machines — a one-line change in `export-review.ts` if you prefer it.)
+`.work/` is added to that repo's `.gitignore` on the first review (`kit init` adds it too), so git never sees the output — and neither does the next review, which would otherwise find the last one sitting in its own diff. The rule is added once; nothing already in the file is touched. The one wart: that two-line `.gitignore` change is itself uncommitted, so it shows up in the next review of the branch until you commit it. (`.git/info/exclude` would avoid that and keep the rule off your teammates' machines — a one-line change in `export-review.ts` if you prefer it.)
 
 A GitHub PR or a pasted diff has no local checkout to write into, so it goes to `reviews/<date>-<slug>/` in this package instead. `outputDir` overrides both and skips the `.gitignore` line.
 

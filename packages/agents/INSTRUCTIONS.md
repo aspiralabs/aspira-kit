@@ -77,7 +77,7 @@ Without a supplied snapshot, the eve entry point loads required guidelines from 
 
 ## pr-reviewer
 
-Six specialist reviewers plus an independent verifier review a pull request and settle on one fix list. For a local repo the output lands in that repo at `.pr-review/<branch>/`, and `.pr-review/` is added to its `.gitignore` on the first run.
+Six specialist reviewers plus an independent verifier review a pull request and settle on one fix list. For a local repo the output lands in that repo at `.work/<ticket>/pr-review/` (the ticket's working folder; `<ticket>` is the branch without its type prefix), and `.work/` is added to its `.gitignore` on the first run.
 
 ```bash
 # A GitHub PR by URL (GITHUB_TOKEN in the environment for private repos)

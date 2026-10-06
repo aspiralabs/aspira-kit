@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { renderPlan, validatePlan } from './plan.ts'
+import { renderPlan, touchesUi, validatePlan } from './plan.ts'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 
 it('accepts concrete test-first tasks and renders separate unit/integration checklists', () => {
@@ -68,4 +68,27 @@ it('lets a plan change tracked lockfiles and .npmrc that are not indexed, but ne
   }
   const directory = validPlan(); directory.tasks[1]!.changes[0]!.path = 'src'
   expect(validatePlan(directory, spec, files, tracked)).toContain('Target is a directory, not a file; name each file to modify: src')
+})
+
+it('keeps support files out of a tests task: the plan lists test files and the implementer creates their fixtures and helpers', () => {
+  for (const [operation, path] of [['create', 'packages/format/fixtures/agent.yaml'], ['create', 'src/fixture-helper.ts'], ['create', 'packages/cli/package.json'], ['modify', 'package.json']] as const) {
+    const plan = validPlan()
+    plan.tasks[0]!.changes.push({ operation, path, symbols: ['support'], instructions: 'Support the cases.', evidence: ['tests/example.test.ts:1'] })
+    expect(validatePlan(plan, spec, files)).toContain(`Test task changes a non-test target: P1/${path}`)
+  }
+})
+
+it('treats a plan as UI work only when it writes UI files', () => {
+  expect(touchesUi(validPlan())).toBe(false)
+  const ui = validPlan(); ui.tasks[1]!.changes[0]!.path = 'app/items/page.tsx'
+  expect(touchesUi(ui)).toBe(true)
+})
+
+it('accepts a handoff for work a named person does: no file changes, and its criterion needs no code or test', () => {
+  const specWithPage = spec + '- [ ] F2: A format reference page exists in Notion.\n'
+  const plan = validPlan()
+  plan.tasks.splice(2, 0, { id: 'P4', title: 'Publish the Notion page', kind: 'handoff', featureIds: ['F2'], dependsOn: [], testIds: [], changes: [], commands: [], outcome: 'David confirms the page is linked from the Overview.' })
+  expect(validatePlan(plan, specWithPage, files).filter((error) => /F2|P4/.test(error))).toEqual([])
+  plan.tasks[2]!.changes.push({ operation: 'create', path: 'docs/page.md', symbols: ['page'], instructions: 'x', evidence: ['src/items.ts:1'] })
+  expect(validatePlan(plan, specWithPage, files)).toContain('A handoff changes no files; the person makes the change: P4')
 })
