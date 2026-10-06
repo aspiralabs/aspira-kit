@@ -2,12 +2,12 @@ import { execFile } from 'node:child_process'
 import { readFile, readdir, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import type { SandboxSession } from 'eve/sandbox'
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
 import { parseCostSample } from '../lib/estimate'
+import { LAUNCH_FILES, packageFile } from '../lib/package-dir'
 import { buildPacket } from '../lib/packet'
 import { writeContext } from '../lib/shared-prefix'
 import {
@@ -34,7 +34,6 @@ import { FILES, SEATS, type Reviewer } from '../lib/review'
 import { TARGET_FILE, headShaFromFindings, type ReviewContextFile, type ReviewTarget } from '../lib/target'
 
 const run = promisify(execFile)
-const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const MAX_TARBALL = 512 * 1024 * 1024
 // macOS tar adds ._* AppleDouble files unless told not to.
 const TAR_ENV = { ...process.env, COPYFILE_DISABLE: '1' }
@@ -103,15 +102,19 @@ export default defineTool({
 
 type Extras = { previous: Previous | null; knowledgeRequiredFile: string | null; rootSessionId: string }
 
-/** Each reviewer's persona, from the agent's own files, read when the review is loaded. */
+/**
+ * Each reviewer's persona, from the agent's own files on the host, read when the review is
+ * loaded. Through packageFile, never `import.meta.url` and `../..`: at launch this module runs
+ * from eve's compiled snapshot, which carries no persona.md (see lib/package-dir.ts).
+ */
 async function readPersonas(): Promise<ReviewContextFile['personas']> {
-  const entries = await Promise.all(([...SEATS, 'quinn'] as Reviewer[]).map(async (who) => [who, await readFile(join(PACKAGE_DIR, 'agent', 'subagents', who, 'persona.md'), 'utf8')] as const))
+  const entries = await Promise.all(([...SEATS, 'quinn'] as Reviewer[]).map(async (who) => [who, await readFile(packageFile(LAUNCH_FILES.persona(who)), 'utf8')] as const))
   return Object.fromEntries(entries) as ReviewContextFile['personas']
 }
 
 /** The cost.md files of this package's previous reviews, for the one-round estimate. */
 async function readCostSamples(): Promise<ReviewContextFile['costSamples']> {
-  const reviews = join(PACKAGE_DIR, 'reviews')
+  const reviews = packageFile(LAUNCH_FILES.reviews)
   const names = (await readdir(reviews).catch(() => [])).sort()
   const samples: ReviewContextFile['costSamples'] = []
   for (const name of names) {
