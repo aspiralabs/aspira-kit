@@ -51,6 +51,11 @@ export const INDEX_NAME = 'INDEX.md'
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex')
 
+/** The title in a page file's provenance header, or undefined when the file has none. */
+export function pageTitle(text: string): string | undefined {
+  return text.match(HEADER)?.[1]?.trim()
+}
+
 /** KEY=VALUE lines of a dotenv file; quotes stripped, comments and blanks skipped. */
 export function parseEnvFile(text: string): Record<string, string> {
   const out: Record<string, string> = {}
