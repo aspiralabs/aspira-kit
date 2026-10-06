@@ -173,12 +173,18 @@ ticket_start() {
 }
 # What a cloud run is likely to cost, from the diff and this package's previous cost.md files.
 # Printed, not confirmed; --yes skips it. An estimate that cannot be computed never blocks the run.
+# With --max-cost the same script is the pre-check: exit 4 means one round is estimated above the
+# budget, and the run is refused before any model call, with both numbers printed. Other failures
+# (no network for the diff, say) never block the run. Runs even with --yes when there is a budget.
 print_estimate() {
-  local args=("$SOURCE")
+  local args=("$SOURCE") code=0
   [ -z "$BRANCH" ] || args+=(--branch "$BRANCH")
   [ -z "$BASE" ] || args+=(--base "$BASE")
   [ -z "$ROUNDS" ] || args+=(--max-rounds "$ROUNDS")
-  agent_node scripts/estimate.ts "${args[@]}" || echo "estimate unavailable (see above); starting anyway"
+  [ -z "$MAX_COST" ] || args+=(--max-cost "$MAX_COST")
+  agent_node scripts/estimate.ts "${args[@]}" || code=$?
+  [ "$code" != 4 ] || die "one round is estimated above the --max-cost budget (see the line above); not started"
+  [ "$code" = 0 ] || echo "estimate unavailable (see above); starting anyway"
 }
 cmd_start() {
   parse start "$@"
@@ -210,7 +216,7 @@ cmd_start() {
   [ -z "$OUT" ] || prompt="$prompt Write the review to $OUT."
   [ -z "$NO_COMMENT" ] || prompt="$prompt Do not comment on the PR."
   [ -z "$folder" ] || prompt="$prompt The ticket's board moves and pushes are made by the launcher around this run; do not call board yourself."
-  [ -n "$YES" ] || print_estimate
+  [ -n "$YES" ] && [ -z "$MAX_COST" ] || print_estimate
   run=$(mktemp -d "${TMPDIR:-/tmp}/pr-reviewer.XXXXXX")
   printf '%s\n' "$SOURCE" > "$run/source"
   printf '%s\n' "${NODE_ARGS[@]}" > "$run/node-args"

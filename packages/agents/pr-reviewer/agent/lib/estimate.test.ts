@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NOM4_SEED, estimateCost, parseCostSample, renderEstimate } from './estimate.ts'
+import { NOM4_SEED, estimateCost, oneRoundCheck, parseCostSample, renderEstimate } from './estimate.ts'
 import { renderCostMarkdown, summarizeUsage, type UsageLine } from './usage.ts'
 
 const line = (i: number, costUsd: number): UsageLine => ({ agent: 'ava', sessionId: `s${i}`, turnId: 't', stepIndex: 0, at: new Date(1_700_000_000_000 + i * 1000).toISOString(), inputTokens: 10, outputTokens: 1, cacheReadTokens: 5, cacheWriteTokens: 0, costUsd })
@@ -51,5 +51,24 @@ describe('renderEstimate', () => {
     expect(text).toContain('cost: $3.14 to $12.57 ($3.14 to $3.14 a round; a review that settles in two rounds is around $6.29)')
     expect(text).toContain('seeded from nomnomzz PR #2')
     expect(text).toContain("--local costs this session's usage instead of the Gateway")
+  })
+})
+
+describe('oneRoundCheck', () => {
+  const samples = [{ label: 'a', costUsd: 12, rounds: 2, calls: 40, changedLines: 1000 }]
+  it('refuses before any model call when one round is estimated above the budget, naming both numbers', () => {
+    const check = oneRoundCheck({ changedLines: 1000, seats: 6, samples, maxCostUsd: 1 })
+    expect(check).toMatchObject({ exceeds: true, oneRoundUsd: 6, maxCostUsd: 1 })
+    expect(check.message).toBe('Refusing to start: one round is estimated at $6.00 for 1,000 changed lines (from 1 previous review), above the --max-cost budget of $1.00. Raise the budget to at least $6.00, or review a smaller diff. No model call was made.')
+  })
+  it('lets a budget that covers one round through, and says so', () => {
+    expect(oneRoundCheck({ changedLines: 1000, seats: 6, samples, maxCostUsd: 10 })).toMatchObject({ exceeds: false, message: 'One round is estimated at $6.00, within the --max-cost budget of $10.00.' })
+    expect(oneRoundCheck({ changedLines: 1000, seats: 6, samples, maxCostUsd: null })).toMatchObject({ exceeds: false, message: 'No budget; one round is estimated at $6.00.' })
+  })
+  it('seeds from NOM-4 when there is no history', () => {
+    const check = oneRoundCheck({ changedLines: 500, seats: 6, samples: [], maxCostUsd: 1 })
+    expect(check.exceeds).toBe(true)
+    expect(check.oneRoundUsd).toBeCloseTo(12.57 / 4)
+    expect(check.message).toContain('seeded from the NOM-4 review')
   })
 })

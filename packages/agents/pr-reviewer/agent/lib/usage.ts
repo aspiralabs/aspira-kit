@@ -169,6 +169,29 @@ export function roundCallsFromTurns(turns: TurnTotals[], rounds: number): RoundC
   }).flatMap((call) => Array.from({ length: call.steps }, () => ({ agent: call.agent, round: call.round })))
 }
 
+/**
+ * Cache-write tokens of each agent's first session: round one, where the shared prefix is
+ * written. Six copies of the packet show as six writes of about the packet size; one shared
+ * prefix shows as one write (the warm-up or the first seat) and small writes for the rest.
+ */
+export function roundOneCacheWrites(turns: TurnTotals[]): { agent: string; cacheWriteTokens: number }[] {
+  const seen = new Set<string>()
+  const rows: { agent: string; cacheWriteTokens: number }[] = []
+  for (const turn of turns) {
+    if (seen.has(turn.agent)) continue
+    seen.add(turn.agent)
+    rows.push({ agent: turn.agent, cacheWriteTokens: turn.cacheWriteTokens })
+  }
+  return rows.toSorted((a, b) => a.agent.localeCompare(b.agent))
+}
+
+export function renderRoundOneCacheWrites(rows: { agent: string; cacheWriteTokens: number }[], packetTokens: number | null): string {
+  if (rows.length === 0) return 'Round-one cache writes: none recorded.'
+  const total = rows.reduce((sum, row) => sum + row.cacheWriteTokens, 0)
+  const copies = packetTokens === null || packetTokens === 0 ? '' : `; the packet is about ${num(packetTokens)} tokens, so that is roughly ${(total / packetTokens).toFixed(1)} copies of it`
+  return `Round-one cache writes (each agent's first session): ${rows.map((row) => `${row.agent} ${num(row.cacheWriteTokens)}`).join(' · ')}; total ${num(total)}${copies}. One shared prefix shows as one write of about the packet size and small ones elsewhere.`
+}
+
 export function renderCallsPerRound(table: Record<string, { rounds: number[]; documents: number }>, rounds: number): string {
   const header = `| Agent | ${Array.from({ length: rounds }, (_, i) => `Round ${i + 1}`).join(' | ')} | Documents | Total |`
   const divider = `| --- | ${Array.from({ length: rounds }, () => '---:').join(' | ')} | ---: | ---: |`
@@ -238,6 +261,7 @@ export function renderCostMarkdown(
   const roundsLine = extras.rounds > 0 ? `Rounds: ${extras.rounds}${extras.settled === true ? ', ended by the stopping rule (a round with no dispute and no new finding)' : ''}. ` : ''
   const linesLine = extras.changedLines === undefined ? '' : `Changed lines: ${num(extras.changedLines)}. `
   const perRound = extras.rounds > 0 ? `\n${renderCallsPerRound(callsPerRound(roundCallsFromTurns(summary.byTurn, extras.rounds), extras.rounds), extras.rounds)}` : ''
+  const writes = renderRoundOneCacheWrites(roundOneCacheWrites(summary.byTurn), extras.packet?.tokens ?? null)
   const timeCaveat =
     t.untimed > 0 ? `\n${t.untimed} of ${t.steps} model calls have no recorded duration, so model time is a lower bound.\n` : ''
 
@@ -253,6 +277,7 @@ Input counts every token sent on every call, so a turn's context is billed again
 
 ${roundsLine}${linesLine}Cache-read share: ${share === null ? '—' : `${Math.round(100 * share)}%`} of input tokens. ${packet}
 ${budget}
+${writes}
 ${perRound}
 ## Timing
 

@@ -2,14 +2,15 @@ import { readFile, readdir } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { estimateCost, parseCostSample, renderEstimate } from '../agent/lib/estimate.ts'
+import { estimateCost, oneRoundCheck, parseCostSample, renderEstimate } from '../agent/lib/estimate.ts'
 import { defaultGithubToken, fetchPrDiff, localDiff, resolveLocalBranch } from '../agent/lib/local-source.ts'
 import { parsePrSource, patchStats } from '../agent/lib/pr.ts'
 import { DEFAULT_MAX_ROUNDS, SEATS } from '../agent/lib/review.ts'
 
 // The estimate the launcher prints before a cloud run: the diff size from the source itself,
 // and the dollar range from the cost.md files of this package's previous reviews. No model call.
-const usage = 'Usage: pnpm review:estimate <github-pr | absolute-repo-path> [--branch B] [--base main] [--max-rounds N]'
+// With --max-cost, exit 4 when one round is estimated above it: the launcher then refuses to start.
+const usage = 'Usage: pnpm review:estimate <github-pr | absolute-repo-path> [--branch B] [--base main] [--max-rounds N] [--max-cost USD]'
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 async function history(): Promise<ReturnType<typeof parseCostSample>[]> {
@@ -26,7 +27,7 @@ async function history(): Promise<ReturnType<typeof parseCostSample>[]> {
 try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { branch: { type: 'string' }, base: { type: 'string' }, 'max-rounds': { type: 'string' } },
+    options: { branch: { type: 'string' }, base: { type: 'string' }, 'max-rounds': { type: 'string' }, 'max-cost': { type: 'string' } },
   })
   const [source, ...extra] = positionals
   if (source === undefined || extra.length > 0) throw new Error(usage)
@@ -42,7 +43,14 @@ try {
   }
   const stats = patchStats(patch, 0)
   const samples = (await history()).flatMap((sample) => (sample === null ? [] : [sample]))
-  console.log(renderEstimate(estimateCost({ changedLines: stats.additions + stats.deletions, maxRounds, seats: SEATS.length, samples }), parsed.label))
+  const changedLines = stats.additions + stats.deletions
+  console.log(renderEstimate(estimateCost({ changedLines, maxRounds, seats: SEATS.length, samples }), parsed.label))
+  const maxCostUsd = values['max-cost'] === undefined ? null : Number(values['max-cost'])
+  if (maxCostUsd !== null) {
+    const check = oneRoundCheck({ changedLines, seats: SEATS.length, samples, maxCostUsd })
+    console.log(check.message)
+    if (check.exceeds) process.exitCode = 4
+  }
 } catch (error) {
   console.error(`pr-reviewer estimate: ${error instanceof Error ? error.message : String(error)}`)
   process.exitCode = 2
