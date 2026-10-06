@@ -63,6 +63,8 @@ it('routes the skill to the official CLI or Notion-loading eve entry point with 
   expect(direct.stdout).toContain('agent: @aspiralabs/spec-reviewer@')
   expect(direct.stderr).toContain(`spec-reviewer: running kit source at ${root}, not the installed @aspiralabs/spec-reviewer`)
   const run = direct.stdout.match(/^run: (.+)$/m)![1]!
+  // What status and wait report, and the export records: the agent package, version, where it ran from.
+  expect(JSON.parse(await readFile(join(run, 'agent.json'), 'utf8'))).toEqual({ name: '@aspiralabs/spec-reviewer', version: expect.stringMatching(/^\d+\.\d+\.\d+/), path: root, source: 'package', installed: false })
   const status = await exec('bash', [launcher, 'status', run], { cwd: repo, env })
   expect(status.stdout).toContain('agent: @aspiralabs/spec-reviewer@')
   expect(status.stdout).toContain('spec.reviewed/spec.reviewed.md')

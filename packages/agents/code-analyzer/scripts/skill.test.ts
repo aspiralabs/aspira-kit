@@ -58,6 +58,8 @@ it('routes a local path to the CLI and a remote repository to the eve entry poin
   expect(local.stdout).toContain('agent: @aspiralabs/code-analyzer@')
   expect(local.stderr).toContain(`code-analyzer: running kit source at ${root}, not the installed @aspiralabs/code-analyzer`)
   const run = local.stdout.match(/^run: (.+)$/m)![1]!
+  // What status and wait report, and the export records: the agent package, version, where it ran from.
+  expect(JSON.parse(await readFile(join(run, 'agent.json'), 'utf8'))).toEqual({ name: '@aspiralabs/code-analyzer', version: expect.stringMatching(/^\d+\.\d+\.\d+/), path: root, source: 'package', installed: false })
   const status = await exec('bash', [launcher, 'status', run], { cwd: repo, env })
   expect(status.stdout).toContain(`${join(sub, '.static-analysis')}/report.md`)
   expect(status.stdout).toContain('agent: @aspiralabs/code-analyzer@')

@@ -64,7 +64,10 @@ resolve_agent() {
 }
 agent_line() { printf 'agent: %s@%s (%s, %s)\n' "$PKG" "$AGENT_VERSION" "$AGENT_SOURCE" "$AGENT"; }
 json_string() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
-agent_json() { printf '{"name":"%s","version":"%s","path":"%s","source":"%s","installed":%s}\n' "$PKG" "$(json_string "$AGENT_VERSION")" "$(json_string "$AGENT")" "$AGENT_SOURCE" "$(case $AGENT in */node_modules/*) echo true ;; *) echo false ;; esac)"; }
+# true when the agent runs from an installed package. A function, not an inline `$(case …)`: bash 3.2
+# (macOS /bin/bash) mis-parses the pattern's `)` inside a command substitution and reports a syntax error.
+agent_installed() { case $AGENT in */node_modules/*) echo true ;; *) echo false ;; esac; }
+agent_json() { printf '{"name":"%s","version":"%s","path":"%s","source":"%s","installed":%s}\n' "$PKG" "$(json_string "$AGENT_VERSION")" "$(json_string "$AGENT")" "$AGENT_SOURCE" "$(agent_installed)"; }
 # The first <ancestor of DIR>/node_modules/RELATIVE, as Node would resolve it from the agent.
 find_up_module() {
   local dir=$1

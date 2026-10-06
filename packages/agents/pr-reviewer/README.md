@@ -90,7 +90,7 @@ agent/
 ├── instructions.md     system prompt
 ├── hooks/usage.ts      per-call cost ledger
 ├── tools/              load-pr · pr-debator · export-review · comment-on-pr · read_files · search
-├── lib/                pure logic: review.ts (seats, prompts, stopping rule, verdict) · packet.ts · loop.ts · pr.ts (sources, git) · target.ts (shas) · budget.ts · call-cap.ts · estimate.ts · usage.ts
+├── lib/                pure logic: review.ts (seats, prompts, stopping rule, verdict) · plan.ts (the round plan, no Node builtins: it runs in the workflow body) · packet.ts · loop.ts · pr.ts (sources, git) · target.ts (shas) · budget.ts · call-cap.ts · estimate.ts · usage.ts
 └── subagents/          ava · cole · nova · reba · dex · iris · quinn — all hidden, all sharing the root's sandbox
 ```
 

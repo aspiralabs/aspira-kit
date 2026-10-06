@@ -1,9 +1,10 @@
-// The review loop pr-debator runs, as one generator over planStep: the same stages, task ids,
-// prompts and stopping rule as --local, with the model calls behind a callback. Between stages
+// The review loop pr-debator runs, as one generator over plan.ts: the same stages, task ids,
+// prompts and stopping rule as --local, with the model calls behind a callback. Pure, like
+// plan.ts: it runs inside the eve workflow body, where no Node.js builtin may be imported. Between stages
 // it asks what the run has cost and stops at the budget, exporting what exists as incomplete.
 
 import { budgetCrossed, type BudgetStop } from './budget.ts'
-import { planStep, type DonePlan, type PendingPlan, type PlanTask } from './local.ts'
+import { planStep, type DonePlan, type PendingPlan, type PlanTask } from './plan.ts'
 import type { PrContext } from './review.ts'
 
 export type LoopInput = {

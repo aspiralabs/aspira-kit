@@ -1,12 +1,13 @@
 import { readFile } from 'node:fs/promises'
 import { defineWorkflowTool } from 'eve/tools'
 import { z } from 'zod'
-import { maxCostFromEnv, spentSoFar } from '../lib/budget'
+import { maxCostFromEnv } from '../lib/budget'
 import { maxSeatCalls } from '../lib/call-cap'
-import type { PlanTask } from '../lib/local'
+import type { PlanTask } from '../lib/plan'
 import { runReviewLoop } from '../lib/loop'
 import type { PacketStats } from '../lib/packet'
 import { DEFAULT_MAX_ROUNDS, FILES, MAX_ROUNDS_LIMIT, OUTPUT_SCHEMAS, OUTPUT_VALIDATORS, roundFilesInOrder, totalFindings, type PrContext } from '../lib/review'
+import { spentSoFar } from '../lib/spend-ledger'
 import { contextFileSchema, type ReviewTarget } from '../lib/target'
 
 // Six lenses plus a verifier, looping until the fix list stops moving.
@@ -36,10 +37,10 @@ async function readSettings(): Promise<{ maxCostUsd: number | null; maxSeatCalls
   return { maxCostUsd: maxCostFromEnv(), maxSeatCalls: maxSeatCalls() }
 }
 
-/** The spend of this run so far, from the usage hook's ledger for the root session. */
+/** The spend of this run so far, from the usage hook's on-disk ledger for the root session. */
 async function spentStep(rootSessionId: string): Promise<number> {
   'use step'
-  return spentSoFar(rootSessionId).costUsd
+  return (await spentSoFar(rootSessionId)).costUsd
 }
 
 export default defineWorkflowTool({

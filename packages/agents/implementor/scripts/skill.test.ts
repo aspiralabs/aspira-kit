@@ -92,6 +92,8 @@ it('launches the agent on a GitHub repository with the same prompt the remote la
   // Byte for byte what implement-remote.sh sent: the default path's prompt is unchanged.
   expect(args[5]).toBe(`Implement docs/plans/my feature/plan.review in the GitHub repository aspiralabs/nomnomzz, starting from branch develop. Follow the aspira-implementor skill. Push the branch; do not open a pull request. ${tail}`)
   const run = started.stdout.match(/^run: (.+)$/m)![1]!
+  // What status and wait report, and the export records: the agent package, version, where it ran from.
+  expect(JSON.parse(await readFile(join(run, 'agent.json'), 'utf8'))).toEqual({ name: '@aspiralabs/implementor', version: expect.stringMatching(/^\d+\.\d+\.\d+/), path: root, source: 'package', installed: false })
   const waited = (await exec('bash', [launcher, 'wait', run, '--max', '5'], { env })).stdout
   expect(waited).toContain('finished')
   expect(waited).toContain('agent: @aspiralabs/implementor@')
