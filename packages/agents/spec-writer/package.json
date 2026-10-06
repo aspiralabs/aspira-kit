@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/spec-writer",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Spec writer: repository exploration, an initial draft, then the official spec review.",
   "type": "module",
   "scripts": {

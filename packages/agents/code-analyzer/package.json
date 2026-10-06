@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/code-analyzer",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Detects a repository's static analyzers, runs them, auto-fixes, hands the rest to a workhorse model, and loops until clean.",
   "type": "module",
   "license": "MIT",
