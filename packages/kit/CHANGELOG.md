@@ -1,5 +1,11 @@
 # @aspiralabs/kit
 
+## 0.5.2
+
+### Patch Changes
+
+- 45a0b17: `kit init` approves pnpm build scripts in `pnpm-workspace.yaml` (`onlyBuiltDependencies`), the place pnpm 12 reads, instead of the `pnpm` field of package.json, which pnpm 12 ignores.
+
 ## 0.5.1
 
 ### Patch Changes
