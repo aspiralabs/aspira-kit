@@ -72,7 +72,7 @@ Pass the same ticket (or source) and options to every call.
 
    `Read <prompt> in full and follow it exactly. Write your JSON result to <output>. Reply with one line.`
 
-   Launch all six seat tasks **in one message**, as six parallel subagents, and wait for all six. The prompt file says how a session turn maps the agent's tools: `read_files` is the Read tool over each listed path, `search` is Grep with two lines of context.
+   Launch all six seat tasks **in one message**, as six parallel subagents, and wait for all six. The prompt file says how a session turn maps the agent's tools: `read_files` is the Read tool over each listed path, `read_diff` is the `diff --git` section of each listed path in the work directory's `pr.patch`, `search` is Grep with two lines of context.
 3. **Quinn.** Run `local` again. It prints `stage: "verifier"` and one task. Launch one subagent the same way.
 4. **Repeat** steps 2 and 3 until the driver says the rounds are done by printing `stage: "documents"`. Whether another round runs is the driver's decision, not yours: it applies the agent's stopping rule from `agent/lib/review.ts`.
 5. **Documents**, then **checks.** Each of these stages has two tasks; launch both in one message. Run `local` between them.

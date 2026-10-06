@@ -251,10 +251,11 @@ describe('runLocal, local repository', () => {
       maxSeatCalls: 8,
     }
     expect(first.target).toEqual({ baseSha: await git('rev-parse', 'main'), headSha: await git('rev-parse', 'feat/x'), since: null })
-    // The packet: built once, every changed file at HEAD, the required reading, the first thing in every prompt.
-    expect(first.packet).toMatchObject({ full: ['a.ts', 'b.ts'], excerpted: [], omitted: [], missing: [] })
-    expect(pr.packet).toContain('1 | export const a = 2\n')
-    expect(pr.packet).toContain('1 | export const b = 1\n')
+    // The packet: built once, the index of the change and the required reading, the first thing in every prompt; no hunks.
+    expect(first.packet).toMatchObject({ files: 2, areas: { lib: 2 } })
+    expect(pr.packet).toContain('- `a.ts` +1/-1 · lib · a\n')
+    expect(pr.packet).toContain('- `b.ts` +1/-0 · lib · b\n')
+    expect(pr.packet).not.toContain('+export const a = 2')
     expect(pr.packet).toContain(REQUIRED_MD.trim())
     for (const task of first.tasks) {
       expect(task.output).toBe(join(work, 'outputs', `${task.id}.json`))

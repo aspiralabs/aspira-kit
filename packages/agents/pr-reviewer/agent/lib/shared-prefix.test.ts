@@ -10,7 +10,7 @@ const context: ReviewContextFile = {
   pr: { label: 'o/n#1', repoPath: '/workspace/repo', knowledgePath: '/workspace/knowledge', knowledgeRequiredFile: '/workspace/knowledge/REQUIRED.md' },
   packet: '# Review packet: o/n#1\n\npacket\n',
   target: { baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40), since: null },
-  stats: { chars: 30, tokens: 8, full: ['a.ts'], excerpted: [], omitted: [], missing: [] },
+  stats: { chars: 30, tokens: 8, files: 1, areas: { lib: 1 } },
   changedLines: 12,
   personas,
   costSamples: [],

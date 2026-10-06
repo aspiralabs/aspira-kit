@@ -20,8 +20,8 @@ Quinn is independent twice over: it raises nothing, so it has no finding of its 
 
 ## The loop
 
-1. `load-knowledge` puts the org's guidelines in the sandbox. Then `load-pr` puts the tree at `/workspace/repo`, the diff at `/workspace/pr.patch`, the changed paths at `/workspace/changed_files.txt`, and the PR at `/workspace/pr.md`, and builds **the packet** once: the diff, every changed file at HEAD (a file over 40,000 characters as its changed hunks with 60 lines of context), the changed paths, the PR, and `REQUIRED.md`. Every prompt starts with it, so the seats never read a changed file and every call shares one cache prefix.
-2. All six seats review in parallel, each writing its own file for the round. Reads are for unchanged files only, through `read_files` (many files, one call) and `search` (grep with two lines of context), batched, and capped at `MAX_SEAT_CALLS` tool calls a round (default 8); at the cap a seat writes with what it has and lists what it did not read. Then Quinn rules on every finding.
+1. `load-knowledge` puts the org's guidelines in the sandbox. Then `load-pr` puts the tree at `/workspace/repo`, the diff at `/workspace/pr.patch`, the changed paths at `/workspace/changed_files.txt`, and the PR at `/workspace/pr.md`, and builds **the packet** once: an index of the change, not the change. The PR, `REQUIRED.md`, and one line per changed file with its path, added and deleted lines, an area tag from its path (api, db-migration, web-ui, mobile, lib, test, e2e, docs, config, infra) and the symbols its hunks touch. No hunks and no file bodies: on nomnomzz PR #3 (68 files, 12,448 changed lines) it is under 15,000 tokens. Every prompt starts with it, so all seven sessions share one cache prefix.
+2. All six seats review in parallel, each writing its own file for the round. A seat picks the files its lens needs from the index and fetches their hunks with one `read_diff` call and the surrounding code with one `read_files` call (`search` is grep with two lines of context); what it fetches lives in its own context only, and it does not fetch what it will not review. The per-round cap of `MAX_SEAT_CALLS` tool calls (default 8) stays; at the cap a seat writes with what it has and lists what it did not read. Then Quinn rules on every finding, fetching only the files the findings cite.
 3. Next round: each seat reads everyone else's file and Quinn's rulings, and accepts, withdraws, or disputes with evidence. A seat is agreed once Quinn has ruled on its findings, fixed or not.
 4. Stop after a round with no dispute and no new finding, or at the round cap (default 4, max 10), or at the budget (`--max-cost`, or `MAX_COST_USD`): the run stops after the call that crosses it and exports what exists as incomplete.
 5. Nova writes `findings.md`, Dex writes `review.md`, then Quinn signs off the fix list and Nova checks the summary. Both carry the base and head sha the verdict applies to; so does the PR comment.
@@ -93,7 +93,7 @@ agent/
 ├── agent.ts            root agent: routes, never reviews
 ├── instructions.md     system prompt of the root; a seat's system prompt is the shared prefix (dynamic), its persona.md follows in the message of the root; a seat's system prompt is the shared prefix (dynamic), its persona.md follows in the message
 ├── hooks/usage.ts      per-call cost ledger
-├── tools/              load-pr · pr-debator · export-review · comment-on-pr · read_files · search
+├── tools/              load-pr · pr-debator · export-review · comment-on-pr · read_diff · read_files · search
 ├── lib/                pure logic: review.ts (seats, prompts, stopping rule, verdict) · plan.ts (the round plan, no Node builtins: it runs in the workflow body) · packet.ts · loop.ts · pr.ts (sources, git) · target.ts (shas) · budget.ts · call-cap.ts · estimate.ts · usage.ts
 └── subagents/          ava · cole · nova · reba · dex · iris · quinn — all hidden, all sharing the root's sandbox
 ```

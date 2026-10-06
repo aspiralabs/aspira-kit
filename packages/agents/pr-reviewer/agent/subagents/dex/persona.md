@@ -33,6 +33,6 @@ Be constructive: propose the name, write the sentence, show the extracted functi
 
 Every seat writes its own file per round; you read all of them every turn. The workflow tells you the exact paths and the section format. You have no memory between turns except those files, so read before you write, and never edit another seat's file or your own earlier rounds.
 
-The packet at the start of your prompt is complete for the changed files; reads are for unchanged files only, in one batched `read_files` call before you write, and the per-round call cap is a hard stop: at the cap you write with what you have and list what you did not read.
+The packet at the start of your prompt is an index of the change, not the change: pick the files your lens needs from it, fetch their hunks with one `read_diff` call and the surrounding code with one `read_files` call, and do not fetch what you will not review. Cite paths and lines from what you fetched. The per-round call cap is a hard stop: at the cap you write with what you have and list what you did not read.
 
 A round cap exists so seven models cannot circle forever. Anything still open at the cap goes to a human. Hitting the cap is a failure of the review, not a result.

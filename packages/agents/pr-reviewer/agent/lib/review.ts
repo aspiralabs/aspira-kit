@@ -273,7 +273,7 @@ export type PrContext = {
   knowledgeRequiredFile?: string | null
   /** Where the prompts say the files are. The sandbox layout when absent. */
   paths?: WorkspacePaths
-  /** The review packet, built once by load-pr: the first thing in every prompt. Null when none was built. */
+  /** The review packet (the index), built once by load-pr: the first thing in every prompt. Null when none was built. */
   packet?: string | null
   /** The shas the verdict applies to, and the previous head for a re-review. */
   target?: ReviewTarget | null
@@ -305,8 +305,8 @@ const readRules = (pr: PrContext) => {
   const packet = pr.packet === undefined || pr.packet === null
   return `Reading, all seats:
 
-- ${packet ? `Read ${pathsOf(pr).files.patch} and the changed files first.` : 'The packet above is complete for the changed files. Do not read a changed file again. Reads are for unchanged files only: what a changed file calls, who calls it, the test beside it.'}
-- Decide what you need before you read, then make one \`read_files\` call with every path you want, not one call per file. \`search(pattern, globs?)\` finds definitions and callers, with two lines of context. \`read_file\` is for a one-off. Searching with \`rg\` or \`grep -rn\` in a shell counts as a call too.
+- ${packet ? `Read ${pathsOf(pr).files.patch} and the changed files first.` : 'The packet above is an index of the change, not the change: one line per changed file with its area and the symbols its hunks touch. Choose by your lens. A security seat picks the api, db-migration and infra lines and whatever touches auth or input; a design-system seat picks web-ui and mobile; a testing seat picks test and e2e beside the code they cover. Then fetch the hunks of exactly those files with one `read_diff(paths)` call, and the surrounding code you need (what a changed file calls, who calls it, the test beside it) with one `read_files(paths)` call. Do not fetch what you will not review. Cite paths and lines from what you fetched, never from the index alone.'}
+- \`search(pattern, globs?)\` finds definitions and callers, with two lines of context. \`read_file\` is for a one-off. Searching with \`rg\` or \`grep -rn\` in a shell counts as a call too. Decide everything you need before you fetch: one batch each, not a call per file.
 - You have at most ${cap} tool calls this round. At the cap, stop reading: write your round file with what you have and list every path you wanted and did not read under a \`### Not read\` heading.`
 }
 
@@ -377,7 +377,7 @@ const protocol = (who: Seat, round: number, pr: PrContext) => {
   const packet = pr.packet !== undefined && pr.packet !== null
   return `Protocol, every turn:
 
-1. ${packet ? `The packet above is ${files.meta}, ${files.patch} and ${files.changed}; do not read them again.` : `Read ${files.meta}, ${files.patch}, and ${files.changed} in full.`} ${round === 1 ? 'Round 1 has no record yet.' : `Then read every file under ${roundsDir}/ — every seat's rounds and every one of Quinn's verification files — in one \`read_files\` call. Do not rely on memory; the files are the record. \`find ${roundsDir} -type f | sort\` lists them.`}
+1. ${packet ? `The packet above is ${files.meta} and the index of ${files.changed}; the hunks of ${files.patch} come one batch at a time through \`read_diff\`, for the files you chose.` : `Read ${files.meta}, ${files.patch}, and ${files.changed} in full.`} ${round === 1 ? 'Round 1 has no record yet.' : `Then read every file under ${roundsDir}/ — every seat's rounds and every one of Quinn's verification files — in one \`read_files\` call. Do not rely on memory; the files are the record. \`find ${roundsDir} -type f | sort\` lists them.`}
 2. Write ${roundFile(round, who, roundsDir)}. One file, yours alone, this round only. Never edit another seat's file and never edit your own earlier rounds. The shape:
 
 ${sectionShape(who, round, pr)}
@@ -429,7 +429,7 @@ ${protocol(who, round, pr)}`
 }
 
 export function verifyPrompt(round: number, pr: PrContext): string {
-  const { files, roundsDir } = pathsOf(pr)
+  const { roundsDir } = pathsOf(pr)
   const packet = pr.packet !== undefined && pr.packet !== null
   const since = sinceOf(pr)
   const previous =
@@ -439,7 +439,7 @@ export function verifyPrompt(round: number, pr: PrContext): string {
 - This is a re-review of \`${since.sha}\`..\`${pr.target?.headSha ?? ''}\`. Rule on each seat's answer to each previous finding too: \`[ID] fixed — confirmed\` when the line it cites is in the delta and does what the seat says, else \`[ID] still open\`. REJECT a new finding on code the delta does not change, as always.`
   return `You are Quinn, the verification seat for the review of ${pr.label}. You are independent of the six reviewers twice over: they hunt and you check, and you run on a different model family than any of them. You raise no findings of your own. Your job is to keep the list honest. The packet and the review instructions above apply to you in full; the finding rules there are what you hold the seats to.
 
-Read every file under ${roundsDir}/ — all seats, all rounds including your own earlier rulings — in one \`read_files\` call. For every finding that is still open, check the actual code at the path and lines it cites${packet ? ' (a changed file is in the packet; read only what is not)' : ''}, cross-reference it against ${files.patch}, and rule on it. Read the unchanged files you need in one \`read_files\` call before you write.
+Read every file under ${roundsDir}/ — all seats, all rounds including your own earlier rulings — in one \`read_files\` call. For every finding that is still open, check the actual code at the path and lines it cites and cross-reference it against the diff: fetch the hunks of the cited files, and only those, with one \`read_diff\` call, and the cited code at HEAD with one \`read_files\` call, before you write.${packet ? ' The packet above is the index, not the diff; a finding on a path the index does not list is on code the diff does not change.' : ''}
 
 Write ${roundFile(round, 'quinn', roundsDir)}:
 
@@ -485,7 +485,7 @@ export function writeFindingsPrompt(pr: PrContext, agreed: boolean): string {
       : `\`# Findings: ${pr.label}\`,${reviewedSection(pr)} then exactly one totals line in this form: \`Totals: <n> critical · <n> high · <n> medium · <n> low · <n> info\` counting the still-open previous findings and the new ones together. Then \`## Previous findings\`: a table with one row per finding of the previous fix list (${files.previousFindings}), columns ID, severity, state (\`fixed\`, \`still open\`, \`withdrawn\`) and evidence (\`path:line\` for fixed, the reason otherwise), as Quinn ruled them. Then \`## New findings\`: one line saying how many, and \`None.\` when there are none. Then \`## Critical\` / \`## High\` / \`## Medium\` / \`## Low\` / \`## Info\` — skip a heading with nothing under it — holding the still-open previous findings, each marked \`(previous, still open)\`, and the new findings, each marked \`(new)\`, one \`### [ID] <one-line title>\` per finding with, in this order: a \`**What this means:**\` line (${WHAT_THIS_MEANS_RULE}), then location as \`path:line\`, what is wrong, the evidence quoted from the diff, the fix, who raised it, and Quinn's ruling in a few words. Fixed and withdrawn findings appear only in the table.`
   return `You are Nova. The review of ${pr.label} is over. Write the fix list.
 
-Read ${files.patch}, ${files.changed}, and every file under ${roundsDir}/ in full${pr.packet === undefined || pr.packet === null ? '' : ' (the first two are in the packet above; the round files in one `read_files` call)'}, then write ${files.findings}: what this PR has to fix, settled, deduplicated, in severity order.
+Read every file under ${roundsDir}/ in full${pr.packet === undefined || pr.packet === null ? ` and ${files.patch} and ${files.changed}` : ' (one `read_files` call; the index of the change is in the packet above, and the hunks of the files the findings cite come from one `read_diff` call)'}, then write ${files.findings}: what this PR has to fix, settled, deduplicated, in severity order.
 
 Shape:
 
@@ -510,7 +510,7 @@ export function writeReviewPrompt(pr: PrContext, agreed: boolean): string {
   const again = since === null ? '' : ` Say in the first sentence that this was a re-review of \`${since.sha}\`..\`${pr.target?.headSha ?? ''}\`, and add \`## Previous findings\` before the fix sections: one line per previous finding, fixed, still open or withdrawn.`
   return `You are Dex. The review of ${pr.label} is over. Write the summary the author reads first.
 
-Read ${files.meta}, ${files.patch}, and every file under ${roundsDir}/ in full${pr.packet === undefined || pr.packet === null ? '' : ' (the first two are in the packet above; the round files in one `read_files` call)'}, then write ${files.review}: plain English, for the person who opened this PR and will not read the transcript.
+Read every file under ${roundsDir}/ in full${pr.packet === undefined || pr.packet === null ? ` and ${files.meta} and ${files.patch}` : ' (one `read_files` call; the pull request and the index of the change are in the packet above, and the hunks of the files the findings cite come from one `read_diff` call)'}, then write ${files.review}: plain English, for the person who opened this PR and will not read the transcript.
 
 Sections:
 
@@ -540,7 +540,7 @@ export function checkFindingsPrompt(pr: PrContext): string {
   const previous = since === null ? '' : `\n- The \`## Previous findings\` table has one row per finding in ${files.previousFindings}, in the state you ruled, and a \`fixed\` row cites a line the delta changes.`
   return `You are Quinn. Nova has written ${files.findings} for the review of ${pr.label}. Sign it off.
 
-Read ${files.patch}, ${files.changed}, every file under ${roundsDir}/, and then ${files.findings}${pr.packet === undefined || pr.packet === null ? '' : ' (the first two are in the packet above; the rest in one `read_files` call)'}. Check that:
+Read every file under ${roundsDir}/ and then ${files.findings}${pr.packet === undefined || pr.packet === null ? `, with ${files.patch} and ${files.changed}` : ' (one `read_files` call; the index of the change is in the packet above, and the hunks of the files the entries cite come from one `read_diff` call)'}. Check that:
 
 - Every entry cites a path the diff actually changes.
 - Every severity is where it finally landed after your rulings, not where it started.
