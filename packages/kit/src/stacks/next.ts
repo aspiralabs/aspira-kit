@@ -185,7 +185,7 @@ function agentFiles(opts: InitOptions): void {
 function specs(opts: InitOptions): void {
   writeIfAbsent(
     join(opts.projectRoot, 'specs', 'README.md'),
-    '# Specs\n\nOne file per feature: intent, constraints, acceptance criteria, out of scope, expected blast radius. Status approved before any code. See the kit constraints.\n',
+    '# Specs\n\nOne folder per ticket: `specs/<id>-<slug>/` with `idea.md`, `spec.md`, `spec.reviewed/` and `plan.review/`. `<id>` is the Feature Board ticket ID in lower case. The ticket in Notion is the record; this folder is the working copy. Commit the markdown; never commit `trace/`, `guidelines/`, `knowledge/` or `*.local/`. No spec, no code: see `node_modules/@aspiralabs/config/agent/AGENTS.md`.\n',
     opts.log,
     opts.dryRun,
   )
