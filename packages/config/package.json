@@ -1,14 +1,13 @@
 {
   "name": "@aspiralabs/config",
   "version": "0.4.2",
-  "description": "Aspira Labs shared config: eslint, tsconfig, prettier, and agent config, as subpath exports.",
+  "description": "Aspira Labs shared config: eslint, tsconfig and prettier, as subpath exports.",
   "type": "module",
   "license": "MIT",
   "files": [
     "eslint",
     "tsconfig",
     "prettier",
-    "agent",
     "README.md"
   ],
   "exports": {
@@ -18,8 +17,7 @@
     "./tsconfig/base.json": "./tsconfig/base.json",
     "./tsconfig/next.json": "./tsconfig/next.json",
     "./tsconfig/library.json": "./tsconfig/library.json",
-    "./prettier": "./prettier/index.js",
-    "./agent/*": "./agent/*"
+    "./prettier": "./prettier/index.js"
   },
   "scripts": {
     "build": "echo '@aspiralabs/config has no build step'",

@@ -18,4 +18,4 @@ export default next
 export { default } from '@aspiralabs/config/prettier'
 ```
 
-`agent/` holds the org's knowledge and the pipeline's plumbing: `constraints.md`, `guides/`, `pitfalls.md`, `slop-register.md`, `decisions.md`, `hooks/`, `personas/`, `templates/`. `kit init` copies the templates into a project and points the hooks at this package in `node_modules`.
+The engineering rules live in Notion (Engineering Central). This package carries no agent files; the `AGENTS.md` block, the MCP config and the session hooks are written by `@aspiralabs/kit`.

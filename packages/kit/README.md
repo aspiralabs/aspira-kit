@@ -53,10 +53,10 @@ Puts a Next.js project on the kit. `next` is the only stack so far.
 | `AGENTS.md` | Writes or replaces the block between `<!-- aspiralabs:begin -->` and `<!-- aspiralabs:end -->`. Everything outside it is yours and is kept |
 | `CLAUDE.md` | `@AGENTS.md`, if the file doesn't exist |
 | `.mcp.json` | Registers the `aspiralabs-ui` docs server, merged into your servers |
-| `.claude/settings.json` | Adds the session-start, deny-tier3 and audit-log hooks, merged into your settings |
-| `specs/README.md` | The specs folder, if it doesn't exist |
+| `.claude/settings.json` | Adds the session-start, deny-tier3 and audit-log hooks (from `node_modules/@aspiralabs/kit/hooks/`), merged into your settings; entries pointing at the retired `@aspiralabs/config/agent/hooks/` path are dropped |
+| `.gitignore` | Adds `.work/`, the per-ticket working folder, if missing |
 
-The `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and hook templates come from the installed `@aspiralabs/config`, so re-running `init` after an upgrade brings them up to that version.
+The `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and settings templates ship in this package (`templates/agent/`), and the hooks in `hooks/`, so re-running `init` after an upgrade brings them up to that version. The managed `AGENTS.md` block and the session-start hook only point at the rules in Notion; they restate none.
 
 ## `kit add auth`
 
