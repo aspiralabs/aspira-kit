@@ -1,8 +1,10 @@
 import { parseArgs } from 'node:util'
+import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
 import { runLocal } from '../agent/lib/local.ts'
 
 // One step of a --local plan. Prints the knowledge stage, the next phase's task (prompt and output
 // file), or, once both phases are done, the exported plan. --finish exports what exists as incomplete.
+// Every step names the agent package that ran (`agent`), and an export records it in its trace.
 const usage = 'Usage: pnpm run plan:local <absolute-spec> <absolute-repo> [--output DIR] [--guidelines REQUIRED.md] [--finish]'
 
 try {
@@ -12,6 +14,7 @@ try {
   })
   const [specPath, repoPath, ...extra] = positionals
   if (specPath === undefined || repoPath === undefined || extra.length > 0) throw new Error(usage)
+  const agent = await agentVersion(new URL('..', import.meta.url))
   const result = await runLocal({
     specPath,
     repoPath,
@@ -19,7 +22,8 @@ try {
     ...(values.guidelines === undefined ? {} : { guidelinesPath: values.guidelines }),
     finish: values.finish === true,
   })
-  console.log(JSON.stringify(result, null, 2))
+  if (!result.pending) await recordAgentVersion(result.dir, agent)
+  console.log(JSON.stringify({ ...result, agent }, null, 2))
   if (!result.pending && result.status !== 'ready') process.exitCode = 1
 } catch (error) {
   console.error(`planner local: ${error instanceof Error ? error.message : String(error)}`)

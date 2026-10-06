@@ -1,6 +1,6 @@
 # Running the agents
 
-Copy-paste commands for every agent in this directory. All of them assume the `agent` shell function from `README.md` is in your `~/.zshrc`:
+In a project on the kit, run the agents through their skills: `/aspira-<agent>` in Claude Code, installed by `kit init` from `@aspiralabs/agents`. The commands below are for working on the agents in this checkout. They assume the `agent` shell function from `README.md` is in your `~/.zshrc` (`ASPIRA_KIT` is only this function's variable; the skill launchers do not read it):
 
 ```bash
 export ASPIRA_KIT="$HOME/path/to/ASPIRA_KIT"

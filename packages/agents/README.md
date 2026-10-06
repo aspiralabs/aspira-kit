@@ -5,7 +5,7 @@ All agents run without application wall-clock cutoffs, including preparation, mo
 The tracked `@modelcontextprotocol/sdk` patch in `patches/` adds `timeout: false` for agent MCP requests; omitted timeouts keep the SDK default for other consumers. Keep its regression tests passing when upgrading the SDK.
 
 
-Aspira Labs agents, built on [eve](https://vercel.com/eve). One package per agent, all repo-local: not published, not installed by `kit`.
+Aspira Labs agents, built on [eve](https://vercel.com/eve). One package per agent, published to GitHub Packages at the kit's version and installed into a project by `kit init` through `@aspiralabs/agents` (`meta/`). A project runs the installed packages from `node_modules`; this checkout is for developing the kit.
 
 | Package | Agent | Spec | State |
 | --- | --- | --- | --- |
@@ -25,13 +25,11 @@ Spec: `specs/agents-skill-pattern.md`. Every agent a person runs (spec-writer, s
 - **Notion rules on every path.** The agent loads them with `load-knowledge`, or takes a `--guidelines` `REQUIRED.md` snapshot. In `--local`, the first stage is `knowledge`, which lists the exact pages the agent's own configuration would load: `KNOWLEDGE_PAGE`, the `KNOWLEDGE_REQUIRED` pages, and the topic pages they route to. The session fetches them with the Notion MCP into `<work>/knowledge/` (`REQUIRED.md`, `INDEX.md`, one file per page), or `--guidelines` stands in. The driver refuses to start without them, and the export records which rules were used.
 - **`SKILL.md` is mechanics only.** It says which command to run, how to launch the tasks, and what to report, and it names `agent/instructions.md` (or the agent's procedure file) as the authority. Each skill has a test that the agent's key rule sentences are absent from `SKILL.md`.
 
-Install a skill once per machine. Claude Code reads `~/.claude/skills/`, so link each skill there from the kit:
+A project gets the skills from `kit init`, which copies each installed package's `skill/aspira-<agent>/` into the project's `.claude/skills/aspira-<agent>/` with a `.kit-version`; they are committed, and `kit doctor` fails when one is missing or from another version. The launcher resolves its agent as `<AGENT>_AGENT_DIR` (kit development only; the run says so), then the `@aspiralabs/<agent>` installed under the project (walking up from the working directory, then from the launcher's own location; with pnpm the agents sit beside `@aspiralabs/agents` in the store), then its own package. `$ASPIRA_KIT` is not consulted. A launcher that lands on a checkout prints one line saying it is running kit source, and every run reports the package version it ran and records it in `trace/agent-version.json`.
 
-```bash
-for a in spec-writer spec-reviewer planner implementor code-analyzer pr-reviewer; do
-  ln -sfn "$ASPIRA_KIT/packages/agents/$a/skill/aspira-$a" ~/.claude/skills/aspira-$a
-done
-```
+The agents are TypeScript run straight from source. Node refuses to strip types under `node_modules`, so each launcher loads `amaro` (Node's own type stripper, a dependency of every agent) as a module hook. The agent's environment is the project's `.env.local`, then the agent's own `.env.local` and `.env.development.local` (kit development); a variable already in the shell wins.
+
+To develop an agent against a project, set `<AGENT>_AGENT_DIR` to the package in your checkout (for example `PLANNER_AGENT_DIR=$PWD/packages/agents/planner`) and run the project's skill. The old `~/.claude/skills/aspira-*` symlinks are retired; the kit README says how to remove them.
 
 A new agent follows the same pattern: a skill directory, a launcher with `start`/`status`/`wait`/`local`, a `local` driver that reads the agent's own files, a knowledge stage, and the tests from F5 of the spec.
 
@@ -105,16 +103,16 @@ Package scripts (`dev`, `info`, `typecheck`, `lint`) need no `exec`: `pnpm -C <d
 
 1. Write the spec first (`specs/agents-<name>.md`). Rule zero (Engineering Central › Agent Instructions in Notion): no spec, no code.
 2. `mkdir packages/agents/<name>` and copy `package.json`, `tsconfig.json`, `eslint.config.mjs`, `.gitignore`, and `.env.example` from an existing agent, plus an `agent/` with `agent.ts`, `instructions.md`, and `channels/eve.ts`. Then edit `package.json` (name `@aspiralabs/<name>`, version `0.1.0`, description). Take the agent whose shape is closer to what you are building.
-3. Add `@aspiralabs/<name>` to `ignore` in `.changeset/config.json`. Repo-local packages are never versioned by the release flow, and a package missing from that list breaks `changeset version`.
+3. Add `@aspiralabs/<name>` to the `fixed` group in `.changeset/config.json`, to `dependencies` of `meta/package.json` (`workspace:*`), to the `AGENTS` list in `packages/kit/src/skills.ts`, and give its `package.json` the `files`, `repository` and `publishConfig` of the others, plus `amaro` as a dependency. A package missing from the fixed group or the meta-package is not released or installed with the rest.
 4. `pnpm install`, then `pnpm --filter @aspiralabs/<name> exec eve info` to confirm eve discovers it with 0 diagnostics.
 5. `cp .env.example .env.local` in the new package and put an AI Gateway key in it. Every package needs its own; `.env.local` is gitignored.
 6. Add its skill as **Skills** above describes: `skill/aspira-<name>/` with `SKILL.md` and `scripts/<name>.sh`, plus a `--local` driver and its tests.
 
-Root `typecheck` and `lint` (`pnpm -r`) pick the package up for free. Root `build` and `test` filter on `./packages/*` and skip it.
+Root `typecheck`, `lint` and `test` (which packs every package) pick the package up for free. Root `build` filters on `./packages/*` and skips it.
 
 ## Shared conventions
 
-Every agent package looks the same from the outside: `dev`, `build`, `typecheck`, `lint`, `info` scripts; `@aspiralabs/config` for eslint and tsconfig; `private: true`; Node 24.
+Every agent package looks the same from the outside: `dev`, `build`, `typecheck`, `lint`, `info` scripts; `@aspiralabs/config` for eslint and tsconfig; published with `files: agent, skill, scripts`; Node 24.
 
 Inside `agent/`, the convention `spec-reviewer` sets and the next agent should follow:
 
@@ -132,7 +130,7 @@ Agents do not import each other. Shared logic that two agents need goes in `@asp
 
 ## Shared secrets: `packages/agents/.env.local`
 
-One env file for every agent. Each agent's `.env.local` is a symlink to `packages/agents/.env.local`, and eve loads it from the agent's folder as usual. `packages/agents/.env.example` lists the keys: the AI Gateway key, an optional GitHub token, and the Notion connection token and guidelines page for `load-knowledge`. An agent-specific override goes in `<agent>/.env.development.local`, which eve loads with higher priority; a shell variable on the command line beats both. A new agent joins with `ln -s ../.env.local <agent>/.env.local`.
+In a project, the agents read the project's own `.env.local` (the launcher passes it to Node), so one file serves every agent there. In this checkout, one env file for every agent. Each agent's `.env.local` is a symlink to `packages/agents/.env.local`, and eve loads it from the agent's folder as usual. `packages/agents/.env.example` lists the keys: the AI Gateway key, an optional GitHub token, and the Notion connection token and guidelines page for `load-knowledge`. An agent-specific override goes in `<agent>/.env.development.local`, which eve loads with higher priority; a shell variable on the command line beats both. A new agent joins with `ln -s ../.env.local <agent>/.env.local`.
 
 ## Shared tools: `packages/agents/common`
 
