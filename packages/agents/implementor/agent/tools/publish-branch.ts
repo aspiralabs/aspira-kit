@@ -2,10 +2,11 @@ import { defineTool } from 'eve/tools'
 import { z } from 'zod'
 import { checkout } from '../lib/checkout-state.ts'
 import { pushCommand, pushGuard, redact, shellQuote } from '../lib/github.ts'
+import { verification } from '../lib/verification-state.ts'
 
 export default defineTool({
   availableInSubagents: false,
-  description: 'Push the branch checkout-repo created, and open a draft pull request against its base when pullRequest is true (only when the request asked for one). Call once at the end, after final verification and after implementation.md is committed, including for partial or blocked builds so the work is not lost. Never pushes any other branch.',
+  description: 'Push the branch checkout-repo created, and open a draft pull request against its base when pullRequest is true (only when the request asked for one). Call once at the end, after record-verification and after implementation.md is committed, including for partial or blocked builds so the work is not lost. Refuses to run before record-verification. Never pushes any other branch.',
   inputSchema: z.object({
     pullRequest: z.boolean().describe('Also open a draft pull request. True only when the request asked for a pull request.'),
     title: z.string().min(1).describe('Pull request title, e.g. "feat: <feature>".'),
@@ -14,6 +15,7 @@ export default defineTool({
   async execute({ pullRequest, title, body }, ctx) {
     const state = checkout.get()
     if (!state) throw new Error('Nothing to publish: call checkout-repo first')
+    if (!verification.get()) throw new Error('No final verification recorded: call record-verification first with the feature table, dependenciesAdded, notesRewritten and slopEntries (or slopJustification)')
     const token = process.env.GITHUB_TOKEN?.trim() || undefined
     if (!token) throw new Error('GITHUB_TOKEN is not set; cannot push or open a pull request')
     const sandbox = await ctx.getSandbox()
