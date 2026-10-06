@@ -61,13 +61,14 @@ export type Board = {
 }
 
 export class BoardError extends Error {
-  constructor(
-    message: string,
-    readonly status?: number,
-    readonly code?: string,
-  ) {
+  readonly status: number | undefined
+  readonly code: string | undefined
+  // Plain fields, not parameter properties: the agents run their TypeScript through amaro in strip-only mode, which refuses those.
+  constructor(message: string, status?: number, code?: string) {
     super(message)
     this.name = 'BoardError'
+    this.status = status
+    this.code = code
   }
 }
 
