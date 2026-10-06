@@ -1,5 +1,12 @@
 # @aspiralabs/spec-writer
 
+## 0.5.4
+
+### Patch Changes
+
+- @aspiralabs/agent-common@0.5.4
+- @aspiralabs/spec-reviewer@0.5.4
+
 ## 0.5.3
 
 ### Patch Changes
