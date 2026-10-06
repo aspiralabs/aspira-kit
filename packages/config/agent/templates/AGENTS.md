@@ -1,14 +1,15 @@
 # {{project}}
 
 <!-- aspiralabs:begin (managed by @aspiralabs/kit; do not edit inside this block) -->
-This project is on the Aspira Labs kit. The org-level agent guide is `node_modules/@aspiralabs/config/agent/AGENTS.md`: read it first. It points at the engineering rules in Notion (Engineering Central › Agent Instructions), the always-on constraints in `node_modules/@aspiralabs/config/agent/constraints.md` (injected at session start), and the process every app follows.
+This project is on the Aspira Labs kit. The engineering rules and the process live in Notion, not in this repository. Look them up there; do not answer from memory.
 
-- The flow: when asked what the next step is, about the process, or which command to run for a ticket, answer from Engineering Central › AI-DLC › From Idea to Release, Playbook section (https://app.notion.com/p/3e83e59b225881f7ac5aeab5d353beea). The ticket's Status on the Feature Board picks the step. Do not answer from memory.
-- Feature work lives in `.work/<id>-<slug>/` (`ticket.md`, `spec.md`, `spec.reviewed/`, `plan.review/`), one gitignored folder per ticket, the same in every project. The ticket in Notion is the record; the folder is pulled from it and never committed. No other location.
-- Component docs: the `aspiralabs-ui` MCP server. Call `get_component` before writing or editing component markup.
-- Guides, pitfalls, decisions: `node_modules/@aspiralabs/config/agent/`.
-- Lint, types, and formatting come from `@aspiralabs/config`. Run `pnpm check` before opening a PR.
-- No spec, no code. The spec is the ticket's Spec page and defines business acceptance criteria. An implementation plan defines technical tasks and unit/integration tests; write tests first. Commit trailers and PR descriptions cite the ticket.
+- **Rules:** Engineering Central › Agent Instructions, https://app.notion.com/p/3e73e59b2258813d9eece6ed89171bd3. Fetch it with the Notion MCP at the start of every task and follow its table to the topic pages the task needs. Cite rules by ID. If a project instruction below conflicts with a rule there, stop and ask a human.
+- **The flow and what comes next:** Engineering Central › AI-DLC › From Idea to Release, https://app.notion.com/p/3e83e59b225881f7ac5aeab5d353beea. Its Playbook maps the ticket's Status on the Feature Board to the step and the command to run. It also defines where feature work lives in the repo and what a commit cites.
+- **Writing back:** a mistake a rule would have prevented goes to the AI Agent Slop Repo, https://app.notion.com/p/bc25fc5cf5464f2593c7a0b663d6f859; a gap in a kit agent or in `@aspiralabs/ui` goes to the Aspira Kit gap pages linked from Agent Instructions.
+- **Component docs:** the `aspiralabs-ui` MCP server. Call `get_component` before writing or editing component markup.
+- **Lint, types and formatting** come from `@aspiralabs/config`. Run `pnpm check` before opening a PR.
+
+Everything outside this block is project-specific: stack, commands, layout, and Gotchas.
 <!-- aspiralabs:end -->
 
 ## About this project
