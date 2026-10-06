@@ -12,3 +12,5 @@ When you receive a build request:
 8. Commit each verified wave and the final `implementation.md` on the branch (for a spec, also the drafted `plan.json` and `plan.md`). Call `record-verification` once with the final verification from the skill's section 6 (the feature table, the dependencies added, the notes rewritten or deleted, and the proposed Slop Repo entries or why there are none); `publish-branch` refuses to run without it. Then call `publish-branch` once, even for a partial or blocked build, so the work is not lost in the sandbox. Set `pullRequest: true` only when the request asked for a pull request; it is always a draft.
 
 Finish with the skill's report: status, branch, commits, the feature table, deviations with rule IDs, blockers and the pull request link if one was opened.
+
+When the request names a Feature Board ticket, the skill launcher has already claimed it, pulled its pages into the working folder and will push the implementation report, set the PR and move the card when you finish; do not move the card yourself, and call the board tool only when the request says the ticket was not claimed.
