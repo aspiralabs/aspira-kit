@@ -232,3 +232,49 @@ it('resolves the agent in order: IMPLEMENTOR_AGENT_DIR, the package installed un
   expect((await captured())[3]).toBe(join(root, 'scripts/local.ts'))
   expect(override.stderr).toContain(`IMPLEMENTOR_AGENT_DIR is set: running kit source at ${root}`)
 })
+
+it('resolves the agent under the app named in the root aspira.json: a multi-app repository where Claude Code runs at the root and apps/web owns node_modules', async () => {
+  const { dir, env, captured } = await stubs()
+  const local = { ...env, AI_GATEWAY_API_KEY: '' }
+  // nomnomzz: no root package.json; apps/web has package.json and a pnpm node_modules with the agents beside @aspiralabs/agents.
+  const repo = join(dir, 'nomnomzz')
+  const web = join(repo, 'apps/web')
+  const store = join(web, 'node_modules/.pnpm/@aspiralabs+agents@9.9.9/node_modules')
+  const installed = join(store, '@aspiralabs/implementor')
+  for (const [name, path] of [['@aspiralabs/agents', join(store, '@aspiralabs/agents')], ['@aspiralabs/implementor', installed]] as const) {
+    await mkdir(path, { recursive: true })
+    await writeFile(join(path, 'package.json'), JSON.stringify({ name, version: '9.9.9' }, null, 2))
+  }
+  await mkdir(join(installed, 'scripts'))
+  await writeFile(join(installed, 'scripts/local.ts'), '')
+  await mkdir(join(store, 'amaro/dist'), { recursive: true })
+  await writeFile(join(store, 'amaro/dist/register-strip.mjs'), '')
+  await mkdir(join(web, 'node_modules/@aspiralabs'), { recursive: true })
+  await symlink(join(store, '@aspiralabs/agents'), join(web, 'node_modules/@aspiralabs/agents'))
+  await writeFile(join(web, 'package.json'), '{"name":"web"}')
+  await writeFile(join(web, '.env.local'), 'NOTION_TOKEN=x\n')
+  await mkdir(join(repo, 'specs'))
+  await writeFile(join(repo, 'specs/x.md'), '# X\n')
+  // What kit init --app apps/web writes at the root: aspira.json with the app, and the skill copy.
+  await writeFile(join(repo, 'aspira.json'), JSON.stringify({ board: 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6', app: 'apps/web' }, null, 2))
+  const copy = join(repo, '.claude/skills/aspira-implementor/scripts/implementor.sh')
+  await cp(launcher, copy)
+  const fromRoot = await exec('bash', [copy, 'local', 'specs/x.md', '--no-ticket'], { cwd: repo, env: local })
+  expect(await captured()).toEqual(['--import', join(store, 'amaro/dist/register-strip.mjs'), '--experimental-strip-types', join(installed, 'scripts/local.ts'), '--repo', repo, '--no-ticket', join(repo, 'specs/x.md')])
+  expect(fromRoot.stderr).not.toContain('kit source')
+  // The project the agent serves is the app: its .env.local is the one loaded.
+  const raw = (await readFile(join(dir, 'arguments'), 'utf8')).split('---\n').filter((block) => block.trim() !== '').at(-1)!
+  expect(raw.split('\n')).toContain(`--env-file=${join(web, '.env.local')}`)
+  // From inside the app too, and from a subdirectory of the root; the kit-development override still wins.
+  await exec('bash', [copy, 'local', '../../specs/x.md', '--no-ticket'], { cwd: web, env: local })
+  expect((await captured())[3]).toBe(join(installed, 'scripts/local.ts'))
+  const override = await exec('bash', [copy, 'local', 'specs/x.md', '--no-ticket'], { cwd: repo, env: { ...local, IMPLEMENTOR_AGENT_DIR: root } })
+  expect((await captured())[3]).toBe(join(root, 'scripts/local.ts'))
+  expect(override.stderr).toContain('IMPLEMENTOR_AGENT_DIR is set')
+  // An aspira.json without app (a single-app project) changes nothing: the walk-up from the working directory decides,
+  // so from inside the app the package is found, and from the root (no node_modules there) it is reported missing.
+  await writeFile(join(repo, 'aspira.json'), JSON.stringify({ board: 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6' }))
+  await exec('bash', [copy, 'local', '../../specs/x.md', '--no-ticket'], { cwd: web, env: local })
+  expect((await captured())[3]).toBe(join(installed, 'scripts/local.ts'))
+  await expect(exec('bash', [copy, 'local', 'specs/x.md', '--no-ticket'], { cwd: repo, env: local })).rejects.toThrow('cannot find @aspiralabs/implementor: install @aspiralabs/agents in the project (kit init)')
+})

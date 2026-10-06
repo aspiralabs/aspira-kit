@@ -1,13 +1,21 @@
 // The Next.js profile. Each step is idempotent: run init twice, get the same project.
+// Two directories: `projectRoot`, where Claude Code runs and the Claude-facing files go (AGENTS.md,
+// CLAUDE.md, .mcp.json, .claude/, aspira.json, .gitignore), and the app that owns package.json and
+// node_modules, where the package steps go (.npmrc, the install, eslint, prettier, tsconfig, css).
+// They are the same directory unless `--app <dir>` says otherwise (apps/web in a multi-app repository).
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join, basename } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { deepMerge, readJson, writeIfAbsent, writeJson, type Log } from '../fs.js'
-import { writeAspira } from '../aspira.js'
+import { appRoot, normalizeApp, writeAspira } from '../aspira.js'
+import { mcpServer } from '../doctor.js'
 import { AGENTS_PACKAGE, installSkills } from '../skills.js'
 
-export type InitOptions = { projectRoot: string; dryRun: boolean; log: Log; board?: string; releases?: string }
+export type InitOptions = { projectRoot: string; app?: string; dryRun: boolean; log: Log; board?: string; releases?: string }
+
+/** The options with `app` normalized (undefined for the root itself) and the app directory resolved. */
+type Resolved = InitOptions & { app: string | undefined; appDir: string }
 
 const DEPS = ['@aspiralabs/ui']
 const DEV_DEPS = ['@aspiralabs/config', '@aspiralabs/kit', AGENTS_PACKAGE, 'eslint', 'prettier', 'typescript']
@@ -75,8 +83,8 @@ const NPMRC = `@aspiralabs:registry=https://npm.pkg.github.com
 // GitHub Packages needs the scope mapped (here, committed) and a token (in the
 // user's ~/.npmrc, never in the project). pnpm 12 does not expand ${VAR} in
 // .npmrc, so the token line cannot live in a committed file.
-function npmrc(opts: InitOptions): void {
-  const path = join(opts.projectRoot, '.npmrc')
+function npmrc(opts: Resolved): void {
+  const path = join(opts.appDir, '.npmrc')
   if (existsSync(path)) {
     const current = readFileSync(path, 'utf8')
     if (current.includes('@aspiralabs:registry')) {
@@ -95,7 +103,7 @@ function npmrc(opts: InitOptions): void {
   }
 }
 
-function ensureToken(opts: InitOptions): void {
+function ensureToken(opts: Resolved): void {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? ''
   const userRc = join(home, '.npmrc')
   if (existsSync(userRc) && readFileSync(userRc, 'utf8').includes('npm.pkg.github.com/:_authToken')) {
@@ -105,9 +113,9 @@ function ensureToken(opts: InitOptions): void {
   opts.log('       //npm.pkg.github.com/:_authToken=<classic token with read:packages>')
 }
 
-function install(opts: InitOptions): void {
+function install(opts: Resolved): void {
   ensureToken(opts)
-  const pm = packageManager(opts.projectRoot)
+  const pm = packageManager(opts.appDir)
   const add = pm === 'yarn' ? 'add' : pm === 'npm' ? 'install' : 'add'
   const devFlag = pm === 'npm' ? '--save-dev' : '-D'
   const cmds = [
@@ -119,14 +127,14 @@ function install(opts: InitOptions): void {
     if (opts.dryRun) {
       continue
     }
-    let res = runAdd(cmd, opts.projectRoot)
+    let res = runAdd(cmd, opts.appDir)
     // Each add can surface another dependency with a build script; approve and retry, a few times at most.
     for (let attempt = 0; res.status !== 0 && pm === 'pnpm' && attempt < 5; attempt += 1) {
-      const approved = approveIgnoredBuilds(res.output, join(opts.projectRoot, 'pnpm-workspace.yaml'))
+      const approved = approveIgnoredBuilds(res.output, join(opts.appDir, 'pnpm-workspace.yaml'))
       if (approved.length === 0) break
-      opts.log(`update ${join(opts.projectRoot, 'pnpm-workspace.yaml')} (allowBuilds: ${approved.join(', ')})`)
+      opts.log(`update ${join(opts.appDir, 'pnpm-workspace.yaml')} (allowBuilds: ${approved.join(', ')})`)
       opts.log(`run    ${cmd.join(' ')} (again, with those builds approved)`)
-      res = runAdd(cmd, opts.projectRoot)
+      res = runAdd(cmd, opts.appDir)
     }
     if (res.status !== 0) {
       throw new Error(`${cmd.join(' ')} failed`)
@@ -142,16 +150,16 @@ function runAdd(cmd: string[], cwd: string): { status: number | null; output: st
   return { status: res.status, output }
 }
 
-function eslint(opts: InitOptions): void {
-  writeIfAbsent(join(opts.projectRoot, 'eslint.config.mjs'), "import next from '@aspiralabs/config/eslint/next'\n\nexport default next\n", opts.log, opts.dryRun)
+function eslint(opts: Resolved): void {
+  writeIfAbsent(join(opts.appDir, 'eslint.config.mjs'), "import next from '@aspiralabs/config/eslint/next'\n\nexport default next\n", opts.log, opts.dryRun)
 }
 
-function prettier(opts: InitOptions): void {
-  writeIfAbsent(join(opts.projectRoot, 'prettier.config.mjs'), "export { default } from '@aspiralabs/config/prettier'\n", opts.log, opts.dryRun)
+function prettier(opts: Resolved): void {
+  writeIfAbsent(join(opts.appDir, 'prettier.config.mjs'), "export { default } from '@aspiralabs/config/prettier'\n", opts.log, opts.dryRun)
 }
 
-function tsconfig(opts: InitOptions): void {
-  const path = join(opts.projectRoot, 'tsconfig.json')
+function tsconfig(opts: Resolved): void {
+  const path = join(opts.appDir, 'tsconfig.json')
   const current = readJson<Record<string, unknown>>(path) ?? {}
   if (current.extends === '@aspiralabs/config/tsconfig/next.json') {
     opts.log(`keep   ${path} (already extends the kit)`)
@@ -171,14 +179,14 @@ function tsconfig(opts: InitOptions): void {
   }
 }
 
-function css(opts: InitOptions): void {
+function css(opts: Resolved): void {
   const candidates = ['app/globals.css', 'src/app/globals.css', 'styles/globals.css']
-  const rel = candidates.find((c) => existsSync(join(opts.projectRoot, c)))
+  const rel = candidates.find((c) => existsSync(join(opts.appDir, c)))
   if (!rel) {
-    opts.log('skip   globals.css not found; add the tokens import and @source line by hand')
+    opts.log(`skip   globals.css not found${opts.app ? ` in ${opts.app}` : ''}; add the tokens import and @source line by hand`)
     return
   }
-  const path = join(opts.projectRoot, rel)
+  const path = join(opts.appDir, rel)
   const text = readFileSync(path, 'utf8')
   if (text.includes('@aspiralabs/ui/tokens.css')) {
     opts.log(`keep   ${path} (tokens already imported)`)
@@ -195,26 +203,32 @@ function css(opts: InitOptions): void {
   }
 }
 
-// Hooks used to live in @aspiralabs/config; a project wired before that still names them, and the merge keeps arrays.
-function dropRetiredHooks(settings: Record<string, unknown>): Record<string, unknown> {
+// The kit's own hook groups are replaced, not merged: a group from an earlier kit (the retired
+// @aspiralabs/config path, or the hooks under another app directory) would otherwise stay beside
+// the current one, since the merge keeps arrays. Everything else in the settings is the project's.
+function dropKitHooks(settings: Record<string, unknown>): Record<string, unknown> {
   const hooks = settings.hooks
   if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
     return settings
   }
-  const retired = (entry: unknown): boolean => JSON.stringify(entry).includes('@aspiralabs/config/agent/hooks/')
+  const kit = (entry: unknown): boolean => /@aspiralabs\/(config\/agent|kit)\/hooks\//.test(JSON.stringify(entry))
   const next: Record<string, unknown> = {}
   for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
-    next[event] = Array.isArray(groups) ? groups.filter((g) => !retired(g)) : groups
+    next[event] = Array.isArray(groups) ? groups.filter((g) => !kit(g)) : groups
   }
   return { ...settings, hooks: next }
 }
 
-function agentFiles(opts: InitOptions): void {
+function agentFiles(opts: Resolved): void {
   // Templates ship with this package (templates/agent/), so a project gets the version of the kit it installed.
+  // `{{app}}` is the app directory with a trailing slash, or nothing: the paths in the written files are
+  // relative to the project root, where Claude Code runs them.
   const templatesDir = fileURLToPath(new URL('../../templates/agent/', import.meta.url))
+  const appPrefix = opts.app ? `${opts.app}/` : ''
+  const appLine = opts.app ? `- **The app:** \`${opts.app}\` owns \`package.json\` and \`node_modules\`; run package commands (install, lint, test, check) there. Claude Code runs at this root.\n` : ''
   const tpl = (name: string, fallback: string): string => {
     const p = join(templatesDir, name)
-    return existsSync(p) ? readFileSync(p, 'utf8') : fallback
+    return (existsSync(p) ? readFileSync(p, 'utf8') : fallback).replaceAll('{{app}}', appPrefix).replaceAll('{{app-line}}\n', appLine)
   }
   const project = basename(opts.projectRoot)
 
@@ -240,39 +254,57 @@ function agentFiles(opts: InitOptions): void {
 
   writeIfAbsent(join(opts.projectRoot, 'CLAUDE.md'), tpl('CLAUDE.md', '@AGENTS.md\n'), opts.log, opts.dryRun)
 
+  // .mcp.json: the aspiralabs-ui entry is the kit's and is replaced whole (npx finds the bin from the
+  // root's node_modules; with an app, node runs the installed package's server from the app's). The
+  // project's other servers are kept.
   const mcpPath = join(opts.projectRoot, '.mcp.json')
-  const mcpTemplate = JSON.parse(tpl('mcp.json', '{"mcpServers":{"aspiralabs-ui":{"command":"npx","args":["--no","aspiralabs-ui-mcp"]}}}')) as Record<string, unknown>
-  const mcpNext = deepMerge(readJson<Record<string, unknown>>(mcpPath) ?? {}, mcpTemplate)
-  opts.log(`${existsSync(mcpPath) ? 'update' : 'write '} ${mcpPath} (aspiralabs-ui server)`)
+  const mcpTemplate = JSON.parse(tpl('mcp.json', '{"mcpServers":{"aspiralabs-ui":{"command":"npx","args":["--no","aspiralabs-ui-mcp"]}}}')) as { mcpServers: Record<string, unknown> }
+  if (opts.app) mcpTemplate.mcpServers['aspiralabs-ui'] = mcpServer(opts.app)
+  const mcpCurrent = readJson<{ mcpServers?: Record<string, unknown> }>(mcpPath) ?? {}
+  const mcpNext = deepMerge({ ...mcpCurrent, mcpServers: { ...mcpCurrent.mcpServers, 'aspiralabs-ui': undefined } }, mcpTemplate)
+  opts.log(`${existsSync(mcpPath) ? 'update' : 'write '} ${mcpPath} (aspiralabs-ui server${opts.app ? ` from ${opts.app}/node_modules` : ''})`)
   if (!opts.dryRun) {
     writeJson(mcpPath, mcpNext)
   }
 
   const settingsPath = join(opts.projectRoot, '.claude', 'settings.json')
   const settingsTemplate = JSON.parse(tpl('claude-settings.json', '{}')) as Record<string, unknown>
-  const settingsNext = deepMerge(dropRetiredHooks(readJson<Record<string, unknown>>(settingsPath) ?? {}), settingsTemplate)
-  opts.log(`${existsSync(settingsPath) ? 'update' : 'write '} ${settingsPath} (session-start, deny-tier3, audit-log hooks)`)
+  const settingsNext = deepMerge(dropKitHooks(readJson<Record<string, unknown>>(settingsPath) ?? {}), settingsTemplate)
+  opts.log(`${existsSync(settingsPath) ? 'update' : 'write '} ${settingsPath} (session-start, deny-tier3, audit-log hooks${opts.app ? ` from ${opts.app}/node_modules` : ''})`)
   if (!opts.dryRun) {
     writeJson(settingsPath, settingsNext)
   }
 }
 
-function gitignore(opts: InitOptions): void {
-  // Per-ticket working folders are pulled from the Notion ticket and never committed.
+/** The entries kit init adds to the root .gitignore, each with the comment above it. */
+export const GITIGNORE_ENTRIES: ReadonlyArray<readonly [entry: string, comment: string]> = [
+  ['.work/', '# per-ticket working folders (pulled from the Notion ticket, never committed)'],
+  ['.aspira/', "# the audit log the kit's hooks write (.aspira/audit.jsonl)"],
+]
+
+function gitignore(opts: Resolved): void {
+  // Per-ticket working folders are pulled from the Notion ticket and never committed; the audit log
+  // the hooks write at the root would otherwise dirty the tree on the first tool call.
   const path = join(opts.projectRoot, '.gitignore')
   const current = existsSync(path) ? readFileSync(path, 'utf8') : ''
-  if (/^\.work\/?$/m.test(current)) {
-    opts.log(`keep   ${path} (.work/ ignored)`)
+  const missing = GITIGNORE_ENTRIES.filter(([entry]) => !new RegExp(`^${entry.replace('.', '\\.').replace(/\/$/, '')}/?$`, 'm').test(current))
+  if (missing.length === 0) {
+    opts.log(`keep   ${path} (${GITIGNORE_ENTRIES.map(([entry]) => entry).join(', ')} ignored)`)
     return
   }
-  opts.log(`update ${path} (ignore .work/)`)
+  opts.log(`update ${path} (ignore ${missing.map(([entry]) => entry).join(', ')})`)
   if (!opts.dryRun) {
-    writeFileSync(path, `${current.trimEnd()}${current ? '\n\n' : ''}# per-ticket working folders (pulled from the Notion ticket, never committed)\n.work/\n`)
+    writeFileSync(path, `${current.trimEnd()}${current ? '\n\n' : ''}${missing.map(([entry, comment]) => `${comment}\n${entry}\n`).join('')}`)
   }
 }
 
-export async function initNext(opts: InitOptions): Promise<void> {
-  opts.log(`stack  next (${opts.projectRoot})`)
+export async function initNext(options: InitOptions): Promise<void> {
+  const app = options.app === undefined ? undefined : normalizeApp(options.app)
+  const opts: Resolved = { ...options, app: app === '.' ? undefined : app, appDir: appRoot(options.projectRoot, app) }
+  if (opts.app && !existsSync(join(opts.appDir, 'package.json'))) {
+    throw new Error(`--app ${opts.app}: no package.json in ${opts.appDir}; --app names the directory that owns package.json and node_modules, relative to ${opts.projectRoot}`)
+  }
+  opts.log(`stack  next (${opts.projectRoot}${opts.app ? `; app ${opts.app}` : ''})`)
   npmrc(opts)
   install(opts)
   eslint(opts)
@@ -280,10 +312,10 @@ export async function initNext(opts: InitOptions): Promise<void> {
   tsconfig(opts)
   css(opts)
   agentFiles(opts)
-  // The /aspira-* skills, copied from the installed agent packages and pinned to their version.
-  installSkills(opts)
+  // The /aspira-* skills, copied from the installed agent packages (under the app) into the root and pinned to their version.
+  installSkills({ projectRoot: opts.projectRoot, app: opts.app, dryRun: opts.dryRun, log: opts.log })
   gitignore(opts)
-  // The Feature Board the skills and kit next read, when the project has one.
-  writeAspira({ projectRoot: opts.projectRoot, board: opts.board, releases: opts.releases, dryRun: opts.dryRun, log: opts.log })
-  opts.log('done   run `pnpm lint` to see what the org rules think of the codebase')
+  // The Feature Board the skills and kit next read, when the project has one, and the app the launchers and kit next resolve the packages under.
+  writeAspira({ projectRoot: opts.projectRoot, board: opts.board, releases: opts.releases, app: opts.app, dryRun: opts.dryRun, log: opts.log })
+  opts.log(`done   run \`pnpm lint\`${opts.app ? ` in ${opts.app}` : ''} to see what the org rules think of the codebase`)
 }
