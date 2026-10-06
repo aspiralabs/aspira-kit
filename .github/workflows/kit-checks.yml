@@ -10,11 +10,18 @@ on:
       node-version:
         type: string
         default: "22"
+      ref:
+        # A branch or commit to check instead of the triggering ref. The release
+        # workflow uses it to run these gates on the changesets version branch.
+        type: string
+        default: ""
 jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
