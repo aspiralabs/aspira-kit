@@ -4,7 +4,7 @@ import { scoreBenchmark, type Evaluation } from './benchmark.ts'
 const evaluation = (id: string, mappings: Evaluation['mappings']): Evaluation => ({ expectedIssueIds: [id], mappings })
 
 it('scores raised separately from retained and rejects fabricated evidence', () => {
-  const report = { findings: [{ id: 'R1', title: 'Old mobile expects an array', evidence: ['mobile/api.ts:10'], fix: 'Keep array' }], synthesis: null, status: 'incomplete', totalMs: 1000 }
+  const report = { findings: [{ id: 'R1', title: 'Old mobile expects an array', severity: 'high' as const, whatThisMeans: 'The installed app would crash on its recipes list.', evidence: ['mobile/api.ts:10'], fix: 'Keep array' }], synthesis: null, status: 'incomplete', totalMs: 1000 }
   const score = scoreBenchmark(report, '', evaluation('COMPATIBILITY', [{ id: 'COMPATIBILITY', findingId: 'R1', raisedQuote: 'Old mobile expects an array', resolutionQuote: '' }]))
   expect(score.raised).toEqual(['COMPATIBILITY'])
   expect(score.retained).toEqual([])
@@ -13,7 +13,7 @@ it('scores raised separately from retained and rejects fabricated evidence', () 
 })
 
 it('accepts a safeguard in the candidate when a related author choice is still open', () => {
-  const report = { findings: [{ id: 'R1', title: 'Choose format; enforce entitlement', evidence: ['spec: export'], fix: 'Choose file shape and deny unauthorized export' }], synthesis: { edits: [], dispositions: [{ findingId: 'R1', status: 'author' as const, reason: 'Choose array or separate files', evidence: ['spec: export'], editIds: [], duplicateOf: null }] }, status: 'needs-author', totalMs: 1000 }
+  const report = { findings: [{ id: 'R1', title: 'Choose format; enforce entitlement', severity: 'medium' as const, whatThisMeans: 'Anyone could export recipes they are not allowed to see.', evidence: ['spec: export'], fix: 'Choose file shape and deny unauthorized export' }], synthesis: { edits: [], dispositions: [{ findingId: 'R1', status: 'author' as const, reason: 'Choose array or separate files', evidence: ['spec: export'], editIds: [], duplicateOf: null }] }, status: 'needs-author', totalMs: 1000 }
   const mapping = [{ id: 'ACCESS', findingId: 'R1', raisedQuote: 'enforce entitlement', resolutionQuote: 'Deny unauthorized export' }]
   expect(scoreBenchmark(report, 'Deny unauthorized export', evaluation('ACCESS', mapping)).retained).toEqual(['ACCESS'])
   expect(scoreBenchmark(report, 'Unrelated candidate', evaluation('ACCESS', mapping)).retained).toEqual([])
@@ -24,7 +24,7 @@ it('accepts a safeguard in the candidate when a related author choice is still o
 
 it('uses external issue sets rather than a fixed baseline', () => {
   const report = {
-    findings: [{ id: 'R1', title: 'Missing input validation', evidence: ['spec: input'], fix: 'Reject invalid input' }],
+    findings: [{ id: 'R1', title: 'Missing input validation', severity: 'high' as const, whatThisMeans: 'Bad input would be saved as if it were valid.', evidence: ['spec: input'], fix: 'Reject invalid input' }],
     synthesis: { edits: [], dispositions: [{ findingId: 'R1', status: 'applied' as const, reason: 'Added validation', evidence: ['spec: input'], editIds: ['E1'], duplicateOf: null }] },
     status: 'ready', totalMs: 1000,
   }

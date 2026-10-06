@@ -15,7 +15,7 @@ vi.mock('ai', async (original) => {
     if (!synthesis && args.output === undefined) expect(args.prepareStep({ stepNumber: 0 }).activeTools).not.toContain('submit_review')
     const result = synthesis
       ? { edits: [{ id: 'E1', before: '# Original', after: fixture.candidate }], dispositions: [{ findingId: 'R1', status: 'applied', reason: 'Repair acceptance contract', evidence: ['spec: Original'], editIds: ['E1'], duplicateOf: null }] }
-      : { facts: [], findings: args.prompt.includes('Research and raise') ? [{ title: 'Missing contract', evidence: ['spec: Original'], fix: 'Add intent and acceptance' }] : [], checks: [{ rule: 'REV-001', evidence: 'spec: Original' }], uiEvidence: [], gaps: [] }
+      : { facts: [], findings: args.prompt.includes('Research and raise') ? [{ title: 'Missing contract', severity: 'high', whatThisMeans: 'Nobody could tell when the feature is done.', evidence: ['spec: Original'], fix: 'Add intent and acceptance' }] : [], checks: [{ rule: 'REV-001', evidence: 'spec: Original' }], uiEvidence: [], gaps: [] }
     args.onStepEnd({ usage: { inputTokens: 100, outputTokens: 10 }, finishReason: 'stop', text: 'mock model output', toolCalls: [], toolResults: [] })
     if (args.output !== undefined) return { output: result }
     await args.tools.submit_review!.execute!(result, { toolCallId: 'test', messages: [], context: {} })
@@ -40,7 +40,10 @@ it('exports a reviewed candidate and raw findings without altering the source', 
   expect(result.dir).toBe(join(dir, 'spec.reviewed'))
   expect(await readFile(specPath, 'utf8')).toBe('# Original')
   expect(await readFile(join(result.dir, 'spec.reviewed.md'), 'utf8')).toBe(fixture.candidate)
-  expect(await readFile(join(result.dir, 'trace/findings.md'), 'utf8')).toContain('R1')
+  const findingsMd = await readFile(join(result.dir, 'trace/findings.md'), 'utf8')
+  expect(findingsMd).toContain('1 findings: 0 critical · 1 high · 0 medium · 0 low · 0 info')
+  expect(findingsMd).toContain('## R1 — Missing contract')
+  expect(findingsMd.indexOf('**What this means:** Nobody could tell')).toBeLessThan(findingsMd.indexOf('- spec: Original'))
   expect(await readFile(join(result.dir, 'run-analysis.md'), 'utf8')).toContain('Run analysis')
   expect((await readdir(result.dir)).sort()).toEqual(['run-analysis.md', 'spec.original.md', 'spec.reviewed.md', 'trace'])
   const trace = JSON.parse(await readFile(join(result.dir, 'trace/calls.json'), 'utf8'))
