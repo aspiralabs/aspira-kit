@@ -90,3 +90,22 @@ export function renderEstimate(estimate: Estimate, source: string): string {
     '  --local costs this session\'s usage instead of the Gateway; --max-cost <USD> stops a cloud run at a dollar amount.',
   ].join('\n')
 }
+
+export type OneRoundCheck = { exceeds: boolean; oneRoundUsd: number; maxCostUsd: number | null; message: string }
+
+/**
+ * The budget pre-check: the dearest per-round cost the history predicts for this diff, against
+ * the budget. A budget below one round would stop the run after its first stage with nothing to
+ * show, so the launcher and pr-debator refuse before any model call and name both numbers.
+ */
+export function oneRoundCheck(input: { changedLines: number; seats: number; samples: CostSample[]; maxCostUsd: number | null }): OneRoundCheck {
+  const estimate = estimateCost({ changedLines: input.changedLines, maxRounds: 1, seats: input.seats, samples: input.samples })
+  const oneRoundUsd = estimate.perRound.high
+  const exceeds = input.maxCostUsd !== null && oneRoundUsd > input.maxCostUsd
+  const message = exceeds
+    ? `Refusing to start: one round is estimated at ${usd(oneRoundUsd)} for ${input.changedLines.toLocaleString('en-US')} changed lines (${estimate.seeded ? 'seeded from the NOM-4 review' : `from ${estimate.samples.length} previous review${estimate.samples.length === 1 ? '' : 's'}`}), above the --max-cost budget of ${usd(input.maxCostUsd ?? 0)}. Raise the budget to at least ${usd(oneRoundUsd)}, or review a smaller diff. No model call was made.`
+    : input.maxCostUsd === null
+      ? `No budget; one round is estimated at ${usd(oneRoundUsd)}.`
+      : `One round is estimated at ${usd(oneRoundUsd)}, within the --max-cost budget of ${usd(input.maxCostUsd)}.`
+  return { exceeds, oneRoundUsd, maxCostUsd: input.maxCostUsd, message }
+}

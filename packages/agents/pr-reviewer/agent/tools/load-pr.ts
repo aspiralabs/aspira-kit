@@ -1,12 +1,15 @@
 import { execFile } from 'node:child_process'
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { readFile, readdir, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import type { SandboxSession } from 'eve/sandbox'
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
+import { parseCostSample } from '../lib/estimate'
 import { buildPacket } from '../lib/packet'
+import { writeContext } from '../lib/shared-prefix'
 import {
   LOCAL_BASE_FALLBACKS,
   LOCAL_EXCLUDES,
@@ -27,10 +30,11 @@ import {
   truncatePatch,
   type PrMeta,
 } from '../lib/pr'
-import { FILES, slugify } from '../lib/review'
-import { TARGET_FILE, headShaFromFindings, type ReviewTarget } from '../lib/target'
+import { FILES, SEATS, type Reviewer } from '../lib/review'
+import { TARGET_FILE, headShaFromFindings, type ReviewContextFile, type ReviewTarget } from '../lib/target'
 
 const run = promisify(execFile)
+const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const MAX_TARBALL = 512 * 1024 * 1024
 // macOS tar adds ._* AppleDouble files unless told not to.
 const TAR_ENV = { ...process.env, COPYFILE_DISABLE: '1' }
@@ -83,7 +87,8 @@ export default defineTool({
     if (source === undefined && patch === undefined) throw new Error('Pass source or patch.')
     const sandbox = await ctx.getSandbox()
     const previous = since === undefined ? null : await previousReview(since)
-    const extras: Extras = { previous, knowledgeRequiredFile: knowledgeRequiredFile ?? null }
+    // load-pr runs in the root session: its id keys the review context the seat sessions read.
+    const extras: Extras = { previous, knowledgeRequiredFile: knowledgeRequiredFile ?? null, rootSessionId: ctx.session.id }
 
     if (source === undefined) {
       if (previous !== null) throw new Error('A pasted diff has no head to re-review from. Drop since, or load the repository.')
@@ -96,7 +101,26 @@ export default defineTool({
   },
 })
 
-type Extras = { previous: Previous | null; knowledgeRequiredFile: string | null }
+type Extras = { previous: Previous | null; knowledgeRequiredFile: string | null; rootSessionId: string }
+
+/** Each reviewer's persona, from the agent's own files, read when the review is loaded. */
+async function readPersonas(): Promise<ReviewContextFile['personas']> {
+  const entries = await Promise.all(([...SEATS, 'quinn'] as Reviewer[]).map(async (who) => [who, await readFile(join(PACKAGE_DIR, 'agent', 'subagents', who, 'persona.md'), 'utf8')] as const))
+  return Object.fromEntries(entries) as ReviewContextFile['personas']
+}
+
+/** The cost.md files of this package's previous reviews, for the one-round estimate. */
+async function readCostSamples(): Promise<ReviewContextFile['costSamples']> {
+  const reviews = join(PACKAGE_DIR, 'reviews')
+  const names = (await readdir(reviews).catch(() => [])).sort()
+  const samples: ReviewContextFile['costSamples'] = []
+  for (const name of names) {
+    const text = await readFile(join(reviews, name, 'cost.md'), 'utf8').catch(() => null)
+    const sample = text === null ? null : parseCostSample(text, name)
+    if (sample !== null) samples.push(sample)
+  }
+  return samples
+}
 
 /** The previous review a re-review starts from: its findings.md and the head it records. */
 async function previousReview(dir: string): Promise<Previous> {
@@ -337,10 +361,21 @@ async function finish(
   // The shas and the packet size, in the sandbox for export-review and comment-on-pr; the
   // packet itself on the host for pr-debator, whose steps read the host and never the sandbox.
   await sandbox.writeTextFile({ path: TARGET_FILE, content: JSON.stringify({ target, packet: packetStats }, null, 2) })
-  const contextDir = join(tmpdir(), 'pr-reviewer-context')
-  await mkdir(contextDir, { recursive: true })
-  const contextFile = join(contextDir, `${slugify(meta.label)}-${Date.now()}.json`)
-  await writeFile(contextFile, JSON.stringify({ packet: text, target, stats: packetStats }), 'utf8')
+  const context: ReviewContextFile = {
+    pr: {
+      label: meta.label,
+      repoPath,
+      knowledgePath: extras.knowledgeRequiredFile === null ? null : dirname(extras.knowledgeRequiredFile),
+      knowledgeRequiredFile: extras.knowledgeRequiredFile,
+    },
+    packet: text,
+    target,
+    stats: packetStats,
+    changedLines: stats.additions + stats.deletions,
+    personas: await readPersonas(),
+    costSamples: await readCostSamples(),
+  }
+  const contextFile = await writeContext(extras.rootSessionId, context)
 
   return {
     label: meta.label,

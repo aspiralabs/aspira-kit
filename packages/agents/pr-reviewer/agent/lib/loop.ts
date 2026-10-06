@@ -15,6 +15,11 @@ export type LoopInput = {
   /** What the run has cost so far, in USD. Asked after every stage. */
   spent: () => Promise<number>
   maxCostUsd: number | null
+  /**
+   * Run once before the first seat stage: one call that writes the shared prefix to the provider's
+   * cache, so the six parallel seats that follow read it instead of each writing its own copy.
+   */
+  warm?: () => Promise<void>
 }
 
 export type LoopProgress = { status: string; stage: PendingPlan['stage']; round: number; maxRounds: number }
@@ -33,9 +38,15 @@ export async function* runReviewLoop(input: LoopInput): AsyncGenerator<LoopProgr
   const outputs = new Map<string, unknown>()
   const read = (id: string) => outputs.get(id)
   let stopped: BudgetStop | null = null
+  let warmed = false
   for (;;) {
     const plan = planStep({ pr: input.pr, maxRounds: input.maxRounds, finish: false, outputs: read })
     if (plan.done) return { ...plan, stopped }
+    if (!warmed && input.warm !== undefined) {
+      yield { status: 'warming the cache', stage: plan.stage, round: plan.round, maxRounds: input.maxRounds }
+      await input.warm()
+      warmed = true
+    }
     yield { status: STATUS[plan.stage], stage: plan.stage, round: plan.round, maxRounds: input.maxRounds }
     const results = await input.run(plan.tasks)
     plan.tasks.forEach((task, i) => outputs.set(task.id, results[i]))

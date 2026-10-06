@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { HUNK_CONTEXT_LINES, MAX_FULL_FILE_CHARS, buildPacket, hunkRanges, packetTokens, truncateForRead } from './packet.ts'
-import { SEATS, openingPrompt, turnPrompt, verifyPrompt, type PrContext } from './review.ts'
+import { SEATS, openingPrompt, sharedPrefix, turnPrompt, verifyPrompt, type PrContext } from './review.ts'
 
 const lines = (n: number, prefix = 'line') => Array.from({ length: n }, (_, i) => `${prefix} ${i + 1}`).join('\n') + '\n'
 
@@ -129,16 +129,15 @@ describe('buildPacket', () => {
     expect(packet.text).not.toContain('101 | const x = 101\n')
   })
 
-  it('is one string shared by every seat prompt and by Quinn, at the start of each', () => {
+  it('is one string at the start of the shared prefix, and in no seat turn, so it is sent once per session', () => {
     const packet = fixture()
     const pr: PrContext = { label: 'o/n#1', repoPath: '/workspace/repo', packet: packet.text }
-    const prompts = [...SEATS.map((seat) => openingPrompt(seat, pr)), ...SEATS.map((seat) => turnPrompt(seat, 2, pr)), verifyPrompt(1, pr)]
-    for (const prompt of prompts) {
-      expect(prompt.startsWith(packet.text)).toBe(true)
-      // The same object, not a copy: one cache prefix for every call that carries it.
-      expect(prompt.slice(0, packet.text.length)).toBe(pr.packet)
-    }
-    expect(openingPrompt('ava', { ...pr, packet: null })).not.toContain('# Review packet')
+    const prefix = sharedPrefix(pr)
+    expect(prefix.startsWith(packet.text)).toBe(true)
+    // The same object, not a copy: one cache prefix for every session that carries it.
+    expect(prefix.slice(0, packet.text.length)).toBe(pr.packet)
+    for (const turn of [...SEATS.map((seat) => openingPrompt(seat, pr)), ...SEATS.map((seat) => turnPrompt(seat, 2, pr)), verifyPrompt(1, pr)]) expect(turn).not.toContain('# Review packet')
+    expect(sharedPrefix({ ...pr, packet: null })).not.toContain('# Review packet')
   })
 })
 

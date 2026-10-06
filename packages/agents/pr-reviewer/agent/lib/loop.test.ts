@@ -66,3 +66,22 @@ describe('runReviewLoop', () => {
     expect(result.calls.filter((c) => c.error === undefined)).toHaveLength(SEATS.length)
   })
 })
+
+describe('runReviewLoop, cache warm-up', () => {
+  it('runs the warm-up once, before the first seat stage, and never again', async () => {
+    const seats = fakeSeats({ price: 0.1, raiseInRound1: true })
+    const order: string[] = []
+    const run = async (tasks: Parameters<typeof seats.run>[0]) => {
+      order.push(`stage:${tasks[0]!.stage}:${tasks[0]!.round}`)
+      return seats.run(tasks)
+    }
+    const warm = async () => {
+      order.push('warm')
+    }
+    const { progress, result } = await drive(runReviewLoop({ pr, maxRounds: 4, run, spent: seats.spent, maxCostUsd: null, warm }))
+    expect(order.slice(0, 2)).toEqual(['warm', 'stage:seats:1'])
+    expect(order.filter((step) => step === 'warm')).toHaveLength(1)
+    expect(progress[0]).toMatchObject({ status: 'warming the cache', stage: 'seats', round: 1 })
+    expect(result.rounds).toBe(2)
+  })
+})

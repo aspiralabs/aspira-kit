@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cacheReadShare, callsPerRound, parseLedger, renderCallsPerRound, renderCostMarkdown, roundCallsFromTurns, summarizeUsage, type UsageLine } from './usage.ts'
+import { cacheReadShare, callsPerRound, parseLedger, renderCallsPerRound, renderCostMarkdown, renderRoundOneCacheWrites, roundCallsFromTurns, roundOneCacheWrites, summarizeUsage, type UsageLine } from './usage.ts'
 
 const line = (agent: string, sessionId: string, i: number, over: Partial<UsageLine> = {}): UsageLine => ({
   agent,
@@ -60,6 +60,8 @@ describe('cost.md', () => {
     expect(md).toContain('Rounds: 2, ended by the stopping rule (a round with no dispute and no new finding). Changed lines: 1,234. Cache-read share: 80% of input tokens. Packet: 120,000 characters, about 30,000 tokens, at the start of every prompt.')
     expect(md).toContain('Budget: $5.00 (--max-cost); the run stayed under it.')
     expect(md).toContain('## Calls per seat per round')
+    // Each agent's first session wrote 0 cache tokens in this fixture; the line still names every agent.
+    expect(md).toContain('Round-one cache writes (each agent\'s first session): ava 0 · cole 0 · dex 0 · iris 0 · nova 0 · quinn 0 · reba 0; total 0')
     expect(md).toContain('| ava | 2 | 2 | 0 | 4 |')
     // The per-agent table is still there.
     expect(md).toContain('| Agent | Model | Calls | Input | Output | Cache read | Cache write | Cost |')
@@ -72,5 +74,23 @@ describe('cost.md', () => {
     expect(stopped).toContain('Packet: none')
     expect(renderCostMarkdown('x', summary, {})).toContain('Budget: none.')
     expect(cacheReadShare({ inputTokens: 0, cacheReadTokens: 0 })).toBeNull()
+  })
+})
+
+describe('round-one cache writes', () => {
+  it('reports each agent\'s first-session cache writes and how many packet copies they add up to', () => {
+    const summary = summarizeUsage([
+      line('ava', 'ava-r1', 0, { cacheWriteTokens: 190_000 }),
+      line('ava', 'ava-r1', 1, { cacheWriteTokens: 2_000 }),
+      line('cole', 'cole-r1', 2, { cacheWriteTokens: 3_000 }),
+      line('ava', 'ava-r2', 3, { cacheWriteTokens: 50_000 }),
+    ])
+    const rows = roundOneCacheWrites(summary.byTurn)
+    expect(rows).toEqual([
+      { agent: 'ava', cacheWriteTokens: 192_000 },
+      { agent: 'cole', cacheWriteTokens: 3_000 },
+    ])
+    expect(renderRoundOneCacheWrites(rows, 185_000)).toBe('Round-one cache writes (each agent\'s first session): ava 192,000 · cole 3,000; total 195,000; the packet is about 185,000 tokens, so that is roughly 1.1 copies of it. One shared prefix shows as one write of about the packet size and small ones elsewhere.')
+    expect(renderRoundOneCacheWrites([], null)).toBe('Round-one cache writes: none recorded.')
   })
 })

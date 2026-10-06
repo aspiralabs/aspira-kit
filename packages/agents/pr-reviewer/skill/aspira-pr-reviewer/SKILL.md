@@ -9,7 +9,7 @@ argument-hint: [<ticket ID | Notion URL> | <github-pr | repo-path> --no-ticket] 
 This skill only runs the official pr-reviewer agent. What the review does, its rules and how its result is reported are defined by the agent, in the pr-reviewer package:
 
 - `agent/instructions.md`: the orchestrator, the authority for the rules and the report.
-- `agent/subagents/<seat>/instructions.md`: each seat and Quinn.
+- `agent/subagents/<seat>/persona.md`: each seat and Quinn. Their system prompt is the shared prefix (`agent/lib/shared-prefix-instructions.ts`): the packet and the review instructions, the same bytes for all seven, so the seats share one cached prefix; the persona follows it in the message.
 - `agent/lib/review.ts`: the prompts, the output schemas, the stopping rule and the verdict.
 - `agent/tools/load-knowledge.ts` and the agent's env (`KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`): which Notion engineering guidelines it loads.
 
@@ -23,7 +23,7 @@ The pr-reviewer runs only from `In Review: Implementation` with the PR property 
 
 Both modes use `scripts/pr-reviewer.sh` beside this file (use its absolute path) and export the same files. Run from the project repository, or pass `--repo` (the ticket's working folder lives under its `.work/`).
 
-Flags both modes take: `--max-rounds N` caps the rounds; `--max-cost USD` is the budget (default `MAX_COST_USD` from the agent's environment, unset means none); `--since DIR` re-reviews only what changed since the previous review exported to DIR; `--no-comment` keeps a GitHub PR's review off the PR. `--yes` is for the default mode only and skips the estimate.
+Flags both modes take: `--max-rounds N` caps the rounds; `--max-cost USD` is the budget (default `MAX_COST_USD` from the agent's environment, unset means none; a cloud run is refused before any model call when one round is estimated above it, and the refusal names both numbers); `--since DIR` re-reviews only what changed since the previous review exported to DIR; `--no-comment` keeps a GitHub PR's review off the PR. `--yes` is for the default mode only and skips the estimate.
 
 | | Default | `--local` |
 | --- | --- | --- |

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import {
@@ -13,6 +16,10 @@ import {
   reviewDocPrompt,
   roundFilesInOrder,
   roundSettled,
+  sharedPrefix,
+  PROMPT_SEPARATOR,
+  fullPrompt,
+  turnMessage,
   turnPrompt,
   verifyPrompt,
   workspacePaths,
@@ -29,6 +36,7 @@ const mapped: PrContext = { ...sandbox, repoPath: `${root}/repo`, paths: workspa
 
 // Every prompt the workflow sends, for one context.
 const prompts = (pr: PrContext) => [
+  sharedPrefix(pr),
   ...SEATS.flatMap((seat) => [openingPrompt(seat, pr), turnPrompt(seat, 2, pr)]),
   verifyPrompt(3, pr),
   writeFindingsPrompt(pr, true),
@@ -70,8 +78,9 @@ describe('workspace paths', () => {
     const before = prompts(withKnowledge)
     const after = prompts(local)
     for (const [i, prompt] of before.entries()) expect(after[i]).toBe(prompt.replaceAll('/workspace', root))
-    expect(after[0]).toContain(`Your first command is \`cat ${root}/knowledge/REQUIRED.md\``)
-    expect(after[0]).toContain(`indexed in ${root}/knowledge/INDEX.md`)
+    // The knowledge section is in the shared prefix, which every seat's prompt starts with.
+    expect(sharedPrefix(local)).toContain(`Your first command is \`cat ${root}/knowledge/REQUIRED.md\``)
+    expect(sharedPrefix(local)).toContain(`indexed in ${root}/knowledge/INDEX.md`)
   })
 
   it('keeps the sandbox layout when no paths are given', () => {
@@ -132,8 +141,9 @@ describe('the stopping rule', () => {
   })
 
   it('asks every seat, the fix list and the summary for the plain-English line before the evidence, and the fix list in severity order', () => {
+    const prefix = sharedPrefix(sandbox)
+    expect(prefix).toContain('Every finding opens with **What this means:**')
     const opening = openingPrompt('ava', sandbox)
-    expect(opening).toContain('Every finding opens with **What this means:**')
     expect(opening.indexOf('`**What this means:**` (the plain-English line')).toBeLessThan(opening.indexOf('the evidence quoted from the diff, and the fix'))
     const findings = writeFindingsPrompt(sandbox, true)
     expect(findings).toContain('in this order: a `**What this means:**` line')
@@ -148,11 +158,79 @@ describe('the stopping rule', () => {
   })
 
   it('every prompt tells the seats the rule, the batching and the cap', () => {
-    const prompt = openingPrompt('ava', sandbox)
-    expect(prompt).toContain('The review ends after a round in which no seat raised or disputed anything')
-    expect(prompt).toContain('one `read_files` call with every path you want, not one call per file')
-    expect(prompt).toContain('You have at most 8 tool calls this round')
-    expect(openingPrompt('ava', { ...sandbox, maxSeatCalls: 3 })).toContain('You have at most 3 tool calls this round')
+    expect(openingPrompt('ava', sandbox)).toContain('The review ends after a round in which no seat raised or disputed anything')
+    const prefix = sharedPrefix(sandbox)
+    expect(prefix).toContain('one `read_files` call with every path you want, not one call per file')
+    expect(prefix).toContain('You have at most 8 tool calls this round')
+    expect(sharedPrefix({ ...sandbox, maxSeatCalls: 3 })).toContain('You have at most 3 tool calls this round')
     expect(turnPrompt('ava', 2, sandbox)).toContain('accept it, or dispute it with evidence')
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
+// One cached prefix: every seat and Quinn start with the same bytes, on the eve prompt builder.
+
+/** The longest common prefix of all the strings, in bytes (UTF-8), as the provider's cache sees it. */
+export function commonPrefixBytes(texts: string[]): number {
+  if (texts.length === 0) return 0
+  const first = texts[0]!
+  let end = first.length
+  for (const text of texts.slice(1)) {
+    let i = 0
+    while (i < end && i < text.length && first[i] === text[i]) i += 1
+    end = i
+  }
+  return Buffer.byteLength(first.slice(0, end), 'utf8')
+}
+
+const personas = Object.fromEntries([...SEATS, 'quinn'].map((who) => [who, readFileSync(join(import.meta.dirname, '..', 'subagents', who, 'persona.md'), 'utf8')])) as Record<string, string>
+
+describe('one cached prefix, eve prompt builder', () => {
+  const pr: PrContext = { ...sandbox, packet: `# Review packet: o/n#1\n\n${'x'.repeat(50_000)}\n`, knowledgePath: '/workspace/knowledge', knowledgeRequiredFile: '/workspace/knowledge/REQUIRED.md' }
+  const roundOne = [...SEATS.map((seat) => fullPrompt(pr, personas[seat]!, openingPrompt(seat, pr))), fullPrompt(pr, personas.quinn!, verifyPrompt(1, pr))]
+
+  it('the round-one prompts of all six seats and Quinn share the full packet plus the shared instructions as their longest common prefix', () => {
+    const prefix = sharedPrefix(pr)
+    expect(prefix.startsWith(pr.packet!)).toBe(true)
+    expect(prefix).toContain('# Review instructions, every seat')
+    const shared = Buffer.byteLength(prefix, 'utf8')
+    expect(commonPrefixBytes(roundOne)).toBeGreaterThanOrEqual(shared)
+    // And nothing more than the separator and whatever the personas happen to share at their start: the personas differ.
+    expect(commonPrefixBytes(roundOne)).toBeLessThan(shared + Buffer.byteLength(PROMPT_SEPARATOR, 'utf8') + 64)
+    // The persona comes after the prefix, the turn after the persona.
+    for (const [i, seat] of SEATS.entries()) {
+      const text = roundOne[i]!
+      expect(text.indexOf(personas[seat]!.trim())).toBe(prefix.length + PROMPT_SEPARATOR.length)
+      expect(text.indexOf(`You are ${seat[0]!.toUpperCase()}${seat.slice(1)}, the`)).toBeGreaterThan(text.indexOf(personas[seat]!.trim()))
+    }
+  })
+
+  it('the eve message carries only the persona and the turn; the prefix is the system prompt, byte-identical for every seat', () => {
+    for (const seat of SEATS) {
+      const message = turnMessage(personas[seat]!, openingPrompt(seat, pr))
+      expect(message).not.toContain('# Review packet')
+      expect(message.startsWith(personas[seat]!.trim())).toBe(true)
+      expect(`${sharedPrefix(pr)}${PROMPT_SEPARATOR}${message}`).toBe(fullPrompt(pr, personas[seat]!, openingPrompt(seat, pr)))
+    }
+  })
+
+  it("eve's system cache breakpoint sits at the end of the shared prefix: the prefix is the whole system prompt, so the marker lands on it", async () => {
+    // eve's own placement, imported from its harness: on the Anthropic-direct path the marker goes on
+    // the last system message; through the Gateway, caching: auto places the provider's breakpoint at
+    // the same boundary. Either way the boundary is the end of our one system message.
+    const cache = (await import(pathToFileURL(join(import.meta.dirname, '..', '..', 'node_modules', 'eve', 'dist', 'src', 'harness', 'prompt-cache.js')).href)) as {
+      applySystemCacheBreakpoint: (instructions: { role: 'system'; content: string }[], marker: unknown) => { role: 'system'; content: string; providerOptions?: Record<string, unknown> }[]
+      getAnthropicCacheMarker: () => Record<string, unknown>
+      detectPromptCachePath: (model: string) => { kind: string }
+      mergeGatewayAutoCaching: (base: Record<string, unknown> | undefined) => Record<string, unknown>
+    }
+    const system = [{ role: 'system' as const, content: sharedPrefix(pr) }]
+    const marked = cache.applySystemCacheBreakpoint(system, cache.getAnthropicCacheMarker())
+    expect(marked).toHaveLength(1)
+    expect(marked[0]!.content).toBe(sharedPrefix(pr))
+    expect(marked[0]!.providerOptions).toMatchObject({ anthropic: { cacheControl: { type: 'ephemeral' } } })
+    // The seats are Gateway model ids, so eve takes the gateway-auto path: caching: auto, one model id for all six.
+    expect(cache.detectPromptCachePath('anthropic/claude-opus-5.5')).toEqual({ kind: 'gateway-auto' })
+    expect(cache.mergeGatewayAutoCaching(undefined)).toEqual({ gateway: { caching: 'auto' } })
   })
 })

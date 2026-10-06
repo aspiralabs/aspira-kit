@@ -35,6 +35,9 @@ async function stubs(withScreen: boolean) {
       '  *" start "*) printf \'folder=%s\\nid=NOM-4\\ntitle=Explore pagination\\nurl=https://www.notion.so/nom-4\\nbefore=In Review: Implementation\\nstatus=In Review: Implementation\\npr=%s\\n\' "$TICKET_FOLDER" "$TICKET_PR" ;;',
       '  *) echo "{}" ;;',
       'esac',
+      // STUB_NODE_EXIT_ON names an argument on which the stub exits 4: the estimate refusing a budget.
+      'for a in "$@"; do [ -n "${STUB_NODE_EXIT_ON:-}" ] && [ "$a" = "$STUB_NODE_EXIT_ON" ] && exit 4; done',
+      'exit 0',
       '',
     ].join('\n'),
     { mode: 0o755 },
@@ -55,7 +58,7 @@ it('starts the eve agent detached, with the PR, the caps, the budget and the com
   const started = await exec('bash', [launcher, 'start', 'https://github.com/acme/app/pull/7', '--no-ticket', '--max-rounds', '2', '--max-cost', '2.5', '--no-comment'], { cwd: repo, env })
   const [estimate, args] = await calls()
   // The estimate runs first, from the same agent with the same node, with the source and the cap; the invoke follows.
-  expect(estimate).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/estimate.ts'), 'https://github.com/acme/app/pull/7', '--max-rounds', '2'])
+  expect(estimate).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/estimate.ts'), 'https://github.com/acme/app/pull/7', '--max-rounds', '2', '--max-cost', '2.5'])
   expect(args!.slice(0, 5)).toEqual(['--import', loader, '--experimental-strip-types', eve, 'invoke'])
   expect(args![5]).toContain('Review https://github.com/acme/app/pull/7')
   expect(args![5]).toContain('cap it at 2 rounds')
@@ -64,6 +67,18 @@ it('starts the eve agent detached, with the PR, the caps, the budget and the com
   expect(started.stdout).toContain('agent: @aspiralabs/pr-reviewer@')
   expect(started.stderr).toContain(`pr-reviewer: running kit source at ${root}, not the installed @aspiralabs/pr-reviewer`)
   await expect(exec('bash', [launcher, 'start', '.', '--no-ticket', '--max-cost', '0'], { cwd: repo, env })).rejects.toThrow('--max-cost')
+
+  // With a budget, the estimate is the pre-check and runs even with --yes; exit 4 refuses the run before the invoke.
+  await exec('bash', [launcher, 'start', 'acme/app#7', '--no-ticket', '--yes', '--max-cost', '3'], { cwd: repo, env })
+  const [precheck, invoked] = await calls()
+  expect(precheck!.slice(4)).toEqual(['acme/app#7', '--max-cost', '3'])
+  expect(invoked!.slice(0, 5)).toEqual(['--import', loader, '--experimental-strip-types', eve, 'invoke'])
+  const refused = await exec('bash', [launcher, 'start', 'acme/app#7', '--no-ticket', '--max-cost', '0.5'], { cwd: repo, env: { ...env, STUB_NODE_EXIT_ON: '--max-cost' } }).then(
+    () => null,
+    (error: Error & { stderr?: string }) => error,
+  )
+  expect(refused?.stderr).toContain('one round is estimated above the --max-cost budget')
+  expect(await calls()).toHaveLength(1)
 
   // --yes skips the estimate; --since names the previous review in the prompt.
   const previous = join(dir, 'previous')
