@@ -19,7 +19,7 @@ vi.mock('ai', async (original) => {
     let result: unknown = review
     if (args.prompt.includes('Explore the repository for this idea')) result = { facts: ['source.ts:1: evidence'], constraints: [], questions: [], uiEvidence: [], gaps: [] }
     else if (args.prompt.includes('Write the complete initial spec')) result = { spec: fixture.draft, assumptions: [] }
-    else if (args.prompt.includes('Research and raise')) result = { ...review, findings: [{ title: 'Retention unstated', evidence: ['spec: list'], fix: 'State retention' }] }
+    else if (args.prompt.includes('Research and raise')) result = { ...review, findings: [{ title: 'Retention unstated', severity: 'low', whatThisMeans: 'Nobody knows when a saved item disappears.', evidence: ['spec: list'], fix: 'State retention' }] }
     else if (args.prompt.includes('Reconcile once')) result = { edits: [{ id: 'E1', before: 'appears in the list.', after: 'appears in the list until removed.' }], dispositions: [{ findingId: 'R1', status: 'applied', reason: 'Retention stated', evidence: ['spec: list'], editIds: ['E1'], duplicateOf: null }] }
     args.onStepEnd({ usage: { inputTokens: 100, outputTokens: 10 }, finishReason: 'stop', text: 'mock model output', toolCalls: [], toolResults: [] })
     if (args.output !== undefined) return { output: result }
@@ -48,7 +48,10 @@ it('writes the draft and the reviewed spec beside the idea without altering it, 
   expect(await readFile(join(result.dir, 'spec.draft.md'), 'utf8')).toBe(fixture.draft)
   expect(await readFile(join(result.dir, 'spec.md'), 'utf8')).toContain('until removed')
   expect(await readFile(join(result.dir, 'trace/exploration.md'), 'utf8')).toContain('source.ts:1: evidence')
-  expect(await readFile(join(result.dir, 'trace/findings.md'), 'utf8')).toContain('R1')
+  const findingsMd = await readFile(join(result.dir, 'trace/findings.md'), 'utf8')
+  expect(findingsMd).toContain('1 findings: 0 critical · 0 high · 0 medium · 1 low · 0 info')
+  expect(findingsMd.indexOf('**What this means:** Nobody knows')).toBeLessThan(findingsMd.indexOf('- spec: list'))
+  expect(await readFile(join(result.dir, 'trace/decisions.md'), 'utf8')).toContain('0 decisions: 0 open · 0 answered')
   expect(await readFile(join(result.dir, 'run-analysis.md'), 'utf8')).toContain('Run analysis')
   const trace = JSON.parse(await readFile(join(result.dir, 'trace/calls.json'), 'utf8'))
   expect(trace.calls.map((c: { phase: string }) => c.phase).slice(0, 3)).toEqual(['explore', 'draft', 'research'])

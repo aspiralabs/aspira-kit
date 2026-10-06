@@ -127,7 +127,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   const knowledge = await resolveKnowledge(input, saved, reportDir, deps)
 
   const prepared = await prepareWrite({ ...input, guidelinesPath: knowledge.requiredFile }, new AbortController().signal)
-  const { dir, idea, guidelines, repo, uiRequired } = prepared
+  const { dir, idea, guidelines, repo, uiRequired, answers } = prepared
   const repoRoot = resolve(input.repoPath)
   const context = writeContext(prepared, 'not preloaded in --local mode; the explore and ui phases read it through the aspiralabs-ui MCP in the session')
   const fingerprint = createHash('sha256').update(JSON.stringify([idea, guidelines, context, uiRequired, knowledge.digest])).digest('hex')
@@ -163,7 +163,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     throw new Error('pending in the session')
   }
 
-  const result = await writePipeline({ idea, guidelines, context, uiRequired }, call)
+  const result = await writePipeline({ idea, guidelines, context, uiRequired, answers }, call)
   if (tasks.length) {
     tasks.sort((a, b) => PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase))
     return { pending: true as const, status: 'pending', stage: STAGES[stageOf(tasks[0]!.phase)], workDir: work, orchestrator, tasks }
