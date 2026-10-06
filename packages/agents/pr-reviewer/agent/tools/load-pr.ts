@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process'
-import { rm, stat } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import type { SandboxSession } from 'eve/sandbox'
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
+import { buildPacket } from '../lib/packet'
 import {
   LOCAL_BASE_FALLBACKS,
   LOCAL_EXCLUDES,
@@ -26,7 +27,8 @@ import {
   truncatePatch,
   type PrMeta,
 } from '../lib/pr'
-import { FILES } from '../lib/review'
+import { FILES, slugify } from '../lib/review'
+import { TARGET_FILE, headShaFromFindings, type ReviewTarget } from '../lib/target'
 
 const run = promisify(execFile)
 const MAX_TARBALL = 512 * 1024 * 1024
@@ -38,14 +40,22 @@ const TAR_ENV = { ...process.env, COPYFILE_DISABLE: '1' }
 // /workspace/changed_files.txt, and the PR itself at /workspace/pr.md. The file
 // layout is nitpick's, because the ported role prompts already assume it.
 //
+// Then it builds the review packet once — the diff, every changed file at HEAD,
+// the changed paths, the PR, the required reading — and leaves it on the host for
+// pr-debator, which puts it at the start of every prompt. The shas go to
+// /workspace/target.json for export-review and comment-on-pr.
+//
 // A GitHub PR is cloned and diffed inside the sandbox; a local repo is diffed on
 // the host (so uncommitted work counts) and tarred in. Runs in the app runtime,
 // hence node:child_process.
 
+/** A re-review: what the previous review's directory says. */
+type Previous = { sha: string; dir: string; findings: string }
+
 export default defineTool({
   availableInSubagents: false,
   description:
-    'Load a pull request into the sandbox so the review seats can read it. Either a GitHub PR (`source` = a PR URL or `owner/name#123`), or a local repository (`source` = the repo path, `branch` = the branch to review, `base` = what to compare it against, default main). Or pass `patch` with a unified diff and no repo. Call before pr-debator, always.',
+    'Load a pull request into the sandbox so the review seats can read it, and build the review packet. Either a GitHub PR (`source` = a PR URL or `owner/name#123`), or a local repository (`source` = the repo path, `branch` = the branch to review, `base` = what to compare it against, default main). Or pass `patch` with a unified diff and no repo. Pass `knowledgeRequiredFile` from load-knowledge so the packet carries the required reading. Pass `since` (the directory of a previous review) to re-review only what changed since it. Call after load-knowledge and before pr-debator, always.',
   inputSchema: z.object({
     source: z
       .string()
@@ -60,20 +70,45 @@ export default defineTool({
       .optional()
       .describe('Local repos only: the branch, ref, or sha to compare against. Default: main, else master, else their origin/ equivalents.'),
     patch: z.string().optional().describe('A unified diff to review on its own, when there is no repo to load.'),
+    since: z
+      .string()
+      .optional()
+      .describe('Re-review: the host directory of the previous review of this change (where its findings.md is). The diff is then from the head that review was of to the head now.'),
+    knowledgeRequiredFile: z
+      .string()
+      .optional()
+      .describe('The `requiredFile` load-knowledge returned (REQUIRED.md in the sandbox). It goes into the packet so the seats need not read it.'),
   }),
-  async execute({ source, branch, base, patch }, ctx) {
+  async execute({ source, branch, base, patch, since, knowledgeRequiredFile }, ctx) {
     if (source === undefined && patch === undefined) throw new Error('Pass source or patch.')
     const sandbox = await ctx.getSandbox()
+    const previous = since === undefined ? null : await previousReview(since)
+    const extras: Extras = { previous, knowledgeRequiredFile: knowledgeRequiredFile ?? null }
 
-    if (source === undefined) return loadPatchOnly(sandbox, patch as string)
+    if (source === undefined) {
+      if (previous !== null) throw new Error('A pasted diff has no head to re-review from. Drop since, or load the repository.')
+      return loadPatchOnly(sandbox, patch as string, extras)
+    }
 
     const parsed = parsePrSource(source)
-    if (parsed.kind === 'github') return loadGithubPr(sandbox, parsed)
-    return loadLocal(sandbox, parsed.path, base, branch)
+    if (parsed.kind === 'github') return loadGithubPr(sandbox, parsed, extras)
+    return loadLocal(sandbox, parsed.path, base, branch, extras)
   },
 })
 
-async function loadGithubPr(sandbox: SandboxSession, parsed: Extract<ReturnType<typeof parsePrSource>, { kind: 'github' }>) {
+type Extras = { previous: Previous | null; knowledgeRequiredFile: string | null }
+
+/** The previous review a re-review starts from: its findings.md and the head it records. */
+async function previousReview(dir: string): Promise<Previous> {
+  const path = join(resolve(process.cwd(), dir), 'findings.md')
+  const findings = await readFile(path, 'utf8').catch(() => null)
+  if (findings === null) throw new Error(`since ${dir} has no findings.md to re-review from.`)
+  const sha = headShaFromFindings(findings)
+  if (sha === null) throw new Error(`${path} records no head sha (no "Reviewed:" or "Re-review:" line), so there is nothing to diff from. Review in full instead.`)
+  return { sha, dir: resolve(process.cwd(), dir), findings }
+}
+
+async function loadGithubPr(sandbox: SandboxSession, parsed: Extract<ReturnType<typeof parsePrSource>, { kind: 'github' }>, extras: Extras) {
   const token = process.env.GITHUB_TOKEN
   const response = await fetch(prApiUrl(parsed.owner, parsed.name, parsed.number), {
     headers: {
@@ -87,8 +122,11 @@ async function loadGithubPr(sandbox: SandboxSession, parsed: Extract<ReturnType<
     throw new Error(`GitHub API ${response.status} for ${parsed.label}${hint}`)
   }
   const meta = prMetaFromApi(parsed.owner, parsed.name, parsed.number, await response.json())
+  if (extras.previous !== null && extras.previous.sha === meta.headSha) {
+    throw new Error(`${parsed.label} is still at ${meta.headSha.slice(0, 7)}, the head the previous review was of. Nothing changed since.`)
+  }
 
-  const result = await sandbox.run({ command: clonePrCommand(parsed, meta, token) })
+  const result = await sandbox.run({ command: clonePrCommand(parsed, meta, token, extras.previous?.sha) })
   if (result.exitCode !== 0) {
     const raw = result.stderr || result.stdout
     const detail = token === undefined ? raw : raw.replaceAll(token, '***')
@@ -102,10 +140,10 @@ async function loadGithubPr(sandbox: SandboxSession, parsed: Extract<ReturnType<
   const { patch: capped, truncated } = truncatePatch(rawPatch)
   if (truncated) await sandbox.writeTextFile({ path: FILES.patch, content: capped })
 
-  return { ...(await finish(sandbox, meta, capped, changed, truncated, REPO_PATH)), github: { owner: parsed.owner, name: parsed.name, number: parsed.number } }
+  return { ...(await finish(sandbox, meta, capped, changed, truncated, REPO_PATH, null, extras)), github: { owner: parsed.owner, name: parsed.name, number: parsed.number } }
 }
 
-async function loadLocal(sandbox: SandboxSession, path: string, base: string | undefined, branch: string | undefined) {
+async function loadLocal(sandbox: SandboxSession, path: string, base: string | undefined, branch: string | undefined, extras: Extras) {
   const dir = resolve(process.cwd(), path)
   const info = await stat(dir).catch(() => null)
   if (info === null || !info.isDirectory()) throw new Error(`Not a directory: ${dir}`)
@@ -139,15 +177,26 @@ async function loadLocal(sandbox: SandboxSession, path: string, base: string | u
       throw new Error(`\`git merge-base ${baseRef} ${headRef}\` failed in ${dir}. Do they share history?`)
     })
 
+  // A re-review diffs from the previous head, not from the merge base: only what changed since.
+  const since = extras.previous?.sha
+  if (since !== undefined) {
+    const known = await git(['cat-file', '-e', `${since}^{commit}`]).then(
+      () => true,
+      () => false,
+    )
+    if (!known) throw new Error(`The previous review was of ${since.slice(0, 7)}, which is not a commit in ${dir}. Was the branch rewritten? Review it in full instead.`)
+  }
+  const against = since ?? mergeBase
+
   // Only the checked-out branch has a working tree. Review it as it stands — with
   // the uncommitted edits and the files never added, which is the point of reviewing
   // locally. Any other branch is committed history and nothing else.
   const live = branch === undefined || headRef === checkedOut
   const { patch: rawPatch, changed } = live
-    ? await workingTreeDiff(dir, mergeBase)
-    : await refDiff(git, mergeBase, headSha)
+    ? await workingTreeDiff(dir, against)
+    : await refDiff(git, against, headSha)
   if (rawPatch.trim() === '') {
-    throw new Error(`Nothing to review: ${headRef} is identical to ${baseRef} in ${dir}.`)
+    throw new Error(since === undefined ? `Nothing to review: ${headRef} is identical to ${baseRef} in ${dir}.` : `Nothing to re-review: ${headRef} in ${dir} has not changed since ${since.slice(0, 7)}.`)
   }
   const subject = (await git(['log', '-1', '--format=%s', headSha])).stdout.trim()
 
@@ -193,7 +242,7 @@ async function loadLocal(sandbox: SandboxSession, path: string, base: string | u
     author: null,
     url: null,
   }
-  return finish(sandbox, meta, capped, changed, truncated, REPO_PATH, { repoDir, branch: headRef })
+  return finish(sandbox, meta, capped, changed, truncated, REPO_PATH, { repoDir, branch: headRef }, extras)
 }
 
 /**
@@ -202,15 +251,15 @@ async function loadLocal(sandbox: SandboxSession, path: string, base: string | u
  * never `git add`ed — the newest code on the branch. The person's own index is never
  * touched, and the scratch file goes away whatever happens.
  */
-async function workingTreeDiff(dir: string, mergeBase: string): Promise<{ patch: string; changed: string[] }> {
+async function workingTreeDiff(dir: string, against: string): Promise<{ patch: string; changed: string[] }> {
   const indexFile = resolve(tmpdir(), `pr-review-index-${process.pid}-${Date.now()}`)
   const staged = (args: string[]) =>
     run('git', ['-C', dir, ...args], { maxBuffer: MAX_TARBALL, env: { ...process.env, GIT_INDEX_FILE: indexFile } })
   try {
     for (const args of TEMP_INDEX_SETUP) await staged(args)
     return {
-      patch: (await staged(cachedDiffArgs(mergeBase, false))).stdout,
-      changed: parseChangedFiles((await staged(cachedDiffArgs(mergeBase, true))).stdout),
+      patch: (await staged(cachedDiffArgs(against, false))).stdout,
+      changed: parseChangedFiles((await staged(cachedDiffArgs(against, true))).stdout),
     }
   } finally {
     await rm(indexFile, { force: true })
@@ -220,16 +269,16 @@ async function workingTreeDiff(dir: string, mergeBase: string): Promise<{ patch:
 /** Any other branch: `main...branch`, straight out of the object database. */
 async function refDiff(
   git: (args: string[]) => Promise<{ stdout: string }>,
-  mergeBase: string,
+  against: string,
   headSha: string,
 ): Promise<{ patch: string; changed: string[] }> {
   return {
-    patch: (await git(refDiffArgs(mergeBase, headSha, false))).stdout,
-    changed: parseChangedFiles((await git(refDiffArgs(mergeBase, headSha, true))).stdout),
+    patch: (await git(refDiffArgs(against, headSha, false))).stdout,
+    changed: parseChangedFiles((await git(refDiffArgs(against, headSha, true))).stdout),
   }
 }
 
-async function loadPatchOnly(sandbox: SandboxSession, patch: string) {
+async function loadPatchOnly(sandbox: SandboxSession, patch: string, extras: Extras) {
   const { patch: capped, truncated } = truncatePatch(patch)
   const changed = changedFromPatch(capped)
   if (changed.length === 0) throw new Error('That does not look like a unified diff: no `diff --git` headers found.')
@@ -246,7 +295,7 @@ async function loadPatchOnly(sandbox: SandboxSession, patch: string) {
     author: null,
     url: null,
   }
-  return finish(sandbox, meta, capped, changed, truncated, null)
+  return finish(sandbox, meta, capped, changed, truncated, null, null, extras)
 }
 
 async function finish(
@@ -259,7 +308,8 @@ async function finish(
   // Where the review is written afterwards: the git root of a local source, so the
   // review lands in the repo it reviewed. Null for a GitHub PR or a bare patch —
   // there is no checkout on this machine to put it in.
-  local: { repoDir: string; branch: string } | null = null,
+  local: { repoDir: string; branch: string } | null,
+  extras: Extras,
 ) {
   // A truncated patch does not contain every changed file, so changed_files.txt is
   // narrowed to what is actually in it — the seats are told to cite paths from that
@@ -267,8 +317,31 @@ async function finish(
   const { reviewed, dropped } = splitChanged(changed, patch, truncated)
   if (dropped.length > 0) await sandbox.writeTextFile({ path: FILES.changed, content: `${reviewed.join('\n')}\n` })
 
+  const target: ReviewTarget = {
+    baseSha: meta.baseSha,
+    headSha: meta.headSha,
+    since: extras.previous === null ? null : { sha: extras.previous.sha, dir: extras.previous.dir },
+  }
   const stats = patchStats(patch, reviewed.length, truncated)
-  await sandbox.writeTextFile({ path: FILES.meta, content: renderPrMeta(meta, stats, reviewed, dropped) })
+  const prMd = renderPrMeta(meta, stats, reviewed, dropped, target)
+  await sandbox.writeTextFile({ path: FILES.meta, content: prMd })
+  if (extras.previous !== null) await sandbox.writeTextFile({ path: FILES.previousFindings, content: extras.previous.findings })
+
+  // The packet, once: every changed file at HEAD from the tree in the sandbox, and the required reading.
+  const files = new Map<string, string | null>()
+  for (const path of reviewed) files.set(path, repoPath === null ? null : await Promise.resolve(sandbox.readTextFile({ path: `${repoPath}/${path}` })).catch(() => null))
+  const required = extras.knowledgeRequiredFile === null ? null : await Promise.resolve(sandbox.readTextFile({ path: extras.knowledgeRequiredFile })).catch(() => null)
+  const packet = buildPacket({ label: meta.label, description: prMd, patch, changed: reviewed, files, required, previousFindings: extras.previous?.findings ?? null })
+  const { text, ...packetStats } = packet
+
+  // The shas and the packet size, in the sandbox for export-review and comment-on-pr; the
+  // packet itself on the host for pr-debator, whose steps read the host and never the sandbox.
+  await sandbox.writeTextFile({ path: TARGET_FILE, content: JSON.stringify({ target, packet: packetStats }, null, 2) })
+  const contextDir = join(tmpdir(), 'pr-reviewer-context')
+  await mkdir(contextDir, { recursive: true })
+  const contextFile = join(contextDir, `${slugify(meta.label)}-${Date.now()}.json`)
+  await writeFile(contextFile, JSON.stringify({ packet: text, target, stats: packetStats }), 'utf8')
+
   return {
     label: meta.label,
     title: meta.title,
@@ -279,6 +352,10 @@ async function finish(
     branch: local?.branch ?? meta.headRef,
     files: FILES,
     stats,
+    target,
+    contextFile,
+    packet: packetStats,
+    required: required !== null,
     notReviewed: dropped,
     changed: reviewed.slice(0, 50),
   }

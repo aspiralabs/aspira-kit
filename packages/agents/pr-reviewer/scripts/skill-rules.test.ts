@@ -35,6 +35,16 @@ const rules = [
   { reason: 'the Notion engineering rules are mandatory for every Aspira agent, local mode included', file: skill, phrase: 'The engineering guidelines are mandatory' },
   { reason: 'local mode builds the guidelines folder the way load-knowledge does, from the pages the agent is configured with', file: skill, phrase: 'Build that folder with the Notion MCP' },
   { reason: 'a truncated or missing guideline page would review against rules the seats never saw', file: skill, phrase: 'If a page is truncated or cannot be fetched, stop and say so' },
+  { reason: 'the packet needs REQUIRED.md, so the guidelines load before the PR', file: instructions, phrase: 'plus `knowledgeRequiredFile` set to the `requiredFile` load-knowledge returned' },
+  { reason: 'the packet and the shas reach pr-debator through a file, never retyped by the model', file: instructions, phrase: 'the `label`, `repoPath` and `contextFile` from the `load-pr` result, exactly as returned' },
+  { reason: 'a re-review is of a named previous review; a guessed directory re-reviews against the wrong findings', file: instructions, phrase: 'If `since` is missing from the request, ask for the directory; do not guess one' },
+  { reason: 'a run the budget stopped has no fix list, and a verdict for it would be invented', file: instructions, phrase: 'A run the budget stopped has no verdict; do not invent one' },
+  { reason: 'the shas the verdict applies to are reported, so a push after the review is visibly unreviewed', file: instructions, phrase: 'A push after this review is unreviewed' },
+  { reason: 'the packet is complete for changed files; a seat that re-reads them pays for them twice', file: 'agent/subagents/ava/instructions.md', phrase: 'The packet at the start of your prompt is complete for the changed files; reads are for unchanged files only' },
+  { reason: 'a seat that holds out for fixes never agrees, and the review runs to the cap every time', file: 'agent/subagents/ava/instructions.md', phrase: 'A finding of yours is settled once Quinn has ruled on it, whether or not anyone has fixed it' },
+  { reason: 'in a re-review, a finding on unchanged code is out of scope, exactly as before', file: 'agent/subagents/quinn/instructions.md', phrase: 'reject a new finding on code the delta does not change' },
+  { reason: 'the estimate is information, not a gate; a launcher that waits for a yes blocks unattended runs', file: skill, phrase: 'The estimate is printed, not confirmed' },
+  { reason: 'the stopping rule lives in the agent; the session must not decide whether another round runs', file: skill, phrase: "it applies the agent's stopping rule from `agent/lib/review.ts`" },
 ]
 
 it('pins each rule with a distinctive phrase', () => {

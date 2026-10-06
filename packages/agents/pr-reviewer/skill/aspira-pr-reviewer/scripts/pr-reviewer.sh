@@ -24,7 +24,7 @@ absolute_source() {
 absolute_path() {
   if [[ $1 = /* ]]; then printf '%s\n' "$1"; else printf '%s/%s\n' "$PWD" "$1"; fi
 }
-SOURCE="" BRANCH="" BASE="" ROUNDS="" OUT="" KNOWLEDGE="" NO_COMMENT="" FINISH=""
+SOURCE="" BRANCH="" BASE="" ROUNDS="" OUT="" KNOWLEDGE="" SINCE="" MAX_COST="" NO_COMMENT="" FINISH="" YES=""
 parse() {
   local mode=$1; shift
   while [ $# -gt 0 ]; do
@@ -32,20 +32,36 @@ parse() {
       --branch) [ $# -ge 2 ] || die "--branch needs a name"; BRANCH=$2; shift 2 ;;
       --base) [ $# -ge 2 ] || die "--base needs a ref"; BASE=$2; shift 2 ;;
       --max-rounds) [ $# -ge 2 ] || die "--max-rounds needs a number"; ROUNDS=$2; shift 2 ;;
+      --max-cost) [ $# -ge 2 ] || die "--max-cost needs a number of dollars"; MAX_COST=$2; shift 2 ;;
+      --since) [ $# -ge 2 ] || die "--since needs the previous review directory"; SINCE=$(absolute_path "$2"); shift 2 ;;
       --output) [ $# -ge 2 ] || die "--output needs a path"; OUT=$(absolute_path "$2"); shift 2 ;;
       --knowledge) [ "$mode" = local ] || die "--knowledge is for local; the agent loads the guidelines itself"; [ $# -ge 2 ] || die "--knowledge needs a path"; KNOWLEDGE=$(absolute_path "$2"); shift 2 ;;
       --no-comment) NO_COMMENT=1; shift ;;
+      --yes) YES=1; shift ;;
       --local) shift ;;
       --finish) [ "$mode" = local ] || die "--finish is for local"; FINISH=1; shift ;;
       -*) die "unknown option: $1" ;;
       *) [ -z "$SOURCE" ] || die "one PR at a time"; SOURCE=${1#@}; shift ;;
     esac
   done
-  [ -n "$SOURCE" ] || die "usage: pr-reviewer.sh $mode <github-pr | repo-path> [--branch B] [--base main] [--max-rounds N] [--no-comment] [--output DIR]$([ "$mode" = local ] && echo ' [--knowledge DIR] [--finish]')"
+  [ -n "$SOURCE" ] || die "usage: pr-reviewer.sh $mode <github-pr | repo-path> [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR]$([ "$mode" = local ] && echo ' [--knowledge DIR] [--finish]' || echo ' [--yes]')"
   if [ -n "$ROUNDS" ]; then
     [[ $ROUNDS =~ ^[0-9]+$ ]] && [ "$ROUNDS" -ge 1 ] && [ "$ROUNDS" -le 10 ] || die "--max-rounds must be 1..10"
   fi
+  if [ -n "$MAX_COST" ]; then
+    [[ $MAX_COST =~ ^[0-9]+(\.[0-9]+)?$ ]] && [ "$MAX_COST" != 0 ] || die "--max-cost must be a number of dollars above 0"
+  fi
+  [ -z "$SINCE" ] || [ -f "$SINCE/findings.md" ] || die "--since $SINCE has no findings.md"
   SOURCE=$(absolute_source "$SOURCE")
+}
+# What a cloud run is likely to cost, from the diff and this package's previous cost.md files.
+# Printed, not confirmed; --yes skips it. An estimate that cannot be computed never blocks the run.
+print_estimate() {
+  local agent=$1 args=("$SOURCE")
+  [ -z "$BRANCH" ] || args+=(--branch "$BRANCH")
+  [ -z "$BASE" ] || args+=(--base "$BASE")
+  [ -z "$ROUNDS" ] || args+=(--max-rounds "$ROUNDS")
+  pnpm -C "$agent" --silent run review:estimate "${args[@]}" || echo "estimate unavailable (see above); starting anyway"
 }
 cmd_start() {
   parse start "$@"
@@ -60,10 +76,13 @@ cmd_start() {
     [ -z "$BRANCH$BASE" ] || die "--branch and --base are for a local repository; a GitHub PR already says what it is against"
     prompt="Review $SOURCE"
   fi
+  [ -z "$SINCE" ] || prompt="$prompt again, since the previous review in $SINCE"
   [ -z "$ROUNDS" ] || prompt="$prompt, cap it at $ROUNDS rounds"
+  [ -z "$MAX_COST" ] || prompt="$prompt, stop at \$$MAX_COST"
   prompt="$prompt."
   [ -z "$OUT" ] || prompt="$prompt Write the review to $OUT."
   [ -z "$NO_COMMENT" ] || prompt="$prompt Do not comment on the PR."
+  [ -n "$YES" ] || print_estimate "$agent"
   run=$(mktemp -d "${TMPDIR:-/tmp}/pr-reviewer.XXXXXX")
   printf '%s\n' "$SOURCE" > "$run/source"
   date +%s > "$run/started"
@@ -85,6 +104,8 @@ cmd_local() {
   [ -z "$BRANCH" ] || args+=(--branch "$BRANCH")
   [ -z "$BASE" ] || args+=(--base "$BASE")
   [ -z "$ROUNDS" ] || args+=(--max-rounds "$ROUNDS")
+  [ -z "$MAX_COST" ] || args+=(--max-cost "$MAX_COST")
+  [ -z "$SINCE" ] || args+=(--since "$SINCE")
   [ -z "$NO_COMMENT" ] || args+=(--no-comment)
   [ -z "$OUT" ] || args+=(--output "$OUT")
   [ -z "$KNOWLEDGE" ] || args+=(--knowledge "$KNOWLEDGE")
@@ -118,5 +139,5 @@ case ${1:-} in
   local) shift; cmd_local "$@" ;;
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
-  *) die "usage: pr-reviewer.sh start SOURCE [--branch B] [--base main] [--max-rounds N] [--no-comment] [--output DIR] | status RUN | wait RUN [--max SECONDS] | local SOURCE [--branch B] [--base main] [--max-rounds N] [--no-comment] [--output DIR] [--knowledge DIR] [--finish]" ;;
+  *) die "usage: pr-reviewer.sh start SOURCE [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--yes] | status RUN | wait RUN [--max SECONDS] | local SOURCE [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--knowledge DIR] [--finish]" ;;
 esac
