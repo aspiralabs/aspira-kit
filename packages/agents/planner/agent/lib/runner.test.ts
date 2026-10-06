@@ -5,7 +5,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import type { ToolSet } from 'ai'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 
-const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, brokenPlans: 0, uiPlan: false, refusals: [] as unknown[], close: vi.fn() }))
+const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [] as unknown[], close: vi.fn() }))
 vi.mock('@aspiralabs/agent-common/lib/repository', () => ({ repository: async () => ({ files, instructions: '', packet: () => 'src/items.ts:1: existing save', gaps: [], commit: 'abc', dirty: false, tools: { read_files: {} } }), allowedPath: (path: string) => !path.includes('.env') }))
 vi.mock('@aspiralabs/agent-common/lib/mcp', () => ({ connectReadTools: async () => ({ tools: state.guidelineTool ? { notion__read_guideline: { execute: async () => ({ content: [{ type: 'text', text: JSON.stringify({ source: 'https://www.notion.so/topic', markdown: 'TEST-001 Write the failing test first.' }) }] }) } } : {}, reads: [], sources: [], close: state.close }) }))
 vi.mock('ai', async (original) => {
@@ -21,7 +21,7 @@ vi.mock('ai', async (original) => {
         // response.messages holds only the last step; responseMessages holds every step.
         return { response: { messages: [prose] }, responseMessages: [{ role: 'assistant', content: 'read src/items.ts' }, { role: 'tool', content: 'EARLIER READ' }, prose] }
       }
-      if (state.guidelineTool) {
+      if (state.guidelineTool && !state.researchSkipsPages) {
         await args.tools.notion__read_guideline!.execute!({ page: 'topic' }, { toolCallId: 'page', messages: [], context: {} })
         await args.tools.notion__read_guideline!.execute!({ page: 'topic' }, { toolCallId: 'page-again', messages: [], context: {} })
       }
@@ -49,7 +49,7 @@ vi.mock('ai', async (original) => {
 })
 import { runPlan } from './runner.ts'
 
-beforeEach(() => { Object.assign(state, { failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, brokenPlans: 0, uiPlan: false, refusals: [] }); state.close.mockClear() })
+beforeEach(() => { Object.assign(state, { failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [] }); state.close.mockClear() })
 async function input() {
   const dir = await mkdtemp(join(tmpdir(), 'planner-test-'))
   const specPath = join(dir, 'spec.reviewed.md')
@@ -218,4 +218,16 @@ it('hands planning the full text of every guideline page research read, once eac
   const planning = vi.mocked(generateText).mock.calls.map(([call]) => call as { prompt?: string; output?: unknown }).find((call) => call.output)!
   expect(planning.prompt).toContain('GUIDELINE PAGES READ DURING RESEARCH (full text):\nSOURCE https://www.notion.so/topic\nTEST-001 Write the failing test first.\n\n')
   expect(planning.prompt!.split('TEST-001 Write the failing test first.')).toHaveLength(2)
+})
+
+it('hands planning every page the required guidelines link to, even ones research did not open', async () => {
+  state.guidelineTool = true
+  state.researchSkipsPages = true
+  const args = await input()
+  await writeFile(args.guidelinesPath, 'REV-001 Inspect source evidence\n| Any code change | [Testing](https://app.notion.com/p/44444444444444444444444444444444) |\n')
+  const { generateText } = await import('ai')
+  vi.mocked(generateText).mockClear()
+  await runPlan(args)
+  const planning = vi.mocked(generateText).mock.calls.map(([call]) => call as { prompt?: string; output?: unknown }).find((call) => call.output)!
+  expect(planning.prompt).toContain('GUIDELINE PAGES READ DURING RESEARCH (full text):\nSOURCE https://www.notion.so/topic\nTEST-001 Write the failing test first.')
 })

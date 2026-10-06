@@ -45,6 +45,9 @@ export function renderDatabase(title: string, sources: { name: string; rows: Rec
   return `Database: ${title}. Every row, as read from Notion.\n\n${tables.join('\n\n')}\n`
 }
 
+/** Pages a discovery walk reads at most before giving up on an unlinked page. */
+const DISCOVERY_PAGES = 40
+
 /** Read-only, per-process cache scoped to the configured engineering index and discovered links.
  * A linked Notion database (such as Approved Technologies) is read as a table of its rows. */
 export function notionReader(token: string, rootPage: string, request: typeof fetch = fetch) {
@@ -78,10 +81,34 @@ export function notionReader(token: string, rootPage: string, request: typeof fe
     return renderDatabase((found.value.title ?? []).map((part) => part.plain_text ?? '').join('') || 'Untitled', sources)
   }
 
+  const linksOf = (markdown: string) => [
+    ...childPagesOf(markdown).map((child) => child.id),
+    ...[...markdown.matchAll(/https:\/\/(?:www\.|app\.)?notion\.(?:so|com)\/[^\s<>")\]]+/g)].map((match) => pageIdFrom(match[0])).filter((linked) => linked !== undefined),
+  ]
+
+  // A page linked from the guidelines (say, from Agent Instructions' routing table) is readable
+  // without the caller walking there first: walk from the index, breadth-first, until it is found.
+  async function discover(id: string, signal: AbortSignal): Promise<void> {
+    const queue = [root]
+    const visited = new Set<string>()
+    while (queue.length > 0 && !allowed.has(id) && visited.size < DISCOVERY_PAGES) {
+      const next = queue.shift()!
+      if (visited.has(next)) continue
+      visited.add(next)
+      const page = await fetchPage(next, signal).catch(() => null)
+      if (page !== null) queue.push(...linksOf(page.markdown).filter((linked) => !visited.has(linked)))
+    }
+  }
+
   async function read(page: string, signal: AbortSignal) {
     const id = pageIdFrom(page)
     if (!id) throw new Error('Not a Notion page URL or ID')
+    if (!allowed.has(id)) await discover(id, signal)
     if (!allowed.has(id)) throw new Error('Page is outside the discovered engineering guidelines. Call list_guidelines, then follow its page links.')
+    return fetchPage(id, signal)
+  }
+
+  async function fetchPage(id: string, signal: AbortSignal) {
     let pending = cache.get(id)
     if (!pending) {
       pending = (async () => {
@@ -96,11 +123,7 @@ export function notionReader(token: string, rootPage: string, request: typeof fe
           if (table === null) throw new Error(`Notion read failed (${result.status}); check integration page access`)
           markdown = table
         }
-        for (const child of childPagesOf(markdown)) allowed.add(child.id)
-        for (const match of markdown.matchAll(/https:\/\/(?:www\.|app\.)?notion\.(?:so|com)\/[^\s<>")\]]+/g)) {
-          const linked = pageIdFrom(match[0])
-          if (linked) allowed.add(linked)
-        }
+        for (const linked of linksOf(markdown)) allowed.add(linked)
         return { pageId: id, source: `https://www.notion.so/${id.replaceAll('-', '')}`, markdown, fetchedAt: new Date().toISOString() }
       })()
       cache.set(id, pending)
