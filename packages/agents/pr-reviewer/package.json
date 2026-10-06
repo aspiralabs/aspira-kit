@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/pr-reviewer",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "pr-reviewer on eve: six specialist seats review a PR and argue, an independent verifier rules on every finding, and the loop runs until the fix list settles.",
   "type": "module",
   "license": "MIT",
