@@ -26,6 +26,10 @@ const rules = [
   { reason: 'no tests run; the human must know the diff is unverified behaviorally', file: instructions, phrase: 'static analysis passing does not mean behavior is unchanged' },
   { reason: 'partial is never rounded up to clean', file: instructions, phrase: '`partial` means the analyzers still fail or one could not run' },
   { reason: 'no run without the engineering rules: a refusal is reported, not worked around', file: instructions, phrase: 'do not retry without them' },
+  // The report rules of specs/agents-human-lists.md F5 live in the agent, where every mode reads them.
+  { reason: 'a human reads the errors first; an unsorted list buries them', file: instructions, phrase: 'in severity order (errors, then warnings)' },
+  { reason: 'the plain-English line is what the human reads; the evidence is there when asked', file: instructions, phrase: 'each with its plain-English line first and its evidence (file, line, rule) available on request' },
+  { reason: 'a summary that drops a diagnostic hides it; the counts must equal the list', file: instructions, phrase: 'never summarise away an item' },
 ]
 
 it('pins each rule with a distinctive phrase', () => {
