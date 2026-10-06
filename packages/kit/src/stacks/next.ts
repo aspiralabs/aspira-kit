@@ -1,8 +1,9 @@
 // The Next.js profile. Each step is idempotent: run init twice, get the same project.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { join, basename } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { configDir, deepMerge, readJson, writeIfAbsent, writeJson, type Log } from '../fs.js'
+import { deepMerge, readJson, writeIfAbsent, writeJson, type Log } from '../fs.js'
 
 export type InitOptions = { projectRoot: string; dryRun: boolean; log: Log }
 
@@ -132,13 +133,25 @@ function css(opts: InitOptions): void {
   }
 }
 
+// Hooks used to live in @aspiralabs/config; a project wired before that still names them, and the merge keeps arrays.
+function dropRetiredHooks(settings: Record<string, unknown>): Record<string, unknown> {
+  const hooks = settings.hooks
+  if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
+    return settings
+  }
+  const retired = (entry: unknown): boolean => JSON.stringify(entry).includes('@aspiralabs/config/agent/hooks/')
+  const next: Record<string, unknown> = {}
+  for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
+    next[event] = Array.isArray(groups) ? groups.filter((g) => !retired(g)) : groups
+  }
+  return { ...settings, hooks: next }
+}
+
 function agentFiles(opts: InitOptions): void {
-  const cfg = configDir(opts.projectRoot)
+  // Templates ship with this package (templates/agent/), so a project gets the version of the kit it installed.
+  const templatesDir = fileURLToPath(new URL('../../templates/agent/', import.meta.url))
   const tpl = (name: string, fallback: string): string => {
-    if (!cfg) {
-      return fallback
-    }
-    const p = join(cfg, 'agent', 'templates', name)
+    const p = join(templatesDir, name)
     return existsSync(p) ? readFileSync(p, 'utf8') : fallback
   }
   const project = basename(opts.projectRoot)
@@ -175,7 +188,7 @@ function agentFiles(opts: InitOptions): void {
 
   const settingsPath = join(opts.projectRoot, '.claude', 'settings.json')
   const settingsTemplate = JSON.parse(tpl('claude-settings.json', '{}')) as Record<string, unknown>
-  const settingsNext = deepMerge(readJson<Record<string, unknown>>(settingsPath) ?? {}, settingsTemplate)
+  const settingsNext = deepMerge(dropRetiredHooks(readJson<Record<string, unknown>>(settingsPath) ?? {}), settingsTemplate)
   opts.log(`${existsSync(settingsPath) ? 'update' : 'write '} ${settingsPath} (session-start, deny-tier3, audit-log hooks)`)
   if (!opts.dryRun) {
     writeJson(settingsPath, settingsNext)

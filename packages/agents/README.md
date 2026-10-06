@@ -103,7 +103,7 @@ Package scripts (`dev`, `info`, `typecheck`, `lint`) need no `exec`: `pnpm -C <d
 
 `pnpm-workspace.yaml` already globs `packages/agents/*`, so the steps are:
 
-1. Write the spec first (`specs/agents-<name>.md`). Rule zero in `packages/config/agent/constraints.md`: no spec, no code.
+1. Write the spec first (`specs/agents-<name>.md`). Rule zero (Engineering Central › Agent Instructions in Notion): no spec, no code.
 2. `mkdir packages/agents/<name>` and copy `package.json`, `tsconfig.json`, `eslint.config.mjs`, `.gitignore`, and `.env.example` from an existing agent, plus an `agent/` with `agent.ts`, `instructions.md`, and `channels/eve.ts`. Then edit `package.json` (name `@aspiralabs/<name>`, version `0.1.0`, description). Take the agent whose shape is closer to what you are building.
 3. Add `@aspiralabs/<name>` to `ignore` in `.changeset/config.json`. Repo-local packages are never versioned by the release flow, and a package missing from that list breaks `changeset version`.
 4. `pnpm install`, then `pnpm --filter @aspiralabs/<name> exec eve info` to confirm eve discovers it with 0 diagnostics.
