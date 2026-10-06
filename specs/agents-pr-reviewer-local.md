@@ -30,6 +30,7 @@ Run the official pr-reviewer pipeline inside a Claude Code session, with every s
   - Each step names `agent/instructions.md` as `orchestrator`, and the export includes its current text. The session acts as the orchestrator by that file.
   - `SKILL.md` describes only the mechanics of running the steps and points to the agent's files as the authority. It restates none of the agent's rules.
   - The only text the driver adds to a prompt is how a session turn differs from an eve turn: real paths and the output file.
+- [x] F10: A session can refuse a helper's write of a report file. The document turns (Nova's findings, Dex's review, Quinn's and Nova's checks) are told not to write their document and to return its full text as an extra `document` string in their JSON result instead. The driver strips that field before schema validation and writes the file once, in stage order (findings, review, then the checks), so a check's revision replaces the draft. A turn that writes the file itself still works.
 
 ## Implementation and verification plan
 
