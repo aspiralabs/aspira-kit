@@ -77,4 +77,4 @@ The work directory, `<output>.local/`, holds the prompts and outputs between ste
 
 ## Results
 
-A local repository's review goes to `<repo>/.pr-review/<branch>/`. A GitHub PR's review goes to `reviews/<date>-<branch>/` in the pr-reviewer package. `--output` overrides both. Both modes write the agent's files there: `review.md`, `findings.md`, `conversation.md`, `pr.md`, `pr.patch`, `changed_files.txt` and `cost.md`. `--local` adds `trace/`. If a run fails before exporting, show its error rather than an earlier review.
+A local repository's review goes to `<repo>/.work/<ticket>/pr-review/`, the ticket's working folder (`<ticket>` is the branch without its type prefix). A GitHub PR's review goes to `reviews/<date>-<branch>/` in the pr-reviewer package. `--output` overrides both. Both modes write the agent's files there: `review.md`, `findings.md`, `conversation.md`, `pr.md`, `pr.patch`, `changed_files.txt` and `cost.md`. `--local` adds `trace/`. If a run fails before exporting, show its error rather than an earlier review.

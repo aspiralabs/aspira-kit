@@ -157,7 +157,7 @@ export const LOCAL_EXCLUDES = [
   'coverage',
   '.packs',
   '*.debate',
-  '.pr-review',
+  '.work',
 ]
 
 /**
@@ -171,9 +171,21 @@ export function optionalPath(value: string | null | undefined): string | undefin
   return trimmed
 }
 
-/** Reviews live in the repo they reviewed, under this directory, ignored by git. */
-export const REVIEW_DIR = '.pr-review'
+/**
+ * Reviews live in the repo they reviewed, inside the ticket's working folder
+ * (`.work/<ticket>/pr-review/`), which git never sees. `.work/` is the one per-ticket
+ * working folder every Aspira project has; `kit init` ignores it.
+ */
+export const REVIEW_DIR = '.work'
 export const IGNORE_PATTERN = `${REVIEW_DIR}/`
+export const REVIEW_SUBDIR = 'pr-review'
+
+/** The ticket folder a branch maps to: the branch without its type prefix (feat/, fix/, …), as a slug. */
+export function ticketFolder(branch: string): string {
+  const name = branch.includes('/') ? branch.slice(branch.indexOf('/') + 1) : branch
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  return slug === '' ? 'review' : slug
+}
 
 /**
  * True when nothing in this .gitignore already covers the review directory. Exact
@@ -189,7 +201,7 @@ export function needsIgnoreRule(gitignore: string): boolean {
 /** Appended to the reviewed repo's .gitignore, once, with a line saying who did it. */
 export function ignoreRule(existing: string): string {
   const separator = existing === '' || existing.endsWith('\n\n') ? '' : existing.endsWith('\n') ? '\n' : '\n\n'
-  return `${separator}# pr-reviewer output\n${IGNORE_PATTERN}\n`
+  return `${separator}# per-ticket working folders (pulled from the Notion ticket, never committed)\n${IGNORE_PATTERN}\n`
 }
 
 /** The changed paths of a pasted diff, read off its `diff --git` headers. */
