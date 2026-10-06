@@ -95,8 +95,11 @@ agent pr-reviewer "Review the branch feat/checkout in $PWD against develop"
 # Against the spec the feature was built from: every seat reads it and can raise spec findings
 agent pr-reviewer "Review the branch feat/checkout in $PWD against main, the spec is $PWD/specs/checkout.md"
 
-# Let it run to the default 4 rounds
+# Let it run to the default 4 rounds (it ends earlier after a round with no dispute and no new finding)
 agent pr-reviewer "Review the branch feat/checkout in $PWD against main"
+
+# Re-review only what changed since the previous review, and stop at $3
+agent pr-reviewer "Review the branch feat/checkout in $PWD against main again, since the previous review in $PWD/.work/checkout/pr-review, stop at \$3"
 
 # Write the output somewhere else
 agent pr-reviewer "Review the branch feat/checkout in $PWD against main, write the output to /tmp/checkout-review"
@@ -107,7 +110,7 @@ agent-dev pr-reviewer
 
 Reviewing the checked-out branch includes your uncommitted and untracked files. Naming any other branch reviews committed history only.
 
-**Skill:** `/aspira-pr-reviewer <github-pr | repo-path> [--branch B] [--base main] [--max-rounds N] [--no-comment]` launches this agent. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `pr-reviewer/skill/aspira-pr-reviewer/`; see **Skills** in `README.md`. A `--local` review exports the same files; Quinn then runs on the session's model, so it is not a second vendor.
+**Skill:** `/aspira-pr-reviewer <github-pr | repo-path> [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--yes]` launches this agent, after printing a cost estimate (`--yes` skips it). `--max-cost` stops a cloud run at a dollar amount (default `MAX_COST_USD`); `--since` re-reviews only what changed since the review in DIR. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `pr-reviewer/skill/aspira-pr-reviewer/`; see **Skills** in `README.md`. A `--local` review exports the same files; Quinn then runs on the session's model, so it is not a second vendor.
 
 ## code-analyzer
 

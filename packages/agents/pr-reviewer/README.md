@@ -20,14 +20,18 @@ Quinn is independent twice over: it raises nothing, so it has no finding of its 
 
 ## The loop
 
-1. `load-pr` puts the tree at `/workspace/repo`, the diff at `/workspace/pr.patch`, the changed paths at `/workspace/changed_files.txt`, and the PR at `/workspace/pr.md`.
-2. All six seats review in parallel, each writing its own file for the round. Then Quinn rules on every finding.
-3. Next round: each seat reads everyone else's file and Quinn's rulings, and accepts, withdraws, or disputes with evidence.
-4. Stop when all seven agree, or at the round cap (default 4, max 10).
-5. Nova writes `findings.md`, Dex writes `review.md`, then Quinn signs off the fix list and Nova checks the summary.
+1. `load-knowledge` puts the org's guidelines in the sandbox. Then `load-pr` puts the tree at `/workspace/repo`, the diff at `/workspace/pr.patch`, the changed paths at `/workspace/changed_files.txt`, and the PR at `/workspace/pr.md`, and builds **the packet** once: the diff, every changed file at HEAD (a file over 40,000 characters as its changed hunks with 60 lines of context), the changed paths, the PR, and `REQUIRED.md`. Every prompt starts with it, so the seats never read a changed file and every call shares one cache prefix.
+2. All six seats review in parallel, each writing its own file for the round. Reads are for unchanged files only, through `read_files` (many files, one call) and `search` (grep with two lines of context), batched, and capped at `MAX_SEAT_CALLS` tool calls a round (default 8); at the cap a seat writes with what it has and lists what it did not read. Then Quinn rules on every finding.
+3. Next round: each seat reads everyone else's file and Quinn's rulings, and accepts, withdraws, or disputes with evidence. A seat is agreed once Quinn has ruled on its findings, fixed or not.
+4. Stop after a round with no dispute and no new finding, or at the round cap (default 4, max 10), or at the budget (`--max-cost`, or `MAX_COST_USD`): the run stops after the call that crosses it and exports what exists as incomplete.
+5. Nova writes `findings.md`, Dex writes `review.md`, then Quinn signs off the fix list and Nova checks the summary. Both carry the base and head sha the verdict applies to; so does the PR comment.
 6. The verdict — `block`, `comment`, `approve` — is computed from the counts. No model declares your PR fine.
 
-Seven model calls a round, all but one on Opus. A four-round review is around thirty calls; `cost.md` tells you what it actually was.
+Seven model calls a round, all but one on Opus. A review that settles in two rounds is around twenty calls; `cost.md` tells you what it actually was, with calls per seat per round, the packet size, the cache-read share and the budget.
+
+**Re-review.** `--since <previous review dir>` (or "review it again since <dir>") reads the head sha the previous `findings.md` recorded and diffs from it to the head now. The seats do two things: say which previous findings the delta fixes, with the line as evidence, and raise new findings only on the delta. `findings.md` gains a **Previous findings** table (fixed, still open, withdrawn) and a **New findings** section; `review.md` and the comment say it was a re-review of `<previous>..<new>`.
+
+**Estimate.** The skill prints one before a cloud run: the diff size, the seats and round cap, and a dollar range from the `cost.md` files under `reviews/` (seeded from the NOM-4 review until there are any). `--yes` skips it.
 
 ## Run
 
@@ -73,7 +77,8 @@ A GitHub PR or a pasted diff has no local checkout to write into, so it goes to 
 | `findings.md` | the fix list: verdict counts, then every surviving finding with severity, location, evidence, fix, who raised it, and Quinn's ruling |
 | `conversation.md` | the full transcript, every seat, every round |
 | `pr.md`, `pr.patch`, `changed_files.txt` | what was actually reviewed |
-| `cost.md`, `usage.jsonl` | tokens and Gateway-reported USD per agent |
+| `previous-findings.md` | a re-review: the findings it answered, verbatim |
+| `cost.md`, `usage.jsonl` | tokens and Gateway-reported USD per agent, calls per seat per round, packet size, cache-read share, budget |
 
 The agent prints `review.md` back in the reply and offers the rest.
 
@@ -84,8 +89,8 @@ agent/
 ├── agent.ts            root agent: routes, never reviews
 ├── instructions.md     system prompt
 ├── hooks/usage.ts      per-call cost ledger
-├── tools/              load-pr · pr-debator · export-review
-├── lib/                pure logic: review.ts (seats, prompts, verdict) · pr.ts (sources, git) · usage.ts
+├── tools/              load-pr · pr-debator · export-review · comment-on-pr · read_files · search
+├── lib/                pure logic: review.ts (seats, prompts, stopping rule, verdict) · packet.ts · loop.ts · pr.ts (sources, git) · target.ts (shas) · budget.ts · call-cap.ts · estimate.ts · usage.ts
 └── subagents/          ava · cole · nova · reba · dex · iris · quinn — all hidden, all sharing the root's sandbox
 ```
 
