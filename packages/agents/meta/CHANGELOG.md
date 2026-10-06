@@ -1,5 +1,17 @@
 # @aspiralabs/agents
 
+## 0.6.0
+
+### Patch Changes
+
+- @aspiralabs/agent-common@0.6.0
+- @aspiralabs/spec-writer@0.6.0
+- @aspiralabs/spec-reviewer@0.6.0
+- @aspiralabs/planner@0.6.0
+- @aspiralabs/implementor@0.6.0
+- @aspiralabs/code-analyzer@0.6.0
+- @aspiralabs/pr-reviewer@0.6.0
+
 ## 0.5.5
 
 ### Patch Changes
