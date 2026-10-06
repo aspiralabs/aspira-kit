@@ -1,0 +1,121 @@
+{
+ "object": "page",
+ "id": "3ec3e59b-2258-8102-becf-ce78d66142e1",
+ "created_time": "2026-10-01T01:46:44.340Z",
+ "last_edited_time": "2026-10-05T04:55:44.354Z",
+ "created_by": {
+  "object": "user",
+  "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+ },
+ "last_edited_by": {
+  "object": "user",
+  "id": "450eaf9b-b1e7-4a1d-85f7-b48fa2ad5f13"
+ },
+ "cover": null,
+ "icon": null,
+ "parent": {
+  "type": "data_source_id",
+  "data_source_id": "b4e393d4-a4a6-46b8-bbd1-3d6c0f45a01e",
+  "database_id": "d9e768e6-e796-4311-8781-14cbbe433ea1"
+ },
+ "in_trash": false,
+ "is_archived": false,
+ "is_locked": false,
+ "properties": {
+  "Area": {
+   "id": "WWFeWQ",
+   "type": "multi_select",
+   "multi_select": [
+    {
+     "id": "discover",
+     "name": "Discover",
+     "color": "green"
+    }
+   ]
+  },
+  "Created": {
+   "id": "Crt",
+   "type": "created_time",
+   "created_time": "2026-10-01T01:46:44.340Z"
+  },
+  "Dev": {
+   "id": "RHlNVA",
+   "type": "select",
+   "select": {
+    "id": "claude",
+    "name": "Claude",
+    "color": "orange"
+   }
+  },
+  "PR": {
+   "id": "PR",
+   "type": "url",
+   "url": "https://github.com/aspiralabs/nomnomzz/pull/2"
+  },
+  "Priority": {
+   "id": "eGBzcA",
+   "type": "select",
+   "select": {
+    "id": "p0-critical",
+    "name": "P0 - Critical",
+    "color": "red"
+   }
+  },
+  "Status": {
+   "id": "bEBnag",
+   "type": "select",
+   "select": {
+    "id": "in-review-implementation",
+    "name": "In Review: Implementation",
+    "color": "blue"
+   }
+  },
+  "Type": {
+   "id": "YH08dA",
+   "type": "select",
+   "select": {
+    "id": "feature",
+    "name": "Feature",
+    "color": "blue"
+   }
+  },
+  "Version": {
+   "id": "Ver",
+   "type": "select",
+   "select": null
+  },
+  "ID": {
+   "id": "%40tZq",
+   "type": "unique_id",
+   "unique_id": {
+    "prefix": "NOM",
+    "number": 4
+   }
+  },
+  "Feature": {
+   "id": "title",
+   "type": "title",
+   "title": [
+    {
+     "type": "text",
+     "text": {
+      "content": "Explore pagination",
+      "link": null
+     },
+     "annotations": {
+      "bold": false,
+      "italic": false,
+      "strikethrough": false,
+      "underline": false,
+      "code": false,
+      "color": "default"
+     },
+     "plain_text": "Explore pagination",
+     "href": null
+    }
+   ]
+  }
+ },
+ "url": "https://www.notion.so/Explore-pagination-3ec3e59b22588102becfce78d66142e1",
+ "public_url": null
+}
