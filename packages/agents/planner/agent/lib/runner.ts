@@ -8,6 +8,7 @@ import { modelTrace } from '@aspiralabs/agent-common/lib/model-trace'
 import { repository } from '@aspiralabs/agent-common/lib/repository'
 import { runAnalysis } from '@aspiralabs/agent-common/lib/run-analysis'
 import { checkBusinessSpec } from '@aspiralabs/agent-common/lib/spec'
+import { pageIdFrom } from '@aspiralabs/agent-common/lib/knowledge'
 import { planSchema, researchSchema, renderPlan, touchesUi, validatePlan, type Plan, type Research } from './plan.ts'
 import { system, researchSystem, researchInstructions, planningInstructions, repairInstructions } from './prompts.ts'
 
@@ -133,6 +134,25 @@ export function readingGuidelines(tools: ToolSet, pages: GuidelinePage[]): ToolS
   }))
 }
 
+/** Notion page ids the required guidelines link to, in order of first appearance. */
+export function linkedGuidelineIds(guidelines: string): string[] {
+  const ids = [...guidelines.matchAll(/https:\/\/(?:www\.|app\.)?notion\.(?:so|com)\/[^\s<>")\]]+/g)].map((match) => pageIdFrom(match[0])).filter((id) => id !== undefined)
+  return [...new Set(ids)]
+}
+
+/** Read each linked guideline page research did not, through the same read tool, so it lands in `pages`. */
+export async function readLinkedGuidelines(tools: ToolSet, guidelines: string, pages: GuidelinePage[], signal: AbortSignal): Promise<void> {
+  const reader = Object.entries(tools).find(([name]) => /read_guideline$/.test(name))?.[1]
+  if (!reader?.execute) return
+  const known = () => new Set(pages.map((page) => pageIdFrom(page.source)))
+  for (const id of linkedGuidelineIds(guidelines)) {
+    if (signal.aborted) return
+    if (known().has(id)) continue
+    // A page that cannot be read stays out; planning names what it lacks.
+    await Promise.resolve(reader.execute({ page: id }, { toolCallId: `linked-${id}`, messages: [], context: {}, abortSignal: signal })).catch(() => undefined)
+  }
+}
+
 /** True when a UI plan lacks the successful catalog and component-document reads it requires. */
 export function missingUiReads(uiRequired: boolean, reads: { tool: string; ok: boolean }[]): boolean {
   return uiRequired && !['list_components', 'get_component'].every((name) => reads.some((read) => read.ok && read.tool.endsWith(`__${name}`)))
@@ -186,6 +206,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   let plan: Plan | null = null
   let research: Research | null = null
   const pages: GuidelinePage[] = []
+  const readTools = readingGuidelines(mcp.tools, pages)
   try {
     options.progress?.('research')
     const prompt = researchPrompt(context)
@@ -210,7 +231,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         submitted = value
         return { accepted: true }
       }
-      const tools: ToolSet = { ...repo.tools, ...readingGuidelines(mcp.tools, pages), submit_research: tool({ description: 'Finish after gathering concrete repository and guideline evidence.', inputSchema: researchSchema, execute: submit }) }
+      const tools: ToolSet = { ...repo.tools, ...readTools, submit_research: tool({ description: 'Finish after gathering concrete repository and guideline evidence.', inputSchema: researchSchema, execute: submit }) }
       // Research that replies without submitting while turns remain is sent back to keep reading,
       // told how many turns it has left. Only its last turn is forced to submit what it has.
       let messages: ModelMessage[] = [{ role: 'user', content: prompt }]
@@ -228,6 +249,9 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       if (!submitted) throw new Error('Research did not submit evidence within its turn budget')
       return researchSchema.parse(submitted)
     })
+    // Planning gets every page the required guidelines link to, not only the ones research
+    // chose to open: the routing table names the pages that bind every code change.
+    if (research && !options.signal?.aborted) await readLinkedGuidelines(readTools, guidelines, pages, preparation)
     if (research && !options.signal?.aborted) {
       options.progress?.('planning')
       const prompt = planningPrompt(context, research, planningInstructions, pages)
