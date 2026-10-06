@@ -2,6 +2,7 @@
 // the seats, prompts, schemas, and the verdict can be tested without a runtime.
 
 import { z } from 'zod'
+import { SEVERITIES, WHAT_THIS_MEANS_RULE, type Counts, type Severity } from '@aspiralabs/agent-common/lib/severity'
 import { DEFAULT_MAX_SEAT_CALLS } from './call-cap.ts'
 import { reviewedLine, type ReviewTarget } from './target.ts'
 
@@ -97,9 +98,8 @@ export const PREFIX: Record<Seat, string> = {
 export const DEFAULT_MAX_ROUNDS = 4
 export const MAX_ROUNDS_LIMIT = 10
 
-export const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'] as const
-export type Severity = (typeof SEVERITIES)[number]
-export type Counts = Record<Severity, number>
+/** The one severity order every Aspira agent uses, from agent-common. */
+export { SEVERITIES, type Counts, type Severity }
 
 export const EMPTY_COUNTS: Counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 }
 
@@ -337,6 +337,7 @@ const findingRules = (pr: PrContext) => {
 - Every finding cites a path from ${files.changed} and a line or line range, and quotes the evidence from the diff.
 - Copy paths from ${files.changed} or ${files.patch}. Never assemble one from memory of how the project is probably laid out: \`components/ui/core/alert.tsx\` and \`components/ui/core/alert/alert.tsx\` are different files, and only one of them exists. If a read says a path is not there, the path was wrong — find the real one with \`search\` before you write anything about it.
 - Severity is one of \`critical\`, \`high\`, \`medium\`, \`low\`, \`info\`. Confidence is a number from 0 to 1. Both are yours to defend.
+- Every finding opens with **What this means:** ${WHAT_THIS_MEANS_RULE}. The evidence and the fix stay exact and technical; the plain-English line is what the author reads first.
 - Prefer the exploitable, reachable, and concrete over the theoretical. Three real findings beat ten vague ones.
 - Do not spend a finding on what typecheck, lint, or prettier already catches. Those gates run before you do.
 - Nothing to say is a result. Write "None." and mean it.`
@@ -360,7 +361,7 @@ Your new findings, each as:
 
 \`#### [${PREFIX[who]}${round}.1] <severity> · <category> · <path>:<line-or-range> · confidence <0.0-1.0>\`
 
-then three short blocks: what is wrong, the evidence quoted from the diff, and the fix. Write "None." if you have none.
+then four short blocks, in this order: \`**What this means:**\` (the plain-English line, as the finding rules say), what is wrong, the evidence quoted from the diff, and the fix. Write "None." if you have none.
 
 ### Position
 One short paragraph: what you now believe must change in this PR, across every point that was ever raised in your lens.
@@ -459,8 +460,8 @@ export function writeFindingsPrompt(pr: PrContext, agreed: boolean): string {
   const since = sinceOf(pr)
   const shape =
     since === null
-      ? `\`# Findings: ${pr.label}\`,${reviewedSection(pr)} then exactly one totals line in this form: \`Totals: <n> critical · <n> high · <n> medium · <n> low · <n> info\`, then \`## Critical\` / \`## High\` / \`## Medium\` / \`## Low\` / \`## Info\` — skip a heading with nothing under it. Under each, one \`### [ID] <one-line title>\` per finding with: location as \`path:line\`, what is wrong, the evidence quoted from the diff, the fix, who raised it, and Quinn's ruling in a few words.`
-      : `\`# Findings: ${pr.label}\`,${reviewedSection(pr)} then exactly one totals line in this form: \`Totals: <n> critical · <n> high · <n> medium · <n> low · <n> info\` counting the still-open previous findings and the new ones together. Then \`## Previous findings\`: a table with one row per finding of the previous fix list (${files.previousFindings}), columns ID, severity, state (\`fixed\`, \`still open\`, \`withdrawn\`) and evidence (\`path:line\` for fixed, the reason otherwise), as Quinn ruled them. Then \`## New findings\`: one line saying how many, and \`None.\` when there are none. Then \`## Critical\` / \`## High\` / \`## Medium\` / \`## Low\` / \`## Info\` — skip a heading with nothing under it — holding the still-open previous findings, each marked \`(previous, still open)\`, and the new findings, each marked \`(new)\`, one \`### [ID] <one-line title>\` per finding with: location as \`path:line\`, what is wrong, the evidence quoted from the diff, the fix, who raised it, and Quinn's ruling in a few words. Fixed and withdrawn findings appear only in the table.`
+      ? `\`# Findings: ${pr.label}\`,${reviewedSection(pr)} then exactly one totals line in this form: \`Totals: <n> critical · <n> high · <n> medium · <n> low · <n> info\`, then \`## Critical\` / \`## High\` / \`## Medium\` / \`## Low\` / \`## Info\` — skip a heading with nothing under it. Under each, one \`### [ID] <one-line title>\` per finding with, in this order: a \`**What this means:**\` line (${WHAT_THIS_MEANS_RULE}), then location as \`path:line\`, what is wrong, the evidence quoted from the diff, the fix, who raised it, and Quinn's ruling in a few words.`
+      : `\`# Findings: ${pr.label}\`,${reviewedSection(pr)} then exactly one totals line in this form: \`Totals: <n> critical · <n> high · <n> medium · <n> low · <n> info\` counting the still-open previous findings and the new ones together. Then \`## Previous findings\`: a table with one row per finding of the previous fix list (${files.previousFindings}), columns ID, severity, state (\`fixed\`, \`still open\`, \`withdrawn\`) and evidence (\`path:line\` for fixed, the reason otherwise), as Quinn ruled them. Then \`## New findings\`: one line saying how many, and \`None.\` when there are none. Then \`## Critical\` / \`## High\` / \`## Medium\` / \`## Low\` / \`## Info\` — skip a heading with nothing under it — holding the still-open previous findings, each marked \`(previous, still open)\`, and the new findings, each marked \`(new)\`, one \`### [ID] <one-line title>\` per finding with, in this order: a \`**What this means:**\` line (${WHAT_THIS_MEANS_RULE}), then location as \`path:line\`, what is wrong, the evidence quoted from the diff, the fix, who raised it, and Quinn's ruling in a few words. Fixed and withdrawn findings appear only in the table.`
   return `${packetSection(pr)}You are Nova. The review of ${pr.label} is over. Write the fix list.
 
 Read ${files.patch}, ${files.changed}, and every file under ${roundsDir}/ in full${pr.packet === undefined || pr.packet === null ? '' : ' (the first two are in the packet above; the round files in one `read_files` call)'}, then write ${files.findings}: what this PR has to fix, settled, deduplicated, in severity order.
@@ -475,6 +476,7 @@ Rules:
 - Keep the id and the severity as they finally stood, not as first written. Where Quinn adjusted severity, use the adjusted one.
 - One entry per real problem. If two surviving ids describe one fix, Quinn missed a duplicate — merge them and say so in the entry.
 - No praise, no summary of the debate, no hedging. This is a work list.
+- Every finding that survived is in the file, under its severity: the totals line counts exactly the entries below it, and nothing is folded into a summary.
 - Do not write a verdict line. The verdict is computed from your counts, not asserted.${unresolved}
 
 Return the structured result with the path, \`changed: true\`, and \`counts\`: how many findings you actually wrote at each severity.`
@@ -493,8 +495,8 @@ Sections:
 
 - \`# Review: ${pr.label}\`${reviewedSection(pr)}
 - \`## What this change does\` — two to four sentences, from the diff, not from the PR description.${again}
-- \`## Fix before merge\` — the critical and high findings, one bullet each, in the author's words: what breaks, where, and what to do. No ids in the sentence; put the id in brackets at the end.
-- \`## Worth fixing\` — medium and low, same shape. One line saying "nothing" if there is nothing.
+- \`## Fix before merge\` — the critical findings, then the high ones, one bullet each, in the author's words: the plain-English line first (what a user or the team would see go wrong), then where, and what to do. No ids in the sentence; put the id in brackets at the end. One line saying "nothing" if there is nothing.
+- \`## Worth fixing\` — medium, then low, then info, same shape, every one of them. One line saying "nothing" if there is nothing.
 - \`## Checked and clean\` — what the seats looked at and found nothing wrong with, one line per lens. This is what makes the rest trustworthy.${unresolved}
 
 No praise for the author, no praise for the seats, no filler, no hedging. If the change is good, say it in one sentence and move on.
@@ -523,7 +525,8 @@ Read ${files.patch}, ${files.changed}, every file under ${roundsDir}/, and then 
 - Every severity is where it finally landed after your rulings, not where it started.
 - Nothing you rejected or folded into another id survived.
 - Nothing the seats settled is missing.
-- No two entries describe one fix.${previous}
+- No two entries describe one fix.
+- The severity sections run critical, high, medium, low, info, the totals line counts exactly the entries under them, and every entry opens with its \`**What this means:**\` line; add the line where Nova left it out.${previous}
 
 Fix the file in place where it drifts; keep its structure. Leave it alone if it is right.
 

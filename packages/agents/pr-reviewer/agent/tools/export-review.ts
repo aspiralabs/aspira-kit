@@ -3,6 +3,7 @@ import { basename, resolve } from 'node:path'
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
 import { REVIEW_DIR, REVIEW_SUBDIR, ignoreRule, needsIgnoreRule, optionalPath, patchStats, ticketFolder } from '../lib/pr'
+import { sortFindingsMarkdown } from '../lib/findings'
 import { FILES, roundFilesInOrder, slugify } from '../lib/review'
 import { TARGET_FILE, stampReviewed, targetFileSchema } from '../lib/target'
 import { USAGE_LEDGER, parseLedger, renderCostMarkdown, summarizeUsage } from '../lib/usage'
@@ -75,10 +76,11 @@ export default defineTool({
         missing.push(path)
         continue
       }
-      // The two documents carry the shas the verdict applies to, whether or not the writers put them in.
-      // Written back to the sandbox too, so comment-on-pr posts the stamped text.
+      // The two documents carry the shas the verdict applies to, whether or not the writers put them in,
+      // and the fix list is in severity order with its totals equal to its entries, whatever Nova wrote.
+      // Written back to the sandbox too, so comment-on-pr posts the stamped, sorted text.
       const stamp = target !== null && (path === FILES.findings || path === FILES.review)
-      const content = stamp ? stampReviewed(raw, target) : raw
+      const content = stamp ? stampReviewed(path === FILES.findings ? sortFindingsMarkdown(raw) : raw, target) : raw
       if (stamp && content !== raw) await sandbox.writeTextFile({ path, content })
       if (path === FILES.findings) findings = content
       if (path === FILES.review) review = content

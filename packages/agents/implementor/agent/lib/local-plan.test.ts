@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { SCHEMAS } from './local-plan.ts'
+import { SCHEMAS, renderAssumptions } from './local-plan.ts'
 
 const base = {
   status: 'done',
@@ -48,5 +48,25 @@ describe('VERIFICATION', () => {
   it('prints as JSON schema for the prompt, with the three fields required', () => {
     const schema = z.toJSONSchema(SCHEMAS.VERIFICATION, { io: 'input' })
     expect(schema.required).toEqual(expect.arrayContaining(['dependenciesAdded', 'notesRewritten', 'slopEntries']))
+  })
+})
+
+describe('assumptions', () => {
+  const assumption = { question: 'Which recipes count as "mine"?', options: ['Authored by me', 'Authored by me or saved by me'], recommended: 'Authored by me', reasoning: 'the existing /recipes/mine route returns authored recipes only', whyYours: 'it changes what members see on their own page' }
+
+  it('requires every assumption to carry options, the recommended option among them, its reasoning and why it is the human\'s', () => {
+    expect(SCHEMAS.VERIFICATION.safeParse({ ...base, assumptions: [assumption] }).success).toBe(true)
+    expect(SCHEMAS.VERIFICATION.safeParse({ ...base, assumptions: ['Saved recipes count as mine'] }).success).toBe(false)
+    expect(SCHEMAS.VERIFICATION.safeParse({ ...base, assumptions: [{ ...assumption, options: ['Authored by me'] }] }).success).toBe(false)
+    expect(SCHEMAS.VERIFICATION.safeParse({ ...base, assumptions: [{ ...assumption, recommended: 'Everything' }] }).success).toBe(false)
+    expect(SCHEMAS.VERIFICATION.safeParse({ ...base, assumptions: [{ ...assumption, whyYours: '' }] }).success).toBe(false)
+  })
+
+  it('renders each assumption as checkboxes with the taken option ticked as the recommendation, under a count equal to the list', () => {
+    const text = renderAssumptions([assumption, { ...assumption, question: 'Expire saved items?', options: ['Never', 'After 30 days'], recommended: 'Never' }], 'done')
+    expect(text).toContain('2 decisions: 0 open · 2 answered')
+    expect(text.match(/^## A\d+ — /gm)).toHaveLength(2)
+    expect(text).toContain('## A1 — Which recipes count as "mine"?\n\nTaken by the agent to keep going: Authored by me. Tick another option to reverse it.\n\n- [x] Authored by me _(recommended, taken by the agent: the existing /recipes/mine route returns authored recipes only)_\n- [ ] Authored by me or saved by me\n\nWhy it is yours to decide: it changes what members see on their own page')
+    expect(renderAssumptions([], 'done')).toContain('0 decisions: 0 open · 0 answered')
   })
 })

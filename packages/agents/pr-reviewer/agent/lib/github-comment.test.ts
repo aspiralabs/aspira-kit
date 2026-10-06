@@ -121,3 +121,28 @@ describe('reviewCommentBody, what was reviewed', () => {
     expect(body.length).toBeLessThanOrEqual(MAX_COMMENT_CHARS)
   })
 })
+
+describe('reviewCommentBody, the findings list', () => {
+  const entry = (id: string, title: string, meaning: string) => `### [${id}] ${title}\n**What this means:** ${meaning}\n- **Location:** \`a.ts:1\`\n`
+  const findings = `# Findings: o/r#2\n\nTotals: 0 critical · 0 high · 0 medium · 0 low · 0 info\n\n## Low\n\n${entry('DEX1.1', 'Naming', 'The helper is hard to find.')}\n## Critical\n\n${entry('AVA1.1', 'Unchecked input', 'Anyone could run commands on the server.')}\n## Info\n\n${entry('IRIS1.1', 'Token nit', 'A colour is hard-coded.')}`
+  it('lists every finding critical first with its plain-English line, under a count equal to the list, before the review', () => {
+    const counts = countsFromFindings(findings)!
+    const body = reviewCommentBody('# Review\n\nText.', counts, null, findings)
+    expect(body).toContain('**Verdict: block** — 1 critical · 0 high · 0 medium · 1 low · 1 info')
+    expect(body).toContain('## Findings (3: 1 critical · 0 high · 0 medium · 1 low · 1 info)')
+    const lines = body.split('\n').filter((line) => line.startsWith('- **'))
+    expect(lines).toHaveLength(3)
+    expect(lines[0]).toBe('- **Critical** · Anyone could run commands on the server. _(AVA1.1: Unchecked input; evidence in findings.md)_')
+    expect(lines[2]).toContain('IRIS1.1')
+    expect(body.indexOf('## Findings (3:')).toBeLessThan(body.indexOf('# Review'))
+  })
+  it('keeps the list whole and cuts the review when the two do not fit', () => {
+    const body = reviewCommentBody('x'.repeat(MAX_COMMENT_CHARS * 2), countsFromFindings(findings)!, null, findings)
+    expect(body.length).toBeLessThanOrEqual(MAX_COMMENT_CHARS)
+    expect(body.split('\n').filter((line) => line.startsWith('- **'))).toHaveLength(3)
+    expect(body).toContain('cut to fit')
+  })
+  it('leaves the list out when no findings file is given, as before', () => {
+    expect(reviewCommentBody('# Review', { critical: 0, high: 0, medium: 0, low: 0, info: 0 })).not.toContain('## Findings')
+  })
+})

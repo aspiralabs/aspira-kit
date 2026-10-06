@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyEdits, checkContract, checkedRuleIds, ruleIds, validateReview, type Finding, type Synthesis } from './review.ts'
+import { applyEdits, checkContract, checkedRuleIds, findingSchema, ruleIds, synthesisSchema, validateReview, type Finding, type Synthesis } from './review.ts'
 
 const spec = `# Feature
 ## Intent
@@ -11,7 +11,8 @@ Let members save items.
 - [ ] unit: [F1] saving twice creates one record.
 - [ ] integration: [F1] saving persists across reload.
 `
-const findings: Finding[] = [{ id: 'R1', title: 'Missing retry', evidence: ['spec: saving twice'], fix: 'Specify retry safety' }]
+const findings: Finding[] = [{ id: 'R1', title: 'Missing retry', severity: 'high', whatThisMeans: 'A double tap would save the item twice.', evidence: ['spec: saving twice'], fix: 'Specify retry safety' }]
+const decision = { question: 'Keep saved items forever?', options: ['Forever', '30 days'], recommended: 'Forever', reasoning: 'matches cookbooks', whyYours: 'it is a storage cost' }
 const synthesis: Synthesis = {
   edits: [{ id: 'E1', before: 'Members can save a item.', after: 'Members can save a item idempotently.' }],
   dispositions: [{ findingId: 'R1', status: 'applied', reason: 'Retry contract', evidence: ['spec: saving twice'], editIds: ['E1'], duplicateOf: null }],
@@ -50,6 +51,28 @@ describe('edits and finding preservation', () => {
     const dispositions = two.map((f, i) => ({ findingId: f.id, status: 'duplicate' as const, reason: 'Same', evidence: ['spec'], editIds: [], duplicateOf: i === 0 ? 'R2' : 'R1' }))
     expect(validateReview(two, { edits: [], dispositions }).length).toBeGreaterThan(0)
     expect(validateReview(findings, { ...synthesis, dispositions: [...synthesis.dispositions, ...synthesis.dispositions] }).length).toBeGreaterThan(0)
+  })
+})
+
+describe('finding and decision schemas', () => {
+  it('requires severity and a one-to-three-sentence whatThisMeans with its terms defined', () => {
+    const finding = { title: 'T', severity: 'low', whatThisMeans: 'Members see a stale list.', evidence: ['spec: x'], fix: 'y' }
+    expect(findingSchema.safeParse(finding).success).toBe(true)
+    expect(findingSchema.safeParse({ ...finding, severity: 'blocker' }).success).toBe(false)
+    const { whatThisMeans: _w, ...withoutMeaning } = finding
+    expect(findingSchema.safeParse(withoutMeaning).success).toBe(false)
+    expect(findingSchema.safeParse({ ...finding, whatThisMeans: 'One. Two. Three. Four.' }).success).toBe(false)
+    expect(findingSchema.safeParse({ ...finding, whatThisMeans: 'Run `pnpm test` first.' }).success).toBe(false)
+    expect(findingSchema.safeParse({ ...finding, whatThisMeans: 'Run `pnpm test` (the unit tests) first.' }).success).toBe(true)
+  })
+  it('requires an author disposition to carry options, a recommended option among them and whyYours', () => {
+    const author = { findingId: 'R1', status: 'author', reason: 'Choose', evidence: [], editIds: [], duplicateOf: null }
+    expect(validateReview(findings, { edits: [], dispositions: [author] } as Synthesis)).toContain('Author disposition without a decision (question, options, recommended, reasoning, whyYours): R1')
+    expect(validateReview(findings, { edits: [], dispositions: [{ ...author, decision }] } as Synthesis)).toEqual([])
+    expect(synthesisSchema.safeParse({ edits: [], dispositions: [{ ...author, decision: { ...decision, options: ['Forever'] } }] }).success).toBe(false)
+    expect(synthesisSchema.safeParse({ edits: [], dispositions: [{ ...author, decision: { ...decision, recommended: 'Never' } }] }).success).toBe(false)
+    const parsed = synthesisSchema.parse({ edits: [], dispositions: [{ ...author, status: 'rejected', evidence: ['spec: x'] }] })
+    expect(parsed.dispositions[0]!.decision).toBeNull()
   })
 })
 

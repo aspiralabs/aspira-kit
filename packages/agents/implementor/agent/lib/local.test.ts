@@ -293,12 +293,18 @@ it('runs the plan in waves: worker briefs from the procedure, schema checks with
   expect(stale.tasks[0]!.error).toContain('badgeCount')
   expect(stale.tasks[0]!.error).toContain('Nowhere')
   await rewriteNotesFile({ repo, file: join(work, 'handoff-notes.md'), sha })
-  await writeFile(verify.tasks[0]!.output, JSON.stringify({ ...claimed, dependenciesAdded, notesRewritten }))
+  const assumption = { question: 'Round the badge count?', options: ['Show 99+', 'Show the exact count'], recommended: 'Show 99+', reasoning: 'the header has room for three characters', whyYours: 'it is what members see on every page' }
+  await writeFile(verify.tasks[0]!.output, JSON.stringify({ ...claimed, dependenciesAdded, notesRewritten, assumptions: [assumption] }))
 
   const done = await step()
   expect(done).toMatchObject({ pending: false, status: 'complete' })
   if (done.pending) return
-  expect(done.verification).toMatchObject({ dependenciesAdded, notesRewritten, slopEntries: [], slopJustification: 'None: no bugs were found and fixed' })
+  expect(done.verification).toMatchObject({ dependenciesAdded, notesRewritten, slopEntries: [], slopJustification: 'None: no bugs were found and fixed', assumptions: [assumption] })
+  // The assumption is a decision the human can reverse: taken, ticked, with the other option open.
+  const decisions = await readFile(join(work, 'trace/decisions.md'), 'utf8')
+  expect(decisions).toContain('1 decision: 0 open · 1 answered')
+  expect(decisions).toContain('## A1 — Round the badge count?')
+  expect(decisions).toContain('- [x] Show 99+ _(recommended, taken by the agent: the header has room for three characters)_\n- [ ] Show the exact count')
   const log = await readFile(join(work, 'implementation.md'), 'utf8')
   for (const section of ['## Dependencies added', '## Mid-build notes', '## Proposed Slop Repo entries']) expect(log).toContain(section)
   const exported = JSON.parse(await readFile(done.export!, 'utf8'))

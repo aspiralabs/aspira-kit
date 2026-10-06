@@ -24,6 +24,12 @@ const rules = [
   { reason: 'a truncated or missing guideline page would review against rules the phases never saw', file: skill, phrase: 'If a page is truncated or cannot be fetched, stop and say so' },
   { reason: 'local mode runs on one vendor and one session; it must be labelled as not independent', file: skill, phrase: 'so it is not an independent review' },
   { reason: 'a failed rerun must not be papered over with the previous report', file: skill, phrase: 'do not present an earlier report as the new result' },
+  // The report rules of specs/agents-human-lists.md F5 live in the agent, where every mode reads them.
+  { reason: 'a human reads the worst finding first; an unsorted list buries it', file: instructions, phrase: 'present the findings in severity order (critical, high, medium, low, info)' },
+  { reason: 'the plain-English line is what a product owner reads; the evidence is there when asked', file: instructions, phrase: 'each with its plain-English line first and its evidence available on request' },
+  { reason: 'an open decision without a recommendation sends the human back to the trace', file: instructions, phrase: 'present every open decision with its recommended answer' },
+  { reason: 'a summary that drops an item hides it; the header count must equal the list', file: instructions, phrase: 'never summarise away an item' },
+  { reason: 'a ticked answer in the decisions file is the author\'s decision on the next run', file: instructions, phrase: 'is read on the next review of the same spec and recorded as the author\'s decision' },
 ]
 
 it('pins each rule with a distinctive phrase', () => {
@@ -48,7 +54,7 @@ const agentRules = [
   'A ready candidate is still a proposed spec for the author to accept',
   'do not modify their original spec',
 ]
-const restatements = ['second review', 'not approval', 'retry failed or incomplete', 'remains unchanged', 'proposed spec', 'notion.com/p/']
+const restatements = ['second review', 'not approval', 'retry failed or incomplete', 'remains unchanged', 'proposed spec', 'notion.com/p/', 'in severity order', 'plain-english line', 'evidence available on request', 'recommended answer', 'summarise away']
 
 it('the agent rules this file checks for are still in agent/instructions.md', () => {
   const text = readFileSync(join(root, instructions), 'utf8')

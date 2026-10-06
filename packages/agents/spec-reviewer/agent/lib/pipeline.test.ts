@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { runPipeline, type Call } from './pipeline.ts'
 import type { Review } from './review.ts'
 
-const review: Review = { facts: [], findings: [{ title: 'Issue', evidence: ['spec: quote'], fix: 'fix' }], checks: [{ rule: 'REV-001', evidence: 'spec quote' }], uiEvidence: [], gaps: [] }
+const review: Review = { facts: [], findings: [{ title: 'Issue', severity: 'medium', whatThisMeans: 'Members would see the wrong list.', evidence: ['spec: quote'], fix: 'fix' }], checks: [{ rule: 'REV-001', evidence: 'spec quote' }], uiEvidence: [], gaps: [] }
+const decision = { question: 'How long are saved items kept?', options: ['Forever', 'Until expiry'], recommended: 'Forever', reasoning: 'the app keeps everything else forever', whyYours: 'it changes storage cost' }
 const input = { spec: '# Spec', guidelines: 'REV-001 Check facts', context: '', uiRequired: false }
 
 describe('cancellable pipeline', () => {
@@ -65,8 +66,22 @@ it('produces a valid candidate without mutating source and preserves author deci
   expect(result.status).toBe('ready')
   expect(result.candidate).toBe(candidate)
   expect(spec).toBe('# Original')
-  const authorCall: Call = async (request) => request.phase === 'synthesis' ? { edits: [], dispositions: [{ findingId: 'R1', status: 'author', reason: 'Choose retention: forever costs storage; expiration removes history.', evidence: [], editIds: [], duplicateOf: null }] } : call(request)
-  expect((await runPipeline({ ...input, spec: candidate }, authorCall)).status).toBe('needs-author')
+  const authorCall: Call = async (request) => request.phase === 'synthesis' ? { edits: [], dispositions: [{ findingId: 'R1', status: 'author', reason: 'Choose retention: forever costs storage; expiration removes history.', evidence: [], editIds: [], duplicateOf: null, decision }] } : call(request)
+  const open = await runPipeline({ ...input, spec: candidate }, authorCall)
+  expect(open.status).toBe('needs-author')
+  expect(open.authorDecisions).toEqual([{ ...decision, id: 'R1', decidedBy: 'open', answer: null }])
+})
+
+it('refuses an author disposition without a decision, and records a ticked answer as the author\'s so the spec no longer needs them', async () => {
+  const candidate = '# Feature\n## Intent\nSave items.\n## Acceptance criteria\n### Features\n- [ ] F1: Save an item idempotently.\n'
+  const without: Call = async ({ phase }) => phase === 'synthesis' ? { edits: [], dispositions: [{ findingId: 'R1', status: 'author', reason: 'Choose retention.', evidence: [], editIds: [], duplicateOf: null }] } : phase === 'research' ? review : { ...review, findings: [] }
+  const missing = await runPipeline({ ...input, spec: candidate }, without)
+  expect(missing.status).toBe('incomplete')
+  expect(missing.problems).toContain('Author disposition without a decision (question, options, recommended, reasoning, whyYours): R1')
+  const withDecision: Call = async (request) => request.phase === 'synthesis' ? { edits: [], dispositions: [{ findingId: 'R1', status: 'author', reason: 'Choose retention.', evidence: [], editIds: [], duplicateOf: null, decision }] } : without(request)
+  const answered = await runPipeline({ ...input, spec: candidate, answers: [{ id: 'S3-1', question: 'How long are saved items kept', answer: 'Until expiry' }] }, withDecision)
+  expect(answered.status).toBe('ready')
+  expect(answered.authorDecisions).toEqual([{ ...decision, id: 'R1', decidedBy: 'author', answer: 'Until expiry' }])
 })
 
 it('preserves findings but publishes no candidate on malformed synthesis', async () => {

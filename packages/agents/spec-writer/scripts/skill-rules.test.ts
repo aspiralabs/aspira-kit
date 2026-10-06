@@ -25,6 +25,12 @@ const rules = [
   { reason: 'local mode runs on one vendor and one session; it must be labelled as not independent', file: skill, phrase: 'its review is not independent of the writer' },
   { reason: 'a failed rerun must not be papered over with the previous report', file: skill, phrase: 'do not present an earlier report as the new result' },
   { reason: 'the idea file is never edited in place', file: skill, phrase: 'The idea file is never modified' },
+  // The report rules of specs/agents-human-lists.md F5 live in the agent, where every mode reads them.
+  { reason: 'a human reads the worst finding first; an unsorted list buries it', file: instructions, phrase: 'present the findings in severity order (critical, high, medium, low, info)' },
+  { reason: 'the plain-English line is what a product owner reads; the evidence is there when asked', file: instructions, phrase: 'each with its plain-English line first and its evidence available on request' },
+  { reason: 'an open decision without a recommendation sends the human back to the trace', file: instructions, phrase: 'present every open decision with its recommended answer' },
+  { reason: 'a summary that drops an item hides it; the header count must equal the list', file: instructions, phrase: 'never summarise away an item' },
+  { reason: 'a ticked answer in the decisions file is the author\'s decision on the next run', file: instructions, phrase: 'is read on the next run of the writer in the same output directory and recorded as the author\'s decision' },
 ]
 
 it('pins each rule with a distinctive phrase', () => {
@@ -48,7 +54,7 @@ const agentRules = [
   'An incomplete run is not a spec to plan from',
   'A ready spec is still a proposal for the author to accept',
 ]
-const restatements = ['write the spec yourself', 'not a spec to plan from', 'retry a failed or incomplete', 'proposal for the author', 'notion.com/p/']
+const restatements = ['write the spec yourself', 'not a spec to plan from', 'retry a failed or incomplete', 'proposal for the author', 'notion.com/p/', 'in severity order', 'plain-english line', 'evidence available on request', 'recommended answer', 'summarise away']
 
 it('the agent rules this file checks for are still in agent/instructions.md', () => {
   const text = readFileSync(join(root, instructions), 'utf8')

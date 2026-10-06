@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { Answer } from '@aspiralabs/agent-common/lib/decisions'
 import { runPipeline, type Call, type PipelineResult } from '@aspiralabs/spec-reviewer/lib/pipeline'
 import { checkContract } from '@aspiralabs/spec-reviewer/lib/review'
 
@@ -26,7 +27,8 @@ export const explorePrompt = `Explore the repository for this idea before a spec
 
 export const draftPrompt = `Write the complete initial spec for the idea, as markdown in the spec field. Ground it in the exploration: name the real paths, symbols, data and consumers it touches; never invent files or APIs; mark what is new as new. Use these sections in this order: "# <feature title>", ## Intent, ## Approach, ## Constraints, ## Acceptance criteria with ### Features, ## Assumptions, ## Out of scope, ## Blast radius. Features are unchecked "- [ ] F1: ..." items, numbered from F1, each an observable and falsifiable business outcome or constraint; together they cover every part of the idea, including the relevant permission, failure, empty and edge cases. Do not write a technical Tests checklist; the planner owns it. Assumptions list every product choice the draft makes that the idea did not state and every open question from the exploration, each with the choice taken and the alternatives; reviewers turn the ones that matter into author decisions. Keep the idea's scope; anything beyond it goes to Out of scope. Also return the assumptions as a list in the assumptions field.`
 
-export type WriteInput = { idea: string; guidelines: string; context: string; uiRequired: boolean }
+/** `answers`: what the author ticked in the previous run's trace/decisions.md; the review records a matching decision as theirs. */
+export type WriteInput = { idea: string; guidelines: string; context: string; uiRequired: boolean; answers?: Answer[] }
 
 export async function writePipeline(input: WriteInput, call: Call, options: { signal?: AbortSignal; progress?: (phase: string) => void } = {}) {
   const started = Date.now()
@@ -65,7 +67,7 @@ export async function writePipeline(input: WriteInput, call: Call, options: { si
   let review: PipelineResult | null = null
   if (draft && !options.signal?.aborted) {
     const context = `${input.context}\n\nWRITER EXPLORATION (gathered while drafting; verify before relying on it):\n${evidence}`
-    review = await runPipeline({ spec: draft.spec, guidelines: input.guidelines, context, uiRequired: input.uiRequired || uiPattern.test(draft.spec) }, call, options)
+    review = await runPipeline({ spec: draft.spec, guidelines: input.guidelines, context, uiRequired: input.uiRequired || uiPattern.test(draft.spec), ...(input.answers === undefined ? {} : { answers: input.answers }) }, call, options)
   }
   if (!draft) problems.push('No draft was written, so the review did not run')
   if (options.signal?.aborted && !review) problems.push('Writing cancelled')

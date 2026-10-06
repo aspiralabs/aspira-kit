@@ -3,6 +3,7 @@
 // with the procedure the session follows; this file only checks that the result is coherent.
 
 import { z } from 'zod'
+import { decisionSchema, renderDecisions, takenDecision, type Decision } from '@aspiralabs/agent-common/lib/decisions'
 
 const text = z.string().trim().min(1)
 const ids = z.array(text)
@@ -94,6 +95,20 @@ export const DEPENDENCY_ADDED = z.object({
   approval: text,
 })
 
+/**
+ * An assumption: a decision the build settled itself to keep going. The same shape as every
+ * other open decision (the question, the options, the recommended option with its reasoning, why
+ * it is the human's), and the recommended option is the one taken, so the human can reverse it.
+ */
+export const ASSUMPTION = decisionSchema
+export type Assumption = Decision
+
+/** trace/decisions.md for a build: every assumption as checkboxes with the taken option ticked and marked as the recommendation. */
+export function renderAssumptions(assumptions: readonly Assumption[], status: string): string {
+  const records = assumptions.map((assumption, index) => takenDecision(`A${index + 1}`, assumption))
+  return renderDecisions(records, { title: 'Assumptions', status, intro: 'Each assumption is a decision the build took to keep going: the recommended option is ticked and already built. Tick another option to reverse it; the build is then redone for that part.' })
+}
+
 /** What happened to one mid-build notes file at verification. */
 export const NOTES_REWRITTEN = z.object({ file: text, action: z.enum(['rewritten', 'deleted']) })
 
@@ -120,7 +135,8 @@ export const VERIFICATION = z
     features: z.array(z.object({ id: text, tasks: ids, tests: ids, passing: z.boolean() })),
     deviations: z.array(z.string()),
     blockers: z.array(z.string()),
-    assumptions: z.array(z.string()),
+    /** Every decision the build settled itself, as a decision already taken. */
+    assumptions: z.array(ASSUMPTION),
     /** Every package a manifest gained between the branch base and HEAD; empty when none. */
     dependenciesAdded: z.array(DEPENDENCY_ADDED),
     /** Every mid-build notes file, rewritten from the code at HEAD or deleted; empty when the build wrote none. */

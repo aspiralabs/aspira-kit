@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { INDEX_FILE, KNOWLEDGE_ENV, KNOWLEDGE_PATH, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED_FILE, parseRequired } from '@aspiralabs/agent-common/lib/knowledge'
 import { z } from 'zod'
 import { maxSeatCalls } from './call-cap.ts'
+import { sortFindingsMarkdown } from './findings.ts'
 import { countsFromFindings, reviewCommentBody, upsertReviewComment, type GithubPr } from './github-comment.ts'
 import {
   cloneHead,
@@ -781,8 +782,9 @@ async function exportReview(args: {
       missingFiles.push(basename(path))
       continue
     }
-    // The two documents carry the shas the verdict applies to, whether or not the writers put them in.
-    const content = path === paths.files.findings || path === paths.files.review ? stampReviewed(raw, state.target) : raw
+    // The two documents carry the shas the verdict applies to, whether or not the writers put them in,
+    // and the fix list is in severity order with its totals equal to its entries, whatever Nova wrote.
+    const content = path === paths.files.findings ? stampReviewed(sortFindingsMarkdown(raw), state.target) : path === paths.files.review ? stampReviewed(raw, state.target) : raw
     texts.set(path, content)
     await writeFile(join(dir, basename(path)), content, 'utf8')
     written.push(join(dir, basename(path)))
@@ -889,7 +891,7 @@ async function postComment(
   const counts = countsFromFindings(findings)
   if (counts === null) return { posted: false, reason: 'findings.md is missing or is not a findings file, so the verdict cannot be computed' }
   try {
-    const { action, url } = await upsertReviewComment(pr, reviewCommentBody(review, counts, target), token, options.fetch)
+    const { action, url } = await upsertReviewComment(pr, reviewCommentBody(review, counts, target, findings), token, options.fetch)
     return { posted: true, action, url }
   } catch (error) {
     return { posted: false, reason: message(error).replaceAll(token, '***') }

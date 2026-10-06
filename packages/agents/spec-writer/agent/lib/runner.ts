@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import { modelSession, reviewModelCall, reviewModels } from '@aspiralabs/spec-reviewer/lib/models'
+import { readAnswers, renderDecisionsFile, renderFindings, renderFindingsSection } from '@aspiralabs/spec-reviewer/lib/report'
 import { systemPrompt as reviewSystemPrompt } from '@aspiralabs/spec-reviewer/lib/review'
 import { writeArtifacts } from './artifacts.ts'
 import { connectReadTools } from './mcp.ts'
@@ -23,14 +24,15 @@ export async function prepareWrite(input: RunInput, signal: AbortSignal) {
     const path = relative(dir, resolve(source))
     if (!path || (!path.startsWith('../') && path !== '..')) throw new Error('Output directory must not contain the idea or guidelines')
   }
-  const [idea, guidelines, repo] = await Promise.all([
-    readFile(resolve(input.ideaPath), 'utf8'), readFile(resolve(input.guidelinesPath), 'utf8'), repository(input.repoPath, signal),
+  // The previous run's trace/decisions.md, with the options the author ticked, is read before the run replaces it.
+  const [idea, guidelines, repo, answers] = await Promise.all([
+    readFile(resolve(input.ideaPath), 'utf8'), readFile(resolve(input.guidelinesPath), 'utf8'), repository(input.repoPath, signal), readAnswers(dir),
   ])
   if (!idea.trim()) throw new Error('The idea is empty')
   if (!guidelines.trim()) throw new Error('Required guidelines snapshot is empty')
   if (/TRUNCATED by the Notion API/i.test(guidelines)) throw new Error('Required guidelines snapshot is truncated')
   const uiRequired = input.uiRequired ?? uiPattern.test(idea)
-  return { dir, idea, guidelines, repo, uiRequired }
+  return { dir, idea, guidelines, repo, uiRequired, answers }
 }
 export type Prepared = Awaited<ReturnType<typeof prepareWrite>>
 
@@ -54,12 +56,13 @@ export function writeFiles(result: WriteResult, { idea, guidelines }: Prepared):
       ? `# Exploration\n\n## Facts\n\n${list(exploration.facts)}\n\n## Constraints\n\n${list(exploration.constraints)}\n\n## Open questions\n\n${exploration.questions.map((q) => `- ${q.question}\n  - Options: ${q.options.join('; ')}\n  - Evidence: ${q.evidence.join('; ') || 'none'}`).join('\n') || '- none'}\n\n## UI evidence\n\n${list(exploration.uiEvidence)}\n\n## Gaps\n\n${list(exploration.gaps)}\n`
       : '# Exploration\n\nThe explore phase did not finish. See trace/checks.md.\n',
     'trace/checks.md': `# Checks\n\nStatus: ${result.status}\n\n${list(result.problems)}\n\n## Draft contract\n\n${draft ? list(result.draftContract) : 'No draft.'}\n\n${review?.reviews.map((r) => `## ${r.phase}\n\n${r.output.checks.map((c) => `- ${c.rule}: ${c.evidence}`).join('\n')}`).join('\n\n') ?? ''}`,
-    'trace/findings.md': review?.findings.map((f) => `## ${f.id} — ${f.title}\n\n${f.evidence.join('\n\n')}\n\nProposed correction: ${f.fix}`).join('\n\n') || 'No review findings.',
-    'trace/decisions.md': `# Decisions\n\nStatus: ${result.status}\n\n${review?.synthesis?.dispositions.map((d) => `## ${d.findingId} — ${d.status}\n\n${d.reason}\n\nEvidence: ${d.evidence.join('; ')}\n\nEdits: ${d.editIds.join(', ') || 'none'}${d.duplicateOf ? `; duplicate of ${d.duplicateOf}` : ''}`).join('\n\n') ?? 'Reconciliation did not finish. All findings remain unresolved.'}\n`,
+    // The review half renders through the spec reviewer's own code: sorted findings, checkbox decisions.
+    'trace/findings.md': review ? renderFindings(review.findings, review.synthesis) : '# Findings\n\nNo review findings: the review did not run.\n',
+    'trace/decisions.md': renderDecisionsFile(result.status, result.authorDecisions, review?.synthesis ?? null),
   }
   if (draft) files['spec.draft.md'] = draft.spec
   if (result.spec !== null) files['spec.md'] = result.status === 'ready' ? result.spec
-    : `> Spec writer status: **${result.status}**. Not ready for planning; resolve trace/decisions.md and trace/checks.md first.\n\n${result.spec}`
+    : `> Spec writer status: **${result.status}**. Not ready for planning; resolve trace/decisions.md and trace/checks.md first.\n\n${renderFindingsSection(review?.findings ?? [])}\n\n---\n\n${result.spec}`
   return files
 }
 
@@ -75,7 +78,7 @@ export async function runWrite(input: RunInput, options: { signal?: AbortSignal;
   const started = Date.now()
   const preparation = options.signal ?? new AbortController().signal
   const prepared = await prepareWrite(input, preparation)
-  const { dir, idea, guidelines, repo, uiRequired } = prepared
+  const { dir, idea, guidelines, repo, uiRequired, answers } = prepared
   const mcp = await connectReadTools(process.env.MCP_READ_CONNECTIONS, preparation)
   const tools = { ...repo.tools, ...mcp.tools }
   const catalogTool = Object.keys(mcp.tools).find((name) => name.endsWith('__list_components'))
@@ -95,7 +98,7 @@ export async function runWrite(input: RunInput, options: { signal?: AbortSignal;
     return reviewCall(request)
   })
   try {
-    const result = await writePipeline({ idea, guidelines, context: writeContext(prepared, JSON.stringify(catalog)), uiRequired }, call, options)
+    const result = await writePipeline({ idea, guidelines, context: writeContext(prepared, JSON.stringify(catalog)), uiRequired, answers }, call, options)
     const uiReviewed = result.review !== null && (uiRequired || uiPattern.test(result.draft?.spec ?? ''))
     if (uiReviewed && !['list_components', 'get_component'].every((name) => mcp.reads.some((read) => read.ok && read.tool.endsWith(`__${name}`)))) {
       result.problems.push('UI work requires successful list_components and get_component MCP reads')

@@ -9,7 +9,8 @@ import { repository } from '@aspiralabs/agent-common/lib/repository'
 import { runAnalysis } from '@aspiralabs/agent-common/lib/run-analysis'
 import { checkBusinessSpec } from '@aspiralabs/agent-common/lib/spec'
 import { pageIdFrom } from '@aspiralabs/agent-common/lib/knowledge'
-import { planSchema, researchSchema, renderPlan, touchesUi, validatePlan, type Plan, type Research } from './plan.ts'
+import type { Answer, DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
+import { mergeDecisions, planSchema, readAnswers, renderChecks, renderDecisionsFile, renderPlan, researchSchema, touchesUi, validatePlan, type Plan, type Research } from './plan.ts'
 import { system, researchSystem, researchInstructions, planningInstructions, repairInstructions } from './prompts.ts'
 
 /** Research model turns, including the final forced `submit_research` turn. */
@@ -161,8 +162,8 @@ export function missingUiReads(uiRequired: boolean, reads: { tool: string; ok: b
 /** ready: structural checks passed; needs-author: product decisions remain; incomplete: anything else. */
 export type PlanStatus = 'ready' | 'needs-author' | 'incomplete'
 
-/** The plan's status and every reason it is not ready, in the order the agent reports them. Sets plan.decisions to the merged decisions. */
-export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<PlanRepository, 'gaps' | 'files' | 'tracked'>; research: Research | null; plan: Plan | null; phaseErrors: { phase: string; error: string | null }[]; uiRequired: boolean; reads: { tool: string; ok: boolean }[]; cancelled: boolean }): { status: PlanStatus; problems: string[]; decisions: string[] } {
+/** The plan's status and every reason it is not ready, in the order the agent reports them. Sets plan.decisions to the merged decisions; `answers` are the author's ticks from the previous plan. */
+export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<PlanRepository, 'gaps' | 'files' | 'tracked'>; research: Research | null; plan: Plan | null; phaseErrors: { phase: string; error: string | null }[]; uiRequired: boolean; reads: { tool: string; ok: boolean }[]; cancelled: boolean; answers?: Answer[] }): { status: PlanStatus; problems: string[]; decisions: DecisionRecord[] } {
   const { spec, guidelines, repo, research, plan } = args
   const problems = [...repo.gaps]
   for (const phase of args.phaseErrors) if (phase.error) problems.push(`${phase.phase}: ${phase.error}`)
@@ -174,21 +175,22 @@ export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<
   if (missingUiReads(args.uiRequired && (plan === null || touchesUi(plan)), args.reads)) problems.push('UI planning requires successful list_components and get_component MCP reads')
   if (args.cancelled) problems.push('Planning cancelled')
   for (const rule of uncoveredRules(guidelines, [...(research?.checks ?? []), ...(plan?.checks ?? [])])) problems.push(`Uncovered guideline: ${rule}`)
-  const decisions = [...new Set([...(research?.decisions ?? []), ...(plan?.decisions ?? [])])]
+  const decisions = mergeDecisions([research?.decisions ?? [], plan?.decisions ?? []], args.answers ?? [])
   if (plan) plan.decisions = decisions
-  const status: PlanStatus = problems.length ? 'incomplete' : decisions.length ? 'needs-author' : 'ready'
+  const status: PlanStatus = problems.length ? 'incomplete' : decisions.some((decision) => decision.decidedBy === 'open') ? 'needs-author' : 'ready'
   return { status, problems, decisions }
 }
 
 /** The report files that do not depend on how the models were called. */
-export function planReportFiles(args: { prepared: PreparedPlan; specPath: string; research: Research | null; plan: Plan | null; status: string; problems: string[] }): Record<string, string> {
-  const { prepared, research, plan, status, problems } = args
+export function planReportFiles(args: { prepared: PreparedPlan; specPath: string; research: Research | null; plan: Plan | null; status: string; problems: string[]; decisions: DecisionRecord[] }): Record<string, string> {
+  const { prepared, research, plan, status, problems, decisions } = args
   const files: Record<string, string> = {
     'trace/spec.original.md': prepared.spec, 'trace/guidelines.md': prepared.guidelines,
     'trace/research.json': JSON.stringify(research, null, 2), 'trace/plan.json': JSON.stringify(plan, null, 2),
-    'trace/checks.md': `# Planning checks\n\nStatus: ${status}\n\n${problems.map((problem) => `- ${problem}`).join('\n')}\n`,
+    'trace/checks.md': renderChecks(status, problems),
+    'trace/decisions.md': renderDecisionsFile(status, decisions),
   }
-  if (plan) files['plan.reviewed.md'] = renderPlan(plan, status, { specPath: args.specPath, commit: prepared.repo.commit, dirty: prepared.repo.dirty }, problems)
+  if (plan) files['plan.reviewed.md'] = renderPlan(plan, status, { specPath: args.specPath, commit: prepared.repo.commit, dirty: prepared.repo.dirty }, problems, decisions)
   return files
 }
 
@@ -198,6 +200,8 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   const preparation = options.signal ?? new AbortController().signal
   const prepared = await preparePlan(input, preparation)
   const { dir, spec, guidelines, repo, uiRequired } = prepared
+  // The previous plan's trace/decisions.md, with the options the author ticked, is read before the run replaces it.
+  const answers = await readAnswers(dir)
   const mcp = await connectReadTools(process.env.MCP_READ_CONNECTIONS, preparation)
   const prepareMs = Date.now() - started
   const trace = modelTrace(started, options.signal)
@@ -271,11 +275,11 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         plan = revised
       }
     }
-    const { status, problems, decisions } = assessPlan({ spec, guidelines, repo, research, plan, phaseErrors: trace.phases, uiRequired, reads: mcp.reads, cancelled: options.signal?.aborted === true })
+    const { status, problems, decisions } = assessPlan({ spec, guidelines, repo, research, plan, phaseErrors: trace.phases, uiRequired, reads: mcp.reads, cancelled: options.signal?.aborted === true, answers })
     const reviewMs = Date.now() - started - prepareMs
     const exportStarted = Date.now()
     const files: Record<string, string> = {
-      ...planReportFiles({ prepared, specPath: input.specPath, research, plan, status, problems }),
+      ...planReportFiles({ prepared, specPath: input.specPath, research, plan, status, problems, decisions }),
       'trace/calls.json': JSON.stringify({ system: { research: researchSystem, planning: system }, models, calls: trace.calls }, null, 2),
       'trace/usage.json': JSON.stringify({ scope: 'Direct planner calls only; excludes eve routing and guideline loading before entry.', turns: trace.turns }, null, 2),
     }
