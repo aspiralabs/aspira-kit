@@ -3,11 +3,11 @@
 // run with node and amaro like the skill launchers do); without it, or when the board cannot be
 // reached, the Status recorded in the ticket's working folder stands in and the output says so.
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { isNotionUrl, readAspira } from './aspira.js'
 import { type Log } from './fs.js'
-import { agentPackageDir } from './skills.js'
+import { AGENTS, agentPackageDir } from './skills.js'
 import { commandFor, nextStep } from './playbook.js'
 
 export type ResolvedTicket = { id: string; title: string; url: string; status: string }
@@ -42,17 +42,38 @@ export function workTickets(projectRoot: string): { folder: string; ticket: Reso
 
 const isTicketRef = (value: string) => /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(value) || /^\d+$/.test(value) || isNotionUrl(value)
 
+/** The first `<ancestor of dir>/node_modules/<relative>` that exists, as Node resolution would find it. */
+function findUpModule(dir: string, relative: string): string | undefined {
+  for (let current = dir; ; current = dirname(current)) {
+    const candidate = join(current, 'node_modules', relative)
+    if (existsSync(candidate)) return candidate
+    if (dirname(current) === current) return undefined
+  }
+}
+
 /** The default resolver: the installed @aspiralabs/agent-common's resolve script, with the project's .env.local. */
 export const liveResolver: Resolver = (board, ref, projectRoot) => {
   const common = agentPackageDir(projectRoot, 'agent-common')
   if (common === undefined) return null
   const script = join(common, 'scripts', 'resolve-ticket.ts')
-  const amaro = [join(common, 'node_modules', 'amaro', 'dist', 'register-strip.mjs'), join(common, '..', 'amaro', 'dist', 'register-strip.mjs'), join(projectRoot, 'node_modules', 'amaro', 'dist', 'register-strip.mjs')].find((candidate) => existsSync(candidate))
-  if (!existsSync(script) || amaro === undefined) return null
+  // amaro is a dependency of the six agents, not of agent-common. Resolve it the way Node would from
+  // an agent's real location: the first ancestor with node_modules/amaro (pnpm keeps a package's
+  // dependencies two levels up from a scoped package; npm and yarn hoist them to the project root).
+  const amaro = [common, ...AGENTS.map((agent) => agentPackageDir(projectRoot, agent)), projectRoot]
+    .filter((dir): dir is string => dir !== undefined)
+    .map((dir) => findUpModule(realpathSync(dir), join('amaro', 'dist', 'register-strip.mjs')))
+    .find((candidate) => candidate !== undefined)
+  if (!existsSync(script) || amaro === undefined) {
+    process.stderr.write(`kit next: ${existsSync(script) ? 'amaro (the TypeScript loader the agents ship with) is not installed' : `${script} is missing`}\n`)
+    return null
+  }
   const env = join(projectRoot, '.env.local')
   const args = ['--import', amaro, '--experimental-strip-types', ...(existsSync(env) ? [`--env-file=${env}`] : []), script, ref, '--board', board]
   const run = spawnSync('node', args, { cwd: projectRoot, encoding: 'utf8' })
-  if (run.status !== 0) return null
+  if (run.status !== 0) {
+    process.stderr.write(`kit next: the board resolver failed:\n${run.stderr ?? ''}`)
+    return null
+  }
   const fields = Object.fromEntries(run.stdout.split('\n').filter((line) => line.includes('=')).map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]))
   if (!fields.id || !fields.status) return null
   return { id: fields.id, title: fields.title ?? '', url: fields.url ?? '', status: fields.status }
@@ -88,7 +109,7 @@ export function next(projectRoot: string, ref: string | undefined, log: Log, res
   const live = resolve(config.board, wanted, projectRoot)
   const ticket = live ?? local
   if (ticket === null) {
-    log(`cannot resolve ${wanted}: the board did not answer (is @aspiralabs/agents installed and NOTION_TOKEN in .env.local?) and no working folder holds it`)
+    log(`cannot resolve ${wanted}: the board did not answer (see the error above; NOTION_TOKEN goes in .env.local at the project root) and no working folder holds it`)
     return 1
   }
   const row = nextStep(ticket.status)
