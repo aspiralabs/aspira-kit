@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { KIT_VERSION, approveIgnoredBuilds, pinned, withOnlyBuiltDependencies } from './stacks/next.js'
+import { KIT_VERSION, approveIgnoredBuilds, pinned, withAllowBuilds } from './stacks/next.js'
 
 describe('pinned', () => {
   it('pins every @aspiralabs package to the kit version and leaves others alone', () => {
@@ -26,21 +26,25 @@ describe('approveIgnoredBuilds', () => {
     return path
   }
 
-  it('approves exactly the packages pnpm named, merged with what the workspace file already approves', () => {
-    const path = project('packages:\n  - apps/*\n\nonlyBuiltDependencies:\n  - sharp\n\nminimumReleaseAgeExclude:\n  - "@aspiralabs/ui@0.5.1"\n')
-    const output = 'Error: ERR_PNPM_IGNORED_BUILDS\n  Ignored build scripts: core-js-pure@3.50.0, esbuild@0.25.0\n  help: Run "pnpm approve-builds"'
-    expect(approveIgnoredBuilds(output, path)).toEqual(['core-js-pure', 'esbuild'])
-    expect(readFileSync(path, 'utf8')).toBe('packages:\n  - apps/*\n\nonlyBuiltDependencies:\n  - core-js-pure\n  - esbuild\n  - sharp\n\nminimumReleaseAgeExclude:\n  - "@aspiralabs/ui@0.5.1"\n')
+  it("replaces pnpm's placeholder with true and keeps every other line", () => {
+    const path = project("allowBuilds:\n  core-js-pure: set this to true or false\nminimumReleaseAgeExclude:\n  - '@aspiralabs/ui@0.5.2'\n")
+    const output = 'Error: ERR_PNPM_IGNORED_BUILDS\n  Ignored build scripts: core-js-pure@3.50.0\n  help: Run "pnpm approve-builds"'
+    expect(approveIgnoredBuilds(output, path)).toEqual(['core-js-pure'])
+    expect(readFileSync(path, 'utf8')).toBe("allowBuilds:\n  core-js-pure: true\nminimumReleaseAgeExclude:\n  - '@aspiralabs/ui@0.5.2'\n")
   })
 
-  it('creates the file and the list when the project has neither, and handles scoped names', () => {
+  it('adds names to an existing block, sorted, and leaves earlier approvals alone', () => {
+    expect(withAllowBuilds('packages:\n  - apps/*\n\nallowBuilds:\n  sharp: true\n  esbuild: false\n', ['unrs-resolver', '@prisma/engines'])).toBe('packages:\n  - apps/*\n\nallowBuilds:\n  @prisma/engines: true\n  esbuild: false\n  sharp: true\n  unrs-resolver: true\n')
+  })
+
+  it('creates the file and the block when the project has neither', () => {
     const path = project(null)
-    expect(approveIgnoredBuilds('Ignored build scripts: @prisma/engines@6.0.0', path)).toEqual(['@prisma/engines'])
-    expect(readFileSync(path, 'utf8')).toBe('onlyBuiltDependencies:\n  - @prisma/engines\n')
+    expect(approveIgnoredBuilds('Ignored build scripts: core-js-pure@3.50.0, unrs-resolver@1.12.2', path)).toEqual(['core-js-pure', 'unrs-resolver'])
+    expect(readFileSync(path, 'utf8')).toBe('allowBuilds:\n  core-js-pure: true\n  unrs-resolver: true\n')
   })
 
-  it('appends the list to a file that has other settings but no list', () => {
-    expect(withOnlyBuiltDependencies('minimumReleaseAgeExclude:\n  - "@aspiralabs/kit@0.5.1"\n', ['core-js-pure'])).toBe('minimumReleaseAgeExclude:\n  - "@aspiralabs/kit@0.5.1"\n\nonlyBuiltDependencies:\n  - core-js-pure\n')
+  it('puts the block first in a file that has other settings but no block', () => {
+    expect(withAllowBuilds("minimumReleaseAgeExclude:\n  - '@aspiralabs/kit@0.5.2'\n", ['core-js-pure'])).toBe("allowBuilds:\n  core-js-pure: true\n\nminimumReleaseAgeExclude:\n  - '@aspiralabs/kit@0.5.2'\n")
   })
 
   it('does nothing when the output names no ignored builds', () => {

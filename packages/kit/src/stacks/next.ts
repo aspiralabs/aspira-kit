@@ -24,34 +24,35 @@ export function pinned(name: string, version: string | undefined): string {
 const IGNORED_BUILDS = /Ignored build scripts:\s*([^\n]+)/
 
 // pnpm 12 refuses to run a dependency's build script until the project approves it, and fails the
-// install with ERR_PNPM_IGNORED_BUILDS naming the packages. Approve exactly those in the project's
-// pnpm-workspace.yaml `onlyBuiltDependencies` (pnpm 12 no longer reads the `pnpm` field of
-// package.json), merged with what is there, and return their names.
+// install with ERR_PNPM_IGNORED_BUILDS naming the packages. pnpm itself then writes a placeholder
+// into pnpm-workspace.yaml (`allowBuilds: { <name>: set this to true or false }`). Approve exactly
+// the packages it named there, as `true`, and return their names.
 export function approveIgnoredBuilds(output: string, workspaceYamlPath: string): string[] {
   const match = output.match(IGNORED_BUILDS)
   if (!match?.[1]) return []
   const names = [...new Set(match[1].split(',').map((entry) => entry.trim().replace(/@[^@]+$/, '')).filter(Boolean))]
   const current = existsSync(workspaceYamlPath) ? readFileSync(workspaceYamlPath, 'utf8') : ''
-  writeFileSync(workspaceYamlPath, withOnlyBuiltDependencies(current, names))
+  writeFileSync(workspaceYamlPath, withAllowBuilds(current, names))
   return names
 }
 
-// Adds names to the `onlyBuiltDependencies` list of a pnpm-workspace.yaml, creating the list when
-// absent and leaving every other line untouched. The list is kept sorted and unique.
-export function withOnlyBuiltDependencies(yaml: string, names: string[]): string {
+// Sets `allowBuilds: <name>: true` for each name in a pnpm-workspace.yaml, replacing pnpm's
+// placeholder or an earlier value, creating the block when absent, and touching no other line.
+export function withAllowBuilds(yaml: string, names: string[]): string {
   const lines = yaml === '' ? [] : yaml.replace(/\n+$/, '').split('\n')
-  const start = lines.findIndex((line) => /^onlyBuiltDependencies:\s*$/.test(line))
-  const existing: string[] = []
+  const start = lines.findIndex((line) => /^allowBuilds:\s*$/.test(line))
+  const entries = new Map<string, string>()
   let end = start + 1
   if (start !== -1) {
-    while (end < lines.length && /^\s+-\s+/.test(lines[end]!)) {
-      existing.push(lines[end]!.replace(/^\s+-\s+/, '').replace(/^['"]|['"]$/g, '').trim())
+    while (end < lines.length && /^\s+\S/.test(lines[end]!)) {
+      const entry = lines[end]!.match(/^\s+(['"]?)([^'":]+)\1:\s*(.*)$/)
+      if (entry?.[2]) entries.set(entry[2], entry[3] ?? '')
       end += 1
     }
   }
-  const merged = [...new Set([...existing, ...names])].sort()
-  const block = ['onlyBuiltDependencies:', ...merged.map((name) => `  - ${name}`)]
-  const next = start === -1 ? [...lines, ...(lines.length > 0 ? [''] : []), ...block] : [...lines.slice(0, start), ...block, ...lines.slice(end)]
+  for (const name of names) entries.set(name, 'true')
+  const block = ['allowBuilds:', ...[...entries.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => `  ${name}: ${value}`)]
+  const next = start === -1 ? [...block, ...(lines.length > 0 ? ['', ...lines] : [])] : [...lines.slice(0, start), ...block, ...lines.slice(end)]
   return `${next.join('\n')}\n`
 }
 
@@ -119,13 +120,13 @@ function install(opts: InitOptions): void {
       continue
     }
     let res = runAdd(cmd, opts.projectRoot)
-    if (res.status !== 0 && pm === 'pnpm') {
+    // Each add can surface another dependency with a build script; approve and retry, a few times at most.
+    for (let attempt = 0; res.status !== 0 && pm === 'pnpm' && attempt < 5; attempt += 1) {
       const approved = approveIgnoredBuilds(res.output, join(opts.projectRoot, 'pnpm-workspace.yaml'))
-      if (approved.length > 0) {
-        opts.log(`update ${join(opts.projectRoot, 'pnpm-workspace.yaml')} (onlyBuiltDependencies += ${approved.join(', ')})`)
-        opts.log(`run    ${cmd.join(' ')} (again, with those builds approved)`)
-        res = runAdd(cmd, opts.projectRoot)
-      }
+      if (approved.length === 0) break
+      opts.log(`update ${join(opts.projectRoot, 'pnpm-workspace.yaml')} (allowBuilds: ${approved.join(', ')})`)
+      opts.log(`run    ${cmd.join(' ')} (again, with those builds approved)`)
+      res = runAdd(cmd, opts.projectRoot)
     }
     if (res.status !== 0) {
       throw new Error(`${cmd.join(' ')} failed`)
