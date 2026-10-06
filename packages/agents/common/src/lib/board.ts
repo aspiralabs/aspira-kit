@@ -124,10 +124,13 @@ function deeperThan(block: Block, depth: number): boolean {
 export function board(options: BoardOptions): Board {
   const request = options.request ?? fetch
   const api = options.api ?? NOTION_API
-  const source = pageIdFrom(options.board)
-  if (source === undefined) throw new BoardError(`Not a Notion data source URL or id: ${options.board}`)
+  const given = pageIdFrom(options.board)
+  if (given === undefined) throw new BoardError(`Not a Notion data source URL or id: ${options.board}`)
   const token = options.token ?? process.env[BOARD_ENV]
   let schema: Promise<Schema> | undefined
+  // The id aspira.json holds is whatever a person copied: the Feature Board's database page URL
+  // (what Notion shows) or its data source id (what the API queries). Resolved once, on first use.
+  let source: string = given
 
   async function call<T>(path: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET', body?: unknown): Promise<T> {
     if (!token) throw new BoardError(`${BOARD_ENV} is not set; the board needs the Notion integration token`)
@@ -158,7 +161,20 @@ export function board(options: BoardOptions): Board {
     return out
   }
 
-  const loadSchema = () => (schema ??= call<Schema>(`/data_sources/${source}`))
+  // A database page id answers 404 on /data_sources; then ask the database for its data sources.
+  const loadSchema = () =>
+    (schema ??= call<Schema>(`/data_sources/${source}`).catch(async (error: unknown) => {
+      if (!(error instanceof BoardError) || error.status !== 404) throw error
+      const database = await call<{ data_sources?: { id: string; name?: string }[] }>(`/databases/${given}`)
+      const first = database.data_sources?.[0]?.id
+      if (first === undefined) throw new BoardError(`${options.board} is a database with no data source`)
+      source = first
+      return call<Schema>(`/data_sources/${source}`)
+    }))
+  const dataSource = async () => {
+    await loadSchema()
+    return source
+  }
 
   async function property(name: string): Promise<SchemaProperty> {
     const found = Object.values((await loadSchema()).properties).find((candidate) => candidate.name === name)
@@ -259,7 +275,7 @@ export function board(options: BoardOptions): Board {
     if (ref.prefix !== undefined && ref.prefix !== (prefix ?? '').toUpperCase()) {
       throw new BoardError(`${ref.prefix}-${ref.number} is not on this board (its IDs are ${prefix ?? '<no prefix>'}-…)`)
     }
-    const found = await call<ListResponse<PageObject>>(`/data_sources/${source}/query`, 'POST', { filter: { property: idProperty.name, unique_id: { equals: ref.number } }, page_size: 2 })
+    const found = await call<ListResponse<PageObject>>(`/data_sources/${await dataSource()}/query`, 'POST', { filter: { property: idProperty.name, unique_id: { equals: ref.number } }, page_size: 2 })
     const page = found.results[0]
     if (page === undefined) throw new BoardError(`No ticket ${prefix ? `${prefix}-` : ''}${ref.number} on the board`)
     return page
