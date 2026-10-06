@@ -24,18 +24,35 @@ export function pinned(name: string, version: string | undefined): string {
 const IGNORED_BUILDS = /Ignored build scripts:\s*([^\n]+)/
 
 // pnpm 12 refuses to run a dependency's build script until the project approves it, and fails the
-// install with ERR_PNPM_IGNORED_BUILDS naming the packages. Approve exactly those, in the project's
-// package.json `pnpm.onlyBuiltDependencies` (merged, sorted, unique), and return their names.
-export function approveIgnoredBuilds(output: string, packageJsonPath: string): string[] {
+// install with ERR_PNPM_IGNORED_BUILDS naming the packages. Approve exactly those in the project's
+// pnpm-workspace.yaml `onlyBuiltDependencies` (pnpm 12 no longer reads the `pnpm` field of
+// package.json), merged with what is there, and return their names.
+export function approveIgnoredBuilds(output: string, workspaceYamlPath: string): string[] {
   const match = output.match(IGNORED_BUILDS)
   if (!match?.[1]) return []
   const names = [...new Set(match[1].split(',').map((entry) => entry.trim().replace(/@[^@]+$/, '')).filter(Boolean))]
-  const pkg = readJson<Record<string, unknown>>(packageJsonPath) ?? {}
-  const pnpm = (pkg.pnpm && typeof pkg.pnpm === 'object' && !Array.isArray(pkg.pnpm) ? pkg.pnpm : {}) as Record<string, unknown>
-  const current = Array.isArray(pnpm.onlyBuiltDependencies) ? (pnpm.onlyBuiltDependencies as string[]) : []
-  const merged = [...new Set([...current, ...names])].sort()
-  writeJson(packageJsonPath, { ...pkg, pnpm: { ...pnpm, onlyBuiltDependencies: merged } })
+  const current = existsSync(workspaceYamlPath) ? readFileSync(workspaceYamlPath, 'utf8') : ''
+  writeFileSync(workspaceYamlPath, withOnlyBuiltDependencies(current, names))
   return names
+}
+
+// Adds names to the `onlyBuiltDependencies` list of a pnpm-workspace.yaml, creating the list when
+// absent and leaving every other line untouched. The list is kept sorted and unique.
+export function withOnlyBuiltDependencies(yaml: string, names: string[]): string {
+  const lines = yaml === '' ? [] : yaml.replace(/\n+$/, '').split('\n')
+  const start = lines.findIndex((line) => /^onlyBuiltDependencies:\s*$/.test(line))
+  const existing: string[] = []
+  let end = start + 1
+  if (start !== -1) {
+    while (end < lines.length && /^\s+-\s+/.test(lines[end]!)) {
+      existing.push(lines[end]!.replace(/^\s+-\s+/, '').replace(/^['"]|['"]$/g, '').trim())
+      end += 1
+    }
+  }
+  const merged = [...new Set([...existing, ...names])].sort()
+  const block = ['onlyBuiltDependencies:', ...merged.map((name) => `  - ${name}`)]
+  const next = start === -1 ? [...lines, ...(lines.length > 0 ? [''] : []), ...block] : [...lines.slice(0, start), ...block, ...lines.slice(end)]
+  return `${next.join('\n')}\n`
 }
 
 export function packageManager(root: string): 'pnpm' | 'npm' | 'yarn' {
@@ -103,9 +120,9 @@ function install(opts: InitOptions): void {
     }
     let res = runAdd(cmd, opts.projectRoot)
     if (res.status !== 0 && pm === 'pnpm') {
-      const approved = approveIgnoredBuilds(res.output, join(opts.projectRoot, 'package.json'))
+      const approved = approveIgnoredBuilds(res.output, join(opts.projectRoot, 'pnpm-workspace.yaml'))
       if (approved.length > 0) {
-        opts.log(`update ${join(opts.projectRoot, 'package.json')} (pnpm.onlyBuiltDependencies += ${approved.join(', ')})`)
+        opts.log(`update ${join(opts.projectRoot, 'pnpm-workspace.yaml')} (onlyBuiltDependencies += ${approved.join(', ')})`)
         opts.log(`run    ${cmd.join(' ')} (again, with those builds approved)`)
         res = runAdd(cmd, opts.projectRoot)
       }
