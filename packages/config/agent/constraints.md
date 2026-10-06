@@ -4,7 +4,7 @@ Always-on rules. Short on purpose: everything that can be a lint rule, a type, o
 
 ## Rule zero
 
-No spec, no code. A feature starts as an approved spec (intent, constraints, acceptance criteria, out of scope, expected blast radius). Intent and acceptance criteria are the floor. The spec's `### Features` checklist defines observable business outcomes and constraints. A separate implementation plan translates those criteria into ordered technical tasks and unit/integration test checklists, with tests mapped to feature IDs. Write the planned tests before implementation; complete both the business criteria and implementation plan before calling the feature done. Commits on a feature branch carry a `Spec: <path>` trailer.
+No spec, no code. A feature starts as an approved spec (intent, constraints, acceptance criteria, out of scope, expected blast radius). Intent and acceptance criteria are the floor. The spec's `### Features` checklist defines observable business outcomes and constraints. A separate implementation plan translates those criteria into ordered technical tasks and unit/integration test checklists, with tests mapped to feature IDs. Write the planned tests before implementation; complete both the business criteria and implementation plan before calling the feature done. The spec is the ticket's Spec page in Notion; its working copy lives in `.work/<id>-<slug>/`, gitignored. Commits on a feature branch carry a `Spec: <ticket URL>` trailer.
 
 ## Enforced by lint (do not argue with the linter, fix the code)
 

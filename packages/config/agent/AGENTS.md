@@ -23,18 +23,19 @@ Related pages:
 
 ## Where feature work lives
 
-The same layout in every project, so the skills, the Playbook and `kit doctor` can rely on it:
+One gitignored working folder per ticket, the same path in every project:
 
 ```text
-specs/<id>-<slug>/          one folder per ticket, e.g. specs/nom-4-explore-pagination/
-  idea.md                   the ticket's Idea, as pulled from the board
-  spec.md                   the spec (also the ticket's Spec page)
-  spec.written/             spec-writer output, when the writer ran
-  spec.reviewed/            spec-reviewer output: spec.reviewed.md, run-analysis.md
-  plan.review/              planner output: plan.reviewed.md, run-analysis.md; the implementor adds implementation.md
+.work/<id>-<slug>/          e.g. .work/nom-4-explore-pagination/
+  ticket.md                 pulled from the board: ID, status, links, the Idea
+  spec.md                   the ticket's Spec page
+  spec.reviewed/            spec-reviewer output; spec.reviewed.md goes back to the ticket as Spec Reviewed
+  plan.review/              planner output; plan.reviewed.md goes back as Plan; the implementor adds implementation.md, which goes back as Implementation
+  pr-review/                what the PR reviewer writes
+  trace/, *.local/          whatever the agents keep between steps
 ```
 
-`<id>` is the Feature Board ticket ID in lower case; a project without a board uses a slug alone. The ticket in Notion is the record; this folder is the working copy. Commit the markdown. Do not commit agent trace folders: `trace/`, `guidelines/`, `knowledge/` and any `*.local/` directory. Nothing goes in `docs/plans/`, `docs/working-feature/` or any other place; `kit doctor` flags those.
+`<id>` is the Feature Board ticket ID in lower case. The ticket in Notion is the record: every document a step produces is pushed back to the ticket as a child page. The folder is a cache of the ticket plus the agents' scratch, for the human running the steps and the agent on the branch. Anyone can rebuild it from the ticket with the pull step. Nothing in it is committed, on any branch: `kit init` adds `.work/` to `.gitignore`, and `kit doctor` fails if that line is missing or if a `specs/`, `docs/plans/` or `docs/working-feature/` folder exists. Commit trailers (`Spec: <ticket URL>`) and PR descriptions cite the ticket, not a path.
 
 ## The skills
 

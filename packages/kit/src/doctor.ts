@@ -30,8 +30,8 @@ export function doctor(projectRoot: string, log: Log): number {
     ['AGENTS.md has the managed block', () => existsSync(join(projectRoot, 'AGENTS.md')) && readFileSync(join(projectRoot, 'AGENTS.md'), 'utf8').includes('aspiralabs:begin')],
     ['.mcp.json registers aspiralabs-ui', () => JSON.stringify(readJson(join(projectRoot, '.mcp.json')) ?? {}).includes('aspiralabs-ui')],
     ['.claude/settings.json has the hooks', () => JSON.stringify(readJson(join(projectRoot, '.claude', 'settings.json')) ?? {}).includes('session-start.sh')],
-    ['specs/ holds feature work', () => existsSync(join(projectRoot, 'specs'))],
-    ['no feature folders outside specs/ (docs/plans, docs/working-feature)', () => !['docs/plans', 'docs/working-feature'].some((p) => existsSync(join(projectRoot, p)))],
+    ['.gitignore ignores .work/ (per-ticket working folders)', () => existsSync(join(projectRoot, '.gitignore')) && /^\.work\/?$/m.test(readFileSync(join(projectRoot, '.gitignore'), 'utf8'))],
+    ['no committed feature folders (specs, docs/plans, docs/working-feature)', () => !['specs', 'docs/plans', 'docs/working-feature'].some((p) => existsSync(join(projectRoot, p)))],
   ]
   for (const [label, ok] of checks) {
     const pass = ok()

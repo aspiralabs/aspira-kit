@@ -182,13 +182,18 @@ function agentFiles(opts: InitOptions): void {
   }
 }
 
-function specs(opts: InitOptions): void {
-  writeIfAbsent(
-    join(opts.projectRoot, 'specs', 'README.md'),
-    '# Specs\n\nOne folder per ticket: `specs/<id>-<slug>/` with `idea.md`, `spec.md`, `spec.reviewed/` and `plan.review/`. `<id>` is the Feature Board ticket ID in lower case. The ticket in Notion is the record; this folder is the working copy. Commit the markdown; never commit `trace/`, `guidelines/`, `knowledge/` or `*.local/`. No spec, no code: see `node_modules/@aspiralabs/config/agent/AGENTS.md`.\n',
-    opts.log,
-    opts.dryRun,
-  )
+function gitignore(opts: InitOptions): void {
+  // Per-ticket working folders are pulled from the Notion ticket and never committed.
+  const path = join(opts.projectRoot, '.gitignore')
+  const current = existsSync(path) ? readFileSync(path, 'utf8') : ''
+  if (/^\.work\/?$/m.test(current)) {
+    opts.log(`keep   ${path} (.work/ ignored)`)
+    return
+  }
+  opts.log(`update ${path} (ignore .work/)`)
+  if (!opts.dryRun) {
+    writeFileSync(path, `${current.trimEnd()}${current ? '\n\n' : ''}# per-ticket working folders (pulled from the Notion ticket, never committed)\n.work/\n`)
+  }
 }
 
 export async function initNext(opts: InitOptions): Promise<void> {
@@ -200,6 +205,6 @@ export async function initNext(opts: InitOptions): Promise<void> {
   tsconfig(opts)
   css(opts)
   agentFiles(opts)
-  specs(opts)
+  gitignore(opts)
   opts.log('done   run `pnpm lint` to see what the org rules think of the codebase')
 }
