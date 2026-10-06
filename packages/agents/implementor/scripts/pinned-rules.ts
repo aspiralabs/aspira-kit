@@ -46,4 +46,9 @@ export const PINNED_RULES: PinnedRule[] = [
   { reason: 'lane copies share the sandbox; a second checkout or publish corrupts the run', file: INSTRUCTIONS, phrase: 'Copies do not call `checkout-repo`, `load-knowledge` or `publish-branch`' },
   { reason: 'work that exists only in a dead sandbox was never done', file: INSTRUCTIONS, phrase: 'call `publish-branch` once, even for a partial or blocked build' },
   { reason: 'the cloud path has no driver; the tool schema is what stops a report without the three sections', file: INSTRUCTIONS, phrase: 'Call `record-verification` once' },
+  // The report rules of specs/agents-human-lists.md F5 live in the agent, where every mode reads them.
+  { reason: 'an assumption the human cannot see as a choice is a choice made for them', file: INSTRUCTIONS, phrase: 'Present every assumption as a decision with its recommended answer already taken' },
+  { reason: 'a human reads the worst blocker first; an unsorted list buries it', file: INSTRUCTIONS, phrase: 'in severity order (critical, high, medium, low, info)' },
+  { reason: 'the plain-English line is what the human reads; the evidence is there when asked', file: INSTRUCTIONS, phrase: 'each with its plain-English line first and its evidence available on request' },
+  { reason: 'a summary that drops an item hides it; the header count must equal the list', file: INSTRUCTIONS, phrase: 'Never summarise away an item' },
 ]

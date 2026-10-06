@@ -33,6 +33,7 @@ import {
 import {
   SCHEMAS,
   baselineWaves,
+  renderAssumptions,
   parallelizationProblems,
   planProblems,
   targetProblems,
@@ -510,6 +511,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     }
     const path = join(traceDir, 'implementation-local.json')
     await writeFile(path, JSON.stringify(trace, null, 2))
+    // The assumptions as decisions the human can reverse: the taken option ticked, the others open.
+    if (extra.verification !== undefined) await writeFile(join(traceDir, 'decisions.md'), renderAssumptions(extra.verification.assumptions, extra.verification.status))
     await rm(runDir, { recursive: true, force: true })
     return done(status, { export: path, missing, ...extra })
   }
