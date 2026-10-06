@@ -12,6 +12,32 @@ export type InitOptions = { projectRoot: string; dryRun: boolean; log: Log; boar
 const DEPS = ['@aspiralabs/ui']
 const DEV_DEPS = ['@aspiralabs/config', '@aspiralabs/kit', AGENTS_PACKAGE, 'eslint', 'prettier', 'typescript']
 
+// The kit's own version: every @aspiralabs package is installed at exactly this version, because the
+// packages release in lockstep and because pnpm 12's supply-chain policy (minimum release age) would
+// otherwise resolve a bare name to a version old enough to pass, not the one just released.
+export const KIT_VERSION: string | undefined = readJson<{ version?: string }>(fileURLToPath(new URL('../../package.json', import.meta.url)))?.version
+
+export function pinned(name: string, version: string | undefined): string {
+  return name.startsWith('@aspiralabs/') && version ? `${name}@${version}` : name
+}
+
+const IGNORED_BUILDS = /Ignored build scripts:\s*([^\n]+)/
+
+// pnpm 12 refuses to run a dependency's build script until the project approves it, and fails the
+// install with ERR_PNPM_IGNORED_BUILDS naming the packages. Approve exactly those, in the project's
+// package.json `pnpm.onlyBuiltDependencies` (merged, sorted, unique), and return their names.
+export function approveIgnoredBuilds(output: string, packageJsonPath: string): string[] {
+  const match = output.match(IGNORED_BUILDS)
+  if (!match?.[1]) return []
+  const names = [...new Set(match[1].split(',').map((entry) => entry.trim().replace(/@[^@]+$/, '')).filter(Boolean))]
+  const pkg = readJson<Record<string, unknown>>(packageJsonPath) ?? {}
+  const pnpm = (pkg.pnpm && typeof pkg.pnpm === 'object' && !Array.isArray(pkg.pnpm) ? pkg.pnpm : {}) as Record<string, unknown>
+  const current = Array.isArray(pnpm.onlyBuiltDependencies) ? (pnpm.onlyBuiltDependencies as string[]) : []
+  const merged = [...new Set([...current, ...names])].sort()
+  writeJson(packageJsonPath, { ...pkg, pnpm: { ...pnpm, onlyBuiltDependencies: merged } })
+  return names
+}
+
 export function packageManager(root: string): 'pnpm' | 'npm' | 'yarn' {
   if (existsSync(join(root, 'pnpm-lock.yaml'))) {
     return 'pnpm'
@@ -67,19 +93,35 @@ function install(opts: InitOptions): void {
   const add = pm === 'yarn' ? 'add' : pm === 'npm' ? 'install' : 'add'
   const devFlag = pm === 'npm' ? '--save-dev' : '-D'
   const cmds = [
-    [pm, add, ...DEPS],
-    [pm, add, devFlag, ...DEV_DEPS],
+    [pm, add, ...DEPS.map((name) => pinned(name, KIT_VERSION))],
+    [pm, add, devFlag, ...DEV_DEPS.map((name) => pinned(name, KIT_VERSION))],
   ]
   for (const cmd of cmds) {
     opts.log(`run    ${cmd.join(' ')}`)
     if (opts.dryRun) {
       continue
     }
-    const res = spawnSync(cmd[0]!, cmd.slice(1), { cwd: opts.projectRoot, stdio: 'inherit' })
+    let res = runAdd(cmd, opts.projectRoot)
+    if (res.status !== 0 && pm === 'pnpm') {
+      const approved = approveIgnoredBuilds(res.output, join(opts.projectRoot, 'package.json'))
+      if (approved.length > 0) {
+        opts.log(`update ${join(opts.projectRoot, 'package.json')} (pnpm.onlyBuiltDependencies += ${approved.join(', ')})`)
+        opts.log(`run    ${cmd.join(' ')} (again, with those builds approved)`)
+        res = runAdd(cmd, opts.projectRoot)
+      }
+    }
     if (res.status !== 0) {
       throw new Error(`${cmd.join(' ')} failed`)
     }
   }
+}
+
+// Runs an install command, echoing its output as it would appear, and keeps it for the build-script check.
+function runAdd(cmd: string[], cwd: string): { status: number | null; output: string } {
+  const res = spawnSync(cmd[0]!, cmd.slice(1), { cwd, encoding: 'utf8' })
+  const output = `${res.stdout ?? ''}${res.stderr ?? ''}`
+  process.stdout.write(output)
+  return { status: res.status, output }
 }
 
 function eslint(opts: InitOptions): void {
