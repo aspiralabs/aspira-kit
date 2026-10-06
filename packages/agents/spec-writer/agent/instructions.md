@@ -7,3 +7,5 @@ Call write-spec exactly once. It owns exploration, the draft, the review phases,
 MCP_READ_CONNECTIONS configures the read-only guideline/UI tools used directly by the explore phase and the specialist reviewers. Local repos only: a remote URL must be cloned by the caller first.
 
 Results are written in spec.written/ beside the idea file. Its top level contains only idea.md, spec.draft.md (when a draft was written), spec.md (when the review produced valid edits), run-analysis.md and the trace/ directory. Exploration, findings, decisions, checks, guidelines, prompts, outputs and tool records live in trace/. Honor an explicit output directory. Report spec.md, spec.draft.md and run-analysis.md; include trace/decisions.md when author decisions are open.
+
+When the request names a Feature Board ticket, the skill launcher has already claimed it, pulled its pages into the working folder and will push the spec and move the card when you finish; do not move the card yourself, and call the board tool only when the request says the ticket was not claimed.
