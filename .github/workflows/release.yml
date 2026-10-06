@@ -34,6 +34,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - name: Version PR or publish
+        id: changesets
         uses: changesets/action@v1
         with:
           # not `pnpm version` / `pnpm release`: `version` is a pnpm built-in and shadows the script
@@ -45,3 +46,38 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      hasChangesets: ${{ steps.changesets.outputs.hasChangesets }}
+      published: ${{ steps.changesets.outputs.published }}
+
+  # GitHub never runs `ci` on the version PR, because changesets opens it with the
+  # built-in token and events made by that token start no workflows. So the gates
+  # run here, on the version branch, and the result is posted as the same status
+  # the branch protection requires ("checks / checks"). The version PR then merges
+  # the normal way, with no admin override.
+  version-pr-checks:
+    needs: release
+    if: needs.release.outputs.hasChangesets == 'true' && needs.release.outputs.published != 'true'
+    uses: ./.github/workflows/kit-checks.yml
+    with:
+      ref: changeset-release/main
+
+  version-pr-status:
+    needs: [release, version-pr-checks]
+    if: always() && needs.release.outputs.hasChangesets == 'true' && needs.release.outputs.published != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Post the gate result on the version branch head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RESULT: ${{ needs.version-pr-checks.result }}
+        run: |
+          sha=$(gh api "repos/${GITHUB_REPOSITORY}/branches/changeset-release/main" --jq .commit.sha)
+          state=failure; [ "$RESULT" = success ] && state=success
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${sha}" \
+            -f state="$state" \
+            -f context="checks / checks" \
+            -f description="kit-checks on the version branch (${RESULT})" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
