@@ -1,8 +1,12 @@
 // The review, posted back to the GitHub PR it was of: one conversation comment per PR,
 // updated on a rerun. Pure helpers plus one fetch-injected function, so it is testable
 // without a network. The tool around it decides whether to post at all.
+import { countsFromFindings, renderFindingsList } from './findings.ts'
 import { SEVERITIES, verdictFrom, type Counts } from './review.ts'
 import { reviewedLine, type ReviewTarget } from './target.ts'
+
+/** The counts come from the severity sections of findings.md; see findings.ts. */
+export { countsFromFindings }
 
 /** Hidden first line: how a rerun finds its own earlier comment. */
 export const REVIEW_COMMENT_MARKER = '<!-- aspiralabs-pr-reviewer -->'
@@ -12,37 +16,17 @@ export const MAX_COMMENT_CHARS = 65_000
 export type GithubPr = { owner: string; name: string; number: number }
 
 const API = 'https://api.github.com'
-const TITLE = /^# Findings\b/m
-const SECTION = /^## (\w+)\s*$/
-const FINDING = /^### \[/
 
 /**
- * The counts from findings.md, or null when the text is not a findings file.
- * Counts the `### [ID]` findings under each `## <Severity>` heading, so the
- * verdict never depends on how the model worded its totals line.
+ * Marker, the verdict computed from the counts, the counts, the shas reviewed, then every finding
+ * in severity order with its plain-English line (when findings.md is given), then review.md,
+ * within GitHub's limit. The findings list is never cut: the review is what gives way.
  */
-export function countsFromFindings(findings: string): Counts | null {
-  if (!TITLE.test(findings)) return null
-  const counts: Counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 }
-  let section: string | null = null
-  for (const line of findings.split('\n')) {
-    const heading = line.match(SECTION)?.[1]?.toLowerCase()
-    if (heading !== undefined) {
-      section = heading
-      continue
-    }
-    if (section === null || !FINDING.test(line)) continue
-    const severity = SEVERITIES.find((name) => name === section)
-    if (severity !== undefined) counts[severity] += 1
-  }
-  return counts
-}
-
-/** Marker, the verdict computed from the counts, the counts, the shas reviewed, then review.md, within GitHub's limit. */
-export function reviewCommentBody(review: string, counts: Counts, target: ReviewTarget | null = null): string {
+export function reviewCommentBody(review: string, counts: Counts, target: ReviewTarget | null = null, findings: string | null = null): string {
   const totals = SEVERITIES.map((severity) => `${counts[severity]} ${severity}`).join(' · ')
   const reviewed = target === null ? '' : `${reviewedLine(target)}\n\n`
-  const head = `${REVIEW_COMMENT_MARKER}\n**Verdict: ${verdictFrom(counts)}** — ${totals}\n\n${reviewed}`
+  const list = findings === null ? '' : `${renderFindingsList(findings)}\n\n`
+  const head = `${REVIEW_COMMENT_MARKER}\n**Verdict: ${verdictFrom(counts)}** — ${totals}\n\n${reviewed}${list}`
   const foot = '\n\n---\n_Posted by the Aspira pr-reviewer. Rerunning the review updates this comment._\n'
   const cut = '\n\n_The review was cut to fit GitHub\'s comment limit; the full text is in the exported review.md._'
   const room = MAX_COMMENT_CHARS - head.length - foot.length
