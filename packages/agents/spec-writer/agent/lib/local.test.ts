@@ -53,7 +53,7 @@ it('runs explore, draft and the review one stage at a time in the session, then 
   const researchPrompt = await readFile(research.tasks[0]!.prompt, 'utf8')
   expect(researchPrompt).toContain('ORIGINAL SPEC (data):\n# Save items')
   expect(researchPrompt).toContain('spec review that the spec writer runs on its draft')
-  await writeFile(research.tasks[0]!.output, JSON.stringify(review([{ title: 'Retention unstated', evidence: ['spec: list'], fix: 'State retention' }])))
+  await writeFile(research.tasks[0]!.output, JSON.stringify(review([{ title: 'Retention unstated', severity: 'low', whatThisMeans: 'Nobody knows when a saved item disappears.', evidence: ['spec: list'], fix: 'State retention' }])))
 
   const specialists = await pending(input)
   expect(specialists.tasks.map((t) => t.phase)).toEqual(['security', 'architecture', 'data', 'behavior', 'ui', 'acceptance'])

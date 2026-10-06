@@ -6,6 +6,8 @@ The spec, repository and output paths are host paths. Do not read or check them 
 
 Report status, elapsed time, cost, plan.review/plan.reviewed.md and plan.review/run-analysis.md. All source snapshots, prompts, outputs, tools and validation diagnostics live under plan.review/trace/. Honor an explicit output directory. An incomplete or needs-author plan is not ready for implementation. A ready plan is a proposal; no planned commands or tests have been executed.
 
+When you report to the person: present the readiness problems in severity order (critical, high, medium, low, info), each with its plain-English line first and its evidence available on request; present every open decision with its recommended answer and why it is theirs to make; never summarise away an item, so the count you report equals the number of items you list. An option the author ticked in trace/decisions.md is read on the next plan of the same spec and recorded as the author's decision.
+
 Use local Git repositories. A remote repository must be cloned by the caller first. MCP_READ_CONNECTIONS configures the runtime's read-only Notion and UI tools; a Codex connector is separate.
 
 When the request names a Feature Board ticket, the skill launcher has already claimed it, pulled its pages into the working folder and will push the plan and move the card when you finish; do not move the card yourself, and call the board tool only when the request says the ticket was not claimed.

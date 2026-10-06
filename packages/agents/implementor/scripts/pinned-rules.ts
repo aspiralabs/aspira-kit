@@ -59,4 +59,9 @@ export const PINNED_SKILL_RULES: PinnedRule[] = [
   { reason: 'a local build pushes nothing, so the PR is the human\'s remaining step and the report must say so', file: 'skill/aspira-implementor/SKILL.md', phrase: 'opening the PR is the remaining step' },
   { reason: 'a push failure is reported with the local path and the move is still made', file: 'skill/aspira-implementor/SKILL.md', phrase: 'say so with the local path of the implementation report and still make the move' },
   { reason: 'the report starts with the ticket, the moves, the pages pushed and the working folder', file: 'skill/aspira-implementor/SKILL.md', phrase: 'Start the report with the ticket ID and title' },
+  // The report rules of specs/agents-human-lists.md F5 live in the agent, where every mode reads them.
+  { reason: 'an assumption the human cannot see as a choice is a choice made for them', file: INSTRUCTIONS, phrase: 'Present every assumption as a decision with its recommended answer already taken' },
+  { reason: 'a human reads the worst blocker first; an unsorted list buries it', file: INSTRUCTIONS, phrase: 'in severity order (critical, high, medium, low, info)' },
+  { reason: 'the plain-English line is what the human reads; the evidence is there when asked', file: INSTRUCTIONS, phrase: 'each with its plain-English line first and its evidence available on request' },
+  { reason: 'a summary that drops an item hides it; the header count must equal the list', file: INSTRUCTIONS, phrase: 'Never summarise away an item' },
 ]

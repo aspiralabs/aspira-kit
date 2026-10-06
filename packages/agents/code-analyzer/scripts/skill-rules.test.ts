@@ -32,6 +32,10 @@ const rules = [
   { reason: 'a human owns every Ready column (BOARD-004)', file: skill, phrase: 'It never moves a card to a Ready column' },
   { reason: 'the report starts with the ticket, the moves, the pages pushed and the working folder', file: skill, phrase: 'Start the report with the ticket ID and title' },
   { reason: 'the launcher owns the board step around a cloud run; the agent must not move the card', file: instructions, phrase: 'do not move the card yourself' },
+  // The report rules of specs/agents-human-lists.md F5 live in the agent, where every mode reads them.
+  { reason: 'a human reads the errors first; an unsorted list buries them', file: instructions, phrase: 'in severity order (errors, then warnings)' },
+  { reason: 'the plain-English line is what the human reads; the evidence is there when asked', file: instructions, phrase: 'each with its plain-English line first and its evidence (file, line, rule) available on request' },
+  { reason: 'a summary that drops a diagnostic hides it; the counts must equal the list', file: instructions, phrase: 'never summarise away an item' },
 ]
 
 it('pins each rule with a distinctive phrase', () => {

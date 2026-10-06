@@ -8,6 +8,7 @@ import { DEFAULT_REQUIRED, MAX_DEPTH, MAX_PAGES } from '@aspiralabs/agent-common
 import { expect, it } from 'vitest'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 import { runLocal, type LocalPending, type LocalResult } from './local.ts'
+import { renderDecisionsFile } from './plan.ts'
 import { planningInstructions, researchInstructions, researchSystem } from './prompts.ts'
 
 const exec = promisify(execFile)
@@ -184,4 +185,34 @@ it('refuses research that leaves a required rule out, and runs the agent\'s corr
   const done = await runLocal(args, { env: {} })
   if (done.pending) throw new Error('expected export')
   expect(done.status).toBe('ready')
+})
+
+it('reads the option the author ticked in trace/decisions.md on the rerun and records it as theirs', async () => {
+  const f = await fixture()
+  const snapshot = join(f.dir, 'REQUIRED.md')
+  await writeFile(snapshot, RULES)
+  const args = { specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir, guidelinesPath: snapshot }
+  const retention = { question: 'Keep saved items forever?', options: ['Keep forever', 'Expire after 30 days'], recommended: 'Keep forever', reasoning: 'nothing else expires', whyYours: 'storage cost' }
+  const research = pending(await runLocal(args, { env: {} }))
+  await writeFile(research.tasks[0]!.output, JSON.stringify({ facts: [], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [retention] }))
+  const planning = pending(await runLocal(args, { env: {} }))
+  await writeFile(planning.tasks[0]!.output, JSON.stringify(validPlan()))
+  const first = await runLocal(args, { env: {} })
+  if (first.pending) throw new Error('expected export')
+  expect(first.status).toBe('needs-author')
+  expect(first.decisions).toEqual([{ ...retention, id: 'D1', decidedBy: 'open', answer: null }])
+  const decisionsFile = join(f.outputDir, 'trace/decisions.md')
+  expect(await readFile(decisionsFile, 'utf8')).toBe(renderDecisionsFile('needs-author', first.decisions))
+
+  await writeFile(decisionsFile, (await readFile(decisionsFile, 'utf8')).replace('- [ ] Expire after 30 days', '- [x] Expire after 30 days'))
+  const again = pending(await runLocal(args, { env: {} }))
+  await writeFile(again.tasks[0]!.output, JSON.stringify({ facts: [], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [retention] }))
+  await writeFile(pending(await runLocal(args, { env: {} })).tasks[0]!.output, JSON.stringify(validPlan()))
+  const second = await runLocal(args, { env: {} })
+  if (second.pending) throw new Error('expected export')
+  expect(second.status).toBe('ready')
+  expect(second.decisions).toEqual([{ ...retention, id: 'D1', decidedBy: 'author', answer: 'Expire after 30 days' }])
+  const review = JSON.parse(await readFile(join(f.outputDir, 'trace/review.json'), 'utf8')) as { status: string; decisions: { decidedBy: string }[] }
+  expect(review.status).toBe('ready')
+  expect(review.decisions.filter((d) => d.decidedBy === 'open')).toEqual([])
 })

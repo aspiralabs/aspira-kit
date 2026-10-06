@@ -9,6 +9,8 @@ import { knowledgeStage, runLocal } from './local.ts'
 
 const candidate = '# Feature\n## Intent\nSave items.\n## Acceptance criteria\n### Features\n- [ ] F1: Save an item idempotently.\n'
 const review = (findings: unknown[] = []) => ({ facts: [], findings, checks: [{ rule: 'REV-001', evidence: 'spec: Original' }], uiEvidence: [], gaps: [] })
+const finding = (title: string, severity = 'medium') => ({ title, severity, whatThisMeans: 'Members would see something other than the spec promises.', evidence: ['spec: Original'], fix: 'Add intent and acceptance' })
+const decision = { question: 'Should saved items be kept forever?', options: ['Keep forever', 'Expire after 30 days'], recommended: 'Keep forever', reasoning: 'cookbooks keep everything until removed', whyYours: 'it decides what members pay storage for' }
 
 async function setup() {
   const dir = await mkdtemp(join(tmpdir(), 'spec-review-local-'))
@@ -30,7 +32,7 @@ it('runs the pipeline one stage at a time with the session as the model, then ex
   expect(prompt).toContain('# Original')
   expect(prompt).toContain('"findings"')
   expect(prompt).not.toContain('notion-fetch')
-  await writeFile(research.tasks[0]!.output, JSON.stringify(review([{ title: 'Missing contract', evidence: ['spec: Original'], fix: 'Add intent and acceptance' }])))
+  await writeFile(research.tasks[0]!.output, JSON.stringify(review([finding('Missing contract')])))
 
   const specialists = await runLocal(input)
   if (!specialists.pending) throw new Error('expected pending')
@@ -150,5 +152,69 @@ describe('engineering guidelines in --local', () => {
     const other = join(dir, 'other.md')
     await writeFile(other, 'REV-001 Something else')
     await expect(runLocal({ ...rest, guidelinesPath: other })).rejects.toThrow('--guidelines')
+  })
+})
+
+// F4: the author answers a decision in the file, and the next review of the same spec records it as theirs.
+describe('author decisions ticked in trace/decisions.md', () => {
+  async function reviewOnce(input: Parameters<typeof runLocal>[0], synthesis: unknown) {
+    const research = await runLocal(input)
+    if (!research.pending) throw new Error('expected pending')
+    await writeFile(research.tasks[0]!.output, JSON.stringify(review([finding('Retention unstated', 'low'), finding('Owner check missing', 'critical')])))
+    const specialists = await runLocal(input)
+    if (!specialists.pending) throw new Error('expected pending')
+    for (const task of specialists.tasks) await writeFile(task.output, JSON.stringify(review()))
+    const reconciliation = await runLocal(input)
+    if (!reconciliation.pending) throw new Error('expected pending')
+    await writeFile(reconciliation.tasks[0]!.output, JSON.stringify(synthesis))
+    const done = await runLocal(input)
+    if (done.pending) throw new Error('expected a report')
+    return done
+  }
+  const dispositions = (withDecision: boolean) => [
+    { findingId: 'R1', status: 'author', reason: 'Retention is a product choice.', evidence: [], editIds: [], duplicateOf: null, ...(withDecision ? { decision } : {}) },
+    { findingId: 'R2', status: 'applied', reason: 'Owner check added.', evidence: ['spec: Original'], editIds: ['E1'], duplicateOf: null },
+  ]
+
+  it('renders the decision as checkboxes with the recommended option first, then reads the tick back on the rerun', async () => {
+    const { dir, input } = await setup()
+    const synthesis = { edits: [{ id: 'E1', before: '# Original', after: candidate }], dispositions: dispositions(true) }
+    const first = await reviewOnce(input, synthesis)
+    expect(first.status).toBe('needs-author')
+    expect(first.authorDecisions).toEqual([{ ...decision, id: 'R1', decidedBy: 'open', answer: null }])
+    const decisionsFile = join(dir, 'spec.reviewed/trace/decisions.md')
+    const text = await readFile(decisionsFile, 'utf8')
+    expect(text).toContain('1 decision: 1 open · 0 answered')
+    expect(text).toContain('## R1 — Should saved items be kept forever?\n\n- [ ] Keep forever _(recommended: cookbooks keep everything until removed)_\n- [ ] Expire after 30 days\n\nWhy it is yours to decide: it decides what members pay storage for')
+    // Findings land critical first, with the plain-English line before the evidence; the header count matches.
+    const findingsMd = await readFile(join(dir, 'spec.reviewed/trace/findings.md'), 'utf8')
+    expect(findingsMd).toContain('2 findings: 1 critical · 0 high · 0 medium · 1 low · 0 info')
+    expect(findingsMd.indexOf('## R2 — Owner check missing')).toBeLessThan(findingsMd.indexOf('## R1 — Retention unstated'))
+    expect(findingsMd.match(/^## /gm)).toHaveLength(2)
+    const reviewed = await readFile(join(dir, 'spec.reviewed/spec.reviewed.md'), 'utf8')
+    expect(reviewed).toContain('## Review findings (2 findings: 1 critical · 0 high · 0 medium · 1 low · 0 info)')
+    expect(reviewed.indexOf('- **critical** · R2')).toBeLessThan(reviewed.indexOf('- **low** · R1'))
+
+    // The author ticks an option in the file and reruns the same stage.
+    await writeFile(decisionsFile, text.replace('- [ ] Expire after 30 days', '- [x] Expire after 30 days'))
+    const second = await reviewOnce(input, synthesis)
+    expect(second.status).toBe('ready')
+    expect(second.authorDecisions).toEqual([{ ...decision, id: 'R1', decidedBy: 'author', answer: 'Expire after 30 days' }])
+    const report = JSON.parse(await readFile(join(dir, 'spec.reviewed/trace/review.json'), 'utf8'))
+    expect(report.status).toBe('ready')
+    expect(report.authorDecisions).toEqual([expect.objectContaining({ id: 'R1', decidedBy: 'author', answer: 'Expire after 30 days' })])
+    expect(report.authorDecisions.filter((d: { decidedBy: string }) => d.decidedBy === 'open')).toEqual([])
+    const rerendered = await readFile(decisionsFile, 'utf8')
+    expect(rerendered).toContain('1 decision: 0 open · 1 answered')
+    expect(rerendered).toContain('Decided by the author: Expire after 30 days.')
+    expect(rerendered).toContain('- [x] Expire after 30 days')
+    expect(await readFile(join(dir, 'spec.reviewed/spec.reviewed.md'), 'utf8')).toBe(candidate)
+  })
+
+  it('leaves an author disposition without a decision as a problem, not a silent pass', async () => {
+    const { input } = await setup()
+    const done = await reviewOnce(input, { edits: [{ id: 'E1', before: '# Original', after: candidate }], dispositions: dispositions(false) })
+    expect(done.status).toBe('incomplete')
+    expect(done.problems).toContain('Author disposition without a decision (question, options, recommended, reasoning, whyYours): R1')
   })
 })

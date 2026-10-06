@@ -131,6 +131,22 @@ describe('the stopping rule', () => {
     expect(reviewAgreed(contested, quinn(false), roundSettled(contested))).toBe(false)
   })
 
+  it('asks every seat, the fix list and the summary for the plain-English line before the evidence, and the fix list in severity order', () => {
+    const opening = openingPrompt('ava', sandbox)
+    expect(opening).toContain('Every finding opens with **What this means:**')
+    expect(opening.indexOf('`**What this means:**` (the plain-English line')).toBeLessThan(opening.indexOf('the evidence quoted from the diff, and the fix'))
+    const findings = writeFindingsPrompt(sandbox, true)
+    expect(findings).toContain('in this order: a `**What this means:**` line')
+    expect(findings.indexOf('`**What this means:**` line')).toBeLessThan(findings.indexOf('the evidence quoted from the diff, the fix'))
+    expect(findings).toContain('`## Critical` / `## High` / `## Medium` / `## Low` / `## Info`')
+    expect(findings).toContain('the totals line counts exactly the entries below it')
+    const review = writeReviewPrompt(sandbox, true)
+    expect(review).toContain('the critical findings, then the high ones')
+    expect(review).toContain('the plain-English line first')
+    expect(review).toContain('medium, then low, then info, same shape, every one of them')
+    expect(checkFindingsPrompt(sandbox)).toContain('every entry opens with its `**What this means:**` line')
+  })
+
   it('every prompt tells the seats the rule, the batching and the cap', () => {
     const prompt = openingPrompt('ava', sandbox)
     expect(prompt).toContain('The review ends after a round in which no seat raised or disputed anything')

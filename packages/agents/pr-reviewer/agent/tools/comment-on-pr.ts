@@ -11,7 +11,7 @@ import { TARGET_FILE, targetFileSchema } from '../lib/target'
 export default defineTool({
   availableInSubagents: false,
   description:
-    'Post the finished review to the GitHub PR it reviewed, as one comment with the computed verdict, the counts, the base and head shas, followed by review.md; a rerun updates that comment. Only for a GitHub PR: pass `github` exactly as load-pr returned it. Call after export-review. Returns posted false with a reason when posting is off or GitHub refuses.',
+    'Post the finished review to the GitHub PR it reviewed, as one comment with the computed verdict, the counts, the base and head shas, every finding in severity order with its plain-English line, followed by review.md; a rerun updates that comment. Only for a GitHub PR: pass `github` exactly as load-pr returned it. Call after export-review. Returns posted false with a reason when posting is off or GitHub refuses.',
   inputSchema: z.object({
     github: z
       .object({ owner: z.string().min(1), name: z.string().min(1), number: z.number().int().positive() })
@@ -32,7 +32,7 @@ export default defineTool({
     if (counts === null) return { posted: false, reason: 'findings.md is missing or is not a findings file, so the verdict cannot be computed' }
     const target = targetJson === null ? null : (targetFileSchema.safeParse(JSON.parse(targetJson)).data?.target ?? null)
     try {
-      const { action, url } = await upsertReviewComment(github, reviewCommentBody(review, counts, target), token)
+      const { action, url } = await upsertReviewComment(github, reviewCommentBody(review, counts, target, findings), token)
       return { posted: true, action, url }
     } catch (error) {
       const message = (error instanceof Error ? error.message : String(error)).replaceAll(token, '***')

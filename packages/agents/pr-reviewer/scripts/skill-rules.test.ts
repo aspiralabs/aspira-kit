@@ -52,6 +52,11 @@ const rules = [
   { reason: 'a push failure is reported with the local path, never hidden', file: skill, phrase: 'say so with the local path of the review and still' },
   { reason: 'the report starts with the ticket, the moves, the pages pushed and the working folder', file: skill, phrase: 'Start the report with the ticket ID and title' },
   { reason: 'the launcher owns the board work around a cloud run; the agent must not add a move', file: instructions, phrase: 'do not move the card yourself' },
+  // The report rules of specs/agents-human-lists.md F5 live in the agent, where every mode reads them.
+  { reason: 'a human reads the worst finding first; an unsorted list buries it', file: instructions, phrase: 'Present the findings in severity order (critical, high, medium, low, info)' },
+  { reason: 'the plain-English line is what the author reads; the evidence is there when asked', file: instructions, phrase: 'each with its plain-English line first and its evidence available on request' },
+  { reason: 'an open point without a recommendation sends the human back to the transcript', file: instructions, phrase: 'the option you would recommend with one sentence of reasoning, and why it is theirs to decide' },
+  { reason: 'a summary that drops a finding hides it; the header count must equal the list', file: instructions, phrase: 'never summarise away an item' },
 ]
 
 it('pins each rule with a distinctive phrase', () => {
@@ -76,7 +81,7 @@ const agentRules = [
   'Never write to `/workspace/findings.md`',
   'Do not argue with it',
 ]
-const restatements = ['do not review the pr yourself', 'never to any other pr', 'no model chooses it', 'do not argue with', 'the verdict is computed']
+const restatements = ['do not review the pr yourself', 'never to any other pr', 'no model chooses it', 'do not argue with', 'the verdict is computed', 'in severity order', 'plain-english line', 'evidence available on request', 'summarise away', 'option you would recommend']
 
 it('the agent rules this file checks for are still in agent/instructions.md', () => {
   const text = readFileSync(join(root, instructions), 'utf8')

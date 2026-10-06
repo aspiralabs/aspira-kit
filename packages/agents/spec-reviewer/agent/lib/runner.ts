@@ -5,6 +5,7 @@ import { runAnalysis } from './run-analysis.ts'
 import { connectReadTools } from './mcp.ts'
 import { modelSession, reviewModelCall, reviewModels } from './models.ts'
 import { runPipeline, type PipelineResult } from './pipeline.ts'
+import { readAnswers, renderDecisionsFile, renderFindings, renderFindingsSection } from './report.ts'
 import { repository } from './repository.ts'
 import { systemPrompt } from './review.ts'
 
@@ -20,13 +21,14 @@ export async function prepareReview(input: RunInput, signal: AbortSignal) {
     const path = relative(dir, resolve(source))
     if (!path || (!path.startsWith('../') && path !== '..')) throw new Error('Output directory must not contain the source spec or guidelines')
   }
-  const [spec, guidelines, repo] = await Promise.all([
-    readFile(resolve(input.specPath), 'utf8'), readFile(resolve(input.guidelinesPath), 'utf8'), repository(input.repoPath, signal),
+  // The previous run's trace/decisions.md, with the options the author ticked, is read before the run replaces it.
+  const [spec, guidelines, repo, answers] = await Promise.all([
+    readFile(resolve(input.specPath), 'utf8'), readFile(resolve(input.guidelinesPath), 'utf8'), repository(input.repoPath, signal), readAnswers(dir),
   ])
   if (!guidelines.trim()) throw new Error('Required guidelines snapshot is empty')
   if (/TRUNCATED by the Notion API/i.test(guidelines)) throw new Error('Required guidelines snapshot is truncated')
   const uiRequired = input.uiRequired ?? /\b(?:UI|screen|page|card|button|mobile|component|navigation)\b/i.test(spec)
-  return { dir, spec, guidelines, repo, uiRequired }
+  return { dir, spec, guidelines, repo, uiRequired, answers }
 }
 export type Prepared = Awaited<ReturnType<typeof prepareReview>>
 
@@ -40,16 +42,17 @@ export function applySnapshotGaps(result: PipelineResult, { repo }: Prepared) {
 
 /** The reviewed spec and the human-readable trace, identical across modes. */
 export function reviewFiles(result: PipelineResult, { spec, guidelines }: Prepared): Record<string, string> {
-  const decisions = result.synthesis?.dispositions.map((d) => `## ${d.findingId} — ${d.status}\n\n${d.reason}\n\nEvidence: ${d.evidence.join('; ')}\n\nEdits: ${d.editIds.join(', ') || 'none'}${d.duplicateOf ? `; duplicate of ${d.duplicateOf}` : ''}`).join('\n\n') ?? 'Reconciliation did not finish. All findings remain unresolved.'
   const files: Record<string, string> = {
     'spec.original.md': spec,
     'trace/guidelines.md': guidelines,
-    'trace/decisions.md': `# Decisions\n\nStatus: ${result.status}\n\n${decisions}\n`,
-    'trace/findings.md': result.findings.map((f) => `## ${f.id} — ${f.title}\n\n${f.evidence.join('\n\n')}\n\nProposed correction: ${f.fix}`).join('\n\n'),
+    'trace/decisions.md': renderDecisionsFile(result.status, result.authorDecisions, result.synthesis),
+    'trace/findings.md': renderFindings(result.findings, result.synthesis),
     'trace/checks.md': `# Checks\n\nStatus: ${result.status}\n\n${result.problems.map((p) => `- ${p}`).join('\n')}\n\n${result.reviews.map((r) => `## ${r.phase}\n\n${r.output.checks.map((c) => `- ${c.rule}: ${c.evidence}`).join('\n')}`).join('\n\n')}`,
   }
+  // A ready candidate is the spec the planner takes, so it carries nothing but the spec. A candidate
+  // that still needs the author or has problems carries the findings, sorted, above it.
   if (result.candidate !== null) files['spec.reviewed.md'] = result.status === 'ready' ? result.candidate
-    : `> Review status: **${result.status}**. Not ready for implementation; resolve trace/decisions.md and trace/checks.md first. Original status metadata below has not been approved by this review.\n\n${result.candidate}`
+    : `> Review status: **${result.status}**. Not ready for implementation; resolve trace/decisions.md and trace/checks.md first. Original status metadata below has not been approved by this review.\n\n${renderFindingsSection(result.findings)}\n\n---\n\n${result.candidate}`
   return files
 }
 
@@ -57,7 +60,7 @@ export async function runReview(input: RunInput, options: { signal?: AbortSignal
   const started = Date.now()
   const preparation = options.signal ?? new AbortController().signal
   const prepared = await prepareReview(input, preparation)
-  const { dir, spec, guidelines, repo, uiRequired } = prepared
+  const { dir, spec, guidelines, repo, uiRequired, answers } = prepared
   const mcp = await connectReadTools(process.env.MCP_READ_CONNECTIONS, preparation)
   const tools = { ...repo.tools, ...mcp.tools }
   const catalogTool = Object.keys(mcp.tools).find((name) => name.endsWith('__list_components'))
@@ -72,7 +75,7 @@ export async function runReview(input: RunInput, options: { signal?: AbortSignal
   const { ledger, calls } = session
   const call = session.record(reviewModelCall(session, models, tools, componentTool))
   try {
-    const result = await runPipeline({ spec, guidelines, context: reviewContext(prepared, JSON.stringify(catalog)), uiRequired }, call, options)
+    const result = await runPipeline({ spec, guidelines, context: reviewContext(prepared, JSON.stringify(catalog)), uiRequired, answers }, call, options)
     if (uiRequired && !['list_components', 'get_component'].every((name) => mcp.reads.some((read) => read.ok && read.tool.endsWith(`__${name}`)))) {
       result.problems.push('UI review requires successful list_components and get_component MCP reads')
       result.status = 'incomplete'
