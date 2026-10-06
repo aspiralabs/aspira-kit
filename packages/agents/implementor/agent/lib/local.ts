@@ -63,7 +63,7 @@ export type LocalInput = {
   maxParallel?: number
   /** No worker lanes: the session builds every task itself. */
   serial?: boolean
-  /** The work directory; default: the procedure's (plan.review/, implementation/ beside a spec, .implement/<key>/). */
+  /** The work directory; default: the procedure's (plan.review/, implementation/ beside a spec, .work/<ticket>/). */
   work?: string
   /** Export what exists now, with the missing stages listed. */
   finish?: boolean
@@ -163,7 +163,7 @@ async function resolveSource(input: LocalInput): Promise<Source> {
   const raw = input.source.replace(/^@/, '')
   const path = resolve(raw)
   if (!existsSync(path)) {
-    throw new Error(`${raw} is not a file or directory. For a ticket, fetch it and restate it as the procedure's "## 1." says, write it to <repo>/.implement/<key>/spec.md, and pass that path.`)
+    throw new Error(`${raw} is not a file or directory. For a ticket, fetch it and restate it as the procedure's "## 1." says, write it to <repo>/.work/<ticket>/spec.md, and pass that path.`)
   }
   const isDir = (await readdir(path).catch(() => null)) !== null
   const repo = resolve(input.repo ?? (await git(isDir ? path : dirname(path), 'rev-parse', '--show-toplevel')))
@@ -172,10 +172,13 @@ async function resolveSource(input: LocalInput): Promise<Source> {
     const note = isDir || basename(path) === 'plan.reviewed.md' ? null : `A reviewed plan sits beside ${relative(repo, path)}; building ${relative(repo, planDir)} instead.`
     return { kind: 'plan', path: planDir, repo, workDir: resolve(input.work ?? planDir), planFile: join(planDir, 'trace/plan.json'), reviewFile: join(planDir, 'trace/review.json'), trailer: null, note }
   }
-  const ticket = path.match(/\/\.implement\/([^/]+)\/spec\.md$/)
+  // A spec inside the ticket's working folder (.work/<ticket>/spec.md) is built as a ticket:
+  // the commit cites the ticket, by its Notion URL when ticket.md beside it names one.
+  const ticket = path.match(/\/\.work\/([^/]+)\/spec\.md$/)
   if (ticket?.[1] !== undefined) {
     const workDir = resolve(input.work ?? dirname(path))
-    return { kind: 'ticket', path, repo, workDir, planFile: join(workDir, 'plan.json'), reviewFile: null, trailer: `Ticket: ${ticket[1]}`, note: null }
+    const ticketUrl = (await readFile(join(dirname(path), 'ticket.md'), 'utf8').catch(() => '')).match(/https:\/\/(?:app\.|www\.)?notion\.(?:com|so)\/\S+/)?.[0] ?? null
+    return { kind: 'ticket', path, repo, workDir, planFile: join(workDir, 'plan.json'), reviewFile: null, trailer: ticketUrl === null ? `Ticket: ${ticket[1]}` : `Spec: ${ticketUrl}`, note: null }
   }
   const workDir = resolve(input.work ?? join(dirname(path), 'implementation'))
   return { kind: 'spec', path, repo, workDir, planFile: join(workDir, 'plan.json'), reviewFile: null, trailer: `Spec: ${relative(repo, path)}`, note: null }

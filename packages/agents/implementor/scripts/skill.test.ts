@@ -16,7 +16,7 @@ it('keeps the agent procedure eve loads, carrying every step of the contract', a
   const procedure = await readFile(join(root, PROCEDURE), 'utf8')
   expect(procedure).toMatch(/^---\nname: aspira-implementor\ndescription: .+\n---\n/)
   for (const step of ['## 1. Resolve the input and gate it', '## 2. Load the standards', '## 3. Draft the plan', '## 4. Analyze the plan and decide how to parallelize', '## 5. Execute', '## 6. Final verification', '## 7. Progress log and report']) expect(procedure).toContain(step)
-  for (const term of ['needs-author', 'incomplete', 'Agent Instructions', 'load-knowledge', 'trace/guidelines.md', 'WRITE SCOPE', 'Hot files', '--max-parallel', 'Spec: <path>', 'implementation.md', 'publish-branch', '**A plan**', '**A spec**', '**A ticket**', 'Ticket: <key or URL>', '## Run to completion', 'Assumptions', 'A leading `@`']) expect(procedure).toContain(term)
+  for (const term of ['needs-author', 'incomplete', 'Agent Instructions', 'load-knowledge', 'trace/guidelines.md', 'WRITE SCOPE', 'Hot files', '--max-parallel', 'Spec: <path>', 'implementation.md', 'publish-branch', '**A plan**', '**A spec**', '**A ticket**', 'Ticket: <key>', '## Run to completion', 'Assumptions', 'A leading `@`']) expect(procedure).toContain(term)
 })
 
 it('is a Claude Code skill that only launches the agent or steps --local, and names the agent files as the authority', async () => {

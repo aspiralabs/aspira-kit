@@ -72,7 +72,7 @@ Every mode ends this step with a **work directory** (where the plan and progress
 | --- | --- | --- |
 | Plan | the `plan.review/` directory | `Spec: <plan header's Source spec path, repo-relative>` |
 | Spec | `implementation/` beside the spec file | `Spec: <spec path, repo-relative>` |
-| Ticket | `.implement/<ticket-key>/` at the repo root | `Ticket: <key or URL>` |
+| Ticket | `.work/<ticket>/` at the repo root, the ticket's working folder | `Spec: <ticket URL>` when `ticket.md` beside the spec names the Notion ticket, else `Ticket: <key>` |
 
 The ticket work directory is a local record; leave it out of commits unless the human asks for it.
 
