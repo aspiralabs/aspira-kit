@@ -45,6 +45,13 @@ const rules = [
   { reason: 'in a re-review, a finding on unchanged code is out of scope, exactly as before', file: 'agent/subagents/quinn/instructions.md', phrase: 'reject a new finding on code the delta does not change' },
   { reason: 'the estimate is information, not a gate; a launcher that waits for a yes blocks unattended runs', file: skill, phrase: 'The estimate is printed, not confirmed' },
   { reason: 'the stopping rule lives in the agent; the session must not decide whether another round runs', file: skill, phrase: "it applies the agent's stopping rule from `agent/lib/review.ts`" },
+  { reason: 'the ticket is the argument; a path is the exception and must be asked for', file: skill, phrase: 'A file path only works with `--no-ticket`' },
+  { reason: 'the gate runs before any model call, so a wrong Status costs nothing', file: skill, phrase: 'refused before any model call' },
+  { reason: 'the reviewer owns no move; a session that moves cards on its own drifts from the board', file: skill, phrase: 'Never move a card anywhere the stage does not list' },
+  { reason: 'a human owns every Ready column (BOARD-004)', file: skill, phrase: 'It never moves a card to a Ready column' },
+  { reason: 'a push failure is reported with the local path, never hidden', file: skill, phrase: 'say so with the local path of the review and still' },
+  { reason: 'the report starts with the ticket, the moves, the pages pushed and the working folder', file: skill, phrase: 'Start the report with the ticket ID and title' },
+  { reason: 'the launcher owns the board work around a cloud run; the agent must not add a move', file: instructions, phrase: 'do not move the card yourself' },
 ]
 
 it('pins each rule with a distinctive phrase', () => {

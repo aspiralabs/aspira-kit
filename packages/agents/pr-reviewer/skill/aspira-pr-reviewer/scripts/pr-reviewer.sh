@@ -101,11 +101,20 @@ absolute_source() {
 absolute_path() {
   if [[ $1 = /* ]]; then printf '%s\n' "$1"; else printf '%s/%s\n' "$PWD" "$1"; fi
 }
-SOURCE="" BRANCH="" BASE="" ROUNDS="" OUT="" KNOWLEDGE="" SINCE="" MAX_COST="" NO_COMMENT="" FINISH="" YES=""
+SOURCE="" POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" REPO="" BRANCH="" BASE="" ROUNDS="" OUT="" KNOWLEDGE="" SINCE="" MAX_COST="" NO_COMMENT="" FINISH="" YES=""
+is_pr() { [[ $1 =~ ^(https?://(www\.)?github\.com/[^/]+/[^/]+/pull/[0-9]+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+)/?$ ]]; }
+# The ticket argument (F1 of the ticket flow): a board ID such as NOM-4, a Notion page URL, nothing
+# (the one folder under .work/ that holds a ticket.md), or, with --no-ticket, the GitHub PR or repository
+# path exactly as before. Sets POSITIONAL, NO_TICKET, FORCE_PULL, VERIFY, REPO and the review options;
+# with --no-ticket, SOURCE.
 parse() {
   local mode=$1; shift
   while [ $# -gt 0 ]; do
     case $1 in
+      --no-ticket) NO_TICKET=1; shift ;;
+      --force-pull) FORCE_PULL=1; shift ;;
+      --verify) [ "$mode" = local ] || die "--verify is for local"; VERIFY=1; shift ;;
+      --repo) [ $# -ge 2 ] || die "--repo needs a directory"; REPO=$2; shift 2 ;;
       --branch) [ $# -ge 2 ] || die "--branch needs a name"; BRANCH=$2; shift 2 ;;
       --base) [ $# -ge 2 ] || die "--base needs a ref"; BASE=$2; shift 2 ;;
       --max-rounds) [ $# -ge 2 ] || die "--max-rounds needs a number"; ROUNDS=$2; shift 2 ;;
@@ -118,10 +127,9 @@ parse() {
       --local) shift ;;
       --finish) [ "$mode" = local ] || die "--finish is for local"; FINISH=1; shift ;;
       -*) die "unknown option: $1" ;;
-      *) [ -z "$SOURCE" ] || die "one PR at a time"; SOURCE=${1#@}; shift ;;
+      *) [ -z "$POSITIONAL" ] || die "one ticket at a time (or one PR with --no-ticket)"; POSITIONAL=${1#@}; shift ;;
     esac
   done
-  [ -n "$SOURCE" ] || die "usage: pr-reviewer.sh $mode <github-pr | repo-path> [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR]$([ "$mode" = local ] && echo ' [--knowledge DIR] [--finish]' || echo ' [--yes]')"
   if [ -n "$ROUNDS" ]; then
     [[ $ROUNDS =~ ^[0-9]+$ ]] && [ "$ROUNDS" -ge 1 ] && [ "$ROUNDS" -le 10 ] || die "--max-rounds must be 1..10"
   fi
@@ -129,7 +137,36 @@ parse() {
     [[ $MAX_COST =~ ^[0-9]+(\.[0-9]+)?$ ]] && [ "$MAX_COST" != 0 ] || die "--max-cost must be a number of dollars above 0"
   fi
   [ -z "$SINCE" ] || [ -f "$SINCE/findings.md" ] || die "--since $SINCE has no findings.md"
-  SOURCE=$(absolute_source "$SOURCE")
+  REPO=$(git -C "${REPO:-$PWD}" rev-parse --show-toplevel 2>/dev/null || true)
+  if [ -n "$NO_TICKET" ]; then
+    [ -n "$REPO" ] || REPO=$PWD
+    [ -n "$POSITIONAL" ] || die "usage: pr-reviewer.sh $mode <github-pr | repo-path> --no-ticket [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR]$([ "$mode" = local ] && echo ' [--knowledge DIR] [--finish]' || echo ' [--yes]')"
+    SOURCE=$(absolute_source "$POSITIONAL")
+  else
+    if [ -n "$POSITIONAL" ] && [ -e "$POSITIONAL" ]; then die "$POSITIONAL is a file path, not a ticket; pass --no-ticket to run on a path with no board"; fi
+    if [ -n "$POSITIONAL" ] && is_pr "$POSITIONAL"; then die "$POSITIONAL is a pull request, not a ticket; pass --no-ticket to review it with no board"; fi
+    [ -z "$BRANCH$BASE" ] || die "--branch and --base are for a repository path with --no-ticket; a ticket names its PR"
+    [ -n "$REPO" ] || die "run inside the project's Git repository or pass --repo; the ticket's working folder lives under its .work/"
+  fi
+}
+# The board step before a separate-process run: resolve the ticket, check its Status and PR (a refusal
+# exits 3 before anything is launched) and pull its pages into .work/<id>-<slug>/. Reads the key=value
+# lines of scripts/ticket.ts into T_FOLDER, T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS, T_PR.
+ticket_start() {
+  local out code line key value
+  out=$(mktemp "${TMPDIR:-/tmp}/pr-reviewer-ticket.XXXXXX")
+  agent_node scripts/ticket.ts start "$POSITIONAL" --repo "$REPO" ${FORCE_PULL:+--force-pull} > "$out"; code=$?
+  if [ "$code" != 0 ]; then rm -f "$out"; exit "$code"; fi
+  T_FOLDER="" T_ID="" T_TITLE="" T_URL="" T_BEFORE="" T_STATUS="" T_PR=""
+  while IFS= read -r line; do
+    key=${line%%=*}; value=${line#*=}
+    case $key in
+      folder) T_FOLDER=$value ;; id) T_ID=$value ;; title) T_TITLE=$value ;; url) T_URL=$value ;;
+      before) T_BEFORE=$value ;; status) T_STATUS=$value ;; pr) T_PR=$value ;;
+    esac
+  done < "$out"
+  rm -f "$out"
+  [ -n "$T_FOLDER" ] || die "the ticket step printed no working folder"
 }
 # What a cloud run is likely to cost, from the diff and this package's previous cost.md files.
 # Printed, not confirmed; --yes skips it. An estimate that cannot be computed never blocks the run.
@@ -142,13 +179,21 @@ print_estimate() {
 }
 cmd_start() {
   parse start "$@"
-  local run prompt eve=""
+  local run prompt eve="" folder=""
   resolve_agent
   node_args
   command -v node >/dev/null || die "node is not installed"
   command -v screen >/dev/null || die "screen is not installed"
   [ -e "$PROJECT/.env.local" ] || [ -e "$AGENT/.env.local" ] || [ -n "${AI_GATEWAY_API_KEY:-}" ] || die "missing $PROJECT/.env.local (or the agent's .env.local) or AI_GATEWAY_API_KEY"
   eve=$(eve_bin)
+  if [ -z "$NO_TICKET" ]; then
+    ticket_start
+    folder=$T_FOLDER
+    SOURCE=$T_PR
+    [ -n "$SOURCE" ] || die "$T_ID has no PR property set; the implementor sets it when it opens the PR"
+    OUT=${OUT:-"$folder/pr-review"}
+    printf 'ticket: %s %s (%s)\nstatus: %s -> %s\nfolder: %s\n' "$T_ID" "$T_TITLE" "$T_URL" "$T_BEFORE" "$T_STATUS" "$folder"
+  fi
   if [ -d "$SOURCE" ]; then
     if [ -n "$BRANCH" ]; then prompt="Review the branch $BRANCH in $SOURCE against ${BASE:-main}"; else prompt="Review the checked-out branch in $SOURCE against ${BASE:-main}"; fi
   else
@@ -161,6 +206,7 @@ cmd_start() {
   prompt="$prompt."
   [ -z "$OUT" ] || prompt="$prompt Write the review to $OUT."
   [ -z "$NO_COMMENT" ] || prompt="$prompt Do not comment on the PR."
+  [ -z "$folder" ] || prompt="$prompt The ticket's board moves and pushes are made by the launcher around this run; do not call board yourself."
   [ -n "$YES" ] || print_estimate
   run=$(mktemp -d "${TMPDIR:-/tmp}/pr-reviewer.XXXXXX")
   printf '%s\n' "$SOURCE" > "$run/source"
@@ -176,17 +222,25 @@ cd "$AGENT" || exit 1
 node "${NODE_ARGS[@]}" "$EVE" invoke "$PROMPT" > "$RUN/log" 2>&1
 code=$?
 printf '%s\n' "$code" > "$RUN/exit"
+# The board step after the run: push review.md to the ticket as PR Review. The reviewer makes no move.
+if [ -n "$FOLDER" ]; then
+  if [ "$code" = 0 ] && [ -f "$OUTPUT/review.md" ]; then outcome=--ok; status=complete; else outcome=--failed; status=incomplete; fi
+  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" "$outcome" --run-status "$status" --export "$OUTPUT" >> "$RUN/log" 2>&1
+fi
 RUNNER
   chmod +x "$run/run.sh"
-  AGENT="$AGENT" EVE="$eve" PROMPT="$prompt" RUN="$run" screen -dmS "pr-review-$(basename "$run")" "$run/run.sh"
+  AGENT="$AGENT" EVE="$eve" PROMPT="$prompt" RUN="$run" FOLDER="$folder" REPO="$REPO" OUTPUT="$OUT" screen -dmS "pr-review-$(basename "$run")" "$run/run.sh"
   printf 'started\nrun: %s\nsource: %s\n' "$run" "$SOURCE"
   agent_line
 }
 # One synchronous step of a --local review: no model calls here, so no screen, gateway key or wait.
-# Prints the next stage's tasks (prompt + output file each) or the exported review as JSON.
+# The driver prints the board stage first (the ticket's resolve and pull for the session to perform),
+# then the next stage's tasks (prompt + output file each) or the exported review with the end board
+# actions; --verify is the last step, once the session pushed the review page.
 cmd_local() {
   parse local "$@"
-  local args=("$SOURCE")
+  local args=(--repo "$REPO")
+  if [ -n "$NO_TICKET" ]; then args+=(--no-ticket "$SOURCE"); elif [ -n "$POSITIONAL" ]; then args+=(--ticket "$POSITIONAL"); fi
   [ -z "$BRANCH" ] || args+=(--branch "$BRANCH")
   [ -z "$BASE" ] || args+=(--base "$BASE")
   [ -z "$ROUNDS" ] || args+=(--max-rounds "$ROUNDS")
@@ -195,6 +249,8 @@ cmd_local() {
   [ -z "$NO_COMMENT" ] || args+=(--no-comment)
   [ -z "$OUT" ] || args+=(--output "$OUT")
   [ -z "$KNOWLEDGE" ] || args+=(--knowledge "$KNOWLEDGE")
+  [ -z "$FORCE_PULL" ] || args+=(--force-pull)
+  [ -z "$VERIFY" ] || args+=(--verify)
   [ -z "$FINISH" ] || args+=(--finish)
   command -v node >/dev/null || die "node is not installed"
   resolve_agent
@@ -227,5 +283,5 @@ case ${1:-} in
   local) shift; cmd_local "$@" ;;
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
-  *) die "usage: pr-reviewer.sh start SOURCE [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--yes] | status RUN | wait RUN [--max SECONDS] | local SOURCE [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--knowledge DIR] [--finish]" ;;
+  *) die "usage: pr-reviewer.sh start [TICKET | SOURCE --no-ticket] [--force-pull] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--yes] | status RUN | wait RUN [--max SECONDS] | local [TICKET | SOURCE --no-ticket] [--force-pull] [--verify] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--knowledge DIR] [--finish]" ;;
 esac
