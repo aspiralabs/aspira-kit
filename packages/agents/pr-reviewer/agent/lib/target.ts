@@ -16,7 +16,7 @@ export type ReviewTarget = z.infer<typeof reviewTargetSchema>
 /** The sandbox file load-pr writes the target to, so export-review and comment-on-pr never get it from a model. */
 export const TARGET_FILE = '/workspace/target.json'
 
-export const packetStatsSchema = z.object({ chars: z.number(), tokens: z.number(), full: z.array(z.string()), excerpted: z.array(z.string()), omitted: z.array(z.string()), missing: z.array(z.string()) })
+export const packetStatsSchema = z.object({ chars: z.number(), tokens: z.number(), files: z.number(), areas: z.record(z.string(), z.number()) })
 
 /** What /workspace/target.json holds. */
 export const targetFileSchema = z.object({ target: reviewTargetSchema, packet: packetStatsSchema.nullable() })

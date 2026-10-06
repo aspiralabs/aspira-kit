@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
+import { buildPacket } from './packet.ts'
 import {
   FILES,
   OUTPUT_SCHEMAS,
@@ -159,8 +160,12 @@ describe('the stopping rule', () => {
 
   it('every prompt tells the seats the rule, the batching and the cap', () => {
     expect(openingPrompt('ava', sandbox)).toContain('The review ends after a round in which no seat raised or disputed anything')
-    const prefix = sharedPrefix(sandbox)
-    expect(prefix).toContain('one `read_files` call with every path you want, not one call per file')
+    // With a packet (the index), the reading rules say how to fetch by lens; without one they say to read the patch.
+    const prefix = sharedPrefix({ ...sandbox, packet: '# Review packet: o/n#1\n' })
+    expect(sharedPrefix(sandbox)).toContain('Read /workspace/pr.patch and the changed files first.')
+    expect(prefix).toContain('fetch the hunks of exactly those files with one `read_diff(paths)` call')
+    expect(prefix).toContain('with one `read_files(paths)` call')
+    expect(prefix).toContain('Do not fetch what you will not review')
     expect(prefix).toContain('You have at most 8 tool calls this round')
     expect(sharedPrefix({ ...sandbox, maxSeatCalls: 3 })).toContain('You have at most 3 tool calls this round')
     expect(turnPrompt('ava', 2, sandbox)).toContain('accept it, or dispute it with evidence')
@@ -186,13 +191,21 @@ export function commonPrefixBytes(texts: string[]): number {
 const personas = Object.fromEntries([...SEATS, 'quinn'].map((who) => [who, readFileSync(join(import.meta.dirname, '..', 'subagents', who, 'persona.md'), 'utf8')])) as Record<string, string>
 
 describe('one cached prefix, eve prompt builder', () => {
-  const pr: PrContext = { ...sandbox, packet: `# Review packet: o/n#1\n\n${'x'.repeat(50_000)}\n`, knowledgePath: '/workspace/knowledge', knowledgeRequiredFile: '/workspace/knowledge/REQUIRED.md' }
+  // A real index packet, from a patch with hunks: the prefix must carry the index and none of the hunks.
+  const patch = ['diff --git a/a.ts b/a.ts', '--- a/a.ts', '+++ b/a.ts', '@@ -1,2 +1,3 @@ export function a() {', '-  return 1', '+  return 2', '+export const added = true', ''].join('\n')
+  const packet = buildPacket({ label: 'o/n#1', description: '# A change\n', patch, changed: ['a.ts'], required: `# Required\n\n${'rule. '.repeat(8_000)}` })
+  const pr: PrContext = { ...sandbox, packet: packet.text, knowledgePath: '/workspace/knowledge', knowledgeRequiredFile: '/workspace/knowledge/REQUIRED.md' }
   const roundOne = [...SEATS.map((seat) => fullPrompt(pr, personas[seat]!, openingPrompt(seat, pr))), fullPrompt(pr, personas.quinn!, verifyPrompt(1, pr))]
 
   it('the round-one prompts of all six seats and Quinn share the full packet plus the shared instructions as their longest common prefix', () => {
     const prefix = sharedPrefix(pr)
     expect(prefix.startsWith(pr.packet!)).toBe(true)
     expect(prefix).toContain('# Review instructions, every seat')
+    // The index, not the diff: no hunk header and no +/- code line anywhere in the prefix.
+    expect(prefix).toContain('- `a.ts` +2/-1 · lib · a, added')
+    expect(prefix).not.toMatch(/^@@/m)
+    expect(prefix).not.toMatch(/^[+-](?![ -]|$)/m)
+    expect(prefix).not.toContain('return 2')
     const shared = Buffer.byteLength(prefix, 'utf8')
     expect(commonPrefixBytes(roundOne)).toBeGreaterThanOrEqual(shared)
     // And nothing more than the separator and whatever the personas happen to share at their start: the personas differ.

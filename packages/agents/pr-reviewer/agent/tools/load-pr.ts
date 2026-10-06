@@ -354,11 +354,9 @@ async function finish(
   await sandbox.writeTextFile({ path: FILES.meta, content: prMd })
   if (extras.previous !== null) await sandbox.writeTextFile({ path: FILES.previousFindings, content: extras.previous.findings })
 
-  // The packet, once: every changed file at HEAD from the tree in the sandbox, and the required reading.
-  const files = new Map<string, string | null>()
-  for (const path of reviewed) files.set(path, repoPath === null ? null : await Promise.resolve(sandbox.readTextFile({ path: `${repoPath}/${path}` })).catch(() => null))
+  // The packet, once: the index of the change and the required reading. No hunks, no file bodies.
   const required = extras.knowledgeRequiredFile === null ? null : await Promise.resolve(sandbox.readTextFile({ path: extras.knowledgeRequiredFile })).catch(() => null)
-  const packet = buildPacket({ label: meta.label, description: prMd, patch, changed: reviewed, files, required, previousFindings: extras.previous?.findings ?? null })
+  const packet = buildPacket({ label: meta.label, description: prMd, patch, changed: reviewed, required, previousFindings: extras.previous?.findings ?? null })
   const { text, ...packetStats } = packet
 
   // The shas and the packet size, in the sandbox for export-review and comment-on-pr; the

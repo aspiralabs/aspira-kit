@@ -32,6 +32,7 @@ import { planStep, type DonePlan, type PlanTask, type Stage } from './plan.ts'
 import {
   DEFAULT_MAX_ROUNDS,
   DISPLAY_NAME,
+  FILES,
   MAX_ROUNDS_LIMIT,
   fullPrompt,
   OUTPUT_SCHEMAS,
@@ -249,7 +250,7 @@ export function renderTaskPrompt(task: PlanTask, output: string, persona: { path
     '',
     `Everything above is what the agent sends ${DISPLAY_NAME[task.agent]}: the shared prefix and the review instructions that agent/lib/review.ts builds for this review, the persona from ${persona.path}, and the turn. This part is only how a session runs the turn.`,
     '',
-    '- This turn runs as a subagent of a Claude Code session, not in the agent\'s sandbox, so every path above is a real path on this machine. read_file is the Read tool, read_files is the Read tool over each path listed (one call per path counts as one read_files call), search is the Grep tool with two lines of context, and the shell commands named above run through Bash.',
+    `- This turn runs as a subagent of a Claude Code session, not in the agent's sandbox, so every path above is a real path on this machine. read_file is the Read tool; read_files is the Read tool over each path listed (one call per path counts as one read_files call); read_diff(paths) is the \`diff --git a/<path> b/<path>\` section of each listed path in ${pr.paths?.files.patch ?? FILES.patch} (Grep that header for the line, then Read the section up to the next \`diff --git\` line; one read_diff call however many paths); search is the Grep tool with two lines of context; and the shell commands named above run through Bash.`,
     `- The structured result the turn asks for goes into \`${output}\` as ONE JSON object valid against the output schema below (review.ts's own). No fences and no prose in that file. Then reply with one line.`,
     ...handBack,
     '',
@@ -427,13 +428,6 @@ async function checkKnowledge(dir: string, agentDir: string, env: Record<string,
   return { files, fingerprint }
 }
 
-/** Every changed path's content from the tree the seats read, for the packet. */
-async function changedFileContents(repoPath: string | null, changed: string[]): Promise<Map<string, string | null>> {
-  const files = new Map<string, string | null>()
-  for (const path of changed) files.set(path, repoPath === null ? null : await readFile(join(repoPath, path), 'utf8').catch(() => null))
-  return files
-}
-
 /** One step of a --local review: the next stage's tasks, or the exported review. */
 export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise<LocalResult> {
   if (input.maxRounds !== undefined && (!Number.isInteger(input.maxRounds) || input.maxRounds < 1 || input.maxRounds > MAX_ROUNDS_LIMIT)) {
@@ -505,7 +499,6 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       description: prMd,
       patch,
       changed: reviewed,
-      files: await changedFileContents(loaded.repoPath, reviewed),
       required: knowledge.files.get(basename(REQUIRED_FILE)) ?? null,
       previousFindings: loaded.previousFindings,
     })
@@ -664,7 +657,7 @@ async function exportReview(args: {
       return (stats.additions + stats.deletions).toLocaleString('en-US')
     })()}.`,
     '',
-    `Packet: ${state.packet.chars.toLocaleString('en-US')} characters, about ${state.packet.tokens.toLocaleString('en-US')} tokens, at the start of every prompt (${state.packet.full.length} changed file${state.packet.full.length === 1 ? '' : 's'} in full, ${state.packet.excerpted.length} as changed hunks, ${state.packet.omitted.length} pointed at).`,
+    `Packet: ${state.packet.chars.toLocaleString('en-US')} characters, about ${state.packet.tokens.toLocaleString('en-US')} tokens, at the start of every prompt: the index of ${state.packet.files} changed file${state.packet.files === 1 ? '' : 's'} (${Object.entries(state.packet.areas).sort(([a], [b]) => a.localeCompare(b)).map(([area, count]) => `${area} ${count}`).join(', ')}), no hunks and no file bodies.`,
     '',
     state.maxCost === null ? 'Budget: none.' : `Budget: $${state.maxCost.toFixed(2)} (--max-cost). Not enforced in --local, where no cost is itemized.`,
     '',
