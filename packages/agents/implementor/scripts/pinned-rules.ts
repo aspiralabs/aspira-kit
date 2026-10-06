@@ -40,6 +40,10 @@ export const PINNED_RULES: PinnedRule[] = [
   { reason: 'a feature is done when its tests pass, not when its code compiles', file: PROCEDURE, phrase: 'A feature with a failing or missing test is not done' },
   { reason: 'review separation: green tests are not review', file: PROCEDURE, phrase: 'The builder does not approve its own code' },
   { reason: 'repeated mistakes become Slop Repo entries, not memory', file: PROCEDURE, phrase: 'add an entry to the AI Agent Slop Repo in Notion' },
+  { reason: 'a dependency nobody listed is a store build or an approval nobody saw coming', file: PROCEDURE, phrase: 'Every dependency the build added is listed, with its native and approval flags' },
+  { reason: 'notes written mid-build describe a tree that no longer exists; stale notes mislead the reviewer', file: PROCEDURE, phrase: 'rewritten from the code at HEAD or deleted' },
+  { reason: 'a bug fixed and forgotten is fixed twice; the proposed Slop Repo entry is the record', file: PROCEDURE, phrase: 'The report cannot be done with the section empty or missing' },
   { reason: 'lane copies share the sandbox; a second checkout or publish corrupts the run', file: INSTRUCTIONS, phrase: 'Copies do not call `checkout-repo`, `load-knowledge` or `publish-branch`' },
   { reason: 'work that exists only in a dead sandbox was never done', file: INSTRUCTIONS, phrase: 'call `publish-branch` once, even for a partial or blocked build' },
+  { reason: 'the cloud path has no driver; the tool schema is what stops a report without the three sections', file: INSTRUCTIONS, phrase: 'Call `record-verification` once' },
 ]
