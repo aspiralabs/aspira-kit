@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/agent-common",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Tools and helpers shared by the Aspira Labs eve agents: each agent re-exports what it mounts from agent/tools/.",
   "type": "module",
   "license": "MIT",
