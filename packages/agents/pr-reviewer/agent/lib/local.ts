@@ -11,6 +11,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { INDEX_FILE, KNOWLEDGE_ENV, KNOWLEDGE_PATH, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED_FILE, parseRequired } from '@aspiralabs/agent-common/lib/knowledge'
 import { z } from 'zod'
+import { maxSeatCalls } from './call-cap.ts'
 import { countsFromFindings, reviewCommentBody, upsertReviewComment, type GithubPr } from './github-comment.ts'
 import {
   cloneHead,
@@ -24,6 +25,7 @@ import {
   type Fetch,
   type RawDiff,
 } from './local-source.ts'
+import { buildPacket, type PacketStats } from './packet.ts'
 import { REVIEW_DIR, REVIEW_SUBDIR, ignoreRule, needsIgnoreRule, parsePrSource, ticketFolder, patchStats, renderPrMeta, splitChanged, truncatePatch, type PrMeta } from './pr.ts'
 import {
   DEFAULT_MAX_ROUNDS,
@@ -37,8 +39,10 @@ import {
   normalizeCounts,
   openingPrompt,
   rehome,
+  reviewAgreed,
   reviewDocPrompt,
   roundFilesInOrder,
+  roundSettled,
   slugify,
   totalFindings,
   turnPrompt,
@@ -55,6 +59,8 @@ import {
   type Verdict,
   type VerifyOutput,
 } from './review.ts'
+import { headShaFromFindings, packetStatsSchema, reviewTargetSchema, stampReviewed, type ReviewTarget } from './target.ts'
+import { callsPerRound, renderCallsPerRound } from './usage.ts'
 
 // ---------------------------------------------------------------------------------------------
 // The loop, pure: what pr-debator does, over outputs that already exist.
@@ -75,6 +81,8 @@ export type PendingPlan = { done: false; stage: Stage; round: number; tasks: Pla
 export type DonePlan = {
   done: true
   agreed: boolean
+  /** The loop ended because a round had no dispute and no new finding, not at the cap. */
+  settled: boolean
   rounds: number
   /** Quinn's sign-off counts, else Nova's; null when neither exists. */
   counts: Counts | null
@@ -100,7 +108,7 @@ export type PlanInput = {
   invalid?: (id: string) => string | undefined
 }
 
-const NO_TURN: TurnOutput = { agreed: false, openPoints: [], note: '' }
+const NO_TURN: TurnOutput = { agreed: false, raised: [], disputed: [], openPoints: [], note: '' }
 const NO_VERIFY: VerifyOutput = { agreed: false, openPoints: [], rejected: [], duplicates: [], note: '' }
 
 /** Replay pr-debator over the outputs that exist and say what runs next, or what it returned. */
@@ -134,6 +142,7 @@ export function planStep(input: PlanInput): PendingPlan | DonePlan {
   let round = 0
   let seats: TurnOutput[] = SEATS.map(() => NO_TURN)
   let quinn: VerifyOutput = NO_VERIFY
+  let settled = false
 
   while (round < maxRounds) {
     round += 1
@@ -156,10 +165,14 @@ export function planStep(input: PlanInput): PendingPlan | DonePlan {
       if (turns.every((turn) => turn.value === undefined) && ruling.value === undefined) round -= 1
       break
     }
-    if (seats.every((seat) => seat.agreed) && quinn.agreed) break
+    // The stopping rule, shared with pr-debator: no dispute and no new finding this round.
+    if (roundSettled(seats)) {
+      settled = true
+      break
+    }
   }
 
-  const agreed = seats.every((seat) => seat.agreed) && quinn.agreed
+  const agreed = reviewAgreed(seats, quinn, settled)
   const last = Math.max(round, 1)
   const findingsDoc = resolveTurn({ id: 'findings', agent: 'nova', kind: 'findings', stage: 'documents', round: last, prompt: writeFindingsPrompt(pr, agreed) }, OUTPUT_VALIDATORS.findings)
   const reviewDoc = resolveTurn({ id: 'review', agent: 'dex', kind: 'doc', stage: 'documents', round: last, prompt: writeReviewPrompt(pr, agreed) }, OUTPUT_VALIDATORS.doc)
@@ -178,6 +191,7 @@ export function planStep(input: PlanInput): PendingPlan | DonePlan {
   return {
     done: true,
     agreed,
+    settled,
     rounds: round,
     counts,
     verdict: counts === null ? null : verdictFrom(counts),
@@ -210,6 +224,10 @@ export type LocalInput = {
   finish?: boolean
   /** The engineering guidelines folder. Default: <work>/knowledge, where load-knowledge's /workspace/knowledge maps. */
   knowledge?: string
+  /** Re-review: the directory of the previous review, whose findings.md names the head it was of. */
+  since?: string
+  /** The budget in USD. Recorded only: a --local review has no itemized cost to stop at. */
+  maxCost?: number
 }
 
 /** Seams for tests: GitHub, the token, the clone remote, where reviews/ lives and where the agent's sources are. */
@@ -220,7 +238,7 @@ export type LocalDeps = {
   packageDir?: string
   /** The pr-reviewer package whose agent/ files and env files are read. Default: this package. */
   agentDir?: string
-  /** The process environment, for the knowledge configuration. Default: process.env. */
+  /** The process environment, for the knowledge configuration and the call cap. Default: process.env. */
   env?: Record<string, string | undefined>
   now?: () => Date
 }
@@ -241,6 +259,10 @@ export type LocalPending = {
   workDir: string
   /** The agent's orchestrator instructions, which the session follows as the orchestrator. */
   orchestrator: string
+  /** What is being reviewed, and the previous head for a re-review. */
+  target: ReviewTarget
+  /** The packet every prompt starts with: its size and what it holds. */
+  packet: PacketStats
   tasks: LocalTask[]
 }
 
@@ -250,10 +272,13 @@ export type LocalDone = {
   status: 'complete' | 'incomplete'
   label: string
   branch: string
+  target: ReviewTarget
+  packet: PacketStats
   verdict: Verdict | null
   counts: Counts | null
   findings: number | null
   agreed: boolean
+  settled: boolean
   rounds: number
   maxRounds: number
   openPoints: string[]
@@ -307,10 +332,15 @@ type State = {
   startedAt: string
   /** Each turn's rejected outputs, oldest first. */
   rejections: Record<string, string[]>
+  target: ReviewTarget
+  packet: PacketStats
+  maxCost: number | null
   /** The document turns whose handed-back document the driver has written. */
   documents: string[]
 }
 
+const targetSchema: z.ZodType<ReviewTarget> = reviewTargetSchema
+const packetSchema: z.ZodType<PacketStats> = packetStatsSchema
 const stateSchema: z.ZodType<State> = z.object({
   fingerprint: z.string(),
   knowledge: z.object({ path: z.string(), fingerprint: z.string() }),
@@ -318,6 +348,9 @@ const stateSchema: z.ZodType<State> = z.object({
   maxRounds: z.number(),
   startedAt: z.string(),
   rejections: z.record(z.string(), z.array(z.string())),
+  target: targetSchema,
+  packet: packetSchema,
+  maxCost: z.number().nullable(),
   documents: z.array(z.string()).default([]),
 })
 
@@ -330,6 +363,9 @@ type Loaded = {
   materialize: () => Promise<void>
   github: GithubPr | null
   repoDir: string | null
+  target: ReviewTarget
+  /** The previous findings.md, for a re-review. */
+  previousFindings: string | null
 }
 
 /** The agent's own instruction files, read from disk on every call so the skill never carries a copy. */
@@ -356,7 +392,7 @@ export function renderTaskPrompt(task: PlanTask, output: string, system: { path:
     '',
     `System below is ${system.path} and Task is the prompt agent/lib/review.ts builds for this turn: exactly what the agent sends ${DISPLAY_NAME[task.agent]}.`,
     '',
-    '- This turn runs as a subagent of a Claude Code session, not in the agent\'s sandbox, so every path in the Task is a real path on this machine. read_file is the Read tool, and the shell commands the Task names run through Bash.',
+    '- This turn runs as a subagent of a Claude Code session, not in the agent\'s sandbox, so every path in the Task is a real path on this machine. read_file is the Read tool, read_files is the Read tool over each path listed (one call per path counts as one read_files call), search is the Grep tool with two lines of context, and the shell commands the Task names run through Bash.',
     `- The structured result the Task asks for goes into \`${output}\` as ONE JSON object valid against the output schema at the end (review.ts's own). No fences and no prose in that file. Then reply with one line.`,
     ...handBack,
     '',
@@ -377,22 +413,39 @@ export function renderTaskPrompt(task: PlanTask, output: string, system: { path:
   ].join('\n')
 }
 
+/** The previous review a re-review starts from: its findings.md and the head it records. */
+async function previousReview(dir: string): Promise<{ sha: string; dir: string; findings: string }> {
+  const path = join(resolve(dir), 'findings.md')
+  const findings = await readFile(path, 'utf8').catch(() => null)
+  if (findings === null) throw new Error(`--since ${dir} has no findings.md to re-review from.`)
+  const sha = headShaFromFindings(findings)
+  if (sha === null) throw new Error(`${path} records no head sha (no "Reviewed:" or "Re-review:" line), so there is nothing to diff from. Review in full instead.`)
+  return { sha, dir: resolve(dir), findings }
+}
+
 async function load(input: LocalInput, deps: Required<Pick<LocalDeps, 'fetch' | 'cloneUrl' | 'packageDir' | 'now'>>, token: () => Promise<string | undefined>): Promise<Loaded> {
   const source = parsePrSource(input.source)
+  const previous = input.since === undefined ? null : await previousReview(input.since)
+  const since = previous === null ? null : { sha: previous.sha, dir: previous.dir }
+  const previousFindings = previous?.findings ?? null
   if (source.kind === 'github') {
     if (input.branch !== undefined || input.base !== undefined) throw new Error(`${source.label} is a GitHub PR; it already says what it is against. Drop --branch and --base.`)
     const pr: GithubPr = { owner: source.owner, name: source.name, number: source.number }
     const auth = await token()
     const meta = await fetchPrMeta(pr, auth, deps.fetch)
+    if (since !== null && since.sha === meta.headSha) throw new Error(`${source.label} is still at ${meta.headSha.slice(0, 7)}, the head the previous review was of. Nothing changed since.`)
     const outputDir = input.output === undefined ? await githubOutputDir(deps.packageDir, slugify(meta.headRef), deps.now()) : resolve(input.output)
-    const diff = await fetchPrDiff(pr, auth, deps.fetch)
+    const diff = await fetchPrDiff(pr, auth, deps.fetch, since === null ? undefined : { sha: since.sha, headSha: meta.headSha })
     const tree = join(workDirFor(outputDir), 'repo')
-    return { meta, diff, outputDir, repoPath: tree, github: pr, repoDir: null, materialize: () => cloneHead(pr, meta.headSha, tree, deps.cloneUrl(pr.owner, pr.name), auth) }
+    const target: ReviewTarget = { baseSha: meta.baseSha, headSha: meta.headSha, since }
+    return { meta, diff, outputDir, repoPath: tree, github: pr, repoDir: null, target, previousFindings, materialize: () => cloneHead(pr, meta.headSha, tree, deps.cloneUrl(pr.owner, pr.name), auth) }
   }
   const branch = await resolveLocalBranch(source.path, input.branch, input.base)
   const outputDir = input.output === undefined ? resolve(branch.repoDir, REVIEW_DIR, ticketFolder(branch.headRef), REVIEW_SUBDIR) : resolve(input.output)
-  const diff = await localDiff(branch, [workDirFor(outputDir), outputDir, ...(input.knowledge === undefined ? [] : [resolve(input.knowledge)])])
-  if (diff.patch.trim() === '') throw new Error(`Nothing to review: ${branch.headRef} is identical to ${branch.baseRef} in ${branch.dir}.`)
+  const diff = await localDiff(branch, [workDirFor(outputDir), outputDir, ...(input.knowledge === undefined ? [] : [resolve(input.knowledge)])], since?.sha)
+  if (diff.patch.trim() === '') {
+    throw new Error(since === null ? `Nothing to review: ${branch.headRef} is identical to ${branch.baseRef} in ${branch.dir}.` : `Nothing to re-review: ${branch.headRef} in ${branch.dir} has not changed since ${since.sha.slice(0, 7)}.`)
+  }
   const tree = join(workDirFor(outputDir), 'repo')
   return {
     meta: await localMeta(branch),
@@ -402,6 +455,8 @@ async function load(input: LocalInput, deps: Required<Pick<LocalDeps, 'fetch' | 
     repoPath: branch.live ? branch.repoDir : tree,
     github: null,
     repoDir: branch.repoDir,
+    target: { baseSha: branch.mergeBase, headSha: branch.headSha, since },
+    previousFindings,
     materialize: branch.live ? async () => {} : () => extractCommit(branch, tree),
   }
 }
@@ -523,11 +578,19 @@ async function checkKnowledge(dir: string, agentDir: string, env: Record<string,
   return { files, fingerprint }
 }
 
+/** Every changed path's content from the tree the seats read, for the packet. */
+async function changedFileContents(repoPath: string | null, changed: string[]): Promise<Map<string, string | null>> {
+  const files = new Map<string, string | null>()
+  for (const path of changed) files.set(path, repoPath === null ? null : await readFile(join(repoPath, path), 'utf8').catch(() => null))
+  return files
+}
+
 /** One step of a --local review: the next stage's tasks, or the exported review. */
 export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise<LocalResult> {
   if (input.maxRounds !== undefined && (!Number.isInteger(input.maxRounds) || input.maxRounds < 1 || input.maxRounds > MAX_ROUNDS_LIMIT)) {
     throw new Error(`--max-rounds must be a whole number from 1 to ${MAX_ROUNDS_LIMIT}.`)
   }
+  if (input.maxCost !== undefined && !(Number.isFinite(input.maxCost) && input.maxCost > 0)) throw new Error('--max-cost must be a number of dollars above 0.')
   const request = deps.fetch ?? fetch
   let cached: Promise<string | undefined> | undefined
   const token = () => (cached ??= (deps.githubToken ?? defaultGithubToken)())
@@ -546,12 +609,13 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   const paths = workspacePaths(work)
   const agentDir = deps.agentDir ?? PACKAGE_DIR
   const sources = agentSources(agentDir)
+  const env = deps.env ?? process.env
 
   // What load-pr's finish() writes: the patch cut to size, the changed paths it still holds, pr.md.
   const { patch, truncated } = truncatePatch(loaded.diff.patch)
   const { reviewed, dropped } = splitChanged(loaded.diff.changed, patch, truncated)
-  const prMd = renderPrMeta(meta, patchStats(patch, reviewed.length, truncated), reviewed, dropped)
-  const fingerprint = createHash('sha256').update(JSON.stringify([meta.label, meta.headSha, meta.baseRef, patch, reviewed])).digest('hex')
+  const prMd = renderPrMeta(meta, patchStats(patch, reviewed.length, truncated), reviewed, dropped, loaded.target)
+  const fingerprint = createHash('sha256').update(JSON.stringify([meta.label, meta.headSha, meta.baseRef, loaded.target.since?.sha ?? null, patch, reviewed])).digest('hex')
 
   const stateFile = join(work, 'state.json')
   const saved = await readFile(stateFile, 'utf8').then(
@@ -566,14 +630,17 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   if (saved !== null && knowledgeDir !== saved.knowledge.path) {
     throw new Error(`--knowledge ${knowledgeDir} differs from the ${saved.knowledge.path} this review started with. Drop it, or delete ${work} to start over.`)
   }
-  const knowledge = await checkKnowledge(knowledgeDir, agentDir, deps.env ?? process.env)
+  const knowledge = await checkKnowledge(knowledgeDir, agentDir, env)
   if (saved !== null && knowledge.fingerprint !== saved.knowledge.fingerprint) {
     throw new Error(`The engineering guidelines in ${knowledgeDir} changed since this local review started. Delete ${work} to start over.`)
   }
   if (saved !== null && input.maxRounds !== undefined && input.maxRounds !== saved.maxRounds) {
     throw new Error(`--max-rounds ${input.maxRounds} differs from the ${saved.maxRounds} this review started with. Drop it, or delete ${work} to start over.`)
   }
-  const state: State = saved ?? { fingerprint, knowledge: { path: knowledgeDir, fingerprint: knowledge.fingerprint }, label: meta.label, maxRounds: input.maxRounds ?? DEFAULT_MAX_ROUNDS, startedAt: new Date().toISOString(), rejections: {}, documents: [] }
+
+  const packetFile = join(work, 'packet.md')
+  let packetText: string
+  let state: State
   if (saved === null) {
     await mkdir(join(work, 'prompts'), { recursive: true })
     await mkdir(join(work, 'outputs'), { recursive: true })
@@ -581,12 +648,50 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     await writeFile(paths.files.patch, patch)
     await writeFile(paths.files.changed, `${reviewed.join('\n')}\n`)
     await writeFile(paths.files.meta, prMd)
+    if (loaded.previousFindings !== null) await writeFile(paths.files.previousFindings, loaded.previousFindings)
     await loaded.materialize()
+    // The packet, once: what load-pr builds before round 1, from the tree the seats read.
+    const packet = buildPacket({
+      label: meta.label,
+      description: prMd,
+      patch,
+      changed: reviewed,
+      files: await changedFileContents(loaded.repoPath, reviewed),
+      required: knowledge.files.get(basename(REQUIRED_FILE)) ?? null,
+      previousFindings: loaded.previousFindings,
+    })
+    await writeFile(packetFile, packet.text)
+    packetText = packet.text
+    const { text: _text, ...stats } = packet
+    state = {
+      fingerprint,
+      knowledge: { path: knowledgeDir, fingerprint: knowledge.fingerprint },
+      label: meta.label,
+      maxRounds: input.maxRounds ?? DEFAULT_MAX_ROUNDS,
+      startedAt: new Date().toISOString(),
+      rejections: {},
+      target: loaded.target,
+      packet: stats,
+      maxCost: input.maxCost ?? null,
+      documents: [],
+    }
     // Written last: a first call that failed half way starts over rather than resuming a broken setup.
     await writeFile(stateFile, JSON.stringify(state, null, 2))
+  } else {
+    state = saved
+    packetText = await readFile(packetFile, 'utf8')
   }
 
-  const pr: PrContext = { label: meta.label, repoPath: loaded.repoPath, knowledgePath: knowledgeDir, knowledgeRequiredFile: join(knowledgeDir, basename(REQUIRED_FILE)), paths }
+  const pr: PrContext = {
+    label: meta.label,
+    repoPath: loaded.repoPath,
+    knowledgePath: knowledgeDir,
+    knowledgeRequiredFile: join(knowledgeDir, basename(REQUIRED_FILE)),
+    paths,
+    packet: packetText,
+    target: state.target,
+    maxSeatCalls: maxSeatCalls(env),
+  }
   const outputFile = (id: string) => join(work, 'outputs', `${id}.json`)
   const raw = new Map<string, unknown>()
   const handedBack = new Map<string, string>()
@@ -641,7 +746,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       tasks.push({ id: task.id, agent: task.agent, prompt, output, schema: SCHEMA_NAMES[task.kind], ...(task.error === undefined ? {} : { error: task.error }), ...(retry === undefined ? {} : { retry }) })
     }
     await writeFile(stateFile, JSON.stringify(state, null, 2))
-    return { pending: true, status: 'pending', stage: plan.stage, round: plan.round, maxRounds: state.maxRounds, workDir: work, orchestrator: sources.orchestrator, tasks }
+    return { pending: true, status: 'pending', stage: plan.stage, round: plan.round, maxRounds: state.maxRounds, workDir: work, orchestrator: sources.orchestrator, target: state.target, packet: state.packet, tasks }
   }
 
   const orchestrator = { path: sources.orchestrator, text: await readFile(sources.orchestrator, 'utf8') }
@@ -669,12 +774,15 @@ async function exportReview(args: {
   const written: string[] = []
   const missingFiles: string[] = []
   const texts = new Map<string, string>()
-  for (const path of [paths.files.meta, paths.files.patch, paths.files.changed, paths.files.findings, paths.files.review]) {
-    const content = await readFile(path, 'utf8').catch(() => null)
-    if (content === null) {
+  const exported = [paths.files.meta, paths.files.patch, paths.files.changed, paths.files.findings, paths.files.review, ...(state.target.since === null ? [] : [paths.files.previousFindings])]
+  for (const path of exported) {
+    const raw = await readFile(path, 'utf8').catch(() => null)
+    if (raw === null) {
       missingFiles.push(basename(path))
       continue
     }
+    // The two documents carry the shas the verdict applies to, whether or not the writers put them in.
+    const content = path === paths.files.findings || path === paths.files.review ? stampReviewed(raw, state.target) : raw
     texts.set(path, content)
     await writeFile(join(dir, basename(path)), content, 'utf8')
     written.push(join(dir, basename(path)))
@@ -690,13 +798,27 @@ async function exportReview(args: {
   written.push(conversation)
 
   const totalMs = Date.now() - Date.parse(state.startedAt)
+  const perRound = callsPerRound(
+    plan.calls.filter((call) => call.error === undefined).map((call) => ({ agent: call.agent, round: call.stage === 'seats' || call.stage === 'verifier' ? call.round : null })),
+    plan.rounds,
+  )
   const cost = [
     `# Cost: ${state.label}`,
     '',
-    'This review ran with `--local`, in a Claude Code session: every seat and Quinn ran as a subagent of that session, on its model and its usage. No model call went through the Vercel AI Gateway, so there is no itemized cost and no `usage.jsonl`.',
+    'This review ran with `--local`, in a Claude Code session: every seat and Quinn ran as a subagent of that session, on its model and its usage. No model call went through the Vercel AI Gateway, so there is no itemized cost, no cache-read share and no `usage.jsonl`.',
     '',
-    `Model turns: ${plan.calls.filter((call) => call.error === undefined).length} of ${plan.calls.length}. Wall clock from the first local step (${state.startedAt}) to export: ${(totalMs / 1000).toFixed(1)}s, including the time the session spent between steps.`,
+    `Model turns: ${plan.calls.filter((call) => call.error === undefined).length} of ${plan.calls.length}, over ${plan.rounds} round${plan.rounds === 1 ? '' : 's'} of ${state.maxRounds}${plan.settled ? ' (ended by the stopping rule: a round with no dispute and no new finding)' : ''}. Wall clock from the first local step (${state.startedAt}) to export: ${(totalMs / 1000).toFixed(1)}s, including the time the session spent between steps.`,
     '',
+    `Changed lines: ${(() => {
+      const stats = patchStats(texts.get(paths.files.patch) ?? '', 0)
+      return (stats.additions + stats.deletions).toLocaleString('en-US')
+    })()}.`,
+    '',
+    `Packet: ${state.packet.chars.toLocaleString('en-US')} characters, about ${state.packet.tokens.toLocaleString('en-US')} tokens, at the start of every prompt (${state.packet.full.length} changed file${state.packet.full.length === 1 ? '' : 's'} in full, ${state.packet.excerpted.length} as changed hunks, ${state.packet.omitted.length} pointed at).`,
+    '',
+    state.maxCost === null ? 'Budget: none.' : `Budget: $${state.maxCost.toFixed(2)} (--max-cost). Not enforced in --local, where no cost is itemized.`,
+    '',
+    renderCallsPerRound(perRound, plan.rounds),
   ].join('\n')
   await writeFile(join(dir, 'cost.md'), cost, 'utf8')
   written.push(join(dir, 'cost.md'))
@@ -706,7 +828,7 @@ async function exportReview(args: {
   await cp(state.knowledge.path, join(dir, 'trace', 'guidelines'), { recursive: true })
   written.push(join(dir, 'trace', 'guidelines'))
   const knowledge = { path: state.knowledge.path, fingerprint: state.knowledge.fingerprint, files: [...args.knowledge.keys()] }
-  const trace = { mode: 'local', label: state.label, startedAt: state.startedAt, maxRounds: state.maxRounds, knowledge, rejections: state.rejections, calls: plan.calls }
+  const trace = { mode: 'local', label: state.label, startedAt: state.startedAt, maxRounds: state.maxRounds, target: state.target, packet: state.packet, maxCost: state.maxCost, knowledge, rejections: state.rejections, calls: plan.calls }
   await writeFile(join(dir, 'trace', 'calls.json'), JSON.stringify(trace, null, 2), 'utf8')
   written.push(join(dir, 'trace', 'calls.json'))
 
@@ -714,7 +836,7 @@ async function exportReview(args: {
   const comment =
     loaded.github === null
       ? null
-      : await postComment(loaded.github, texts.get(paths.files.review) ?? null, texts.get(paths.files.findings) ?? null, {
+      : await postComment(loaded.github, texts.get(paths.files.review) ?? null, texts.get(paths.files.findings) ?? null, state.target, {
           noComment: input.noComment === true,
           complete: status === 'complete',
           fetch: args.deps.fetch,
@@ -728,10 +850,13 @@ async function exportReview(args: {
     status,
     label: state.label,
     branch: loaded.meta.headRef,
+    target: state.target,
+    packet: state.packet,
     verdict: plan.verdict,
     counts: plan.counts,
     findings: plan.counts === null ? null : totalFindings(plan.counts),
     agreed: plan.agreed,
+    settled: plan.settled,
     rounds: plan.rounds,
     maxRounds: state.maxRounds,
     openPoints: plan.openPoints,
@@ -752,6 +877,7 @@ async function postComment(
   pr: GithubPr,
   review: string | null,
   findings: string | null,
+  target: ReviewTarget,
   options: { noComment: boolean; complete: boolean; fetch: Fetch; token: () => Promise<string | undefined> },
 ): Promise<CommentResult> {
   if (options.noComment) return { posted: false, reason: '--no-comment was given' }
@@ -763,7 +889,7 @@ async function postComment(
   const counts = countsFromFindings(findings)
   if (counts === null) return { posted: false, reason: 'findings.md is missing or is not a findings file, so the verdict cannot be computed' }
   try {
-    const { action, url } = await upsertReviewComment(pr, reviewCommentBody(review, counts), token, options.fetch)
+    const { action, url } = await upsertReviewComment(pr, reviewCommentBody(review, counts, target), token, options.fetch)
     return { posted: true, action, url }
   } catch (error) {
     return { posted: false, reason: message(error).replaceAll(token, '***') }

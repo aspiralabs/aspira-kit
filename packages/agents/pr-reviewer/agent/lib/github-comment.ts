@@ -2,6 +2,7 @@
 // updated on a rerun. Pure helpers plus one fetch-injected function, so it is testable
 // without a network. The tool around it decides whether to post at all.
 import { SEVERITIES, verdictFrom, type Counts } from './review.ts'
+import { reviewedLine, type ReviewTarget } from './target.ts'
 
 /** Hidden first line: how a rerun finds its own earlier comment. */
 export const REVIEW_COMMENT_MARKER = '<!-- aspiralabs-pr-reviewer -->'
@@ -37,10 +38,11 @@ export function countsFromFindings(findings: string): Counts | null {
   return counts
 }
 
-/** Marker, the verdict computed from the counts, the counts, then review.md, within GitHub's limit. */
-export function reviewCommentBody(review: string, counts: Counts): string {
+/** Marker, the verdict computed from the counts, the counts, the shas reviewed, then review.md, within GitHub's limit. */
+export function reviewCommentBody(review: string, counts: Counts, target: ReviewTarget | null = null): string {
   const totals = SEVERITIES.map((severity) => `${counts[severity]} ${severity}`).join(' · ')
-  const head = `${REVIEW_COMMENT_MARKER}\n**Verdict: ${verdictFrom(counts)}** — ${totals}\n\n`
+  const reviewed = target === null ? '' : `${reviewedLine(target)}\n\n`
+  const head = `${REVIEW_COMMENT_MARKER}\n**Verdict: ${verdictFrom(counts)}** — ${totals}\n\n${reviewed}`
   const foot = '\n\n---\n_Posted by the Aspira pr-reviewer. Rerunning the review updates this comment._\n'
   const cut = '\n\n_The review was cut to fit GitHub\'s comment limit; the full text is in the exported review.md._'
   const room = MAX_COMMENT_CHARS - head.length - foot.length

@@ -6,7 +6,7 @@ import { KnowledgeRequired, runLocal } from '../agent/lib/local.ts'
 // or, once every stage is done, the exported review. --finish exports what exists as incomplete.
 // Without the engineering guidelines folder it refuses (exit 3) and prints the pages to fetch.
 // Every step names the agent package that ran (`agent`), and an export records it in its trace.
-const usage = 'Usage: pnpm review:local <github-pr | absolute-repo-path> [--branch B] [--base main] [--max-rounds N] [--output DIR] [--knowledge DIR] [--no-comment] [--finish]'
+const usage = 'Usage: pnpm review:local <github-pr | absolute-repo-path> [--branch B] [--base main] [--max-rounds N] [--output DIR] [--knowledge DIR] [--since DIR] [--max-cost USD] [--no-comment] [--finish]'
 
 const agent = await agentVersion(new URL('..', import.meta.url))
 try {
@@ -18,6 +18,8 @@ try {
       'max-rounds': { type: 'string' },
       output: { type: 'string' },
       knowledge: { type: 'string' },
+      since: { type: 'string' },
+      'max-cost': { type: 'string' },
       'no-comment': { type: 'boolean' },
       finish: { type: 'boolean' },
     },
@@ -32,6 +34,8 @@ try {
     ...(rounds === undefined ? {} : { maxRounds: Number(rounds) }),
     ...(values.output === undefined ? {} : { output: values.output }),
     ...(values.knowledge === undefined ? {} : { knowledge: values.knowledge }),
+    ...(values.since === undefined ? {} : { since: values.since }),
+    ...(values['max-cost'] === undefined ? {} : { maxCost: Number(values['max-cost']) }),
     noComment: values['no-comment'] === true,
     finish: values.finish === true,
   })

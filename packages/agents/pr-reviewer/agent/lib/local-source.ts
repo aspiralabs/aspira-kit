@@ -14,6 +14,7 @@ import {
   TEMP_INDEX_SETUP,
   cachedDiffArgs,
   changedFromPatch,
+  compareApiUrl,
   parseChangedFiles,
   prApiUrl,
   prMetaFromApi,
@@ -82,24 +83,36 @@ export async function resolveLocalBranch(path: string, branch: string | undefine
  * exactly as load-pr does, minus `exclude`: the review's own work and output directories,
  * which sit inside the tree they review and must not review themselves.
  */
-export async function localDiff(branch: LocalBranch, exclude: string[]): Promise<RawDiff> {
+export async function localDiff(branch: LocalBranch, exclude: string[], since?: string): Promise<RawDiff> {
+  // A re-review diffs from the previous head, not from the merge base: only what changed since.
+  const against = since ?? branch.mergeBase
+  if (since !== undefined) {
+    const known = await git(branch.dir, ['cat-file', '-e', `${since}^{commit}`]).then(
+      () => true,
+      () => false,
+    )
+    if (!known) throw new Error(`The previous review was of ${since.slice(0, 7)}, which is not a commit in ${branch.dir}. Was the branch rewritten? Review it in full instead.`)
+  }
   if (!branch.live) {
     return {
-      patch: (await git(branch.dir, refDiffArgs(branch.mergeBase, branch.headSha, false))).stdout,
-      changed: parseChangedFiles((await git(branch.dir, refDiffArgs(branch.mergeBase, branch.headSha, true))).stdout),
+      patch: (await git(branch.dir, refDiffArgs(against, branch.headSha, false))).stdout,
+      changed: parseChangedFiles((await git(branch.dir, refDiffArgs(against, branch.headSha, true))).stdout),
     }
   }
-  const pathspecs = exclude
+  // The review's own directories are taken back out of the scratch index after the add rather
+  // than excluded by pathspec: `git add` refuses a pathspec that names only ignored paths, and
+  // `.work/` is ignored in every repo that has been reviewed once.
+  const own = exclude
     .map((path) => relative(branch.repoDir, path))
     .filter((path) => path !== '' && !path.startsWith('..') && !isAbsolute(path))
-    .map((path) => `:(top,exclude)${path}`)
   const indexFile = resolve(tmpdir(), `pr-review-local-index-${process.pid}-${Date.now()}`)
   const env = { ...process.env, GIT_INDEX_FILE: indexFile }
   try {
-    for (const args of TEMP_INDEX_SETUP) await git(branch.dir, args[0] === 'add' ? [...args, ...pathspecs] : args, env)
+    for (const args of TEMP_INDEX_SETUP) await git(branch.dir, args, env)
+    if (own.length > 0) await git(branch.repoDir, ['rm', '--cached', '-r', '-q', '--ignore-unmatch', '--', ...own], env)
     return {
-      patch: (await git(branch.dir, cachedDiffArgs(branch.mergeBase, false), env)).stdout,
-      changed: parseChangedFiles((await git(branch.dir, cachedDiffArgs(branch.mergeBase, true), env)).stdout),
+      patch: (await git(branch.dir, cachedDiffArgs(against, false), env)).stdout,
+      changed: parseChangedFiles((await git(branch.dir, cachedDiffArgs(against, true), env)).stdout),
     }
   } finally {
     await rm(indexFile, { force: true })
@@ -148,11 +161,15 @@ export async function fetchPrMeta(pr: GithubPr, token: string | undefined, reque
   return prMetaFromApi(pr.owner, pr.name, pr.number, await response.json())
 }
 
-/** The PR's diff against its merge base, from the GitHub API, with the changed paths read off it. */
-export async function fetchPrDiff(pr: GithubPr, token: string | undefined, request: Fetch): Promise<RawDiff> {
-  const response = await request(prApiUrl(pr.owner, pr.name, pr.number), { headers: headers(token, 'application/vnd.github.diff') })
+/**
+ * The PR's diff against its merge base, from the GitHub API, with the changed paths read off it.
+ * With `since`, the diff from that commit to the head instead: a re-review reads only the delta.
+ */
+export async function fetchPrDiff(pr: GithubPr, token: string | undefined, request: Fetch, since?: { sha: string; headSha: string }): Promise<RawDiff> {
+  const url = since === undefined ? prApiUrl(pr.owner, pr.name, pr.number) : compareApiUrl(pr.owner, pr.name, since.sha, since.headSha)
+  const response = await request(url, { headers: headers(token, 'application/vnd.github.diff') })
   if (!response.ok) {
-    const hint = response.status === 406 ? ' (GitHub does not serve diffs this large through the API)' : ''
+    const hint = response.status === 406 ? ' (GitHub does not serve diffs this large through the API)' : since !== undefined && response.status === 404 ? ` (the previous head ${since.sha.slice(0, 7)} is not in the repository any more; was the branch rewritten?)` : ''
     throw new Error(`GitHub API ${response.status} fetching the diff of ${pr.owner}/${pr.name}#${pr.number}${hint}`)
   }
   const patch = await response.text()

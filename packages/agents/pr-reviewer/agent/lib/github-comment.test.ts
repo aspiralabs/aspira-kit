@@ -105,3 +105,19 @@ describe('optionalPath', () => {
     expect(optionalPath('/repo')).toBe('/repo')
   })
 })
+
+describe('reviewCommentBody, what was reviewed', () => {
+  const counts = { critical: 0, high: 1, medium: 0, low: 0, info: 0 }
+  it('carries the base and head shas the verdict applies to', () => {
+    const body = reviewCommentBody('# Review\n', counts, { baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40), since: null })
+    expect(body).toContain(`**Verdict: block** — 0 critical · 1 high · 0 medium · 0 low · 0 info\n\nReviewed: base \`${'a'.repeat(40)}\` → head \`${'b'.repeat(40)}\`\n\n# Review`)
+  })
+  it('says a re-review was of the previous head to the new one', () => {
+    const body = reviewCommentBody('# Review\n', counts, { baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40), since: { sha: 'c'.repeat(40), dir: '/x' } })
+    expect(body).toContain(`Re-review: \`${'c'.repeat(40)}\`..\`${'b'.repeat(40)}\` (base \`${'a'.repeat(40)}\`)`)
+  })
+  it('still fits GitHub\'s limit with the line in', () => {
+    const body = reviewCommentBody('x'.repeat(MAX_COMMENT_CHARS * 2), counts, { baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40), since: null })
+    expect(body.length).toBeLessThanOrEqual(MAX_COMMENT_CHARS)
+  })
+})

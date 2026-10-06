@@ -9,14 +9,18 @@ import {
   checkFindingsPrompt,
   openingPrompt,
   rehome,
+  reviewAgreed,
   reviewDocPrompt,
   roundFilesInOrder,
+  roundSettled,
   turnPrompt,
   verifyPrompt,
   workspacePaths,
   writeFindingsPrompt,
   writeReviewPrompt,
   type PrContext,
+  type TurnOutput,
+  type VerifyOutput,
 } from './review.ts'
 
 const root = '/tmp/work dir.local'
@@ -44,6 +48,7 @@ describe('workspace paths', () => {
       conversation: `${root}/conversation.md`,
       findings: `${root}/findings.md`,
       review: `${root}/review.md`,
+      previousFindings: `${root}/previous-findings.md`,
     })
     expect(paths.roundsDir).toBe(`${root}/review`)
     expect(roundFilesInOrder(1, paths.roundsDir)[0]).toBe(`${root}/review/round-1/ava.md`)
@@ -92,8 +97,46 @@ describe('output validators', () => {
     })
   }
   it('rejects extra keys and wrong types', () => {
-    expect(OUTPUT_VALIDATORS.turn.safeParse({ agreed: true, openPoints: [], note: '' }).success).toBe(true)
-    expect(OUTPUT_VALIDATORS.turn.safeParse({ agreed: 'yes', openPoints: [], note: '' }).success).toBe(false)
-    expect(OUTPUT_VALIDATORS.turn.safeParse({ agreed: true, openPoints: [], note: '', extra: 1 }).success).toBe(false)
+    expect(OUTPUT_VALIDATORS.turn.safeParse({ agreed: true, raised: [], disputed: [], openPoints: [], note: '' }).success).toBe(true)
+    expect(OUTPUT_VALIDATORS.turn.safeParse({ agreed: 'yes', raised: [], disputed: [], openPoints: [], note: '' }).success).toBe(false)
+    expect(OUTPUT_VALIDATORS.turn.safeParse({ agreed: true, openPoints: [], note: '' }).success).toBe(false)
+    expect(OUTPUT_VALIDATORS.turn.safeParse({ agreed: true, raised: [], disputed: [], openPoints: [], note: '', extra: 1 }).success).toBe(false)
+  })
+})
+
+describe('the stopping rule', () => {
+  const seat = (over: Partial<TurnOutput> = {}): TurnOutput => ({ agreed: true, raised: [], disputed: [], openPoints: [], note: '', ...over })
+  const quinn = (agreed: boolean): VerifyOutput => ({ agreed, openPoints: [], rejected: [], duplicates: [], note: '' })
+
+  it('a seat with every finding ruled on is agreed even when nothing was fixed', () => {
+    // Fixing is not part of the loop: the schema says agreed means ruled on, not fixed.
+    expect(OUTPUT_SCHEMAS.turn.properties.agreed.description).toContain('Whether the author has fixed anything does not matter')
+    const ruledOn = SEATS.map(() => seat({ agreed: true, openPoints: [] }))
+    expect(roundSettled(ruledOn)).toBe(true)
+    expect(reviewAgreed(ruledOn, quinn(true), true)).toBe(true)
+  })
+
+  it('a round with no dispute and no new finding ends the review', () => {
+    expect(roundSettled(SEATS.map(() => seat()))).toBe(true)
+    // Even when a seat still says open: nothing was raised or disputed, so there is nothing left to argue.
+    const holdingOut = SEATS.map((s) => seat({ agreed: s !== 'ava', openPoints: s === 'ava' ? ['AVA1.1 waiting for the fix'] : [] }))
+    expect(roundSettled(holdingOut)).toBe(true)
+    expect(reviewAgreed(holdingOut, quinn(false), roundSettled(holdingOut))).toBe(true)
+  })
+
+  it('a dispute or a new finding runs one more round', () => {
+    expect(roundSettled(SEATS.map((s) => seat({ disputed: s === 'reba' ? ['REBA1.2'] : [] })))).toBe(false)
+    expect(roundSettled(SEATS.map((s) => seat({ raised: s === 'cole' ? ['COLE2.1'] : [], agreed: s !== 'cole' })))).toBe(false)
+    const contested = SEATS.map((s) => seat({ disputed: s === 'reba' ? ['REBA1.2'] : [], agreed: s !== 'reba' }))
+    expect(reviewAgreed(contested, quinn(false), roundSettled(contested))).toBe(false)
+  })
+
+  it('every prompt tells the seats the rule, the batching and the cap', () => {
+    const prompt = openingPrompt('ava', sandbox)
+    expect(prompt).toContain('The review ends after a round in which no seat raised or disputed anything')
+    expect(prompt).toContain('one `read_files` call with every path you want, not one call per file')
+    expect(prompt).toContain('You have at most 8 tool calls this round')
+    expect(openingPrompt('ava', { ...sandbox, maxSeatCalls: 3 })).toContain('You have at most 3 tool calls this round')
+    expect(turnPrompt('ava', 2, sandbox)).toContain('accept it, or dispute it with evidence')
   })
 })

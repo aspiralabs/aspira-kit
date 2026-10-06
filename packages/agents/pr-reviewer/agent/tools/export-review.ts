@@ -2,8 +2,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
-import { REVIEW_DIR, REVIEW_SUBDIR, ignoreRule, needsIgnoreRule, optionalPath, ticketFolder } from '../lib/pr'
+import { REVIEW_DIR, REVIEW_SUBDIR, ignoreRule, needsIgnoreRule, optionalPath, patchStats, ticketFolder } from '../lib/pr'
 import { FILES, roundFilesInOrder, slugify } from '../lib/review'
+import { TARGET_FILE, stampReviewed, targetFileSchema } from '../lib/target'
 import { USAGE_LEDGER, parseLedger, renderCostMarkdown, summarizeUsage } from '../lib/usage'
 
 // Which model each agent runs on, for the cost table. Keep in step with the agent.ts files.
@@ -25,7 +26,7 @@ const MODELS: Record<string, string> = {
 export default defineTool({
   availableInSubagents: false,
   description:
-    'Copy the review markdown (findings.md, review.md, conversation.md, pr.patch, changed_files.txt) from the sandbox to the host, plus cost.md with the model spend. For a local review it lands in <repoDir>/.work/<ticket>/pr-review/ (the ticket folder is the branch without its type prefix) and adds .work/ to that repo\'s .gitignore. Call after pr-debator finishes.',
+    'Copy the review markdown (findings.md, review.md, conversation.md, pr.patch, changed_files.txt) from the sandbox to the host, plus cost.md with the model spend. Stamps the base and head shas into findings.md and review.md. For a local review it lands in <repoDir>/.work/<ticket>/pr-review/ (the ticket folder is the branch without its type prefix) and adds .work/ to that repo\'s .gitignore. Call after pr-debator finishes, or after it stopped at the budget.',
   inputSchema: z.object({
     rounds: z.number().int().min(1).describe('The `rounds` pr-debator returned. Decides how much transcript to assemble.'),
     label: z.string().optional().describe('The `label` pr-debator returned. Names the transcript.'),
@@ -36,8 +37,11 @@ export default defineTool({
       .describe('The `repoDir` load-pr returned, for a local review. Files then land in <repoDir>/.work/<ticket>/pr-review/.'),
     branch: z.string().nullable().optional().describe('The `branch` load-pr returned. Its name without the type prefix is the ticket folder inside .work/.'),
     outputDir: z.string().optional().describe('Host directory, absolute or relative to the agent project. Overrides the default.'),
+    settled: z.boolean().optional().describe('The `settled` pr-debator returned: the loop ended by the stopping rule, not at the cap.'),
+    maxCostUsd: z.number().nullable().optional().describe('The `budget.maxCostUsd` pr-debator returned, for cost.md. Null or absent when there was no budget.'),
+    stoppedByBudget: z.boolean().optional().describe('true when pr-debator returned a `stopped` object: the budget ended the run and the export is incomplete.'),
   }),
-  async execute({ rounds, label, repoDir: rawRepoDir, branch: rawBranch, outputDir }, ctx) {
+  async execute({ rounds, label, repoDir: rawRepoDir, branch: rawBranch, outputDir, settled, maxCostUsd, stoppedByBudget }, ctx) {
     // load-pr returns null for these on a GitHub PR, and a model passes that back as "null".
     const repoDir = optionalPath(rawRepoDir)
     const branch = optionalPath(rawBranch)
@@ -50,6 +54,11 @@ export default defineTool({
     const ignored = repoDir === undefined || outputDir !== undefined ? null : await ensureIgnored(repoDir)
 
     const sandbox = await ctx.getSandbox()
+    // What was reviewed, as load-pr recorded it: the shas for the stamp, the packet size for cost.md.
+    const targetJson = await Promise.resolve(sandbox.readTextFile({ path: TARGET_FILE })).catch(() => null)
+    const loaded = targetJson === null ? null : (targetFileSchema.safeParse(JSON.parse(targetJson)).data ?? null)
+    const target = loaded?.target ?? null
+
     const written: string[] = []
     const missing: string[] = []
     // Handed back so the orchestrator can print the documents without a second read.
@@ -57,15 +66,26 @@ export default defineTool({
     // reaches for one of them gets "File not found" and burns a call retrying.
     let findings: string | null = null
     let review: string | null = null
+    let changedLines: number | undefined
 
-    for (const path of [FILES.meta, FILES.patch, FILES.changed, FILES.findings, FILES.review]) {
-      const content = await sandbox.readTextFile({ path })
-      if (content === null) {
+    const exported = [FILES.meta, FILES.patch, FILES.changed, FILES.findings, FILES.review, ...(target?.since === null || target?.since === undefined ? [] : [FILES.previousFindings])]
+    for (const path of exported) {
+      const raw = await sandbox.readTextFile({ path })
+      if (raw === null) {
         missing.push(path)
         continue
       }
+      // The two documents carry the shas the verdict applies to, whether or not the writers put them in.
+      // Written back to the sandbox too, so comment-on-pr posts the stamped text.
+      const stamp = target !== null && (path === FILES.findings || path === FILES.review)
+      const content = stamp ? stampReviewed(raw, target) : raw
+      if (stamp && content !== raw) await sandbox.writeTextFile({ path, content })
       if (path === FILES.findings) findings = content
       if (path === FILES.review) review = content
+      if (path === FILES.patch) {
+        const stats = patchStats(content, 0)
+        changedLines = stats.additions + stats.deletions
+      }
       await writeFile(resolve(dir, basename(path)), content, 'utf8')
       written.push(resolve(dir, basename(path)))
     }
@@ -87,14 +107,25 @@ export default defineTool({
     const ledger = await sandbox.readTextFile({ path: USAGE_LEDGER })
     const summary = summarizeUsage(parseLedger(ledger ?? ''))
     const costPath = resolve(dir, 'cost.md')
-    await writeFile(costPath, renderCostMarkdown(label ?? slug, summary, MODELS), 'utf8')
+    const packet = loaded?.packet ?? null
+    await writeFile(
+      costPath,
+      renderCostMarkdown(label ?? slug, summary, MODELS, {
+        rounds,
+        ...(changedLines === undefined ? {} : { changedLines }),
+        packet: packet === null ? null : { chars: packet.chars, tokens: packet.tokens },
+        budget: maxCostUsd === null || maxCostUsd === undefined ? null : { maxCostUsd, stopped: stoppedByBudget === true },
+        ...(settled === undefined ? {} : { settled }),
+      }),
+      'utf8',
+    )
     written.push(costPath)
     if (ledger !== null) {
       await writeFile(resolve(dir, 'usage.jsonl'), ledger, 'utf8')
       await sandbox.removePath({ path: USAGE_LEDGER, force: true })
     }
 
-    return { dir, written, missing, findings, review, gitignore: ignored, cost: summary }
+    return { dir, written, missing, findings, review, target, gitignore: ignored, cost: summary, incomplete: stoppedByBudget === true || findings === null || review === null }
   },
 })
 
