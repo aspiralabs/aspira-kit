@@ -11,6 +11,7 @@ import { markdownToBlocks } from './notion-markdown'
 
 const fixture = <T>(name: string): T => JSON.parse(readFileSync(new URL(`./fixtures/board/${name}`, import.meta.url), 'utf8')) as T
 const DS = 'b4e393d4-a4a6-46b8-bbd1-3d6c0f45a01e'
+const DB = 'd9e768e6-e796-4311-8781-14cbbe433ea1' // the Feature Board's database page id, what a person copies from Notion
 const PAGE = '3ec3e59b-2258-8102-becf-ce78d66142e1'
 const SPEC_REVIEWED = '3ec3e59b-2258-8123-961c-ce4ccd8e662a'
 const TOKEN = 'test-token'
@@ -56,6 +57,8 @@ function route(call: Call): { status: number; body: Json } {
   const { method, path, body } = call
   const json = (value: Json, code = 200) => ({ status: code, body: value })
   if (method === 'GET' && path === `/v1/data_sources/${DS}`) return json(fixture('feature-board.data-source.json'))
+  if (method === 'GET' && path === `/v1/data_sources/${DB}`) return json({ object: 'error', status: 404, code: 'object_not_found', message: `Could not find data_source with ID: ${DB}` }, 404)
+  if (method === 'GET' && path === `/v1/databases/${DB}`) return json({ object: 'database', id: DB, data_sources: [{ id: DS, name: 'Feature Board' }] })
   if (method === 'POST' && path === `/v1/data_sources/${DS}/query`) {
     const equals = ((body?.filter as Json | undefined)?.unique_id as Json | undefined)?.equals
     return json(equals === 4 ? { ...fixture<Json>('query.nom-4.json'), results: [page()] } : { object: 'list', results: [], has_more: false, next_cursor: null })
@@ -317,5 +320,14 @@ describe('pullPage', () => {
 
   it('returns undefined when the ticket has no page with that title', async () => {
     await expect(client.pullPage(PAGE, 'Nope')).resolves.toBeUndefined()
+  })
+})
+
+describe('board given the database page URL', () => {
+  it('finds the data source through /databases and resolves the ticket', async () => {
+    const b = board({ board: `https://app.notion.com/p/Feature-Board-${DB.replaceAll('-', '')}`, token: TOKEN, api })
+    const ticket = await b.resolveTicket('NOM-4')
+    expect(ticket.id).toBe('NOM-4')
+    expect(requests().slice(0, 4)).toEqual([`GET /v1/data_sources/${DB}`, `GET /v1/databases/${DB}`, `GET /v1/data_sources/${DS}`, `POST /v1/data_sources/${DS}/query`])
   })
 })
