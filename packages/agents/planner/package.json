@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/planner",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Turn business specs into grounded, test-first implementation plans.",
   "type": "module",
   "scripts": {
