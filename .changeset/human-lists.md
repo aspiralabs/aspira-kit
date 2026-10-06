@@ -1,5 +1,0 @@
----
-'@aspiralabs/kit': patch
----
-
-Every list the agents hand to a person is sorted, explained and comes with a recommendation. Findings from the spec reviewer, the spec writer and the PR reviewer, and the planner's readiness problems, are ordered critical, high, medium, low, info, under a header whose count equals the items below it. Every finding carries a plain-English "What this means" line before its evidence. Every decision left to the author (spec review author decisions, planner decisions, the implementor's assumptions) names its options, a recommended option with one sentence of reasoning and why it is the author's call, and is rendered as checkboxes in trace/decisions.md; the next run of the same stage reads a ticked option and records it in review.json as the author's decision. The implementor's assumptions are shown as the recommended option already taken. The PR comment lists every finding in severity order. Each agent's instructions.md says how to report, and the skill-rules tests pin those sentences.

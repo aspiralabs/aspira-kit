@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/spec-reviewer",
-  "version": "0.2.1",
+  "version": "0.5.0",
   "description": "Spec review: research, concurrent audits, deterministic reconciliation checks.",
   "type": "module",
   "exports": {
