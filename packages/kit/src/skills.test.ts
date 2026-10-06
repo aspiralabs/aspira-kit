@@ -112,6 +112,7 @@ describe('checkSkills and kit doctor', () => {
     mkdirSync(join(root, '.claude'), { recursive: true })
     writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ command: 'session-start.sh' }] }] } }))
     writeFileSync(join(root, '.gitignore'), '.work/\n')
+    writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6' }))
   }
 
   it('fails on a missing folder and on a version mismatch, and passes after re-init', () => {

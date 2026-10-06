@@ -4,11 +4,10 @@
 // success move once the agent exits; `resolve` reads a ticket for `kit next`. Output is one
 // `key=value` per line, which bash reads without a JSON parser. Exit 3 is a refusal.
 
-import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { board as makeBoard } from './board.ts'
 import { GATES, SKILLS, reportHeader, type Skill } from './ticket.ts'
-import { FlowRefused, finishFlow, readAspira, startFlow } from './ticket-flow.ts'
+import { FlowRefused, finishFlow, inputFileFor, readAspira, startFlow } from './ticket-flow.ts'
 import { resolveArgument } from './ticket-driver.ts'
 
 export const REFUSED_EXIT = 3
@@ -75,6 +74,10 @@ export async function ticketCli(skill: Skill, argv: string[], io: { out: (text: 
 }
 
 function inputOf(skill: Skill, folder: string): string {
-  const input = GATES[skill].input
-  return input === undefined ? '' : join(folder, input)
+  if (GATES[skill].input === undefined) return ''
+  try {
+    return inputFileFor(skill, folder)
+  } catch {
+    return ''
+  }
 }

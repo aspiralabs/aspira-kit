@@ -21,7 +21,7 @@ export const skillDir = (projectRoot: string, agent: Agent): string => join(proj
 const isPackage = (dir: string, name: string): boolean => readJson<{ name?: string }>(join(dir, 'package.json'))?.name === name
 
 /** The installed @aspiralabs/<agent> package, or undefined. Direct installs sit in the project's node_modules; with pnpm the agents sit beside @aspiralabs/agents in its own folder instead. */
-export function agentPackageDir(projectRoot: string, agent: Agent): string | undefined {
+export function agentPackageDir(projectRoot: string, agent: Agent | 'agent-common'): string | undefined {
   const scope = join(projectRoot, 'node_modules', '@aspiralabs')
   const direct = join(scope, agent)
   if (isPackage(direct, `@aspiralabs/${agent}`)) {

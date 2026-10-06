@@ -41,8 +41,8 @@ export type Gate = {
   /** The ticket property the skill needs set before it runs. */
   requires?: 'PR'
   pushes: Push[]
-  /** The file in the working folder the skill takes as its input, when it takes one. */
-  input?: string
+  /** The file in the working folder the skill takes as its input, when it takes one; a list is tried in order (the reviewer reruns on the answered reviewed spec). */
+  input?: string | string[]
 }
 
 export const GATES: Record<Skill, Gate> = {
@@ -53,7 +53,7 @@ export const GATES: Record<Skill, Gate> = {
       { title: 'Spec Reviewed', file: 'spec.reviewed/spec.reviewed.md' },
       { title: 'Spec Review Decisions', file: 'spec.reviewed/trace/decisions.md', when: 'needs-author' },
     ],
-    input: 'spec.md',
+    input: ['spec.reviewed/spec.reviewed.md', 'spec.md'],
   },
   planner: { accepts: ['Ready: Spec'], inProgress: 'In Progress: Plan', success: 'In Review: Plan', pushes: [{ title: 'Plan', file: 'plan.review/plan.reviewed.md' }], input: 'spec.reviewed/spec.reviewed.md' },
   implementor: {

@@ -4,9 +4,10 @@ import { fileURLToPath } from 'node:url'
 import { join, basename } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { deepMerge, readJson, writeIfAbsent, writeJson, type Log } from '../fs.js'
+import { writeAspira } from '../aspira.js'
 import { AGENTS_PACKAGE, installSkills } from '../skills.js'
 
-export type InitOptions = { projectRoot: string; dryRun: boolean; log: Log }
+export type InitOptions = { projectRoot: string; dryRun: boolean; log: Log; board?: string; releases?: string }
 
 const DEPS = ['@aspiralabs/ui']
 const DEV_DEPS = ['@aspiralabs/config', '@aspiralabs/kit', AGENTS_PACKAGE, 'eslint', 'prettier', 'typescript']
@@ -222,5 +223,7 @@ export async function initNext(opts: InitOptions): Promise<void> {
   // The /aspira-* skills, copied from the installed agent packages and pinned to their version.
   installSkills(opts)
   gitignore(opts)
+  // The Feature Board the skills and kit next read, when the project has one.
+  writeAspira({ projectRoot: opts.projectRoot, board: opts.board, releases: opts.releases, dryRun: opts.dryRun, log: opts.log })
   opts.log('done   run `pnpm lint` to see what the org rules think of the codebase')
 }

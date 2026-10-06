@@ -484,7 +484,7 @@ function sameRef(folder: WorkFolder, ref: string): boolean {
 }
 
 /** The end of a local run (F8): the pushes and the success or failure move as actions, and the trace written into the export with the Status the verify step expects. */
-export async function localBoardEnd(options: { skill: Skill; folder: string; ok: boolean; runStatus: string; exportDir: string; stateDir: string; verifyCommand: string }): Promise<{ stage: 'board-end'; actions: BoardAction[]; verify: { command: string; file: string; status: string }; traceFile: string; remaining: string | null }> {
+export async function localBoardEnd(options: { skill: Skill; folder: string; ok: boolean; runStatus: string; exportDir: string; stateDir: string; verifyCommand: string }): Promise<{ stage: 'board-end'; actions: BoardAction[]; verify: { command: string; file: string; status: string } | null; traceFile: string; remaining: string | null }> {
   const state = await readState(options.stateDir)
   const ticket = await readTicketMd(options.folder)
   if (ticket === null) throw new Error(`${join(options.folder, TICKET_FILE)} is missing`)
@@ -502,9 +502,10 @@ export async function localBoardEnd(options: { skill: Skill; folder: string; ok:
   const expected = move?.to ?? ticket.status
   trace.expected = expected
   trace.pushing = actions.filter((action) => action.action === 'push').map((action) => (action as { title: string }).title)
-  trace.verified = false
+  // Nothing for the session to do: the trace is complete as it stands.
+  trace.verified = actions.length === 0
   const traceFile = await writeBoardTrace(options.exportDir, trace)
-  return { stage: 'board-end', actions, verify: { command: options.verifyCommand, file: join(options.folder, TICKET_FILE), status: expected }, traceFile, remaining: remainingStep(options.skill, options.ok, expected, false) }
+  return { stage: 'board-end', actions, verify: actions.length === 0 ? null : { command: options.verifyCommand, file: join(options.folder, TICKET_FILE), status: expected }, traceFile, remaining: remainingStep(options.skill, options.ok, expected, false) }
 }
 
 /** The last local step: ticket.md must show the expected Status; the pushed pages are read from its Pages table; the trace is completed. */
@@ -539,12 +540,15 @@ export async function localBoardVerify(options: { skill: Skill; folder: string; 
 export function inputFileFor(skill: Skill, folder: string): string {
   const input = GATES[skill].input
   if (input === undefined) throw new Error(`${skill} takes no input file`)
-  const file = resolve(folder, input)
-  if (!existsSync(file)) {
-    const page = TICKET_PAGES.find((candidate) => candidate.file === input)
-    throw new FlowRefused(page === undefined ? `${file} is missing` : `${file} is missing: the ticket has no "${page.title}" page yet. ${whoProduces(page.title)}`)
+  const candidates = Array.isArray(input) ? input : [input]
+  for (const candidate of candidates) {
+    const file = resolve(folder, candidate)
+    if (existsSync(file)) return file
   }
-  return file
+  const last = candidates.at(-1)!
+  const file = resolve(folder, last)
+  const page = TICKET_PAGES.find((candidate) => candidate.file === last)
+  throw new FlowRefused(page === undefined ? `${file} is missing` : `${file} is missing: the ticket has no "${page.title}" page yet. ${whoProduces(page.title)}`)
 }
 
 function whoProduces(title: string): string {

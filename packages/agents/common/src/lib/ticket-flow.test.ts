@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Board, Ticket, TicketPage } from './board'
 import { ticketCli } from './ticket-cli'
 import { afterRun, beforeRun, verifyRun } from './ticket-driver'
-import { FlowRefused, finishFlow, findWorkFolders, readAspira, readBoardTrace, readTicketMd, startFlow } from './ticket-flow'
+import { FlowRefused, finishFlow, findWorkFolders, inputFileFor, readAspira, readBoardTrace, readTicketMd, startFlow } from './ticket-flow'
 import { TICKET_FILE, renderTicketMd, type BoardAction } from './ticket'
 
 // A board built from the recorded NOM-4 fixture values, in process: the same shape board.ts returns,
@@ -384,7 +384,8 @@ describe('the --local board stage (planner against a stub session)', () => {
     await mkdir(exportDir, { recursive: true })
     const end = await afterRun(ctx, ready, { ok: false, status: 'incomplete', exportDir, verifyCommand: 'planner.sh local NOM-4 --verify' })
     expect(end.board.actions).toEqual([])
-    expect(end.board.verify.status).toBe('In Progress: Plan')
+    expect(end.board.verify).toBeNull()
+    expect((await readBoardTrace(exportDir))!.trace.verified).toBe(true)
     expect(end.board.remaining).toContain('stays in "In Progress: Plan"')
     expect((await verifyRun(ctx, { positional: 'NOM-4' }, () => exportDir)).verified).toBe(true)
   })
@@ -428,5 +429,19 @@ describe('the working folders and aspira.json', () => {
     await writeFile(join(repo, 'aspira.json'), JSON.stringify({ releases: 'x' }))
     await expect(readAspira(repo)).rejects.toThrow(FlowRefused)
     expect((await stat(join(repo, '.work'))).isDirectory()).toBe(true)
+  })
+})
+
+describe('inputFileFor', () => {
+  it('takes the first file of the list that exists, and names the missing page otherwise', async () => {
+    const folder = join(repo, '.work', 'nom-4-explore-pagination')
+    await mkdir(join(folder, 'spec.reviewed'), { recursive: true })
+    expect(() => inputFileFor('spec-reviewer', folder)).toThrow('the ticket has no "Spec" page yet. The spec writer puts it there.')
+    await writeFile(join(folder, 'spec.md'), 'spec')
+    expect(inputFileFor('spec-reviewer', folder)).toBe(join(folder, 'spec.md'))
+    await writeFile(join(folder, 'spec.reviewed/spec.reviewed.md'), 'answered')
+    expect(inputFileFor('spec-reviewer', folder)).toBe(join(folder, 'spec.reviewed/spec.reviewed.md'))
+    expect(() => inputFileFor('planner', join(repo, 'nowhere'))).toThrow('the ticket has no "Spec Reviewed" page yet')
+    expect(() => inputFileFor('code-analyzer', folder)).toThrow('takes no input file')
   })
 })

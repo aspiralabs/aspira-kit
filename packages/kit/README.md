@@ -3,9 +3,10 @@
 The CLI that puts a project on the kit: it installs `@aspiralabs/ui`, `@aspiralabs/config` and `@aspiralabs/agents`, wires them in, installs the `/aspira-*` agent skills, scaffolds shared features like auth, and reports drift.
 
 ```bash
-pnpm dlx @aspiralabs/kit init --stack next   # first run, before the kit is installed
+pnpm dlx @aspiralabs/kit init --stack next --board <Feature Board URL>   # first run, before the kit is installed
 pnpm kit add auth                            # base Better Auth setup
 pnpm kit doctor                              # what version you're on, what's wired
+pnpm kit next NOM-4                          # what to run next for a ticket
 ```
 
 Installing needs a GitHub Packages token in `~/.npmrc`; see the [repo README](../../README.md#use-the-kit-in-an-app).
@@ -14,9 +15,12 @@ Installing needs a GitHub Packages token in `~/.npmrc`; see the [repo README](..
 
 | Command | What it does |
 |---|---|
-| `kit init --stack next` | Installs the kit packages and wires the project to them |
+| `kit init --stack next` | Installs the kit packages and wires the project to them; `--board <url>` also writes `aspira.json` |
+| `kit init --board <url>` | Writes or updates `aspira.json` (the Feature Board, and `--releases <url>`) in a project already on the kit |
 | `kit add auth` | Writes a base Better Auth setup the project then owns |
-| `kit doctor` | Prints the kit versions in use and checks the wiring, including the agent skills |
+| `kit doctor` | Prints the kit versions in use and checks the wiring, including `aspira.json` and the agent skills |
+| `kit next [<ticket>]` | Prints the ticket's Status and the Playbook step, command and owner that come next |
+| `kit playbook` | Prints the Playbook section of From Idea to Release as markdown, from the same table `kit next` reads |
 
 Every command takes `--cwd <path>` to run against another directory. `init` and `add` take `--dry-run`, which prints the plan and changes nothing.
 
@@ -37,7 +41,7 @@ Exit codes: `0` success, `1` a failed step or `doctor` found problems, `2` bad a
 ## `kit init --stack next`
 
 ```bash
-pnpm kit init --stack next [--dry-run] [--cwd <path>]
+pnpm kit init --stack next [--board <Feature Board URL>] [--releases <Releases page URL>] [--dry-run] [--cwd <path>]
 ```
 
 Puts a Next.js project on the kit. `next` is the only stack so far.
@@ -56,6 +60,7 @@ Puts a Next.js project on the kit. `next` is the only stack so far.
 | `.claude/settings.json` | Adds the session-start, deny-tier3 and audit-log hooks (from `node_modules/@aspiralabs/kit/hooks/`), merged into your settings; entries pointing at the retired `@aspiralabs/config/agent/hooks/` path are dropped |
 | `.claude/skills/aspira-<agent>/` | One folder per agent (spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer): a copy of the installed package's `skill/aspira-<agent>/` (`SKILL.md` and `scripts/`) plus `.kit-version`, the installed `@aspiralabs/agents` version. Commit them. A re-run after a bump rewrites them |
 | `.gitignore` | Adds `.work/`, the per-ticket working folder, if missing |
+| `aspira.json` | With `--board`: the project's Feature Board URL and, with `--releases`, its Releases page. The `/aspira-*` skills and `kit next` read it. Without `--board` the file is left as it is, and a project without one has no board: every skill then needs `--no-ticket` |
 
 The `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and settings templates ship in this package (`templates/agent/`), and the hooks in `hooks/`, so re-running `init` after an upgrade brings them up to that version. The managed `AGENTS.md` block and the session-start hook only point at the rules in Notion; they restate none.
 
@@ -141,7 +146,18 @@ If you already have `lib/prisma.ts` or `lib/redis.ts`, they're kept. The command
 pnpm kit doctor [--cwd <path>]
 ```
 
-Prints the version of each kit package the project declares and has installed (`@aspiralabs/ui`, `config`, `kit` and `agents`), then checks each part of the `init` wiring: ESLint, `tsconfig.json`, the tokens import, the `AGENTS.md` block, the MCP server, the hooks, and each `.claude/skills/aspira-<agent>/` folder (present, complete, and its `.kit-version` equal to the installed `@aspiralabs/agents` version). It exits `1` if anything is missing and tells you to re-run `init`.
+Prints the version of each kit package the project declares and has installed (`@aspiralabs/ui`, `config`, `kit` and `agents`), then checks each part of the `init` wiring: ESLint, `tsconfig.json`, the tokens import, the `AGENTS.md` block, the MCP server, the hooks, `aspira.json` (present, with a Notion URL as `board`), and each `.claude/skills/aspira-<agent>/` folder (present, complete, and its `.kit-version` equal to the installed `@aspiralabs/agents` version). It exits `1` if anything is missing and tells you to re-run `init`.
+
+## `kit next` and `kit playbook`
+
+```bash
+pnpm kit next [<ticket>] [--cwd <path>]
+pnpm kit playbook
+```
+
+`kit next` answers "what is the next step" for a ticket. It reads the board from `aspira.json`, resolves the ticket (an ID such as `NOM-4`, a Notion page URL, or, with no argument, the one folder under `.work/` that holds a `ticket.md`; two is an error naming them) through the installed agents' board module with `NOTION_TOKEN` from `.env.local`, and prints its Status, the Playbook step for that Status, the exact command to run with the ID filled in, and who acts. When the board does not answer, the Status as pulled into the working folder stands in and the output says so.
+
+The mapping is `src/playbook.ts`, the one source of the Status table. `kit playbook` renders it as the markdown of the "Playbook: what to run next" section of From Idea to Release in Notion; paste its output there when the table changes, so the page and the command stay in step.
 
 ## Working on the CLI
 

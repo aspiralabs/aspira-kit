@@ -1,6 +1,7 @@
 // Reports which kit version a project is on and whether the wiring is present.
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { checkAspira } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 import { AGENTS_PACKAGE, checkSkills } from './skills.js'
 
@@ -34,6 +35,9 @@ export function doctor(projectRoot: string, log: Log): number {
     ['.gitignore ignores .work/ (per-ticket working folders)', () => existsSync(join(projectRoot, '.gitignore')) && /^\.work\/?$/m.test(readFileSync(join(projectRoot, '.gitignore'), 'utf8'))],
     ['no committed feature folders (specs, docs/plans, docs/working-feature)', () => !['specs', 'docs/plans', 'docs/working-feature'].some((p) => existsSync(join(projectRoot, p)))],
   ]
+  // The Feature Board: aspira.json with a Notion URL, which the skills and kit next read.
+  const aspira = checkAspira(projectRoot)
+  checks.push([aspira.ok ? 'aspira.json names the Feature Board' : aspira.reason ?? 'aspira.json', () => aspira.ok])
   // The /aspira-* skills: present, complete, and from the installed @aspiralabs/agents version.
   for (const skill of checkSkills(projectRoot)) {
     checks.push([skill.ok ? `.claude/skills/aspira-${skill.agent} matches ${AGENTS_PACKAGE}` : skill.reason ?? `.claude/skills/aspira-${skill.agent}`, () => skill.ok])
@@ -45,6 +49,6 @@ export function doctor(projectRoot: string, log: Log): number {
     }
     log(`${pass ? 'ok  ' : 'FAIL'} ${label}`)
   }
-  log(problems === 0 ? 'healthy' : `${problems} problem(s); run kit init --stack next`)
+  log(problems === 0 ? 'healthy' : `${problems} problem(s); run kit init --stack next (and --board <Feature Board URL> when aspira.json is the problem)`)
   return problems === 0 ? 0 : 1
 }

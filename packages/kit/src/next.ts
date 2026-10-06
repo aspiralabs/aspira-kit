@@ -1,0 +1,105 @@
+// `kit next [<ticket>]`: what to run next for a ticket, from its Status and the Playbook table.
+// The ticket is resolved live through the installed agents' board module (the one Notion client,
+// run with node and amaro like the skill launchers do); without it, or when the board cannot be
+// reached, the Status recorded in the ticket's working folder stands in and the output says so.
+import { spawnSync } from 'node:child_process'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { isNotionUrl, readAspira } from './aspira.js'
+import { type Log } from './fs.js'
+import { agentPackageDir } from './skills.js'
+import { commandFor, nextStep } from './playbook.js'
+
+export type ResolvedTicket = { id: string; title: string; url: string; status: string }
+
+/** Resolves a ticket on a board; null when it cannot (the agents are not installed, no token, no network). */
+export type Resolver = (board: string, ref: string, projectRoot: string) => ResolvedTicket | null
+
+/** A working folder's ticket.md, read the way the agents write it: the Field/Value table and the title line. */
+export function readWorkTicket(folder: string): ResolvedTicket | null {
+  const file = join(folder, 'ticket.md')
+  if (!existsSync(file)) return null
+  const text = readFileSync(file, 'utf8')
+  const title = text.match(/^# ([^:\n]+): (.*)$/m)
+  if (title === null) return null
+  const field = (name: string) => text.match(new RegExp(`^\\| ${name} \\| (.*?) \\|\\s*$`, 'm'))?.[1]?.trim() ?? ''
+  return { id: field('ID') || title[1]!.trim(), title: title[2]!.trim(), url: field('URL'), status: field('Status') }
+}
+
+/** Every folder under .work/ with a ticket.md. */
+export function workTickets(projectRoot: string): { folder: string; ticket: ResolvedTicket }[] {
+  const dir = join(projectRoot, '.work')
+  if (!existsSync(dir)) return []
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .flatMap((entry) => {
+      const folder = join(dir, entry.name)
+      const ticket = readWorkTicket(folder)
+      return ticket === null ? [] : [{ folder, ticket }]
+    })
+}
+
+const isTicketRef = (value: string) => /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(value) || /^\d+$/.test(value) || isNotionUrl(value)
+
+/** The default resolver: the installed @aspiralabs/agent-common's resolve script, with the project's .env.local. */
+export const liveResolver: Resolver = (board, ref, projectRoot) => {
+  const common = agentPackageDir(projectRoot, 'agent-common')
+  if (common === undefined) return null
+  const script = join(common, 'scripts', 'resolve-ticket.ts')
+  const amaro = [join(common, 'node_modules', 'amaro', 'dist', 'register-strip.mjs'), join(common, '..', 'amaro', 'dist', 'register-strip.mjs'), join(projectRoot, 'node_modules', 'amaro', 'dist', 'register-strip.mjs')].find((candidate) => existsSync(candidate))
+  if (!existsSync(script) || amaro === undefined) return null
+  const env = join(projectRoot, '.env.local')
+  const args = ['--import', amaro, '--experimental-strip-types', ...(existsSync(env) ? [`--env-file=${env}`] : []), script, ref, '--board', board]
+  const run = spawnSync('node', args, { cwd: projectRoot, encoding: 'utf8' })
+  if (run.status !== 0) return null
+  const fields = Object.fromEntries(run.stdout.split('\n').filter((line) => line.includes('=')).map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]))
+  if (!fields.id || !fields.status) return null
+  return { id: fields.id, title: fields.title ?? '', url: fields.url ?? '', status: fields.status }
+}
+
+/** Print the next step for a ticket. Exit 0 with a step, 1 when the ticket or the board cannot be found, 2 for a bad argument. */
+export function next(projectRoot: string, ref: string | undefined, log: Log, resolve: Resolver = liveResolver): number {
+  const config = readAspira(projectRoot)
+  if (!isNotionUrl(config?.board)) {
+    log('no aspira.json with a Feature Board here; run kit init --board <Feature Board URL>')
+    return 1
+  }
+  const folders = workTickets(projectRoot)
+  let wanted: string
+  let local: ResolvedTicket | null = null
+  if (ref !== undefined && ref !== '') {
+    if (!isTicketRef(ref)) {
+      log(`not a ticket: ${ref} (an ID such as NOM-4, or a Notion page URL)`)
+      return 2
+    }
+    wanted = ref
+    local = folders.find((entry) => entry.ticket.id.toLowerCase() === ref.toLowerCase() || (isNotionUrl(ref) && entry.ticket.url.replace(/-/g, '').endsWith(ref.replace(/-/g, '').replace(/^.*\//, '').replace(/\?.*$/, ''))))?.ticket ?? null
+  } else if (folders.length === 1) {
+    wanted = folders[0]!.ticket.id
+    local = folders[0]!.ticket
+  } else if (folders.length === 0) {
+    log('no ticket given and no folder under .work/ holds a ticket.md; name the ticket: kit next <ID>')
+    return 1
+  } else {
+    log(`no ticket given and ${folders.length} folders under .work/ hold a ticket.md: ${folders.map((entry) => entry.folder).join(', ')}; name the ticket`)
+    return 1
+  }
+  const live = resolve(config.board, wanted, projectRoot)
+  const ticket = live ?? local
+  if (ticket === null) {
+    log(`cannot resolve ${wanted}: the board did not answer (is @aspiralabs/agents installed and NOTION_TOKEN in .env.local?) and no working folder holds it`)
+    return 1
+  }
+  const row = nextStep(ticket.status)
+  log(`ticket   ${ticket.id} ${ticket.title}${ticket.url ? ` (${ticket.url})` : ''}`)
+  log(`status   ${ticket.status}${live === null ? ' (as pulled into the working folder; the board did not answer)' : ''}`)
+  if (row === null) {
+    log(`next     unknown: the Playbook has no row for "${ticket.status}"`)
+    return 1
+  }
+  log(`next     ${row.step}`)
+  log(`run      ${commandFor(row, ticket.id) ?? 'by hand, on the board'}`)
+  log(`who      ${row.who}`)
+  return 0
+}
