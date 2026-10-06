@@ -33,6 +33,7 @@ import {
   DEFAULT_MAX_ROUNDS,
   DISPLAY_NAME,
   MAX_ROUNDS_LIMIT,
+  fullPrompt,
   OUTPUT_SCHEMAS,
   OUTPUT_VALIDATORS,
   SANDBOX_PATHS,
@@ -220,38 +221,37 @@ type Loaded = {
 /** The agent's own instruction files, read from disk on every call so the skill never carries a copy. */
 export const agentSources = (agentDir: string) => ({
   orchestrator: join(agentDir, 'agent', 'instructions.md'),
-  seat: (who: Reviewer) => join(agentDir, 'agent', 'subagents', who, 'instructions.md'),
+  seat: (who: Reviewer) => join(agentDir, 'agent', 'subagents', who, 'persona.md'),
 })
 
 /**
- * The file a subagent reads. Everything the seat is told comes from the agent: System is its
- * instructions.md and Task is review.ts's prompt, both verbatim, and the schema is review.ts's.
- * The only text added here is how a session runs a turn instead of eve: real paths, and
- * where to write the structured result.
+ * The file a subagent reads. Everything the seat is told comes from the agent: the shared prefix
+ * and the turn are review.ts's, the persona is the seat's persona.md, all verbatim, and the
+ * schema is review.ts's. The only text added here is how a session runs a turn instead of eve:
+ * real paths, and where to write the structured result.
  */
-export function renderTaskPrompt(task: PlanTask, output: string, system: { path: string; text: string }, document?: string): string {
+export function renderTaskPrompt(task: PlanTask, output: string, persona: { path: string; text: string }, pr: PrContext, document?: string): string {
   const handBack =
     document === undefined
       ? []
       : [
           `- Do not write \`${document}\` yourself: a session can refuse a helper's write of a report file. Put the complete text the Task would leave in that file into the JSON result as one extra string field, \`document\`, and keep \`path\` as that file's path. Leave \`document\` out when you change nothing. The driver writes the file.`,
         ]
+  // The same order as the agent's own sessions: the shared prefix (the packet and the review
+  // instructions, identical for every task), then the persona, then the turn. The mechanics of a
+  // session turn come last, after everything the agent would send.
   return [
+    fullPrompt(pr, persona.text, task.prompt),
+    '',
+    '---',
+    '',
     `# pr-reviewer --local: ${task.id}`,
     '',
-    `System below is ${system.path} and Task is the prompt agent/lib/review.ts builds for this turn: exactly what the agent sends ${DISPLAY_NAME[task.agent]}.`,
+    `Everything above is what the agent sends ${DISPLAY_NAME[task.agent]}: the shared prefix and the review instructions that agent/lib/review.ts builds for this review, the persona from ${persona.path}, and the turn. This part is only how a session runs the turn.`,
     '',
-    '- This turn runs as a subagent of a Claude Code session, not in the agent\'s sandbox, so every path in the Task is a real path on this machine. read_file is the Read tool, read_files is the Read tool over each path listed (one call per path counts as one read_files call), search is the Grep tool with two lines of context, and the shell commands the Task names run through Bash.',
-    `- The structured result the Task asks for goes into \`${output}\` as ONE JSON object valid against the output schema at the end (review.ts's own). No fences and no prose in that file. Then reply with one line.`,
+    '- This turn runs as a subagent of a Claude Code session, not in the agent\'s sandbox, so every path above is a real path on this machine. read_file is the Read tool, read_files is the Read tool over each path listed (one call per path counts as one read_files call), search is the Grep tool with two lines of context, and the shell commands named above run through Bash.',
+    `- The structured result the turn asks for goes into \`${output}\` as ONE JSON object valid against the output schema below (review.ts's own). No fences and no prose in that file. Then reply with one line.`,
     ...handBack,
-    '',
-    '## System',
-    '',
-    system.text.trim(),
-    '',
-    '## Task',
-    '',
-    task.prompt,
     '',
     '## Output schema',
     '',
@@ -591,7 +591,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       const prompt = join(work, 'prompts', `${task.id}.md`)
       const system = sources.seat(task.agent)
       const document = DOCUMENT_TURNS.find((turn) => turn.id === task.id)
-      await writeFile(prompt, renderTaskPrompt(task, output, { path: system, text: await readFile(system, 'utf8') }, document && paths.files[document.file]))
+      await writeFile(prompt, renderTaskPrompt(task, output, { path: system, text: await readFile(system, 'utf8') }, pr, document && paths.files[document.file]))
       tasks.push({ id: task.id, agent: task.agent, prompt, output, schema: SCHEMA_NAMES[task.kind], ...(task.error === undefined ? {} : { error: task.error }), ...(retry === undefined ? {} : { retry }) })
     }
     await writeFile(stateFile, JSON.stringify(state, null, 2))

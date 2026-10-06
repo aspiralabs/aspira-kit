@@ -21,8 +21,28 @@ export const packetStatsSchema = z.object({ chars: z.number(), tokens: z.number(
 /** What /workspace/target.json holds. */
 export const targetFileSchema = z.object({ target: reviewTargetSchema, packet: packetStatsSchema.nullable() })
 
-/** What load-pr leaves on the host for pr-debator: the packet text beside the target. */
-export const contextFileSchema = z.object({ packet: z.string(), target: reviewTargetSchema, stats: packetStatsSchema })
+/** One previous review's cost, as cost.md records it, for the budget pre-check. */
+export const costSampleSchema = z.object({ label: z.string(), costUsd: z.number(), rounds: z.number(), calls: z.number(), changedLines: z.number().nullable() })
+
+const personaSchema = z.object({ ava: z.string(), cole: z.string(), nova: z.string(), reba: z.string(), dex: z.string(), iris: z.string(), quinn: z.string() })
+
+/**
+ * What load-pr leaves on the host for the review: everything a prompt is built from, so the seat
+ * sessions' system prompt (the shared prefix) and pr-debator's messages come from one source.
+ */
+export const contextFileSchema = z.object({
+  pr: z.object({ label: z.string(), repoPath: z.string().nullable(), knowledgePath: z.string().nullable(), knowledgeRequiredFile: z.string().nullable() }),
+  packet: z.string(),
+  target: reviewTargetSchema,
+  stats: packetStatsSchema,
+  /** Added plus deleted lines of the diff, for the one-round estimate. */
+  changedLines: z.number(),
+  /** Each reviewer's persona.md, read when the review was loaded. */
+  personas: personaSchema,
+  /** The cost.md samples of this package's previous reviews, for the one-round estimate. */
+  costSamples: z.array(costSampleSchema),
+})
+export type ReviewContextFile = z.infer<typeof contextFileSchema>
 
 const SHA = /[0-9a-f]{7,40}/
 

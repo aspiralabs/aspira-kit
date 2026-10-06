@@ -9,8 +9,10 @@ import { KnowledgeRequired, knowledgeConfig, planStep, runLocal, workDirFor, typ
 import {
   SEATS,
   checkFindingsPrompt,
+  fullPrompt,
   openingPrompt,
   reviewDocPrompt,
+  sharedPrefix,
   turnPrompt,
   verifyPrompt,
   workspacePaths,
@@ -258,15 +260,16 @@ describe('runLocal, local repository', () => {
       expect(task.output).toBe(join(work, 'outputs', `${task.id}.json`))
       expect(task.schema).toBe('TURN_OUTPUT_SCHEMA')
       const text = await readFile(task.prompt, 'utf8')
-      expect(text).toContain(`\n## Task\n\n${openingPrompt(task.agent === 'quinn' ? 'ava' : task.agent, pr)}\n\n## Output schema\n`)
+      // The file starts with exactly what the agent sends: the shared prefix, the persona, the turn.
+      const persona = await readFile(join(PACKAGE_DIR, 'agent', 'subagents', task.agent, 'persona.md'), 'utf8')
+      expect(text.startsWith(`${fullPrompt(pr, persona, openingPrompt(task.agent === 'quinn' ? 'ava' : task.agent, pr))}\n\n---\n\n# pr-reviewer --local: ${task.id}`)).toBe(true)
       expect(text).toContain(`# ${task.agent[0]!.toUpperCase()}${task.agent.slice(1)}\n`)
       expect(text).toContain(task.output)
       expect(text).not.toContain('/workspace/')
       expect(text).toContain(`Required reading is ${join(work, 'knowledge', 'REQUIRED.md')}`)
-      expect(text).toContain('## Task\n\n# Review packet: ')
+      expect(text.startsWith('# Review packet: ')).toBe(true)
       expect(text).toContain('read_files is the Read tool over each path listed')
-      // The seat's system prompt is its instructions.md, byte for byte, read on this call.
-      expect(text).toContain(`## System\n\n${(await readFile(join(PACKAGE_DIR, 'agent', 'subagents', task.agent, 'instructions.md'), 'utf8')).trim()}\n\n## Task`)
+      expect(text).toContain('## Output schema')
     }
     expect(first.orchestrator).toBe(join(PACKAGE_DIR, 'agent', 'instructions.md'))
     expect(await readFile(join(work, 'pr.patch'), 'utf8')).toContain('b/b.ts')
@@ -542,7 +545,9 @@ describe('runLocal, engineering guidelines', () => {
     const work = first.workDir
     const pr: PrContext = { label: `${repo} @ feat/x vs main`, repoPath: repo, knowledgePath: folder, knowledgeRequiredFile: join(folder, 'REQUIRED.md'), paths: workspacePaths(work), packet: await readFile(join(work, 'packet.md'), 'utf8'), target: first.target, maxSeatCalls: 8 }
     for (const task of first.tasks) {
-      expect(await readFile(task.prompt, 'utf8')).toContain(`\n## Task\n\n${openingPrompt(task.agent === 'quinn' ? 'ava' : task.agent, pr)}\n\n## Output schema\n`)
+      const text = await readFile(task.prompt, 'utf8')
+      expect(text.startsWith(sharedPrefix(pr))).toBe(true)
+      expect(text).toContain(`\n\n---\n\n${openingPrompt(task.agent === 'quinn' ? 'ava' : task.agent, pr)}\n\n---\n\n# pr-reviewer --local:`)
     }
     for (const task of first.tasks) await answer(task, work)
     const quinn = pending(await runLocal({ source: repo, knowledge: folder }))
@@ -562,14 +567,16 @@ describe('runLocal, engineering guidelines', () => {
 })
 
 describe('runLocal, the agent\'s own sources', () => {
-  it('reads each seat\'s instructions.md from the agent on every call', async () => {
+  it('reads each seat\'s persona.md from the agent on every call, after the shared prefix and before the turn', async () => {
     const agentDir = await realpath(await mkdtemp(join(tmpdir(), 'pr-review-agent-')))
     await cp(join(PACKAGE_DIR, 'agent'), join(agentDir, 'agent'), { recursive: true })
-    const ava = join(agentDir, 'agent', 'subagents', 'ava', 'instructions.md')
+    const ava = join(agentDir, 'agent', 'subagents', 'ava', 'persona.md')
     await writeFile(ava, '# Ava\n\nVersion one of the security seat.\n')
     const { repo } = await gitRepo()
     const first = pending(await runLocal({ source: repo }, { agentDir }))
-    expect(await readFile(first.tasks[0]!.prompt, 'utf8')).toContain('## System\n\n# Ava\n\nVersion one of the security seat.\n\n## Task')
+    const before = await readFile(first.tasks[0]!.prompt, 'utf8')
+    expect(before).toContain('\n\n---\n\n# Ava\n\nVersion one of the security seat.\n\n---\n\nYou are Ava, the security seat.')
+    expect(before.indexOf('# Review packet')).toBeLessThan(before.indexOf('Version one of the security seat'))
     await writeFile(ava, '# Ava\n\nVersion two.\n')
     const again = pending(await runLocal({ source: repo }, { agentDir }))
     const text = await readFile(again.tasks[0]!.prompt, 'utf8')
@@ -655,5 +662,37 @@ describe('runLocal, budget and call cap', () => {
     const done = finished(await complete({ source: repo, maxCost: 3 }, { env: { MAX_SEAT_CALLS: '5' } }))
     expect(await readFile(join(done.dir, 'cost.md'), 'utf8')).toContain('Budget: $3.00 (--max-cost). Not enforced in --local, where no cost is itemized.')
     await expect(runLocal({ source: repo, maxCost: -1 })).rejects.toThrow('--max-cost')
+  })
+})
+
+describe('runLocal, one cached prefix', () => {
+  it('the round-one prompt files of all six seats and Quinn share the full packet plus the shared instructions as their longest common prefix', async () => {
+    const { repo } = await gitRepo()
+    const seats = pending(await runLocal({ source: repo }))
+    const work = seats.workDir
+    const pr: PrContext = {
+      label: `${repo} @ feat/x vs main`,
+      repoPath: repo,
+      knowledgePath: join(work, 'knowledge'),
+      knowledgeRequiredFile: join(work, 'knowledge', 'REQUIRED.md'),
+      paths: workspacePaths(work),
+      packet: await readFile(join(work, 'packet.md'), 'utf8'),
+      target: seats.target,
+      maxSeatCalls: 8,
+    }
+    const files = await Promise.all(seats.tasks.map((task) => readFile(task.prompt, 'utf8')))
+    for (const task of seats.tasks) await answer(task, work)
+    const quinn = pending(await runLocal({ source: repo }))
+    files.push(await readFile(quinn.tasks[0]!.prompt, 'utf8'))
+    expect(files).toHaveLength(SEATS.length + 1)
+    const shared = Buffer.byteLength(sharedPrefix(pr), 'utf8')
+    expect(shared).toBeGreaterThan(Buffer.byteLength(pr.packet!, 'utf8'))
+    let common = files[0]!
+    for (const text of files) {
+      let i = 0
+      while (i < common.length && i < text.length && common[i] === text[i]) i += 1
+      common = common.slice(0, i)
+    }
+    expect(Buffer.byteLength(common, 'utf8')).toBeGreaterThanOrEqual(shared)
   })
 })

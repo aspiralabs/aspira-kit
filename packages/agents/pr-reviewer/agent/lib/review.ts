@@ -385,22 +385,45 @@ ${sectionShape(who, round, pr)}
 3. Return the structured result. \`raised\` is the ids you wrote under Findings this turn; \`disputed\` is the ids of the rulings you disputed. \`agreed\` is true once every finding you ever raised has a ruling and you dispute none of them. The review ends after a round in which no seat raised or disputed anything, so do not hold out for fixes: a ruled-on finding is settled.`
 }
 
-export function openingPrompt(who: Seat, pr: PrContext): string {
-  return `${packetSection(pr)}You are ${DISPLAY_NAME[who]}, the ${LENS[who]} seat. This is round 1 of a review of ${pr.label}. Five other seats are reviewing the same diff in parallel through their own lenses, and Quinn verifies all of it after every round. You do not know which model any of them is. Do not defer to them.
+/**
+ * The shared prefix: the packet, then every instruction that is the same for every seat and for
+ * Quinn in every round. On the eve path it is the whole system prompt of each seat session
+ * (agent/lib/shared-prefix-instructions.ts), and on --local the first bytes of every prompt file,
+ * so all seven sessions of a round send one identical block before anything of their own: the
+ * persona, then the turn. One identical block is one cache prefix; six different ones are six.
+ */
+export function sharedPrefix(pr: PrContext): string {
+  return `${packetSection(pr)}# Review instructions, every seat
+
+These instructions are the same for every seat and for Quinn, in every round. Who you are and what this turn asks for come after them.
 
 ${context(pr)}
 
-${findingRules(pr)}
+${findingRules(pr)}`
+}
+
+/** What separates the shared prefix, the persona and the turn in a prompt. */
+export const PROMPT_SEPARATOR = '\n\n---\n\n'
+
+/** The message a seat session receives on the eve path: its persona, then the turn. The shared prefix is its system prompt. */
+export function turnMessage(persona: string, turn: string): string {
+  return `${persona.trim()}${PROMPT_SEPARATOR}${turn}`
+}
+
+/** The whole prompt as one text, in the order every seat shares: prefix, persona, turn. --local writes exactly this. */
+export function fullPrompt(pr: PrContext, persona: string, turn: string): string {
+  return `${sharedPrefix(pr)}${PROMPT_SEPARATOR}${turnMessage(persona, turn)}`
+}
+
+/** Round 1 for a seat: what this turn asks for. The packet and the shared rules are in the prefix. */
+export function openingPrompt(who: Seat, pr: PrContext): string {
+  return `You are ${DISPLAY_NAME[who]}, the ${LENS[who]} seat. This is round 1 of a review of ${pr.label}. Five other seats are reviewing the same diff in parallel through their own lenses, and Quinn verifies all of it after every round. You do not know which model any of them is. Do not defer to them. The packet and the review instructions above apply to you in full.
 
 ${protocol(who, 1, pr)}`
 }
 
 export function turnPrompt(who: Seat, round: number, pr: PrContext): string {
-  return `${packetSection(pr)}You are ${DISPLAY_NAME[who]}, the ${LENS[who]} seat, in round ${round} of the review of ${pr.label}. Every other seat has written since you last read the record, and Quinn has ruled on round ${round - 1}. Answer every ruling on your findings: accept it, or dispute it with evidence. If you accept them all and have nothing new, say so and mark \`agreed\`; the review ends when every seat does.
-
-${context(pr)}
-
-${findingRules(pr)}
+  return `You are ${DISPLAY_NAME[who]}, the ${LENS[who]} seat, in round ${round} of the review of ${pr.label}. Every other seat has written since you last read the record, and Quinn has ruled on round ${round - 1}. Answer every ruling on your findings: accept it, or dispute it with evidence. If you accept them all and have nothing new, say so and mark \`agreed\`; the review ends when every seat does. The packet and the review instructions above apply to you in full.
 
 ${protocol(who, round, pr)}`
 }
@@ -414,9 +437,7 @@ export function verifyPrompt(round: number, pr: PrContext): string {
       ? ''
       : `
 - This is a re-review of \`${since.sha}\`..\`${pr.target?.headSha ?? ''}\`. Rule on each seat's answer to each previous finding too: \`[ID] fixed — confirmed\` when the line it cites is in the delta and does what the seat says, else \`[ID] still open\`. REJECT a new finding on code the delta does not change, as always.`
-  return `${packetSection(pr)}You are Quinn, the verification seat for the review of ${pr.label}. You are independent of the six reviewers twice over: they hunt and you check, and you run on a different model family than any of them. You raise no findings of your own. Your job is to keep the list honest.
-
-${context(pr)}
+  return `You are Quinn, the verification seat for the review of ${pr.label}. You are independent of the six reviewers twice over: they hunt and you check, and you run on a different model family than any of them. You raise no findings of your own. Your job is to keep the list honest. The packet and the review instructions above apply to you in full; the finding rules there are what you hold the seats to.
 
 Read every file under ${roundsDir}/ — all seats, all rounds including your own earlier rulings — in one \`read_files\` call. For every finding that is still open, check the actual code at the path and lines it cites${packet ? ' (a changed file is in the packet; read only what is not)' : ''}, cross-reference it against ${files.patch}, and rule on it. Read the unchanged files you need in one \`read_files\` call before you write.
 
@@ -462,7 +483,7 @@ export function writeFindingsPrompt(pr: PrContext, agreed: boolean): string {
     since === null
       ? `\`# Findings: ${pr.label}\`,${reviewedSection(pr)} then exactly one totals line in this form: \`Totals: <n> critical · <n> high · <n> medium · <n> low · <n> info\`, then \`## Critical\` / \`## High\` / \`## Medium\` / \`## Low\` / \`## Info\` — skip a heading with nothing under it. Under each, one \`### [ID] <one-line title>\` per finding with, in this order: a \`**What this means:**\` line (${WHAT_THIS_MEANS_RULE}), then location as \`path:line\`, what is wrong, the evidence quoted from the diff, the fix, who raised it, and Quinn's ruling in a few words.`
       : `\`# Findings: ${pr.label}\`,${reviewedSection(pr)} then exactly one totals line in this form: \`Totals: <n> critical · <n> high · <n> medium · <n> low · <n> info\` counting the still-open previous findings and the new ones together. Then \`## Previous findings\`: a table with one row per finding of the previous fix list (${files.previousFindings}), columns ID, severity, state (\`fixed\`, \`still open\`, \`withdrawn\`) and evidence (\`path:line\` for fixed, the reason otherwise), as Quinn ruled them. Then \`## New findings\`: one line saying how many, and \`None.\` when there are none. Then \`## Critical\` / \`## High\` / \`## Medium\` / \`## Low\` / \`## Info\` — skip a heading with nothing under it — holding the still-open previous findings, each marked \`(previous, still open)\`, and the new findings, each marked \`(new)\`, one \`### [ID] <one-line title>\` per finding with, in this order: a \`**What this means:**\` line (${WHAT_THIS_MEANS_RULE}), then location as \`path:line\`, what is wrong, the evidence quoted from the diff, the fix, who raised it, and Quinn's ruling in a few words. Fixed and withdrawn findings appear only in the table.`
-  return `${packetSection(pr)}You are Nova. The review of ${pr.label} is over. Write the fix list.
+  return `You are Nova. The review of ${pr.label} is over. Write the fix list.
 
 Read ${files.patch}, ${files.changed}, and every file under ${roundsDir}/ in full${pr.packet === undefined || pr.packet === null ? '' : ' (the first two are in the packet above; the round files in one `read_files` call)'}, then write ${files.findings}: what this PR has to fix, settled, deduplicated, in severity order.
 
@@ -487,7 +508,7 @@ export function writeReviewPrompt(pr: PrContext, agreed: boolean): string {
   const { files, roundsDir } = pathsOf(pr)
   const since = sinceOf(pr)
   const again = since === null ? '' : ` Say in the first sentence that this was a re-review of \`${since.sha}\`..\`${pr.target?.headSha ?? ''}\`, and add \`## Previous findings\` before the fix sections: one line per previous finding, fixed, still open or withdrawn.`
-  return `${packetSection(pr)}You are Dex. The review of ${pr.label} is over. Write the summary the author reads first.
+  return `You are Dex. The review of ${pr.label} is over. Write the summary the author reads first.
 
 Read ${files.meta}, ${files.patch}, and every file under ${roundsDir}/ in full${pr.packet === undefined || pr.packet === null ? '' : ' (the first two are in the packet above; the round files in one `read_files` call)'}, then write ${files.review}: plain English, for the person who opened this PR and will not read the transcript.
 
@@ -505,7 +526,7 @@ Return the structured result with the path and \`changed: true\`.`
 }
 
 export function reviewDocPrompt(who: Reviewer, path: string, pr: PrContext): string {
-  return `${packetSection(pr)}You are ${DISPLAY_NAME[who]}. ${path} has been written for the review of ${pr.label}.
+  return `You are ${DISPLAY_NAME[who]}. ${path} has been written for the review of ${pr.label}.
 
 Read every file under ${pathsOf(pr).roundsDir}/ in one \`read_files\` call, and then ${path}. Check it against the record: nothing invented, nothing dropped, no side taken on a point that was left open, and no finding described as worse or milder than it was settled to be. If it drifts, fix the document in place and keep its structure. If it is accurate, leave it alone.
 
@@ -517,7 +538,7 @@ export function checkFindingsPrompt(pr: PrContext): string {
   const { files, roundsDir } = pathsOf(pr)
   const since = sinceOf(pr)
   const previous = since === null ? '' : `\n- The \`## Previous findings\` table has one row per finding in ${files.previousFindings}, in the state you ruled, and a \`fixed\` row cites a line the delta changes.`
-  return `${packetSection(pr)}You are Quinn. Nova has written ${files.findings} for the review of ${pr.label}. Sign it off.
+  return `You are Quinn. Nova has written ${files.findings} for the review of ${pr.label}. Sign it off.
 
 Read ${files.patch}, ${files.changed}, every file under ${roundsDir}/, and then ${files.findings}${pr.packet === undefined || pr.packet === null ? '' : ' (the first two are in the packet above; the rest in one `read_files` call)'}. Check that:
 

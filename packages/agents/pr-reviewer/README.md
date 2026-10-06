@@ -31,7 +31,11 @@ Seven model calls a round, all but one on Opus. A review that settles in two rou
 
 **Re-review.** `--since <previous review dir>` (or "review it again since <dir>") reads the head sha the previous `findings.md` recorded and diffs from it to the head now. The seats do two things: say which previous findings the delta fixes, with the line as evidence, and raise new findings only on the delta. `findings.md` gains a **Previous findings** table (fixed, still open, withdrawn) and a **New findings** section; `review.md` and the comment say it was a re-review of `<previous>..<new>`.
 
-**Estimate.** The skill prints one before a cloud run: the diff size, the seats and round cap, and a dollar range from the `cost.md` files under `reviews/` (seeded from the NOM-4 review until there are any). `--yes` skips it.
+**One cached prefix.** Every seat session and Quinn's start with the same bytes: the packet, then the review instructions that are the same for every seat (`sharedPrefix` in `review.ts`), as the session's whole system prompt, resolved per session by `agent/lib/shared-prefix-instructions.ts` from the context `load-pr` wrote; the persona (`agent/subagents/<seat>/persona.md`) and the turn come after, in the message. Through the Gateway, `caching: auto` places the provider's breakpoint at the system boundary, which is exactly the end of that block. Before round one a single warm-up call writes the prefix to the cache (`PR_REVIEW_WARM_CACHE=off` skips it), because a provider serves an entry only once the request that wrote it has begun answering: six parallel seats starting cold would each write their own copy. `cost.md` reports round-one cache writes per seat so the next benchmark shows whether the writes collapsed to one.
+
+**One cached prefix.** Every seat session and Quinn's start with the same bytes: the packet, then the review instructions that are the same for every seat (`sharedPrefix` in `review.ts`), as the session's whole system prompt, resolved per session by `agent/lib/shared-prefix-instructions.ts` from the context `load-pr` wrote; the persona (`agent/subagents/<seat>/persona.md`) and the turn come after, in the message. Through the Gateway, `caching: auto` places the provider's breakpoint at the system boundary, which is exactly the end of that block. Before round one a single warm-up call writes the prefix to the cache (`PR_REVIEW_WARM_CACHE=off` skips it), because a provider serves an entry only once the request that wrote it has begun answering: six parallel seats starting cold would each write their own copy. `cost.md` reports round-one cache writes per seat so the next benchmark shows whether the writes collapsed to one.
+
+**Estimate.** The skill prints one before a cloud run: the diff size, the seats and round cap, and a dollar range from the `cost.md` files under `reviews/` (seeded from the NOM-4 review until there are any). `--yes` skips it, except the budget pre-check: with `--max-cost`, a run whose one round is estimated above the budget is refused before any model call, naming both numbers.
 
 ## Run
 
@@ -87,7 +91,7 @@ The agent prints `review.md` back in the reply and offers the rest.
 ```
 agent/
 ├── agent.ts            root agent: routes, never reviews
-├── instructions.md     system prompt
+├── instructions.md     system prompt of the root; a seat's system prompt is the shared prefix (dynamic), its persona.md follows in the message of the root; a seat's system prompt is the shared prefix (dynamic), its persona.md follows in the message
 ├── hooks/usage.ts      per-call cost ledger
 ├── tools/              load-pr · pr-debator · export-review · comment-on-pr · read_files · search
 ├── lib/                pure logic: review.ts (seats, prompts, stopping rule, verdict) · plan.ts (the round plan, no Node builtins: it runs in the workflow body) · packet.ts · loop.ts · pr.ts (sources, git) · target.ts (shas) · budget.ts · call-cap.ts · estimate.ts · usage.ts

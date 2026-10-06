@@ -1,6 +1,7 @@
 import { defineHook } from 'eve/hooks'
 import { forgetSpend, recordSpend } from './spend-ledger'
 import { forgetSession, recordCalls } from './call-cap'
+import { forgetSession as forgetSessionContext, rememberSession } from './shared-prefix'
 import { USAGE_LEDGER, type UsageLine } from './usage'
 
 // Appends one line per model call to the shared sandbox ledger. Mounted as
@@ -27,11 +28,19 @@ export default defineHook({
     'step.started'(event, ctx) {
       started.set(stepKey(ctx.session.id, event.data.turnId, event.data.stepIndex), Date.now())
     },
+    async 'session.started'(_event, ctx) {
+      // A seat session: point it at the root's review context, so its dynamic system instruction
+      // (the shared prefix) can find it. Hooks run before the instruction resolver for the same
+      // event, and session.started precedes the turn.started the resolver listens on.
+      const root = ctx.session.parent?.rootSessionId
+      if (root !== undefined) await rememberSession(ctx.session.id, root).catch((error: unknown) => console.warn('[usage] could not record the review context pointer', error))
+    },
     'actions.requested'(event, ctx) {
       recordCalls(ctx.session.id, event.data.actions.length)
     },
     async 'session.completed'(_event, ctx) {
       forgetSession(ctx.session.id)
+      await forgetSessionContext(ctx.session.id).catch(() => undefined)
       // The root's spend is read by pr-debator during the run; a child's session end is not the root's.
       if (ctx.session.parent === undefined) await forgetSpend(ctx.session.id).catch(() => undefined)
     },
