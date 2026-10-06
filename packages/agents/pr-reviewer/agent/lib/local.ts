@@ -24,7 +24,7 @@ import {
   type Fetch,
   type RawDiff,
 } from './local-source.ts'
-import { REVIEW_DIR, ignoreRule, needsIgnoreRule, parsePrSource, patchStats, renderPrMeta, splitChanged, truncatePatch, type PrMeta } from './pr.ts'
+import { REVIEW_DIR, REVIEW_SUBDIR, ignoreRule, needsIgnoreRule, parsePrSource, ticketFolder, patchStats, renderPrMeta, splitChanged, truncatePatch, type PrMeta } from './pr.ts'
 import {
   DEFAULT_MAX_ROUNDS,
   DISPLAY_NAME,
@@ -202,7 +202,7 @@ export type LocalInput = {
   base?: string
   /** Round cap. Default DEFAULT_MAX_ROUNDS; fixed by the first call of a run. */
   maxRounds?: number
-  /** Export directory. Default: <repo>/.pr-review/<branch>/ or reviews/<date>-<slug>/ in this package. */
+  /** Export directory. Default: <repo>/.work/<ticket>/pr-review/ or reviews/<date>-<slug>/ in this package. */
   output?: string
   /** Do not post the review to the PR. */
   noComment?: boolean
@@ -368,7 +368,7 @@ async function load(input: LocalInput, deps: Required<Pick<LocalDeps, 'fetch' | 
     return { meta, diff, outputDir, repoPath: tree, github: pr, repoDir: null, materialize: () => cloneHead(pr, meta.headSha, tree, deps.cloneUrl(pr.owner, pr.name), auth) }
   }
   const branch = await resolveLocalBranch(source.path, input.branch, input.base)
-  const outputDir = input.output === undefined ? resolve(branch.repoDir, REVIEW_DIR, slugify(branch.headRef)) : resolve(input.output)
+  const outputDir = input.output === undefined ? resolve(branch.repoDir, REVIEW_DIR, ticketFolder(branch.headRef), REVIEW_SUBDIR) : resolve(input.output)
   const diff = await localDiff(branch, [workDirFor(outputDir), outputDir, ...(input.knowledge === undefined ? [] : [resolve(input.knowledge)])])
   if (diff.patch.trim() === '') throw new Error(`Nothing to review: ${branch.headRef} is identical to ${branch.baseRef} in ${branch.dir}.`)
   const tree = join(workDirFor(outputDir), 'repo')

@@ -112,7 +112,7 @@ async function loadLocal(sandbox: SandboxSession, path: string, base: string | u
   const git = (args: string[]) => run('git', ['-C', dir, ...args], { maxBuffer: MAX_TARBALL })
 
   // The git root, not the path we were handed: a review of packages/ui belongs in
-  // the repo's .pr-review, not in packages/ui/.pr-review.
+  // the repo's .work, not in packages/ui/.work.
   const repoDir = await git(['rev-parse', '--show-toplevel'])
     .then((r) => r.stdout.trim())
     .catch(() => {

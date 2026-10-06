@@ -43,7 +43,7 @@ The launcher resolves the agent from `IMPLEMENTOR_AGENT_DIR`, then `$ASPIRA_KIT/
 
 Each `local` call makes no model call. It prints one JSON stage, and you do what it lists, then call `local` again with the same source and options. Repeat until it prints `"pending": false`.
 
-For a ticket, fetch it with whatever tracker tool the session has, restate it as the procedure says for ticket input, write it to `<repo>/.implement/<key>/spec.md`, and pass that path.
+For a ticket, fetch it with whatever tracker tool the session has, restate it as the procedure says for ticket input, write it to `<repo>/.work/<ticket>/spec.md`, and pass that path.
 
 1. **`knowledge`** (always first; nothing else runs without it). The stage lists `pages` from the agent's own knowledge configuration (`KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`): the index page, the required pages, and, once those are in, the topic pages they route to. Fetch every page with `present: false` using the Notion MCP (by `url`, or by `title` when there is no URL). Write each to `knowledgeDir`, at `file` when given, else `<title in kebab case>.md`. Start each file with the `pageHeader` line filled in, followed by the page content exactly as fetched. Then run `local` again; it may list more pages. When all are present, the driver writes `REQUIRED.md` the way `load-knowledge` does. If a page cannot be fetched, stop and say so. With `--guidelines FILE` (a `REQUIRED.md` snapshot), this stage is skipped and the run records that live Notion was not read.
 2. **Model stages.** Each lists `tasks: [{id, agent, prompt, output, schema}]`.

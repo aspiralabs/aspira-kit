@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
-import { REVIEW_DIR, ignoreRule, needsIgnoreRule, optionalPath } from '../lib/pr'
+import { REVIEW_DIR, REVIEW_SUBDIR, ignoreRule, needsIgnoreRule, optionalPath, ticketFolder } from '../lib/pr'
 import { FILES, roundFilesInOrder, slugify } from '../lib/review'
 import { USAGE_LEDGER, parseLedger, renderCostMarkdown, summarizeUsage } from '../lib/usage'
 
@@ -25,7 +25,7 @@ const MODELS: Record<string, string> = {
 export default defineTool({
   availableInSubagents: false,
   description:
-    'Copy the review markdown (findings.md, review.md, conversation.md, pr.patch, changed_files.txt) from the sandbox to the host, plus cost.md with the model spend. For a local review it lands in <repoDir>/.pr-review/<branch>/ and adds .pr-review/ to that repo\'s .gitignore. Call after pr-debator finishes.',
+    'Copy the review markdown (findings.md, review.md, conversation.md, pr.patch, changed_files.txt) from the sandbox to the host, plus cost.md with the model spend. For a local review it lands in <repoDir>/.work/<ticket>/pr-review/ (the ticket folder is the branch without its type prefix) and adds .work/ to that repo\'s .gitignore. Call after pr-debator finishes.',
   inputSchema: z.object({
     rounds: z.number().int().min(1).describe('The `rounds` pr-debator returned. Decides how much transcript to assemble.'),
     label: z.string().optional().describe('The `label` pr-debator returned. Names the transcript.'),
@@ -33,8 +33,8 @@ export default defineTool({
       .string()
       .nullable()
       .optional()
-      .describe('The `repoDir` load-pr returned, for a local review. Files then land in <repoDir>/.pr-review/<branch>/.'),
-    branch: z.string().nullable().optional().describe('The `branch` load-pr returned. Names the directory inside .pr-review/.'),
+      .describe('The `repoDir` load-pr returned, for a local review. Files then land in <repoDir>/.work/<ticket>/pr-review/.'),
+    branch: z.string().nullable().optional().describe('The `branch` load-pr returned. Its name without the type prefix is the ticket folder inside .work/.'),
     outputDir: z.string().optional().describe('Host directory, absolute or relative to the agent project. Overrides the default.'),
   }),
   async execute({ rounds, label, repoDir: rawRepoDir, branch: rawBranch, outputDir }, ctx) {
@@ -42,7 +42,7 @@ export default defineTool({
     const repoDir = optionalPath(rawRepoDir)
     const branch = optionalPath(rawBranch)
     const slug = slugify(branch ?? label ?? 'review')
-    const dir = resolve(process.cwd(), outputDir ?? defaultDir(slug, repoDir))
+    const dir = resolve(process.cwd(), outputDir ?? defaultDir(slug, ticketFolder(branch ?? label ?? 'review'), repoDir))
     await mkdir(dir, { recursive: true })
     // The review lives in the repo it reviewed, and git never sees it. Done before
     // anything is written, so the files are ignored the moment they exist — otherwise
@@ -98,17 +98,17 @@ export default defineTool({
   },
 })
 
-// In the repo that was reviewed, under the branch name, when we know where it is.
-// Otherwise — a GitHub PR, a pasted diff — a dated folder in the package, because
-// there is no checkout on this machine to put it in.
-function defaultDir(slug: string, repoDir: string | undefined): string {
-  if (repoDir !== undefined) return resolve(resolve(process.cwd(), repoDir), REVIEW_DIR, slug)
+// In the repo that was reviewed, inside the ticket's working folder, when we know
+// where it is. Otherwise — a GitHub PR, a pasted diff — a dated folder in the
+// package, because there is no checkout on this machine to put it in.
+function defaultDir(slug: string, ticket: string, repoDir: string | undefined): string {
+  if (repoDir !== undefined) return resolve(resolve(process.cwd(), repoDir), REVIEW_DIR, ticket, REVIEW_SUBDIR)
   const date = new Date().toISOString().slice(0, 10)
   return `reviews/${date}-${slug}`
 }
 
 /**
- * Append `.pr-review/` to the reviewed repo's .gitignore, once. Idempotent, and it
+ * Append `.work/` to the reviewed repo's .gitignore, once. Idempotent, and it
  * never rewrites what is there — worst case it adds two lines to a file the person
  * owns. A repo we cannot write to is not worth failing an otherwise finished review,
  * so a failure is reported rather than thrown.
