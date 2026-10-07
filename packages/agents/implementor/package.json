@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/implementor",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "The implementor agent: builds a planner plan test-first, in parallel where the plan allows. Its skill launches it, or with --local runs its procedure in a Claude Code session.",
   "type": "module",
   "scripts": {
