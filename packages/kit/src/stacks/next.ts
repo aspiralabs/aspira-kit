@@ -3,19 +3,25 @@
 // CLAUDE.md, .mcp.json, .claude/, aspira.json, .gitignore), and the app that owns package.json and
 // node_modules, where the package steps go (.npmrc, the install, eslint, prettier, tsconfig, css).
 // They are the same directory unless `--app <dir>` says otherwise (apps/web in a multi-app repository).
+// With `--app` there are two layouts. In a repository with no root package.json, the app is on its own
+// and gets every package file. In a workspace (pnpm, npm or yarn) whose root has its own package.json,
+// the registry mapping, the lockfile, allowBuilds and a shared prettier config belong to the root:
+// init uses the root's and writes none into the app, and keeps @aspiralabs packages the root already
+// declares on the same version as the app's.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join, basename } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { deepMerge, readJson, writeIfAbsent, writeJson, type Log } from '../fs.js'
-import { appRoot, normalizeApp, writeAspira } from '../aspira.js'
+import { deepMerge, hasJsonComments, readJson, writeIfAbsent, writeJson, type Log } from '../fs.js'
+import { appRoot, isWorkspaceRoot, normalizeApp, writeAspira } from '../aspira.js'
 import { mcpServer } from '../doctor.js'
 import { AGENTS_PACKAGE, installSkills } from '../skills.js'
 
 export type InitOptions = { projectRoot: string; app?: string; dryRun: boolean; log: Log; board?: string; releases?: string }
 
-/** The options with `app` normalized (undefined for the root itself) and the app directory resolved. */
-type Resolved = InitOptions & { app: string | undefined; appDir: string }
+/** The options with `app` normalized (undefined for the root itself), the app directory resolved, and
+ * `workspaceDir`: the directory that owns the lockfile and .npmrc (the root of a workspace, else the app). */
+type Resolved = InitOptions & { app: string | undefined; appDir: string; workspace: boolean; workspaceDir: string }
 
 const DEPS = ['@aspiralabs/ui']
 const DEV_DEPS = ['@aspiralabs/config', '@aspiralabs/kit', AGENTS_PACKAGE, 'eslint', 'prettier', 'typescript']
@@ -84,7 +90,8 @@ const NPMRC = `@aspiralabs:registry=https://npm.pkg.github.com
 // user's ~/.npmrc, never in the project). pnpm 12 does not expand ${VAR} in
 // .npmrc, so the token line cannot live in a committed file.
 function npmrc(opts: Resolved): void {
-  const path = join(opts.appDir, '.npmrc')
+  // pnpm and npm read a workspace's registry settings from its root .npmrc, not the app's.
+  const path = join(opts.workspaceDir, '.npmrc')
   if (existsSync(path)) {
     const current = readFileSync(path, 'utf8')
     if (current.includes('@aspiralabs:registry')) {
@@ -115,31 +122,45 @@ function ensureToken(opts: Resolved): void {
 
 function install(opts: Resolved): void {
   ensureToken(opts)
-  const pm = packageManager(opts.appDir)
-  const add = pm === 'yarn' ? 'add' : pm === 'npm' ? 'install' : 'add'
-  const devFlag = pm === 'npm' ? '--save-dev' : '-D'
-  const cmds = [
-    [pm, add, ...DEPS.map((name) => pinned(name, KIT_VERSION))],
-    [pm, add, devFlag, ...DEV_DEPS.map((name) => pinned(name, KIT_VERSION))],
-  ]
-  for (const cmd of cmds) {
-    opts.log(`run    ${cmd.join(' ')}`)
+  const pm = packageManager(opts.workspaceDir)
+  for (const [cmd, cwd] of installCommands(opts, pm)) {
+    opts.log(`run    ${cmd.join(' ')}${opts.workspace ? ` (in ${cwd === opts.projectRoot ? 'the workspace root' : opts.app})` : ''}`)
     if (opts.dryRun) {
       continue
     }
-    let res = runAdd(cmd, opts.appDir)
+    let res = runAdd(cmd, cwd)
     // Each add can surface another dependency with a build script; approve and retry, a few times at most.
     for (let attempt = 0; res.status !== 0 && pm === 'pnpm' && attempt < 5; attempt += 1) {
-      const approved = approveIgnoredBuilds(res.output, join(opts.appDir, 'pnpm-workspace.yaml'))
+      const approved = approveIgnoredBuilds(res.output, join(opts.workspaceDir, 'pnpm-workspace.yaml'))
       if (approved.length === 0) break
-      opts.log(`update ${join(opts.appDir, 'pnpm-workspace.yaml')} (allowBuilds: ${approved.join(', ')})`)
+      opts.log(`update ${join(opts.workspaceDir, 'pnpm-workspace.yaml')} (allowBuilds: ${approved.join(', ')})`)
       opts.log(`run    ${cmd.join(' ')} (again, with those builds approved)`)
-      res = runAdd(cmd, opts.appDir)
+      res = runAdd(cmd, cwd)
     }
     if (res.status !== 0) {
       throw new Error(`${cmd.join(' ')} failed`)
     }
   }
+}
+
+/** The install commands for the app, then, in a workspace, for the @aspiralabs packages the root already declares (kept on the app's version). */
+function installCommands(opts: Resolved, pm: 'pnpm' | 'npm' | 'yarn'): Array<[cmd: string[], cwd: string]> {
+  const add = pm === 'npm' ? 'install' : 'add'
+  const devFlag = pm === 'npm' ? '--save-dev' : '-D'
+  const cmds: Array<[string[], string]> = [
+    [[pm, add, ...DEPS.map((name) => pinned(name, KIT_VERSION))], opts.appDir],
+    [[pm, add, devFlag, ...DEV_DEPS.map((name) => pinned(name, KIT_VERSION))], opts.appDir],
+  ]
+  if (!opts.workspace) return cmds
+  const root = readJson<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(join(opts.projectRoot, 'package.json')) ?? {}
+  // pnpm and yarn refuse an add at a workspace root without saying it is meant (-w, -W).
+  const rootFlag = pm === 'pnpm' ? ['-w'] : pm === 'yarn' ? ['-W'] : []
+  const kitNames = (deps: Record<string, string> | undefined) => Object.keys(deps ?? {}).filter((name) => name.startsWith('@aspiralabs/'))
+  const deps = kitNames(root.dependencies)
+  const devDeps = kitNames(root.devDependencies)
+  if (deps.length > 0) cmds.push([[pm, add, ...rootFlag, ...deps.map((name) => pinned(name, KIT_VERSION))], opts.projectRoot])
+  if (devDeps.length > 0) cmds.push([[pm, add, ...rootFlag, devFlag, ...devDeps.map((name) => pinned(name, KIT_VERSION))], opts.projectRoot])
+  return cmds
 }
 
 // Runs an install command, echoing its output as it would appear, and keeps it for the build-script check.
@@ -154,7 +175,21 @@ function eslint(opts: Resolved): void {
   writeIfAbsent(join(opts.appDir, 'eslint.config.mjs'), "import next from '@aspiralabs/config/eslint/next'\n\nexport default next\n", opts.log, opts.dryRun)
 }
 
+// The config files prettier looks for, nearest first; a workspace root's one applies to the app too.
+const PRETTIER_CONFIGS = ['.prettierrc', '.prettierrc.json', '.prettierrc.yaml', '.prettierrc.yml', '.prettierrc.json5', '.prettierrc.js', '.prettierrc.mjs', '.prettierrc.cjs', '.prettierrc.ts', '.prettierrc.toml', 'prettier.config.js', 'prettier.config.mjs', 'prettier.config.cjs', 'prettier.config.ts', 'prettier.config.mts', 'prettier.config.cts']
+
+function prettierConfig(dir: string): string | undefined {
+  const file = PRETTIER_CONFIGS.find((name) => existsSync(join(dir, name)))
+  if (file) return file
+  return readJson<{ prettier?: unknown }>(join(dir, 'package.json'))?.prettier === undefined ? undefined : 'package.json "prettier"'
+}
+
 function prettier(opts: Resolved): void {
+  const shared = opts.workspace && !prettierConfig(opts.appDir) ? prettierConfig(opts.projectRoot) : undefined
+  if (shared) {
+    opts.log(`keep   ${join(opts.projectRoot, shared)} (the workspace root's prettier config covers ${opts.app})`)
+    return
+  }
   writeIfAbsent(join(opts.appDir, 'prettier.config.mjs'), "export { default } from '@aspiralabs/config/prettier'\n", opts.log, opts.dryRun)
 }
 
@@ -173,7 +208,7 @@ function tsconfig(opts: Resolved): void {
     co.paths = { '@/*': ['./*'] }
   }
   next.compilerOptions = co
-  opts.log(`update ${path} (extends -> @aspiralabs/config/tsconfig/next.json)`)
+  opts.log(`update ${path} (extends -> @aspiralabs/config/tsconfig/next.json${hasJsonComments(path) ? '; its comments are not kept, put them back by hand' : ''})`)
   if (!opts.dryRun) {
     writeJson(path, next)
   }
@@ -300,11 +335,13 @@ function gitignore(opts: Resolved): void {
 
 export async function initNext(options: InitOptions): Promise<void> {
   const app = options.app === undefined ? undefined : normalizeApp(options.app)
-  const opts: Resolved = { ...options, app: app === '.' ? undefined : app, appDir: appRoot(options.projectRoot, app) }
+  const appDir = appRoot(options.projectRoot, app)
+  const workspace = isWorkspaceRoot(options.projectRoot, app)
+  const opts: Resolved = { ...options, app: app === '.' ? undefined : app, appDir, workspace, workspaceDir: workspace ? options.projectRoot : appDir }
   if (opts.app && !existsSync(join(opts.appDir, 'package.json'))) {
     throw new Error(`--app ${opts.app}: no package.json in ${opts.appDir}; --app names the directory that owns package.json and node_modules, relative to ${opts.projectRoot}`)
   }
-  opts.log(`stack  next (${opts.projectRoot}${opts.app ? `; app ${opts.app}` : ''})`)
+  opts.log(`stack  next (${opts.projectRoot}${opts.app ? `; app ${opts.app}${workspace ? ' in the workspace' : ''}` : ''})`)
   npmrc(opts)
   install(opts)
   eslint(opts)
