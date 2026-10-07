@@ -28,6 +28,16 @@ export function appRoot(projectRoot: string, app: string | undefined): string {
   return app === undefined || app === '.' ? projectRoot : join(projectRoot, app)
 }
 
+/**
+ * Whether the app sits in a workspace whose root is the project root: a root package.json with a
+ * pnpm-workspace.yaml beside it or a "workspaces" field (npm, yarn). The root then owns the lockfile,
+ * .npmrc and shared config; without it (no root package.json), the app owns everything.
+ */
+export function isWorkspaceRoot(projectRoot: string, app: string | undefined): boolean {
+  if (app === undefined || app === '.' || !existsSync(join(projectRoot, 'package.json'))) return false
+  return existsSync(join(projectRoot, 'pnpm-workspace.yaml')) || readJson<{ workspaces?: unknown }>(join(projectRoot, 'package.json'))?.workspaces !== undefined
+}
+
 export function readAspira(projectRoot: string): Partial<AspiraConfig> | undefined {
   return readJson<Partial<AspiraConfig>>(join(projectRoot, ASPIRA_FILE))
 }

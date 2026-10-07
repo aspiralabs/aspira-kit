@@ -4,7 +4,7 @@
 // Claude-facing items (AGENTS.md, .mcp.json, .claude/, .gitignore, aspira.json) live at the root.
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { appRoot, checkAspira, readApp } from './aspira.js'
+import { appRoot, checkAspira, isWorkspaceRoot, readApp } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 import { AGENTS_PACKAGE, checkSkills } from './skills.js'
 
@@ -36,6 +36,15 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string): number 
       continue
     }
     log(`${name.padEnd(20)} declared ${declared.padEnd(14)} installed ${installed ?? '(not installed)'}`)
+  }
+  // A workspace root that declares @aspiralabs packages itself (shared eslint or prettier config) keeps them on the app's version.
+  if (isWorkspaceRoot(projectRoot, app)) {
+    const root = readJson<Pkg>(join(projectRoot, 'package.json')) ?? {}
+    for (const [name, declared] of Object.entries({ ...root.dependencies, ...root.devDependencies }).filter(([name]) => name.startsWith('@aspiralabs/'))) {
+      const same = declared === all[name]
+      log(`${same ? 'ok  ' : 'FAIL'} workspace root declares ${name} ${declared}${same ? ', as the app does' : `, the app ${all[name] ?? 'does not'}`}`)
+      if (!same) problems += 1
+    }
   }
   const inApp = (file: string) => (app ? `${app}/${file}` : file)
   const settings = () => JSON.stringify(readJson(join(projectRoot, '.claude', 'settings.json')) ?? {})

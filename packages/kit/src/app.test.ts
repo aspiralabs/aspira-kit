@@ -3,13 +3,14 @@
 // root puts the package steps in the app and the Claude-facing files at the root, with every path
 // inside them pointing into the app; doctor, next and the launchers read the app from aspira.json.
 import { spawnSync } from 'node:child_process'
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { checkAspira, normalizeApp, readApp, resolveProjectRoot, writeAspira } from './aspira.js'
 import { doctor } from './doctor.js'
+import { hasJsonComments, readJson } from './fs.js'
 import { liveResolver, next, type Resolver } from './next.js'
 import { AGENTS, skillDir } from './skills.js'
 import { initNext } from './stacks/next.js'
@@ -188,6 +189,84 @@ describe('kit init --stack next --app apps/web at the repository root', () => {
     expect(checkAspira(root)).toEqual({ ok: true })
     writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/mobile' }))
     expect(checkAspira(root).reason).toBe('aspira.json "app" is apps/mobile, but apps/mobile/package.json does not exist')
+  })
+})
+
+/** The repository above as a pnpm workspace (hangar): the root has its own package.json, lockfile, .npmrc and prettier config, and declares the kit config itself. */
+function workspace(): { root: string; app: string } {
+  const { root, app } = repository()
+  rmSync(join(app, 'pnpm-lock.yaml'))
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'hangar', private: true, devDependencies: { '@aspiralabs/config': '^0.4.2', prettier: '^3' } }))
+  writeFileSync(join(root, 'pnpm-workspace.yaml'), "packages:\n  - 'apps/*'\n")
+  writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n')
+  writeFileSync(join(root, '.npmrc'), '@aspiralabs:registry=https://npm.pkg.github.com\n')
+  writeFileSync(join(root, 'prettier.config.mjs'), "export { default } from '@aspiralabs/config/prettier'\n")
+  // A tsconfig with comments and a trailing comma, as Next and editors write them, already on the kit.
+  writeFileSync(join(app, 'tsconfig.json'), '{\n  "extends": "@aspiralabs/config/tsconfig/next.json",\n  "compilerOptions": {\n    // Next requires react-jsx.\n    "jsx": "react-jsx", /* "a // string" */\n    "paths": { "@/*": ["./*"] },\n  },\n}\n')
+  return { root, app }
+}
+
+describe('kit init --stack next --app apps/web in a workspace whose root has its own package.json', () => {
+  it('uses the root .npmrc and prettier config, keeps the commented tsconfig, and keeps the root kit packages on the app version', async () => {
+    const { root, app } = workspace()
+    const tsconfig = readFileSync(join(app, 'tsconfig.json'), 'utf8')
+    const lines = await init(root, { app: 'apps/web', board: BOARD })
+    const version = (JSON.parse(readFileSync(join(kit, 'package.json'), 'utf8')) as { version: string }).version
+    expect(lines[0]).toBe(`stack  next (${root}; app apps/web in the workspace)`)
+    expect(lines).toContain(`keep   ${join(root, '.npmrc')} (scope already mapped)`)
+    expect(lines).toContain(`keep   ${join(root, 'prettier.config.mjs')} (the workspace root's prettier config covers apps/web)`)
+    expect(lines).toContain(`keep   ${join(app, 'tsconfig.json')} (already extends the kit)`)
+    for (const file of ['.npmrc', 'prettier.config.mjs']) expect(existsSync(join(app, file)), file).toBe(false)
+    expect(readFileSync(join(app, 'tsconfig.json'), 'utf8')).toBe(tsconfig)
+    expect(lines).toContain(`run    pnpm add @aspiralabs/ui@${version} (in apps/web)`)
+    expect(lines).toContain(`run    pnpm add -w -D @aspiralabs/config@${version} (in the workspace root)`)
+    // The Claude-facing files are where they are for any app.
+    expect((JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf8')) as Mcp).mcpServers['aspiralabs-ui']).toEqual({ command: 'node', args: ['apps/web/node_modules/@aspiralabs/ui/bin/mcp.js'] })
+    expect(JSON.parse(readFileSync(join(root, 'aspira.json'), 'utf8'))).toEqual({ board: BOARD, app: 'apps/web' })
+  })
+
+  it('maps the scope in the root .npmrc when it is missing, and leaves an app prettier config to the app', async () => {
+    const { root, app } = workspace()
+    rmSync(join(root, '.npmrc'))
+    writeFileSync(join(app, '.prettierrc'), '{}\n')
+    const lines = await init(root, { app: 'apps/web', dryRun: true })
+    expect(lines).toContain(`write  ${join(root, '.npmrc')}`)
+    expect(lines).toContain(`write  ${join(app, 'prettier.config.mjs')}`)
+    expect(lines.some((l) => l.includes("workspace root's prettier config"))).toBe(false)
+  })
+
+  it('treats a root package.json that is not a workspace like no root package.json', async () => {
+    const { root, app } = repository()
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'scripts-only', private: true }))
+    const lines = await init(root, { app: 'apps/web', dryRun: true })
+    expect(lines[0]).toBe(`stack  next (${root}; app apps/web)`)
+    expect(lines).toContain(`write  ${join(app, '.npmrc')}`)
+    expect(lines.some((l) => l.includes(' -w '))).toBe(false)
+  })
+
+  it('doctor flags a root kit package on another version than the app', async () => {
+    const { root } = workspace()
+    await init(root, { app: 'apps/web', board: BOARD })
+    const { lines, log } = logs()
+    doctor(root, log)
+    expect(lines).toContain(`FAIL workspace root declares @aspiralabs/config ^0.4.2, the app ${VERSION}`)
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'hangar', private: true, devDependencies: { '@aspiralabs/config': VERSION } }))
+    const again = logs()
+    doctor(root, again.log)
+    expect(again.lines).toContain(`ok   workspace root declares @aspiralabs/config ${VERSION}, as the app does`)
+    expect(again.lines).toContain('ok   apps/web/tsconfig.json extends the kit')
+  })
+})
+
+describe('readJson', () => {
+  it('reads JSON with comments and trailing commas, and leaves comment markers inside strings alone', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-jsonc-'))
+    const path = join(dir, 'tsconfig.json')
+    writeFileSync(path, '{\n  // line\n  "a": "x // y /* z */", /* block */\n  "b": [1, 2, /* last */],\n  "c": "quote \\" // still a string",\n}\n')
+    expect(readJson(path)).toEqual({ a: 'x // y /* z */', b: [1, 2], c: 'quote " // still a string' })
+    expect(hasJsonComments(path)).toBe(true)
+    writeFileSync(path, '{"a": "// not a comment"}')
+    expect(hasJsonComments(path)).toBe(false)
   })
 })
 
