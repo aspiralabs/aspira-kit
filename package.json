@@ -16,6 +16,8 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "@aspiralabs/agents": "workspace:*",
+    "@aspiralabs/kit": "workspace:*"
   }
 }

@@ -17,3 +17,6 @@ spec.reviewed.local/
 plan.review/
 plan.review.lock/
 .static-analysis/
+
+# Per-ticket working folders (AI-DLC); never committed
+.work/
