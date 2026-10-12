@@ -140,12 +140,8 @@ export function whoMoves(status: string): string {
   return moves[status] ?? 'a human'
 }
 
-/**
- * The child pages of a title the ticket has more than once, every one of them, the first first.
- * `Ticket.duplicatePages` in board.ts has this shape once board.ts reads it (P7); until then the
- * gate and ticket.md take it from here.
- */
-export type DuplicatePages = { title: string; pages: TicketPage[] }[]
+/** The child pages of a title the ticket has more than once, every one of them, the first first. */
+export type DuplicatePages = NonNullable<Ticket['duplicatePages']>
 
 /** The Type gate's refusals (F4). `name` is `<ID> <title>`; each ends with the sentence every gate refusal ends with. */
 export const TYPE_EMPTY_MESSAGE = (name: string): string => `${name} has no Type; set it to Feature to groom it. No model call was made.`

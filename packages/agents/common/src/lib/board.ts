@@ -3,8 +3,10 @@
 // URL the caller reads from the project's aspira.json. Uses NOTION_TOKEN, the same API base and
 // version as knowledge.ts, and fetch, so a test stands up a mock Notion server and nothing else.
 
+import { z } from 'zod'
+import { GROOMER_MARKER_PREFIX } from './groom-record.ts'
 import { NOTION_API, NOTION_VERSION, pageIdFrom } from './knowledge.ts'
-import { markdownToBlocks, notionToMarkdown, type Block } from './notion-markdown.ts'
+import { chunkText, markdownToBlocks, notionToMarkdown, type Block } from './notion-markdown.ts'
 import { propertyText } from './notion.ts'
 
 export const BOARD_ENV = 'NOTION_TOKEN'
@@ -45,9 +47,14 @@ export type Ticket = {
   lastEditedAt: string
   /** The Idea body as plain markdown. */
   idea: string
-  /** Child pages by title: Spec, Spec Reviewed, Plan, Implementation, and whatever else is there. */
+  /** Child pages by title: Spec, Spec Reviewed, Plan, Implementation, and whatever else is there. The first of a repeated title. */
   pages: Record<string, TicketPage>
+  /** Every title the ticket has more than one child page of, with all of those pages in page order. Absent when there is none. */
+  duplicatePages?: { title: string; pages: TicketPage[] }[]
 }
+
+/** A to-do block of a page: its tick, its plain text and the user who last edited it, when Notion says. */
+export type ToDo = { id: string; checked: boolean; text: string; lastEditedBy?: { id: string } }
 
 export type Board = {
   resolveTicket(idOrUrl: string): Promise<Ticket>
@@ -58,6 +65,28 @@ export type Board = {
   pushPage(page: Ticket | string, title: string, markdown: string): Promise<{ id: string; url: string; created: boolean }>
   /** The child page with that title as plain markdown, or undefined when there is none. */
   pullPage(page: Ticket | string, title: string): Promise<(TicketPage & { markdown: string }) | undefined>
+  /** Creates a child page with that title and the markdown as its blocks, whether or not one with that title exists. */
+  createPage(page: Ticket | string, title: string, markdown: string): Promise<{ id: string; url: string }>
+  /** Appends one paragraph of literal text to a page and returns the created block's id. */
+  appendParagraph(pageId: string, text: string): Promise<{ id: string }>
+  /** Deletes (archives) one block. Callers only pass ids of blocks they created. */
+  deleteBlock(id: string): Promise<void>
+  /**
+   * Replaces the content of the child page with that title, append-first: the new blocks are appended below the
+   * existing ones, and only after every append succeeded are the previous blocks deleted (never a child page,
+   * child database or synced block). Returns the page object's last edit after the writes.
+   */
+  replacePage(page: Ticket | string, title: string, markdown: string): Promise<{ id: string; url: string; lastEditedAt: string }>
+  /**
+   * Writes the groomer's Idea summary into the ticket body: replaces a previous summary found by its marker
+   * paragraph, or inserts after the Idea prose, or adds `## Idea` when the body has none. Never deletes a block
+   * it did not write. Returns the ids it created and the ids it deleted.
+   */
+  writeIdeaSummary(page: Ticket | string, markdown: string): Promise<{ ids: string[]; deleted: string[] }>
+  /** Every to-do block at the top level of a page, in page order. */
+  listToDos(pageId: string): Promise<ToDo[]>
+  /** The integration's own user. */
+  me(): Promise<{ id: string }>
 }
 
 export class BoardError extends Error {
@@ -84,18 +113,33 @@ export function parseTicketRef(input: string): TicketRef {
 }
 
 /** The Idea body of a ticket page: the section under the Idea heading, or the whole body when there is none, without child page tags. */
+// The Idea ends at the next heading of its own level or shallower, so `###` subsections under `## Idea` stay in it.
 export function ideaOf(notionMarkdown: string): string {
   const lines = notionMarkdown.split('\n').filter((line) => !/^\s*<page url="[^"]*">[^<]*<\/page>\s*$/.test(line))
-  const sections: { heading?: string; body: string[] }[] = [{ body: [] }]
+  type Section = { level: number; heading?: string; line: string; body: string[] }
+  let current: Section = { level: 0, line: '', body: [] }
+  const sections: Section[] = [current]
   for (const line of lines) {
-    const heading = line.match(/^#{1,3} (.*)$/)
-    if (heading) sections.push({ heading: heading[1]!.trim(), body: [] })
-    else sections.at(-1)!.body.push(line)
+    const heading = line.match(/^(#{1,3}) (.*)$/)
+    if (heading === null) {
+      current.body.push(line)
+      continue
+    }
+    current = { level: heading[1]?.length ?? 0, heading: (heading[2] ?? '').trim(), line, body: [] }
+    sections.push(current)
   }
-  const idea = sections.find((section) => section.heading?.toLowerCase() === 'idea')
-  if (idea) return notionToMarkdown(idea.body.join('\n'))
+  const at = sections.findIndex((section) => section.heading?.toLowerCase() === 'idea')
+  const idea = sections[at]
+  if (idea !== undefined) {
+    const out = [...idea.body]
+    for (const section of sections.slice(at + 1)) {
+      if (section.level <= idea.level) break
+      out.push(section.line, ...section.body)
+    }
+    return notionToMarkdown(out.join('\n'))
+  }
   const kept = sections.filter((section) => section.heading === undefined || section.body.some((line) => line.trim() !== ''))
-  return notionToMarkdown(kept.flatMap((section) => (section.heading === undefined ? section.body : [`## ${section.heading}`, ...section.body])).join('\n'))
+  return notionToMarkdown(kept.flatMap((section) => (section.heading === undefined ? section.body : [section.line, ...section.body])).join('\n'))
 }
 
 type Property = Parameters<typeof propertyText>[0] & { unique_id?: { prefix?: string | null; number?: number | null } }
@@ -104,6 +148,37 @@ type SchemaProperty = { name: string; type: string; unique_id?: { prefix?: strin
 type Schema = { properties: Record<string, SchemaProperty> }
 type ListResponse<T> = { results: T[]; has_more: boolean; next_cursor: string | null }
 type ChildPageBlock = Block & { child_page?: { title?: string }; last_edited_time?: string }
+
+// The shapes the groomer's methods read, validated at the network boundary (TS-004).
+const BlockShape = z.looseObject({ id: z.string(), type: z.string(), has_children: z.boolean().optional() })
+type BlockShape = z.output<typeof BlockShape>
+const Created = z.object({ results: z.array(BlockShape) })
+const PageShape = z.object({ id: z.string(), url: z.string(), last_edited_time: z.string() })
+const UserShape = z.object({ id: z.string() })
+const RichTextShape = z.array(z.object({ plain_text: z.string().optional(), text: z.object({ content: z.string() }).optional() }))
+const TextBody = z.object({ rich_text: RichTextShape })
+const ToDoBody = z.object({ rich_text: RichTextShape, checked: z.boolean() })
+const LastEditedBy = z.object({ last_edited_by: z.object({ id: z.string() }).optional() })
+
+/** Blocks a write never deletes: deleting one archives a page, a database or content shared elsewhere. */
+const KEPT_TYPES = new Set(['child_page', 'child_database', 'synced_block'])
+const IDEA_SUMMARY_REFUSED = 'cannot write the Idea summary without rewriting the Idea section'
+
+const plainOf = (rich: z.output<typeof RichTextShape>): string => rich.map((part) => part.plain_text ?? part.text?.content ?? '').join('')
+
+/** The plain text of a block's rich text, or '' for a block that has none. */
+function blockText(block: BlockShape): string {
+  const body = TextBody.safeParse(block[block.type])
+  return body.success ? plainOf(body.data.rich_text) : ''
+}
+
+/** 1, 2 or 3 for a heading block, undefined for anything else. */
+function headingLevel(block: BlockShape): number | undefined {
+  const match = block.type.match(/^heading_([123])$/)
+  return match === null ? undefined : Number(match[1])
+}
+
+const isHeading3 = (block: BlockShape | undefined, text: string): boolean => block !== undefined && block.type === 'heading_3' && blockText(block).trim() === text
 
 const dashed = (id: string) => pageIdFrom(id) ?? id
 const pageUrl = (id: string) => `https://www.notion.so/${id.replaceAll('-', '')}`
@@ -230,25 +305,34 @@ export function board(options: BoardOptions): Board {
 
   const children = (pageId: string) => list<ChildPageBlock>(`/blocks/${pageId}/children`)
 
-  const childPages = (blocks: ChildPageBlock[]): Record<string, TicketPage> => {
+  /** The child pages by title, the first of a repeated title in `pages`, and every repeated title with all of its pages in `duplicates`. */
+  const childPages = (blocks: ChildPageBlock[]): { pages: Record<string, TicketPage>; duplicates: { title: string; pages: TicketPage[] }[] } => {
     const pages: Record<string, TicketPage> = {}
+    const byTitle: Record<string, TicketPage[]> = {}
     for (const block of blocks) {
       if (block.type !== 'child_page' || block.id === undefined) continue
       const title = block.child_page?.title ?? ''
-      pages[title] ??= { id: dashed(block.id), title, url: pageUrl(block.id), lastEditedAt: block.last_edited_time ?? '' }
+      const page = { id: dashed(block.id), title, url: pageUrl(block.id), lastEditedAt: block.last_edited_time ?? '' }
+      pages[title] ??= page
+      ;(byTitle[title] ??= []).push(page)
     }
-    return pages
+    const duplicates = Object.entries(byTitle)
+      .filter(([, list]) => list.length > 1)
+      .map(([title, list]) => ({ title, pages: list }))
+    return { pages, duplicates }
   }
 
   async function ticketFrom(page: PageObject): Promise<Ticket> {
     const title = Object.values(page.properties).find((candidate) => candidate.type === 'title')
     const pageId = dashed(page.id)
-    const pages = childPages(await children(pageId))
-    const markdown = await call<{ markdown?: string }>(`/pages/${pageId}/markdown`)
+    const { pages, duplicates } = childPages(await children(pageId))
+    const markdown = await call<{ markdown?: string; truncated?: boolean }>(`/pages/${pageId}/markdown`)
+    const titleText = title === undefined ? '' : propertyText(title)
+    if (markdown.truncated) throw new BoardError(`Notion truncated the page "${titleText}" (${page.url}); not returning a partial copy`)
     return {
       ...uniqueId(page),
       pageId,
-      title: title === undefined ? '' : propertyText(title),
+      title: titleText,
       url: page.url,
       status: text(page, 'Status') ?? '',
       type: text(page, 'Type'),
@@ -260,6 +344,7 @@ export function board(options: BoardOptions): Board {
       lastEditedAt: page.last_edited_time,
       idea: ideaOf(markdown.markdown ?? ''),
       pages,
+      ...(duplicates.length === 0 ? {} : { duplicatePages: duplicates }),
     }
   }
 
@@ -309,6 +394,101 @@ export function board(options: BoardOptions): Board {
     }
   }
 
+  /** A call whose answer is checked against a schema before anything reads it. */
+  async function parsed<S extends z.ZodType>(schema: S, path: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET', body?: unknown): Promise<z.output<S>> {
+    const result = schema.safeParse(await call<unknown>(path, method, body))
+    if (!result.success) throw new BoardError(`Notion answered ${method} ${path} with an unexpected shape: ${result.error.message}`)
+    return result.data
+  }
+
+  /** The top-level blocks of a page, every page of the list, each checked for an id and a type. */
+  async function blocksOf(pageId: string): Promise<BlockShape[]> {
+    return (await list<unknown>(`/blocks/${pageId}/children`)).map((block) => {
+      const result = BlockShape.safeParse(block)
+      if (!result.success) throw new BoardError(`Notion answered a block under ${pageId} with an unexpected shape: ${result.error.message}`)
+      return result.data
+    })
+  }
+
+  /** Creates a child page holding the blocks: the first batch with the page, the rest appended. */
+  async function create(pageId: string, title: string, blocks: Block[]): Promise<{ id: string; url: string }> {
+    const head = blocks.slice(0, APPEND_BATCH)
+    const created = await call<{ id: string; url: string }>('/pages', 'POST', {
+      parent: { page_id: pageId },
+      properties: { title: { title: [{ type: 'text', text: { content: title } }] } },
+      children: head.map((block) => prune(block, APPEND_DEPTH)),
+    })
+    if (head.some((block) => deeperThan(block, APPEND_DEPTH))) await attachDeeper(await children(created.id), head)
+    await append(created.id, blocks.slice(APPEND_BATCH))
+    return { id: dashed(created.id), url: created.url }
+  }
+
+  /** Inserts blocks right after a block, in order, batch by batch. Returns the created top-level ids. */
+  async function insertAfter(parentId: string, afterId: string, blocks: Block[]): Promise<string[]> {
+    const ids: string[] = []
+    let after = afterId
+    for (let offset = 0; offset < blocks.length; offset += APPEND_BATCH) {
+      const batch = blocks.slice(offset, offset + APPEND_BATCH)
+      const created = await parsed(Created, `/blocks/${parentId}/children`, 'PATCH', {
+        children: batch.map((block) => prune(block, APPEND_DEPTH)),
+        position: { type: 'after_block', after_block: { id: after } },
+      }).catch((error: unknown) => {
+        if (error instanceof BoardError && error.status === 400) throw new BoardError(IDEA_SUMMARY_REFUSED, error.status, error.code)
+        throw error
+      })
+      await attachDeeper(created.results, batch)
+      ids.push(...created.results.map((block) => block.id))
+      after = ids.at(-1) ?? after
+    }
+    return ids
+  }
+
+  /** Appends blocks at the end of a parent and returns the created top-level ids. */
+  async function appendReturning(parentId: string, blocks: Block[]): Promise<string[]> {
+    const ids: string[] = []
+    for (let offset = 0; offset < blocks.length; offset += APPEND_BATCH) {
+      const batch = blocks.slice(offset, offset + APPEND_BATCH)
+      const created = await parsed(Created, `/blocks/${parentId}/children`, 'PATCH', { children: batch.map((block) => prune(block, APPEND_DEPTH)) })
+      await attachDeeper(created.results, batch)
+      ids.push(...created.results.map((block) => block.id))
+    }
+    return ids
+  }
+
+  /** The board ID of a ticket for a message: from the ticket, or read from its page. */
+  async function ticketIdOf(page: Ticket | string): Promise<string> {
+    if (typeof page !== 'string') return page.id
+    return uniqueId(await call<PageObject>(`/pages/${pageIdOf(page)}`)).id
+  }
+
+  /**
+   * The groomer's previous summary inside the Idea range, found by its marker paragraph directly above a
+   * `Decisions` heading_3, walked through its shape: marker, Decisions heading and bulleted items, Terms
+   * heading and bulleted items or `None introduced.`. Any other block inside that shape refuses.
+   */
+  function previousSummary(range: BlockShape[]): BlockShape[] | undefined {
+    const start = range.findIndex((block, i) => block.type === 'paragraph' && blockText(block).startsWith(GROOMER_MARKER_PREFIX) && isHeading3(range[i + 1], 'Decisions'))
+    if (start === -1) return undefined
+    const foreign = (block: BlockShape) => new BoardError(`the Idea summary range holds a block the groomer did not write: ${block.id} (${block.type})`)
+    // The bulleted items from index `from` on, up to the first block that is not one.
+    const items = (from: number): BlockShape[] => {
+      const stop = range.findIndex((block, i) => i >= from && block.type !== 'bulleted_list_item')
+      return range.slice(from, stop === -1 ? range.length : stop)
+    }
+    const summary = [...range.slice(start, start + 2), ...items(start + 2)]
+    const terms = range[start + summary.length]
+    if (terms !== undefined) {
+      if (!isHeading3(terms, 'Terms')) throw foreign(terms)
+      const after = start + summary.length + 1
+      const none = range[after]
+      summary.push(terms, ...(none !== undefined && none.type === 'paragraph' && blockText(none).trim() === 'None introduced.' ? [none] : items(after)))
+    }
+    // A note a person nested under a groomer block would be archived with it.
+    const nested = summary.find((block) => block.has_children === true)
+    if (nested !== undefined) throw foreign(nested)
+    return summary
+  }
+
   return {
     async resolveTicket(idOrUrl) {
       return ticketFrom(await findPage(parseTicketRef(idOrUrl)))
@@ -335,29 +515,92 @@ export function board(options: BoardOptions): Board {
     async pushPage(page, title, markdown) {
       const pageId = pageIdOf(page)
       const blocks = markdownToBlocks(markdown)
-      const existing = childPages(await children(pageId))[title]
+      const existing = childPages(await children(pageId)).pages[title]
       if (existing !== undefined) {
         for (const block of await children(existing.id)) if (block.id !== undefined) await call(`/blocks/${block.id}`, 'DELETE')
         await append(existing.id, blocks)
         return { id: existing.id, url: existing.url, created: false }
       }
-      const head = blocks.slice(0, APPEND_BATCH)
-      const created = await call<{ id: string; url: string }>('/pages', 'POST', {
-        parent: { page_id: pageId },
-        properties: { title: { title: [{ type: 'text', text: { content: title } }] } },
-        children: head.map((block) => prune(block, APPEND_DEPTH)),
-      })
-      if (head.some((block) => deeperThan(block, APPEND_DEPTH))) await attachDeeper(await children(created.id), head)
-      await append(created.id, blocks.slice(APPEND_BATCH))
-      return { id: dashed(created.id), url: created.url, created: true }
+      return { ...(await create(pageId, title, blocks)), created: true }
     },
 
     async pullPage(page, title) {
-      const found = childPages(await children(pageIdOf(page)))[title]
+      const found = childPages(await children(pageIdOf(page))).pages[title]
       if (found === undefined) return undefined
       const result = await call<{ markdown?: string; truncated?: boolean }>(`/pages/${found.id}/markdown`)
       if (result.truncated) throw new BoardError(`Notion truncated the page "${title}" (${found.url}); not returning a partial copy`)
       return { ...found, markdown: notionToMarkdown(result.markdown ?? '') }
+    },
+
+    async createPage(page, title, markdown) {
+      return create(pageIdOf(page), title, markdownToBlocks(markdown))
+    },
+
+    async appendParagraph(pageId, text) {
+      const [id] = await appendReturning(pageId, [{ object: 'block', type: 'paragraph', paragraph: { rich_text: chunkText(text) } }])
+      if (id === undefined) throw new BoardError(`Notion created no block under ${pageId}`)
+      return { id }
+    },
+
+    async deleteBlock(id) {
+      await call(`/blocks/${id}`, 'DELETE')
+    },
+
+    async replacePage(page, title, markdown) {
+      const ticketPageId = pageIdOf(page)
+      const found = childPages(await children(ticketPageId)).pages[title]
+      if (found === undefined) throw new BoardError(`${await ticketIdOf(page)} has no child page titled "${title}"`, 404, 'object_not_found')
+      const previous = await blocksOf(found.id)
+      await append(found.id, markdownToBlocks(markdown))
+      for (const block of previous) if (!KEPT_TYPES.has(block.type)) await call(`/blocks/${block.id}`, 'DELETE')
+      const object = await parsed(PageShape, `/pages/${found.id}`)
+      return { id: found.id, url: object.url, lastEditedAt: object.last_edited_time }
+    },
+
+    async writeIdeaSummary(page, markdown) {
+      const pageId = pageIdOf(page)
+      const body = await blocksOf(pageId)
+      const summary = markdownToBlocks(markdown)
+      const at = body.findIndex((block) => headingLevel(block) !== undefined && blockText(block).trim().toLowerCase() === 'idea')
+      const heading = body[at]
+      if (heading === undefined) {
+        // No Idea heading: add `## Idea` after the last block that is not a child page, child database or synced block, or at the end.
+        const blocks = [...markdownToBlocks('## Idea'), ...summary]
+        const last = body.findLast((block) => !KEPT_TYPES.has(block.type))
+        return { ids: last === undefined ? await appendReturning(pageId, blocks) : await insertAfter(pageId, last.id, blocks), deleted: [] }
+      }
+      const level = headingLevel(heading) ?? 0
+      if (level === 3) throw new BoardError(`${await ticketIdOf(page)}'s Idea heading is level 3; change it to ## Idea by hand, then rerun`)
+      const end = body.findIndex((block, i) => i > at && (headingLevel(block) ?? Number.POSITIVE_INFINITY) <= level)
+      const range = body.slice(at + 1, end === -1 ? body.length : end)
+      const previous = previousSummary(range)
+      if (previous !== undefined) {
+        const before = body[body.indexOf(previous[0] ?? heading) - 1] ?? heading
+        const ids = await insertAfter(pageId, before.id, summary)
+        for (const block of previous) await call(`/blocks/${block.id}`, 'DELETE')
+        return { ids, deleted: previous.map((block) => block.id) }
+      }
+      // After the last block of the Idea range that is content; a toggle or column block counts as one opaque block.
+      const skipped = (block: BlockShape) => KEPT_TYPES.has(block.type) || block.type === 'divider' || (block.type === 'paragraph' && blockText(block).trim() === '' && block.has_children !== true)
+      const last = range.findLast((block) => !skipped(block)) ?? heading
+      return { ids: await insertAfter(pageId, last.id, summary), deleted: [] }
+    },
+
+    async listToDos(pageId) {
+      const out: ToDo[] = []
+      for (const block of await blocksOf(pageId)) {
+        if (block.type !== 'to_do') continue
+        const toDo = ToDoBody.safeParse(block.to_do)
+        const editor = LastEditedBy.safeParse(block)
+        if (!toDo.success || !editor.success) throw new BoardError(`Notion answered the to-do ${block.id} with an unexpected shape`)
+        out.push({ id: block.id, checked: toDo.data.checked, text: plainOf(toDo.data.rich_text), lastEditedBy: editor.data.last_edited_by === undefined ? undefined : { id: editor.data.last_edited_by.id } })
+      }
+      return out
+    },
+
+    async me() {
+      const user = await parsed(UserShape, '/users/me')
+      return { id: user.id }
     },
   }
 }
