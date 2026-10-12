@@ -6,6 +6,9 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
+import { SETTLED_DECISIONS_RULE } from '@aspiralabs/agent-common/lib/decisions'
+import { runPipeline, type Call } from '../agent/lib/pipeline.ts'
+import { systemPrompt } from '../agent/lib/review.ts'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const skill = 'skill/aspira-spec-reviewer/SKILL.md'
@@ -72,4 +75,24 @@ it(`${skill} points at agent/instructions.md and restates none of the agent's ru
   const text = readFileSync(join(root, skill), 'utf8')
   expect(text).toContain('agent/instructions.md')
   for (const rule of [...agentRules, ...restatements]) expect(text.toLowerCase()).not.toContain(rule.toLowerCase())
+})
+
+// A spec's `## Decisions` were made by the author before the review (the groomer writes them):
+// every prompt of the review carries the one sentence that says so, or a phase reopens them.
+const specWithDecisions = '# Feature\n## Intent\nLet members share a list.\n## Decisions\n- **Q1 — Who owns the list?** Answer: The team. Why: Shared.\n## Acceptance criteria\n### Features\n- [ ] F1: Members can share a list.\n'
+
+it('the review system prompt says ## Decisions items are settled by the author', () => {
+  expect(systemPrompt).toContain(SETTLED_DECISIONS_RULE)
+})
+
+it('the research, every specialist and the synthesis prompt say ## Decisions items are settled by the author', async () => {
+  const prompts = new Map<string, string>()
+  const call: Call = async ({ phase, prompt }) => {
+    prompts.set(phase, prompt)
+    if (phase === 'synthesis') return { edits: [], dispositions: [] }
+    return { facts: [], findings: [], checks: [], uiEvidence: [], gaps: [] }
+  }
+  await runPipeline({ spec: specWithDecisions, guidelines: '', context: '', uiRequired: false }, call)
+  expect([...prompts.keys()].sort()).toEqual(['acceptance', 'architecture', 'behavior', 'data', 'research', 'security', 'synthesis', 'ui'])
+  expect([...prompts].filter(([, prompt]) => !prompt.includes(SETTLED_DECISIONS_RULE)).map(([phase]) => phase)).toEqual([])
 })

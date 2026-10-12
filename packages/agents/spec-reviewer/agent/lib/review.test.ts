@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { applyEdits, checkContract, checkedRuleIds, findingSchema, ruleIds, synthesisSchema, validateReview, type Finding, type Synthesis } from './review.ts'
+import { LENSES } from '@aspiralabs/agent-common/lib/lenses'
+import { authorDecisionsOf } from './pipeline.ts'
+import { applyEdits, checkContract, checkedRuleIds, findingSchema, lenses, ruleIds, synthesisSchema, validateReview, type Finding, type Synthesis } from './review.ts'
 
 const spec = `# Feature
 ## Intent
@@ -82,4 +84,39 @@ it('tracks defined rules without mistaking citation examples for rules', () => {
 
 it('normalizes compact rule references without dropping coverage', () => {
   expect(checkedRuleIds('REV-002/003/004, TS-070')).toEqual(['REV-002', 'REV-003', 'REV-004', 'TS-070'])
+})
+
+describe('the lens names', () => {
+  it('names the specialist lenses exactly as the shared LENSES list does, in its order', () => {
+    expect(Object.keys(lenses)).toEqual([...LENSES])
+  })
+})
+
+describe('decisions the author already made', () => {
+  const settledSpec = `# Feature
+## Intent
+Let members share a list.
+## Decisions
+- **Q1 — Who owns the list?** Answer: The team. Why: Shared.
+- **D2 — Moves.** body
+- loose note
+## Acceptance criteria
+### Features
+- [ ] F1: Members can share a list.
+`
+  const reopened = (findingId: string, question: string) => ({
+    findingId,
+    status: 'author' as const,
+    reason: 'Reopens a settled choice',
+    evidence: [],
+    editIds: [],
+    duplicateOf: null,
+    decision: { question, options: ['Yes', 'No'], recommended: 'Yes', reasoning: 'it matches the idea', whyYours: 'it is a product call' },
+  })
+  const synthesisReopening: Synthesis = { edits: [], dispositions: [reopened('R1', 'Who owns the list?'), reopened('R2', 'moves')] }
+
+  it('drops every author decision that reopens a ## Decisions item, records it as settled, and keeps unparsed items aside', () => {
+    const result = authorDecisionsOf(settledSpec, synthesisReopening, [])
+    expect({ decisions: result.decisions.length, settledByAuthor: result.settledByAuthor.length, unparsedDecisionItems: result.unparsedDecisionItems }).toEqual({ decisions: 0, settledByAuthor: 2, unparsedDecisionItems: ['- loose note'] })
+  })
 })

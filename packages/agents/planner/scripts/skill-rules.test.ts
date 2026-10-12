@@ -6,6 +6,8 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
+import { SETTLED_DECISIONS_RULE } from '@aspiralabs/agent-common/lib/decisions'
+import { planningInstructions, researchInstructions } from '../agent/lib/prompts.ts'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const skill = 'skill/aspira-planner/SKILL.md'
@@ -53,4 +55,10 @@ it(`${skill} points at agent/instructions.md and restates none of the report rul
   const text = readFileSync(join(root, skill), 'utf8').toLowerCase()
   expect(text).toContain('agent/instructions.md')
   for (const rule of reportRules) expect(text).not.toContain(rule)
+})
+
+// A spec's `## Decisions` were made by the author before planning (the groomer writes them): the
+// planner never emits one of them as a planner decision under another ID.
+it('the research and planning prompts say ## Decisions items are settled by the author', () => {
+  expect([researchInstructions.includes(SETTLED_DECISIONS_RULE), planningInstructions.includes(SETTLED_DECISIONS_RULE)]).toEqual([true, true])
 })

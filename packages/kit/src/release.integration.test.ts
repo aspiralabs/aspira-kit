@@ -1,6 +1,6 @@
 // The release workflow's version step, dry-run on a fixture: the repo's changesets config over
 // minimal copies of every workspace package, one changeset, `changeset version`. Every package in
-// the fixed group ends on one version: ui, config, kit, the seven agent packages and @aspiralabs/agents.
+// the fixed group ends on one version: ui, config, kit, the eight agent packages and @aspiralabs/agents.
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -9,9 +9,9 @@ import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
 
 const repo = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))))
-const PACKAGES = ['ui', 'config', 'kit', 'agents/common', 'agents/spec-writer', 'agents/spec-reviewer', 'agents/planner', 'agents/implementor', 'agents/code-analyzer', 'agents/pr-reviewer', 'agents/meta']
+const PACKAGES = ['ui', 'config', 'kit', 'agents/common', 'agents/spec-writer', 'agents/spec-reviewer', 'agents/planner', 'agents/implementor', 'agents/code-analyzer', 'agents/pr-reviewer', 'agents/groomer', 'agents/meta']
 
-it('bumps all eleven published packages to one version from a single changeset', () => {
+it('bumps all twelve published packages to one version from a single changeset', () => {
   const config = JSON.parse(readFileSync(join(repo, '.changeset', 'config.json'), 'utf8')) as { fixed: string[][]; ignore: string[] }
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kit-release-')))
   mkdirSync(join(dir, '.changeset'))
@@ -40,6 +40,7 @@ it('bumps all eleven published packages to one version from a single changeset',
     return [manifest.name, manifest.version]
   }))
   expect(Object.keys(after).sort()).toEqual([...names].sort())
+  expect(names).toContain('@aspiralabs/groomer')
   expect(config.fixed[0]?.slice().sort()).toEqual([...names].sort())
   expect(config.ignore).not.toEqual(expect.arrayContaining(names))
   const versions = new Set(Object.values(after))
