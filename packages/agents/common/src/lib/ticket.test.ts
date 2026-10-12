@@ -440,7 +440,7 @@ describe('run status words', () => {
       const script = readFileSync(new URL(`../../../${skill}/skill/aspira-${skill}/scripts/${skill}.sh`, import.meta.url), 'utf8')
       for (const match of script.matchAll(/\bstatus=([a-z][a-z-]*)\b/g)) words.add(match[1]!)
       for (const match of script.matchAll(/case \$status in ([a-z|-]+)\)/g)) for (const word of match[1]!.split('|')) words.add(word)
-      for (const match of script.matchAll(/\?\? '([a-z-]+)'|\|\| echo ([a-z-]+)\)/g)) words.add((match[1] ?? match[2])!)
+      for (const match of script.matchAll(/\?\? '([a-z-]+)'|^\s*status=\$\(.*\|\| echo ([a-z-]+)\)/gm)) words.add((match[1] ?? match[2])!)
     }
     return [...words].sort()
   }

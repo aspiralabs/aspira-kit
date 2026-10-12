@@ -10,6 +10,7 @@ import { ticketCli } from './ticket-cli'
 import { afterRun, beforeRun, boardStateDir, verifyRun, type DriverContext } from './ticket-driver'
 import { FlowRefused, finishFlow, findWorkFolders, inputFileFor, localBoardVerify, readAspira, readBoardTrace, readTicketMd, startFlow, type FlowFinish } from './ticket-flow'
 import { TICKET_FILE, renderTicketMd, type BoardAction, type RunStatus, type Skill } from './ticket'
+import type { GroomRunStatus } from './groom-record.ts'
 
 // A board built from the recorded NOM-4 fixture values, in process: the same shape board.ts returns,
 // with the Status, Dev, PR and child pages kept in memory so every move and push can be read back.
@@ -692,7 +693,7 @@ const ideaSummaryOf = (decisions: GroomDecision[]) =>
  * What the groomer's agent leaves in the working folder at the end of its run: the record (keeping what
  * the start step wrote into it), the rendering in groom/trace/decisions.md and, on a confirm, the Idea summary.
  */
-async function agentRun(folder: string, decisions: GroomDecision[], fields: { status: RunStatus; round?: number; summary?: boolean }): Promise<GroomRecord> {
+async function agentRun(folder: string, decisions: GroomDecision[], fields: { status: GroomRunStatus; round?: number; summary?: boolean }): Promise<GroomRecord> {
   const current = await readGroomJson(folder)
   const record: GroomRecord = { ...current, decisions, branches: BRANCHES.map((id) => ({ id, state: 'visited' as const })), round: fields.round ?? 1, open: decisions.filter((decision) => decision.decidedBy === 'open').length, status: fields.status }
   await writeFile(groomJsonPath(folder), `${JSON.stringify(record, null, 2)}\n`)
