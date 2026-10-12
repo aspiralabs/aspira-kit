@@ -15,7 +15,7 @@ import { initNext } from './stacks/next.js'
 
 const kit = dirname(dirname(fileURLToPath(import.meta.url)))
 const repo = dirname(dirname(kit))
-const PACKAGES = ['common', 'spec-reviewer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'meta']
+const PACKAGES = ['common', 'spec-reviewer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'groomer', 'meta']
 const run = (cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) => execFileSync(cmd, args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
 let scratch: string
@@ -48,7 +48,7 @@ beforeAll(() => {
 })
 
 describe('an installed project', () => {
-  it('has every agent under node_modules and kit init writes the six skills from them', async () => {
+  it('has every agent under node_modules and kit init writes the seven skills from them', async () => {
     expect(JSON.parse(readFileSync(join(app, 'node_modules', '@aspiralabs', 'agents', 'package.json'), 'utf8'))).toMatchObject({ name: '@aspiralabs/agents' })
     // kit init's install step adds the registry packages; here it is a no-op, the tarballs are already installed.
     const bin = join(scratch, 'bin')
@@ -62,7 +62,8 @@ describe('an installed project', () => {
     } finally {
       process.env.PATH = path
     }
-    expect(lines.filter((l) => l.startsWith('write  .claude/skills/aspira-')).length).toBe(6)
+    expect(lines.filter((l) => l.startsWith('write  .claude/skills/aspira-')).length).toBe(7)
+    expect(lines.some((l) => l.startsWith('write  .claude/skills/aspira-groomer'))).toBe(true)
     const version = (JSON.parse(readFileSync(join(repo, 'packages/agents/meta/package.json'), 'utf8')) as { version: string }).version
     for (const agent of AGENTS) {
       expect(existsSync(join(skillDir(app, agent), 'SKILL.md'))).toBe(true)
@@ -71,7 +72,7 @@ describe('an installed project', () => {
     }
     const report: string[] = []
     doctor(app, (line) => report.push(line))
-    expect(report.filter((l) => l.startsWith('ok   .claude/skills/aspira-')).length).toBe(6)
+    expect(report.filter((l) => l.startsWith('ok   .claude/skills/aspira-')).length).toBe(7)
     expect(report.some((l) => l.startsWith('@aspiralabs/agents') && l.includes(`installed ${version}`))).toBe(true)
   })
 

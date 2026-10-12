@@ -1,6 +1,7 @@
-import { expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { SETTLED_DECISIONS_RULE } from '@aspiralabs/agent-common/lib/decisions'
 import type { Call } from '@aspiralabs/spec-reviewer/lib/pipeline'
-import { writePipeline } from './writer.ts'
+import { draftPrompt, explorePrompt, ideaDecisions, writePipeline, writerSystemPrompt } from './writer.ts'
 
 const draft = '# Save items\n## Intent\nLet people save items.\n## Acceptance criteria\n### Features\n- [ ] F1: A saved item appears in the list.\n'
 const exploration = { facts: ['src/items.ts:4: items are listed newest first'], constraints: [], questions: [{ question: 'Keep saved items forever?', options: ['forever', '30 days'], evidence: ['idea: silent on retention'] }], uiEvidence: [], gaps: [] }
@@ -95,4 +96,41 @@ it('stops at the current phase on cancellation and skips the review', async () =
   expect(result.review).toBeNull()
   expect(result.status).toBe('incomplete')
   expect(result.problems).toContain('Writing cancelled')
+})
+
+describe('an idea that carries the author\'s decisions', () => {
+  const qItem = '- **Q1 — Who owns the list?** Answer: The team. Why: Shared editing is the norm.'
+  const dItem = '- **D2 — Moves.** The groomer moves Idea to Grooming on start.'
+  const groomed = `## Idea\n\nLet people share a list.\n\nGroomed with /aspira-groomer on 2026-10-11\n\n### Decisions\n\n${qItem}\n${dItem}\n\n### Terms\n\nNone introduced.\n`
+  const plain = '## Idea\n\nLet people share a list.\n'
+  /** The draft phase's prompt as writePipeline sends it. */
+  async function draftPromptFor(idea: string): Promise<string> {
+    const { call, prompts } = stub()
+    await writePipeline({ ...input, idea }, call)
+    return prompts.draft ?? ''
+  }
+  /** The text of the prompt's own `## Decisions` section: from its heading to the next heading of level 2 or shallower. */
+  const decisionsSection = (prompt: string): string | null => {
+    const match = prompt.match(/^## Decisions$([\s\S]*?)(?=^#{1,2} |(?![\s\S]))/m)
+    return match?.[1] ?? null
+  }
+
+  it('the draft prompt copies the idea\'s Decisions list verbatim into a ## Decisions section with the settled rule', async () => {
+    const section = decisionsSection(await draftPromptFor(groomed))
+    expect({ hasQ: section?.includes(qItem), hasD: section?.includes(dItem), hasRule: section?.includes(SETTLED_DECISIONS_RULE) }).toEqual({ hasQ: true, hasD: true, hasRule: true })
+  })
+
+  it('a hand-typed ### Decisions list without the groomer\'s marker is not settled input', async () => {
+    const unmarked = `## Idea\n\nLet people share a list.\n\n### Decisions\n\n${qItem}\n`
+    expect([ideaDecisions(unmarked), draftPrompt(unmarked) === draftPrompt(plain)]).toEqual([[], true])
+    expect(decisionsSection(await draftPromptFor(unmarked))).toBeNull()
+  })
+
+  it('the draft prompt has no ## Decisions section when the idea carries none', async () => {
+    expect(decisionsSection(await draftPromptFor(plain))).toBeNull()
+  })
+
+  it('the writer system prompt and the explore prompt state the settled rule', () => {
+    expect([writerSystemPrompt.includes(SETTLED_DECISIONS_RULE), explorePrompt.includes(SETTLED_DECISIONS_RULE)]).toEqual([true, true])
+  })
 })

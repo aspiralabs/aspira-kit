@@ -1,9 +1,16 @@
 import { readFileSync } from 'node:fs'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { board, ideaOf, parseTicketRef, type Board } from './board'
-import { markdownToBlocks } from './notion-markdown'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { BoardError, board, ideaOf, parseTicketRef, type Board } from './board'
+import { renderGroomPage } from './decisions'
+import type { GroomRecord } from './groom-record'
+import { blocksToMarkdown, markdownToBlocks, type Block } from './notion-markdown'
+import { renderTicketMd } from './ticket'
+import { finishFlow } from './ticket-flow'
 
 // Recorded Notion API shapes (page, data source, block children, page markdown) filled with
 // the NOM-4 ticket as the MCP shows it. The mock server below answers from them, so no test
@@ -26,6 +33,18 @@ let status: string
 let stored: Map<string, Json[]>
 let nextId: number
 let rateLimitOnce: boolean
+/** The ticket page's children come from `stored` alone, not from the recorded fixture: set by `setBody`. */
+let bodyFromStore: boolean
+/** Pages whose markdown route answers `truncated: true`. */
+let truncated: Set<string>
+/** The n-th PATCH /blocks/{id}/children (counted from 1) answers 500. */
+let failAppendAt: number | undefined
+let appends: number
+/** Any PATCH /blocks/{id}/children carrying `position` answers 400. */
+let refusePosition: boolean
+/** Page objects GET /pages/{id} serves beyond the ticket: child pages created or registered by a test. */
+let pageObjects: Map<string, Json>
+let clock: number
 
 function page(): Json {
   const base = fixture<Json>('nom-4.page.json')
@@ -33,19 +52,41 @@ function page(): Json {
   return { ...base, properties }
 }
 
-/** Stores a block tree under a parent, handing out ids the way Notion does, and returns the top level with ids. */
-function store(parent: string, blocks: Json[]): Json[] {
+const isRecord = (value: unknown): value is Json => typeof value === 'object' && value !== null && !Array.isArray(value)
+const records = (value: unknown): Json[] => (Array.isArray(value) ? value.filter(isRecord) : [])
+
+/** Stores a block tree under a parent, handing out ids the way Notion does, and returns the top level with ids. With `after`, the blocks go right after that block, in order. */
+function store(parent: string, blocks: Json[], after?: string): Json[] {
   const list = stored.get(parent) ?? []
   stored.set(parent, list)
+  let at = after === undefined ? list.length : list.findIndex((block) => block.id === after) + 1
   return blocks.map((block) => {
     const id = `blk-${nextId++}`
-    const { children, ...rest } = block as Json & { children?: Json[] }
-    const saved = { object: 'block', id, has_children: Boolean(children?.length), ...rest }
-    list.push(saved)
-    if (children) store(id, children)
+    const { children, ...rest } = block
+    const nested = records(children)
+    const saved = { object: 'block', id, has_children: nested.length > 0, ...rest }
+    list.splice(at, 0, saved)
+    at += 1
+    if (nested.length > 0) store(id, nested)
     return saved
   })
 }
+
+/** A page's last edit moves forward on every write under it, as Notion's does. */
+function touch(parent: string) {
+  const object = pageObjects.get(parent)
+  if (object !== undefined) pageObjects.set(parent, { ...object, last_edited_time: new Date(Date.UTC(2026, 9, 11, 11, clock++)).toISOString() })
+}
+
+/** One page of a block list, 100 at a time, with Notion's cursor. */
+function listed(path: string, all: Json[]): { status: number; body: Json } {
+  const cursor = new URL(path, 'http://mock').searchParams.get('start_cursor')
+  const start = cursor === null ? 0 : Number(cursor)
+  const end = start + 100
+  return { status: 200, body: { object: 'list', results: all.slice(start, end), has_more: end < all.length, next_cursor: end < all.length ? String(end) : null } }
+}
+
+const asBlock = (json: Json): Block => ({ ...json, type: typeof json.type === 'string' ? json.type : 'unsupported' })
 
 async function readBody(request: IncomingMessage): Promise<Json | undefined> {
   const chunks: Buffer[] = []
@@ -56,6 +97,7 @@ async function readBody(request: IncomingMessage): Promise<Json | undefined> {
 function route(call: Call): { status: number; body: Json } {
   const { method, path, body } = call
   const json = (value: Json, code = 200) => ({ status: code, body: value })
+  if (method === 'GET' && path === '/v1/users/me') return json({ object: 'user', id: 'bot-1', type: 'bot', bot: {} })
   if (method === 'GET' && path === `/v1/data_sources/${DS}`) return json(fixture('feature-board.data-source.json'))
   if (method === 'GET' && path === `/v1/data_sources/${DB}`) return json({ object: 'error', status: 404, code: 'object_not_found', message: `Could not find data_source with ID: ${DB}` }, 404)
   if (method === 'GET' && path === `/v1/databases/${DB}`) return json({ object: 'database', id: DB, data_sources: [{ id: DS, name: 'Feature Board' }] })
@@ -70,27 +112,58 @@ function route(call: Call): { status: number; body: Json } {
     if (next) status = next.name as string
     return json(page())
   }
-  if (method === 'GET' && path === `/v1/pages/${PAGE}/markdown`) return json(fixture('nom-4.markdown.json'))
+  if (method === 'GET' && path === `/v1/pages/${PAGE}/markdown`) return json({ ...fixture<Json>('nom-4.markdown.json'), ...(truncated.has(PAGE) ? { truncated: true } : {}) })
   if (method === 'GET' && path === `/v1/pages/${SPEC_REVIEWED}/markdown`) return json(fixture('spec-reviewed.markdown.json'))
   if (method === 'GET' && path.startsWith(`/v1/blocks/${PAGE}/children`)) {
-    const results = [...fixture<{ results: Json[] }>('nom-4.children.json').results, ...(stored.get(PAGE) ?? [])]
-    return json({ object: 'list', results, has_more: false, next_cursor: null })
+    const results = [...(bodyFromStore ? [] : fixture<{ results: Json[] }>('nom-4.children.json').results), ...(stored.get(PAGE) ?? [])]
+    return listed(path, results)
   }
   if (method === 'GET' && path.startsWith(`/v1/blocks/${SPEC_REVIEWED}/children`)) {
     const results = stored.has(SPEC_REVIEWED) ? stored.get(SPEC_REVIEWED)! : fixture<{ results: Json[] }>('spec-reviewed.children.json').results
-    return json({ object: 'list', results, has_more: false, next_cursor: null })
+    return listed(path, results)
+  }
+  const pageMatch = path.match(/^\/v1\/pages\/([^/]+)(\/markdown)?$/)
+  const pageObject = pageMatch === null ? undefined : pageObjects.get(pageMatch[1]!)
+  if (method === 'GET' && pageMatch !== null && pageMatch[2] === undefined && pageObject !== undefined) return json(pageObject)
+  if (method === 'GET' && pageMatch !== null && pageMatch[2] !== undefined && stored.has(pageMatch[1]!)) {
+    const id = pageMatch[1]!
+    return json({ object: 'page_markdown', id, markdown: blocksToMarkdown((stored.get(id) ?? []).map(asBlock)), truncated: truncated.has(id), unknown_block_ids: [] })
   }
   const children = path.match(/^\/v1\/blocks\/([^/]+)\/children(?:\?.*)?$/)
-  if (method === 'GET' && children) return json({ object: 'list', results: stored.get(children[1]!) ?? [], has_more: false, next_cursor: null })
+  if (method === 'GET' && children) return listed(path, stored.get(children[1]!) ?? [])
   if (method === 'PATCH' && children) {
-    if (children[1] === SPEC_REVIEWED && !stored.has(SPEC_REVIEWED)) stored.set(SPEC_REVIEWED, [])
-    return json({ object: 'list', results: store(children[1]!, body?.children as Json[]) })
+    const parent = children[1]!
+    appends += 1
+    if (failAppendAt === appends) return json({ object: 'error', status: 500, code: 'internal_server_error', message: `append ${appends} failed` }, 500)
+    const position = body?.position
+    if (position !== undefined && refusePosition) return json({ object: 'error', status: 400, code: 'validation_error', message: 'body.position should be not present' }, 400)
+    const after = isRecord(position) && isRecord(position.after_block) && typeof position.after_block.id === 'string' ? position.after_block.id : undefined
+    if (after !== undefined && !(stored.get(parent) ?? []).some((block) => block.id === after)) return json({ object: 'error', status: 400, code: 'validation_error', message: `no block ${after} under ${parent}` }, 400)
+    if (parent === SPEC_REVIEWED && !stored.has(SPEC_REVIEWED)) stored.set(SPEC_REVIEWED, [])
+    const results = store(parent, records(body?.children), after)
+    touch(parent)
+    return json({ object: 'list', results })
   }
-  if (method === 'DELETE' && /^\/v1\/blocks\/[^/]+$/.test(path)) return json({ object: 'block', id: path.split('/').pop(), in_trash: true })
+  const single = path.match(/^\/v1\/blocks\/([^/]+)$/)
+  if (method === 'GET' && single) {
+    const found = [...stored.values()].flat().find((block) => block.id === single[1])
+    return found === undefined ? json({ object: 'error', status: 404, code: 'object_not_found', message: `no block ${single[1]}` }, 404) : json(found)
+  }
+  if (method === 'DELETE' && single) {
+    for (const [parent, list] of stored) {
+      const index = list.findIndex((block) => block.id === single[1])
+      if (index === -1) continue
+      list.splice(index, 1)
+      touch(parent)
+    }
+    return json({ object: 'block', id: single[1], in_trash: true })
+  }
   if (method === 'POST' && path === '/v1/pages') {
     const id = `page-${nextId++}`
-    store(id, (body?.children as Json[] | undefined) ?? [])
-    return json({ object: 'page', id, url: `https://www.notion.so/${id}`, last_edited_time: '2026-10-06T00:00:00.000Z', parent: body?.parent })
+    store(id, records(body?.children))
+    const created = { object: 'page', id, url: `https://www.notion.so/${id}`, last_edited_time: '2026-10-06T00:00:00.000Z', parent: body?.parent }
+    pageObjects.set(id, created)
+    return json(created)
   }
   return json({ object: 'error', status: 404, code: 'object_not_found', message: `no route for ${method} ${path}` }, 404)
 }
@@ -127,6 +200,13 @@ beforeEach(() => {
   stored = new Map()
   nextId = 1
   rateLimitOnce = false
+  bodyFromStore = false
+  truncated = new Set()
+  failAppendAt = undefined
+  appends = 0
+  refusePosition = false
+  pageObjects = new Map()
+  clock = 0
   client = board({ token: TOKEN, board: `collection://${DS}`, api })
 })
 
@@ -329,5 +409,388 @@ describe('board given the database page URL', () => {
     const ticket = await b.resolveTicket('NOM-4')
     expect(ticket.id).toBe('NOM-4')
     expect(requests().slice(0, 4)).toEqual([`GET /v1/data_sources/${DB}`, `GET /v1/databases/${DB}`, `GET /v1/data_sources/${DS}`, `POST /v1/data_sources/${DS}/query`])
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
+// The groomer's board work (KIT-8): the Idea boundary, a truncated card, duplicate child pages,
+// the new Board methods and the Idea summary write. Every assertion reads the mock's stored
+// blocks or its request log, never the client's internals.
+// ---------------------------------------------------------------------------------------------
+
+const rich = (content: string) => [{ type: 'text', text: { content, link: null }, plain_text: content }]
+const heading = (id: string, level: 1 | 2 | 3, content: string): Json => ({ object: 'block', id, type: `heading_${level}`, [`heading_${level}`]: { rich_text: rich(content), is_toggleable: false } })
+const paragraph = (id: string, content: string): Json => ({ object: 'block', id, type: 'paragraph', paragraph: { rich_text: rich(content) } })
+const bullet = (id: string, content: string): Json => ({ object: 'block', id, type: 'bulleted_list_item', bulleted_list_item: { rich_text: rich(content) } })
+const childPage = (id: string, title: string, editedAt = '2026-10-11T09:00:00.000Z'): Json => ({ object: 'block', id, type: 'child_page', has_children: true, last_edited_time: editedAt, child_page: { title } })
+const toDo = (id: string, content: string, checked: boolean, editor?: string): Json => ({
+  object: 'block',
+  id,
+  type: 'to_do',
+  to_do: { rich_text: rich(content), checked },
+  ...(editor === undefined ? {} : { last_edited_by: { object: 'user', id: editor } }),
+})
+
+/** The plain text of a stored block: its rich text, or a child page's title. */
+function plain(block: Json): string {
+  const type = block.type
+  if (typeof type !== 'string') return ''
+  const body = block[type]
+  if (!isRecord(body)) return ''
+  if (typeof body.title === 'string') return body.title
+  return records(body.rich_text)
+    .map((part) => (isRecord(part.text) && typeof part.text.content === 'string' ? part.text.content : ''))
+    .join('')
+}
+const isChecked = (block: Json): boolean => isRecord(block.to_do) && block.to_do.checked === true
+const shape = (parent: string): string[] => (stored.get(parent) ?? []).map((block) => `${String(block.type)}: ${plain(block)}`)
+const idsOf = (parent: string): unknown[] => (stored.get(parent) ?? []).map((block) => block.id)
+const deleted = (): string[] => calls.filter((call) => call.method === 'DELETE').map((call) => call.path.split('/').pop() ?? '')
+const writes = (): string[] => calls.filter((call) => call.method !== 'GET').map((call) => `${call.method} ${call.path}`)
+
+/** The ticket page's body is these blocks and nothing from the recorded fixture. */
+function setBody(blocks: Json[]) {
+  bodyFromStore = true
+  stored.set(PAGE, blocks.map((block) => ({ ...block })))
+}
+const NOM4_BODY = (): Json[] => fixture<{ results: Json[] }>('nom-4.children.json').results
+
+const SUMMARY = [
+  'Groomed with /aspira-groomer on 2026-10-11',
+  '',
+  '### Decisions',
+  '',
+  '- **Q1 — Who owns the list — the user or the team?** Answer: The team. Why: Shared editing is the norm.',
+  '',
+  '### Terms',
+  '',
+  '- **Cook**: a person who publishes recipes. _Avoid_: chef.',
+  '',
+].join('\n')
+const SUMMARY_SHAPE = [
+  'paragraph: Groomed with /aspira-groomer on 2026-10-11',
+  'heading_3: Decisions',
+  'bulleted_list_item: Q1 — Who owns the list — the user or the team? Answer: The team. Why: Shared editing is the norm.',
+  'heading_3: Terms',
+  'bulleted_list_item: Cook: a person who publishes recipes. Avoid: chef.',
+]
+const NOM4_SHAPE_AFTER_DOCS = ['heading_2: Docs', 'child_page: Spec', 'child_page: Spec Reviewed', 'child_page: Plan', 'child_page: NOM-4 run log (manual AI-DLC, 2026-09-30 to 2026-10-01)', 'child_page: Implementation']
+const NOM4_PROSE = 'Every list stops at 10 and the default Explore order is effectively random. Unblocks find-cooks, cookbook-detail, search-filters, and My Recipes Phase 1.'
+
+/** A card that already carries a groomer summary from an earlier completion. */
+const previouslyGroomed = (between: Json[] = []): Json[] => [
+  heading('idea', 2, 'Idea'),
+  paragraph('prose', 'Lists stop at ten.'),
+  paragraph('old-marker', 'Groomed with /aspira-groomer on 2026-10-01'),
+  heading('old-decisions', 3, 'Decisions'),
+  bullet('old-q1', 'Q1 — Who owns the list? Answer: Each user. Why: Simpler.'),
+  ...between,
+  heading('old-terms', 3, 'Terms'),
+  bullet('old-term', 'None introduced.'),
+  heading('docs', 2, 'Docs'),
+  childPage('spec-page', 'Spec'),
+]
+const PREVIOUS_SUMMARY_IDS = ['old-marker', 'old-decisions', 'old-q1', 'old-terms', 'old-term']
+
+describe('ideaOf, the Idea boundary', () => {
+  it('# Idea keeps its ### subsections and the ## section after it, both deeper than the Idea heading', () => {
+    expect(ideaOf('# Idea\nLists stop at ten.\n### Decisions\n- Keep the team list.\n## Docs\nTail.')).toBe('Lists stop at ten.\n\n### Decisions\n\n- Keep the team list.\n\n## Docs\n\nTail.\n')
+  })
+
+  it('## Idea keeps its ### subsections and ends at the next ##', () => {
+    expect(ideaOf('## Idea\nLists stop at ten.\n### Terms\n- **Cook**: a person who publishes recipes.\n## Docs\n<page url="https://app.notion.com/p/1">Spec</page>')).toBe(
+      'Lists stop at ten.\n\n### Terms\n\n- **Cook**: a person who publishes recipes.\n',
+    )
+  })
+
+  it('### Idea ends at the next ### and at the ## after it', () => {
+    expect(ideaOf('### Idea\nLists stop at ten.\n### Other\nMore.\n## Docs\nTail.')).toBe('Lists stop at ten.\n')
+  })
+
+  it('a body with no Idea heading comes back with its heading levels unchanged', () => {
+    expect(ideaOf('# Title\nA.\n## Section\nB.\n### Sub\nC.')).toBe('# Title\n\nA.\n\n## Section\n\nB.\n\n### Sub\n\nC.\n')
+  })
+})
+
+describe('resolveTicket on a truncated card', () => {
+  it('refuses with the BoardError pullPage gives for a truncated page', async () => {
+    truncated.add(PAGE)
+    await expect(client.resolveTicket('NOM-4')).rejects.toBeInstanceOf(BoardError)
+    await expect(client.resolveTicket('NOM-4')).rejects.toThrow(/^Notion truncated the page .+; not returning a partial copy$/)
+  })
+})
+
+describe('resolveTicket with two child pages of one title', () => {
+  const G1 = '3f53e59b-2258-8100-0000-0000000000a1'
+  const G2 = '3f53e59b-2258-8100-0000-0000000000a2'
+  const first = { id: G1, title: 'Grooming Decisions', url: 'https://www.notion.so/3f53e59b2258810000000000000000a1', lastEditedAt: '2026-10-11T10:00:00.000Z' }
+  const second = { id: G2, title: 'Grooming Decisions', url: 'https://www.notion.so/3f53e59b2258810000000000000000a2', lastEditedAt: '2026-10-11T10:05:00.000Z' }
+
+  beforeEach(() => setBody([...NOM4_BODY(), childPage(G1, 'Grooming Decisions', first.lastEditedAt), childPage(G2, 'Grooming Decisions', second.lastEditedAt)]))
+
+  it('keeps the first in pages', async () => {
+    expect((await client.resolveTicket('NOM-4')).pages['Grooming Decisions']?.id).toBe(G1)
+  })
+
+  it('lists both, in page order, under duplicatePages', async () => {
+    expect((await client.resolveTicket('NOM-4')).duplicatePages).toEqual([{ title: 'Grooming Decisions', pages: [first, second] }])
+  })
+})
+
+describe('createPage, appendParagraph and deleteBlock', () => {
+  const INTRO = 'Grooming Decisions for NOM-4. Tick one box per question; the next run reads your ticks.'
+  const MARKER = 'Run: 2026-10-11T10:00:00Z agent in progress'
+
+  it('creates the page under the ticket, and the marker lands after the intro', async () => {
+    const ticket = await client.resolveTicket('NOM-4')
+    const created = await client.createPage(ticket, 'Grooming Decisions', INTRO)
+    await client.appendParagraph(created.id, MARKER)
+    expect(calls.find((call) => call.method === 'POST' && call.path === '/v1/pages')?.body).toMatchObject({ parent: { page_id: PAGE }, properties: { title: { title: [{ text: { content: 'Grooming Decisions' } }] } } })
+    expect(shape(created.id)).toEqual([`paragraph: ${INTRO}`, `paragraph: ${MARKER}`])
+  })
+
+  it('appendParagraph returns the id of the block it created', async () => {
+    const created = await client.createPage(PAGE, 'Grooming Decisions', INTRO)
+    const marker = await client.appendParagraph(created.id, MARKER)
+    expect(marker).toEqual({ id: stored.get(created.id)?.at(-1)?.id })
+  })
+
+  it('deleteBlock deletes that block and no other', async () => {
+    const created = await client.createPage(PAGE, 'Grooming Decisions', INTRO)
+    const marker = await client.appendParagraph(created.id, MARKER)
+    await client.deleteBlock(marker.id)
+    expect(deleted()).toEqual([marker.id])
+    expect(shape(created.id)).toEqual([`paragraph: ${INTRO}`])
+  })
+})
+
+describe('replacePage, append-first', () => {
+  const GD = '3f53e59b-2258-8100-0000-0000000000d1'
+  const GD_URL = 'https://www.notion.so/3f53e59b2258810000000000000000d1'
+  const lines = (round: number, count: number) => Array.from({ length: count }, (_, i) => `Round ${round} line ${i + 1}`)
+  const round2 = lines(2, 150)
+  const round3 = lines(3, 160)
+
+  beforeEach(() => {
+    setBody([...NOM4_BODY(), childPage(GD, 'Grooming Decisions')])
+    store(GD, markdownToBlocks(round2.join('\n\n')))
+    stored.get(GD)?.push(childPage('attachment', 'Attachment'))
+    pageObjects.set(GD, { object: 'page', id: GD, url: GD_URL, last_edited_time: '2026-10-11T09:00:00.000Z' })
+  })
+
+  it('a failed append leaves the previous rendering in full and deletes nothing', async () => {
+    failAppendAt = 2
+    await expect(client.replacePage(PAGE, 'Grooming Decisions', round3.join('\n\n'))).rejects.toThrow()
+    expect(deleted()).toEqual([])
+    expect(shape(GD).filter((line) => line.startsWith('paragraph: Round 2 '))).toEqual(round2.map((line) => `paragraph: ${line}`))
+  })
+
+  it('a successful replace leaves the new rendering and the untouched child page', async () => {
+    await client.replacePage(PAGE, 'Grooming Decisions', round3.join('\n\n'))
+    expect(shape(GD).filter((line) => !line.startsWith('child_page: '))).toEqual(round3.map((line) => `paragraph: ${line}`))
+    expect((stored.get(GD) ?? []).filter((block) => block.type === 'child_page').map((block) => block.id)).toEqual(['attachment'])
+  })
+
+  it('returns the page object\'s last edit after the writes', async () => {
+    const result = await client.replacePage(PAGE, 'Grooming Decisions', round3.join('\n\n'))
+    expect(result).toEqual({ id: GD, url: GD_URL, lastEditedAt: pageObjects.get(GD)?.last_edited_time })
+  })
+})
+
+describe('listToDos and me', () => {
+  const PAGE_ID = 'todo-page'
+  const fill = (from: number, count: number) => Array.from({ length: count }, (_, i) => paragraph(`p${from + i}`, `Line ${from + i}`))
+
+  beforeEach(() => {
+    stored.set(PAGE_ID, [
+      toDo('t1', 'The team', true, 'human-7'),
+      ...fill(1, 40),
+      toDo('t2', 'Each user', false, 'bot-1'),
+      ...fill(41, 60),
+      toDo('t3', 'Confirm', true),
+      ...fill(101, 15),
+      toDo('t4', 'Stop', false, 'human-7'),
+    ])
+  })
+
+  it('returns every to-do across pages with its tick, text and last editor', async () => {
+    expect(await client.listToDos(PAGE_ID)).toEqual([
+      { id: 't1', checked: true, text: 'The team', lastEditedBy: { id: 'human-7' } },
+      { id: 't2', checked: false, text: 'Each user', lastEditedBy: { id: 'bot-1' } },
+      { id: 't3', checked: true, text: 'Confirm', lastEditedBy: undefined },
+      { id: 't4', checked: false, text: 'Stop', lastEditedBy: { id: 'human-7' } },
+    ])
+  })
+
+  it('me() returns the integration\'s own user', async () => {
+    expect(await client.me()).toEqual({ id: 'bot-1' })
+  })
+})
+
+describe('writeIdeaSummary', () => {
+  it('on the NOM-4 card inserts the marker, Decisions and Terms after the Idea prose', async () => {
+    setBody(NOM4_BODY())
+    const ticket = await client.resolveTicket('NOM-4')
+    await client.writeIdeaSummary(ticket, SUMMARY)
+    expect(shape(PAGE)).toEqual([`heading_2: Idea`, `paragraph: ${NOM4_PROSE}`, ...SUMMARY_SHAPE, ...NOM4_SHAPE_AFTER_DOCS])
+  })
+
+  it('on the NOM-4 card deletes nothing and keeps the ids and text of the prose and the child pages', async () => {
+    const before = NOM4_BODY().map((block) => `${String(block.id)} ${plain(block)}`)
+    setBody(NOM4_BODY())
+    await client.writeIdeaSummary(await client.resolveTicket('NOM-4'), SUMMARY)
+    const kept = new Set(NOM4_BODY().map((block) => block.id))
+    expect(deleted()).toEqual([])
+    expect((stored.get(PAGE) ?? []).filter((block) => kept.has(block.id)).map((block) => `${String(block.id)} ${plain(block)}`)).toEqual(before)
+  })
+
+  it('the Idea range on the blocks list reads as the same markdown as ticket.idea', async () => {
+    const blocks = fixture<{ results: Block[] }>('nom-4.children.json').results
+    const start = blocks.findIndex((block) => block.id === 'a1')
+    const end = blocks.findIndex((block) => block.id === 'a3')
+    expect(blocksToMarkdown(blocks.slice(start + 1, end))).toBe((await client.resolveTicket('NOM-4')).idea)
+  })
+
+  it('replaces exactly the previous summary, in place, with no second copy', async () => {
+    setBody(previouslyGroomed())
+    await client.writeIdeaSummary(await client.resolveTicket('NOM-4'), SUMMARY)
+    expect([...deleted()].sort()).toEqual([...PREVIOUS_SUMMARY_IDS].sort())
+    expect(shape(PAGE)).toEqual(['heading_2: Idea', 'paragraph: Lists stop at ten.', ...SUMMARY_SHAPE, 'heading_2: Docs', 'child_page: Spec'])
+  })
+
+  it('refuses a summary range that holds a block the groomer did not write, and deletes nothing', async () => {
+    setBody(previouslyGroomed([paragraph('note-1', 'Ask Sam about shared lists.')]))
+    await expect(client.writeIdeaSummary(await client.resolveTicket('NOM-4'), SUMMARY)).rejects.toThrow(/^the Idea summary range holds a block the groomer did not write: note-1 \(paragraph\)$/)
+    expect(deleted()).toEqual([])
+  })
+
+  it('never touches a ### Terms heading in the prose above the marker', async () => {
+    const body = previouslyGroomed()
+    setBody([...body.slice(0, 2), heading('prose-terms', 3, 'Terms'), bullet('prose-term', 'Cook: whoever is at the stove.'), ...body.slice(2)])
+    await client.writeIdeaSummary(await client.resolveTicket('NOM-4'), SUMMARY)
+    expect(deleted().filter((id) => id === 'prose-terms' || id === 'prose-term')).toEqual([])
+    expect(shape(PAGE).slice(0, 4)).toEqual(['heading_2: Idea', 'paragraph: Lists stop at ten.', 'heading_3: Terms', 'bulleted_list_item: Cook: whoever is at the stove.'])
+  })
+
+  it('leaves a hand-groomed ### Decisions list with no marker alone and writes the summary below it', async () => {
+    setBody([heading('idea', 2, 'Idea'), paragraph('prose', 'Lists stop at ten.'), heading('hand-decisions', 3, 'Decisions'), bullet('hand-d1', 'D1 — Name. Lists, not boards.'), bullet('hand-d2', 'D2 — Moves. Humans only.'), heading('docs', 2, 'Docs'), childPage('spec-page', 'Spec')])
+    await client.writeIdeaSummary(await client.resolveTicket('NOM-4'), SUMMARY)
+    expect(deleted()).toEqual([])
+    expect(shape(PAGE)).toEqual([
+      'heading_2: Idea',
+      'paragraph: Lists stop at ten.',
+      'heading_3: Decisions',
+      'bulleted_list_item: D1 — Name. Lists, not boards.',
+      'bulleted_list_item: D2 — Moves. Humans only.',
+      ...SUMMARY_SHAPE,
+      'heading_2: Docs',
+      'child_page: Spec',
+    ])
+  })
+
+  it('on a card with no Idea heading inserts ## Idea and the summary after the last prose block, before the child pages', async () => {
+    setBody([paragraph('prose-1', 'Lists stop at ten.'), paragraph('prose-2', 'Nobody can find older recipes.'), childPage('spec-page', 'Spec'), childPage('plan-page', 'Plan')])
+    await client.writeIdeaSummary(await client.resolveTicket('NOM-4'), SUMMARY)
+    expect(shape(PAGE)).toEqual(['paragraph: Lists stop at ten.', 'paragraph: Nobody can find older recipes.', 'heading_2: Idea', ...SUMMARY_SHAPE, 'child_page: Spec', 'child_page: Plan'])
+  })
+
+  it('refuses a ### Idea heading and writes nothing', async () => {
+    setBody([heading('idea', 3, 'Idea'), paragraph('prose', 'Lists stop at ten.'), childPage('spec-page', 'Spec')])
+    const ticket = await client.resolveTicket('NOM-4')
+    calls = []
+    await expect(client.writeIdeaSummary(ticket, SUMMARY)).rejects.toThrow("NOM-4's Idea heading is level 3; change it to ## Idea by hand, then rerun")
+    expect(writes()).toEqual([])
+  })
+
+  it('on a title-only card appends the heading and the summary after the Grooming Decisions link, as the last blocks', async () => {
+    setBody([childPage('gd-page', 'Grooming Decisions')])
+    await client.writeIdeaSummary(await client.resolveTicket('NOM-4'), SUMMARY)
+    expect(shape(PAGE)).toEqual(['child_page: Grooming Decisions', 'heading_2: Idea', ...SUMMARY_SHAPE])
+  })
+
+  it('refuses when Notion will not insert at a position, and deletes or appends nothing', async () => {
+    refusePosition = true
+    setBody(previouslyGroomed())
+    const before = idsOf(PAGE)
+    await expect(client.writeIdeaSummary(await client.resolveTicket('NOM-4'), SUMMARY)).rejects.toThrow('cannot write the Idea summary without rewriting the Idea section')
+    expect(deleted()).toEqual([])
+    expect(idsOf(PAGE)).toEqual(before)
+  })
+})
+
+describe('finishFlow for the groomer, a tick made on Notion', () => {
+  const GD = '3f53e59b-2258-8100-0000-0000000000d2'
+  const GD_URL = 'https://www.notion.so/3f53e59b2258810000000000000000d2'
+  const GD_EDITED = '2026-10-11T09:00:00.000Z'
+  let folder: string
+
+  beforeEach(async () => {
+    folder = await mkdtemp(join(tmpdir(), 'groomer-finish-'))
+  })
+
+  afterEach(async () => {
+    await rm(folder, { recursive: true, force: true })
+  })
+
+  it('records the Notion tick as the author\'s answer and who ticked it', async () => {
+    status = 'Grooming'
+    setBody([...NOM4_BODY(), childPage(GD, 'Grooming Decisions', GD_EDITED)])
+    pageObjects.set(GD, { object: 'page', id: GD, url: GD_URL, last_edited_time: GD_EDITED })
+    const record: GroomRecord = {
+      decisions: [
+        {
+          id: 'Q1',
+          question: 'Who owns the list?',
+          options: ['The team', 'Each user'],
+          recommended: 'The team',
+          reasoning: 'Shared editing is the norm.',
+          whyYours: 'It decides who can change a list.',
+          decidedBy: 'open',
+          answer: null,
+          branch: 'who',
+          facts: [{ path: 'packages/agents/common/src/lib/board.ts', line: 87 }],
+        },
+      ],
+      branches: [{ id: 'who', state: 'visited' }],
+      round: 1,
+      startedAt: '2026-10-11T10:00:00.000Z',
+      open: 1,
+      page: { id: GD, url: GD_URL },
+      status: 'needs-author',
+    }
+    const rendered = renderGroomPage(record, { date: '2026-10-11', notes: [] })
+    // The page on Notion: the rendering the start pulled, Q1's first option since ticked by a person, and this run's marker.
+    const onNotion = store(GD, markdownToBlocks(rendered.replace(/^- \[ \] The team/m, '- [x] The team')))
+    for (const block of onNotion) if (block.type === 'to_do') block.last_edited_by = { object: 'user', id: isChecked(block) ? 'human-7' : 'bot-1' }
+    const [marker] = store(GD, [{ object: 'block', type: 'paragraph', paragraph: { rich_text: rich('Run: 2026-10-11T10:00:00.000Z agent in progress') } }])
+    await mkdir(join(folder, 'groom', 'trace'), { recursive: true })
+    await writeFile(join(folder, 'groom', 'trace', 'groom.json'), `${JSON.stringify({ ...record, markerBlockId: marker?.id }, null, 2)}\n`)
+    await writeFile(join(folder, 'groom', 'trace', 'decisions.md'), rendered)
+    await writeFile(
+      join(folder, 'ticket.md'),
+      renderTicketMd({
+        id: 'NOM-4',
+        title: 'Explore pagination',
+        url: 'https://www.notion.so/Explore-pagination-3ec3e59b22588102becfce78d66142e1',
+        status: 'Grooming',
+        type: 'Feature',
+        priority: 'P0 - Critical',
+        area: ['Discover'],
+        dev: 'Claude',
+        pr: undefined,
+        version: undefined,
+        pulledAt: '2026-10-11T10:00:00.000Z',
+        idea: `${NOM4_PROSE}\n`,
+        pages: { 'Grooming Decisions': { id: GD, title: 'Grooming Decisions', url: GD_URL, lastEditedAt: GD_EDITED } },
+      }),
+    )
+
+    await finishFlow({ skill: 'groomer', folder, ok: true, runStatus: 'needs-author', board: `collection://${DS}`, client })
+
+    const page = stored.get(GD) ?? []
+    expect(page.map(plain)).toContain('Decided by the author: The team.')
+    expect(page.filter((block) => block.type === 'to_do' && isChecked(block)).map(plain)).toEqual([expect.stringMatching(/^The team\b/)])
+    const saved: unknown = JSON.parse(await readFile(join(folder, 'groom', 'trace', 'groom.json'), 'utf8'))
+    expect(saved).toMatchObject({ decisions: [expect.objectContaining({ id: 'Q1', tickedBy: { kind: 'notion', id: 'human-7' } })] })
   })
 })

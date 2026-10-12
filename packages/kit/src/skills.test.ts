@@ -7,7 +7,7 @@ import { AGENTS, agentPackageDir, checkSkills, installSkills, skillDir, VERSION_
 
 type Layout = 'npm' | 'pnpm'
 
-/** A project with @aspiralabs/agents and the six agents installed, laid out as npm (hoisted) or pnpm (beside the meta-package) would. */
+/** A project with @aspiralabs/agents and every agent installed, laid out as npm (hoisted) or pnpm (beside the meta-package) would. */
 function project(version: string, layout: Layout = 'npm'): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kit-skills-')))
   const scope = layout === 'npm' ? join(root, 'node_modules', '@aspiralabs') : join(root, 'node_modules', '.pnpm', `@aspiralabs+agents@${version}`, 'node_modules', '@aspiralabs')
@@ -48,7 +48,7 @@ describe('agentPackageDir', () => {
 })
 
 describe('installSkills', () => {
-  it('writes the six skill folders as copies of the installed packages, each with .kit-version, and keeps them on a re-run', () => {
+  it('writes the seven skill folders as copies of the installed packages, each with .kit-version, and keeps them on a re-run', () => {
     const root = project('0.5.0', 'pnpm')
     const first = logs()
     expect(installSkills({ projectRoot: root, dryRun: false, log: first.log })).toEqual([])
@@ -59,7 +59,7 @@ describe('installSkills', () => {
       // The launcher is executable even when the package manager dropped the bit.
       expect(statSync(join(dir, 'scripts', `${agent}.sh`)).mode & 0o111).not.toBe(0)
     }
-    expect(first.lines.filter((l) => l.startsWith('write ')).length).toBe(6)
+    expect(first.lines.filter((l) => l.startsWith('write ')).length).toBe(7)
     const again = logs()
     installSkills({ projectRoot: root, dryRun: false, log: again.log })
     expect(again.lines.every((l) => l.startsWith('keep   '))).toBe(true)
@@ -76,7 +76,7 @@ describe('installSkills', () => {
     symlinkSync(join(bumped, 'node_modules'), join(root, 'node_modules'))
     const dry = logs()
     installSkills({ projectRoot: root, dryRun: true, log: dry.log })
-    expect(dry.lines.filter((l) => l.startsWith('update ')).length).toBe(6)
+    expect(dry.lines.filter((l) => l.startsWith('update ')).length).toBe(7)
     expect(readFileSync(join(skillDir(root, 'planner'), VERSION_FILE), 'utf8')).toBe('0.5.0\n')
     installSkills({ projectRoot: root, dryRun: false, log: () => {} })
     expect(readFileSync(join(skillDir(root, 'planner'), VERSION_FILE), 'utf8')).toBe('0.6.0\n')
@@ -126,7 +126,7 @@ describe('checkSkills and kit doctor', () => {
     installSkills({ projectRoot: root, dryRun: false, log: () => {} })
     const healthy = logs()
     expect(doctor(root, healthy.log)).toBe(0)
-    expect(healthy.lines.filter((l) => l.startsWith('ok   .claude/skills/aspira-')).length).toBe(6)
+    expect(healthy.lines.filter((l) => l.startsWith('ok   .claude/skills/aspira-')).length).toBe(7)
     expect(checkSkills(root).every((c) => c.ok)).toBe(true)
 
     writeFileSync(join(skillDir(root, 'pr-reviewer'), VERSION_FILE), '0.4.0\n')
@@ -141,6 +141,20 @@ describe('checkSkills and kit doctor', () => {
 
     installSkills({ projectRoot: root, dryRun: false, log: () => {} })
     expect(doctor(root, () => {})).toBe(0)
+  })
+
+  it('installs .claude/skills/aspira-groomer with the others and reports it missing or stale like them', () => {
+    const root = project('0.5.0')
+    installSkills({ projectRoot: root, dryRun: false, log: () => {} })
+    const groomer = join(root, '.claude', 'skills', 'aspira-groomer')
+    expect(readFileSync(join(groomer, VERSION_FILE), 'utf8')).toBe('0.5.0\n')
+    rmSync(groomer, { recursive: true })
+    const missing = checkSkills(root).find((c) => c.reason?.includes('aspira-groomer'))
+    expect(missing?.reason).toBe('.claude/skills/aspira-groomer is missing')
+    installSkills({ projectRoot: root, dryRun: false, log: () => {} })
+    writeFileSync(join(groomer, VERSION_FILE), '0.4.0\n')
+    const stale = checkSkills(root).find((c) => c.reason?.includes('aspira-groomer'))
+    expect(stale?.reason).toBe('.claude/skills/aspira-groomer is from 0.4.0, @aspiralabs/agents is 0.5.0')
   })
 
   it('reports a skill it cannot check when @aspiralabs/agents is missing', () => {

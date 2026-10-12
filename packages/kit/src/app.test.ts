@@ -305,7 +305,7 @@ describe('kit doctor with an app', () => {
     expect(flagged.lines).toContain('ok   .mcp.json registers aspiralabs-ui from apps/web/node_modules')
     expect(flagged.lines).toContain('ok   .gitignore ignores .aspira/ (the audit log the hooks write)')
     expect(flagged.lines).toContain('ok   aspira.json names the Feature Board and the app (apps/web)')
-    expect(flagged.lines.filter((l) => l.startsWith('ok   .claude/skills/aspira-')).length).toBe(6)
+    expect(flagged.lines.filter((l) => l.startsWith('ok   .claude/skills/aspira-')).length).toBe(7)
     expect(flagged.lines.at(-1)).toBe('healthy')
     // Without the flag: the app comes from aspira.json.
     const fromConfig = logs()

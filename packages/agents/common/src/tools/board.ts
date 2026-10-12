@@ -1,6 +1,6 @@
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
-import { SKILLS } from '../lib/ticket'
+import { RUN_STATUSES, TOOL_SKILLS } from '../lib/ticket'
 import { FlowRefused, finishFlow, readAspira, startFlow } from '../lib/ticket-flow'
 import { resolveArgument } from '../lib/ticket-driver'
 import { board as makeBoard } from '../lib/board'
@@ -17,12 +17,12 @@ export default defineTool({
     'The project Feature Board, through the shared board module. "resolve" reads a ticket (ID or URL) and its Status. "start" gates the skill on the ticket Status, pulls the ticket pages into <repo>/.work/<id>-<slug>/ and claims the ticket (Dev set, In Progress move). "finish" pushes the skill outputs as child pages and makes the success move. Needs NOTION_TOKEN and <repo>/aspira.json. Refuses, with the Status the skill needs and who moves it, when the gate is not met.',
   inputSchema: z.object({
     action: z.enum(['resolve', 'start', 'finish']),
-    skill: z.enum(SKILLS),
+    skill: z.enum(TOOL_SKILLS),
     repo: z.string().describe('The repository root on the host (holds aspira.json and .work/).'),
     ticket: z.string().optional().describe('A board ID such as NOM-4 or a Notion page URL. Omitted: the one working folder under .work/.'),
     folder: z.string().optional().describe('finish: the working folder the start step returned.'),
     ok: z.boolean().optional().describe('finish: did the run succeed.'),
-    runStatus: z.string().optional().describe('finish: the run status word (ready, needs-author, incomplete, complete, clean).'),
+    runStatus: z.enum(RUN_STATUSES).optional().describe(`finish: the run status word (${RUN_STATUSES.join(', ')}).`),
     prUrl: z.string().optional().describe('finish, implementor only: the pull request it opened.'),
     exportDir: z.string().optional().describe('finish: the export directory the trace is written into.'),
     forcePull: z.boolean().optional(),

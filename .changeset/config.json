@@ -14,7 +14,8 @@
       "@aspiralabs/planner",
       "@aspiralabs/implementor",
       "@aspiralabs/code-analyzer",
-      "@aspiralabs/pr-reviewer"
+      "@aspiralabs/pr-reviewer",
+      "@aspiralabs/groomer"
     ]
   ],
   "access": "public",

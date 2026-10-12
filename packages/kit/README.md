@@ -65,7 +65,7 @@ Puts a Next.js project on the kit. `next` is the only stack so far. Without `--a
 | `CLAUDE.md` | `@AGENTS.md`, if the file doesn't exist |
 | `.mcp.json` | Registers the `aspiralabs-ui` docs server (`npx --no aspiralabs-ui-mcp`; with `--app`, `node <app>/node_modules/@aspiralabs/ui/bin/mcp.js`), merged into your servers. The kit's entry is replaced on a re-run, yours are kept |
 | `.claude/settings.json` | Adds the session-start, deny-tier3 and audit-log hooks (`sh node_modules/@aspiralabs/kit/hooks/<name>.sh`; with `--app`, `sh <app>/node_modules/...`), merged into your settings. The kit's hook groups are replaced on a re-run, including entries pointing at the retired `@aspiralabs/config/agent/hooks/` path or at a previous app directory; yours are kept |
-| `.claude/skills/aspira-<agent>/` | One folder per agent (spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer): a copy of the installed package's `skill/aspira-<agent>/` (`SKILL.md` and `scripts/`) plus `.kit-version`, the installed `@aspiralabs/agents` version. Commit them. A re-run after a bump rewrites them |
+| `.claude/skills/aspira-<agent>/` | One folder per agent (groomer, spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer): a copy of the installed package's `skill/aspira-<agent>/` (`SKILL.md` and `scripts/`) plus `.kit-version`, the installed `@aspiralabs/agents` version. Commit them. A re-run after a bump rewrites them |
 | `.gitignore` | Adds `.work/` (the per-ticket working folder) and `.aspira/` (the audit log the hooks write, `.aspira/audit.jsonl`), whichever is missing |
 | `aspira.json` | With `--board`: the project's Feature Board URL and, with `--releases`, its Releases page. The `/aspira-*` skills and `kit next` read it. With `--app`: `"app": "<dir>"`, which `kit doctor`, `kit next` and the skill launchers read to find the installed packages. Without `--board` the board is left as it is, and a project without one has no board: every skill then needs `--no-ticket` |
 
@@ -88,14 +88,14 @@ The `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and settings templates ship in this pa
 
 ### The agent skills
 
-`@aspiralabs/agents` is one dependency that brings every agent package (`@aspiralabs/spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer` and `agent-common`) into the project at the kit's version. Each agent's skill is copied into `.claude/skills/aspira-<agent>/`, so `/aspira-planner` and friends run the agent installed in `node_modules`, never a source checkout. The launcher resolves its agent as `<AGENT>_AGENT_DIR` (kit development only; the run says so), then the installed package under the app named in the root's `aspira.json` (`--app`), then walking up from the working directory, then from its own location; `$ASPIRA_KIT` is not consulted. Agent environment comes from the project's `.env.local` (`AI_GATEWAY_API_KEY`, `NOTION_TOKEN`, `KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`), then the agent's own folder.
+`@aspiralabs/agents` is one dependency that brings every agent package (`@aspiralabs/groomer`, `spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer` and `agent-common`) into the project at the kit's version. Each agent's skill is copied into `.claude/skills/aspira-<agent>/`, so `/aspira-planner` and friends run the agent installed in `node_modules`, never a source checkout. The launcher resolves its agent as `<AGENT>_AGENT_DIR` (kit development only; the run says so), then the installed package under the app named in the root's `aspira.json` (`--app`), then walking up from the working directory, then from its own location; `$ASPIRA_KIT` is not consulted. Agent environment comes from the project's `.env.local` (`AI_GATEWAY_API_KEY`, `NOTION_TOKEN`, `KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`), then the agent's own folder.
 
 Updating an agent is a kit release, a bump of `@aspiralabs/agents` in the project, and `kit init` again; `kit doctor` fails until the skills match the installed version. Each run reports the agent package and version it ran, and writes `trace/agent-version.json` into its export.
 
 **Removing the old `~/.claude/skills` symlinks.** Before this, the skills were symlinks from `~/.claude/skills/aspira-*` into one kit checkout, and `ASPIRA_KIT` pointed the launchers at it. Those links now shadow nothing useful and can point at a stale checkout, so remove them once per machine:
 
 ```bash
-for a in spec-writer spec-reviewer planner implementor code-analyzer pr-reviewer; do
+for a in groomer spec-writer spec-reviewer planner implementor code-analyzer pr-reviewer; do
   [ -L ~/.claude/skills/aspira-$a ] && rm ~/.claude/skills/aspira-$a
 done
 # and drop `export ASPIRA_KIT=...` from your shell profile; the launchers no longer read it

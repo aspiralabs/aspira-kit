@@ -39,6 +39,15 @@ describe('the Playbook module', () => {
   })
 })
 
+describe('Step 1 of the Playbook', () => {
+  it('names /aspira-groomer and keeps the Shortlist -> Ready: Idea move as the human\'s', () => {
+    const { body } = PLAYBOOK_STEPS[0] ?? { body: '' }
+    const sentences = body.split(/(?<=[.;])\s+/)
+    const move = sentences.find((sentence) => /Shortlist\s*(?:→|->|to)\s*Ready: Idea/.test(sentence)) ?? ''
+    expect({ namesGroomer: body.includes('/aspira-groomer'), humanMoves: /\b(?:you|yours|human|by hand)\b/i.test(move) }).toEqual({ namesGroomer: true, humanMoves: true })
+  })
+})
+
 describe('kit next', () => {
   const resolver = (status: string): Resolver => (board, ref) => (board === BOARD && /^nom-4$/i.test(ref) ? { id: 'NOM-4', title: 'Explore pagination', url: 'https://www.notion.so/x', status } : null)
   const run = (ref: string | undefined, resolve: Resolver) => {
@@ -61,6 +70,16 @@ describe('kit next', () => {
         `who      ${row.who}`,
       ])
     }
+  })
+
+  it('sends Idea and Grooming to the groomer, and leaves Shortlist to the human, who approves the groomed idea', () => {
+    writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: BOARD }))
+    const shown = (status: string) => run('NOM-4', resolver(status)).lines.slice(2)
+    expect({ idea: shown('Idea'), grooming: shown('Grooming'), shortlist: shown('Shortlist') }).toEqual({
+      idea: ['next     Step 1: groom the idea with the groomer, then move the card to Ready: Idea', 'run      /aspira-groomer NOM-4 --local', 'who      you, with an agent'],
+      grooming: ['next     Step 1: groom the idea with the groomer, then move the card to Ready: Idea', 'run      /aspira-groomer NOM-4 --local', 'who      you, with an agent'],
+      shortlist: ['next     Approve the groomed idea: move the card to Ready: Idea', 'run      by hand, on the board', 'who      you'],
+    })
   })
 
   it('needs aspira.json, takes the one working folder when no ticket is given, and names two', () => {
