@@ -100,6 +100,12 @@ describe('the round schema and round zero', () => {
     expect([citingSecret, searchedNothing, oneOption].map((round) => roundSchema.safeParse(round).success)).toEqual([false, false, false])
   })
 
+  it('keeps a question\'s reasoning without the full stop the model closed it with, so the summary reads it back the same (REBA1.1)', () => {
+    const closed = { ...nothingFound, questions: [{ ...question('Q1', 'problem'), reasoning: 'Shared editing is the norm.' }] }
+    const parsed = roundSchema.parse(closed)
+    expect(parsed.questions[0]!.reasoning).toBe('Shared editing is the norm')
+  })
+
   it('accepts a round that searched and found nothing, and its report says so', () => {
     const parsed = roundSchema.safeParse(nothingFound)
     expect(parsed.success ? roundZeroReport(parsed.data) : parsed.error.message).toBe('Round zero: nothing found for cart limit; no term collides')

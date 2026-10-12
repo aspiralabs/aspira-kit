@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { SETTLED_DECISIONS_RULE, type Answer } from '@aspiralabs/agent-common/lib/decisions'
+import { markedDecisions } from '@aspiralabs/agent-common/lib/groom-record'
 import { runPipeline, type Call, type PipelineResult } from '@aspiralabs/spec-reviewer/lib/pipeline'
 import { checkContract } from '@aspiralabs/spec-reviewer/lib/review'
 
@@ -28,13 +29,16 @@ export const explorePrompt = `Explore the repository for this idea before a spec
 
 const draftInstructions = `Write the complete initial spec for the idea, as markdown in the spec field. Ground it in the exploration: name the real paths, symbols, data and consumers it touches; never invent files or APIs; mark what is new as new. Use these sections in this order: "# <feature title>", ## Intent, ## Approach, ## Constraints, ## Acceptance criteria with ### Features, ## Assumptions, ## Out of scope, ## Blast radius. Features are unchecked "- [ ] F1: ..." items, numbered from F1, each an observable and falsifiable business outcome or constraint; together they cover every part of the idea, including the relevant permission, failure, empty and edge cases. Do not write a technical Tests checklist; the planner owns it. Assumptions list every product choice the draft makes that the idea did not state and every open question from the exploration, each with the choice taken and the alternatives; reviewers turn the ones that matter into author decisions. Keep the idea's scope; anything beyond it goes to Out of scope. Also return the assumptions as a list in the assumptions field.`
 
-/** The bullet items of the idea's `### Decisions` list (the groomer writes it), verbatim; empty when there is none. */
+/**
+ * The bullet items of the idea's groomed `### Decisions` list, verbatim; empty when there is none. Only
+ * the list under the groomer's marker counts: a hand-typed `### Decisions` on an ungroomed card is
+ * ordinary idea text, not settled input.
+ */
 export function ideaDecisions(idea: string): string[] {
-  const section = idea.match(/^### Decisions[ \t]*$([\s\S]*?)(?=^#{1,3} |(?![\s\S]))/m)?.[1] ?? ''
-  return section.split('\n').filter((line) => line.startsWith('- '))
+  return (markedDecisions(idea) ?? '').split('\n').filter((line) => line.startsWith('- '))
 }
 
-/** The draft instructions; an idea with a `### Decisions` list also gets a `## Decisions` section the spec copies verbatim. */
+/** The draft instructions; an idea with a groomed `### Decisions` list also gets a `## Decisions` section the spec copies verbatim. */
 export function draftPrompt(idea: string): string {
   const decisions = ideaDecisions(idea)
   if (!decisions.length) return draftInstructions

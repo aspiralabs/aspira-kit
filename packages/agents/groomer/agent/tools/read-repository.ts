@@ -2,10 +2,12 @@ import { defineTool } from 'eve/tools'
 import { z } from 'zod'
 import { connectReadTools } from '@aspiralabs/agent-common/lib/mcp'
 import { repository } from '@aspiralabs/agent-common/lib/repository'
+import { requireBound } from '../lib/bound.ts'
 
 // The groomer's only window on the repository (spec Round zero): `repository()`'s list_files,
 // read_files and search over `git ls-files` filtered by allowedPath (no .env*, secrets, keys, .git,
-// node_modules), and the read-only MCP tools MCP_READ_CONNECTIONS allow-lists. No shell, no other file.
+// node_modules), and the read-only MCP tools MCP_READ_CONNECTIONS allow-lists. No shell, no other file,
+// and no other repository: repoPath must be the one the launcher bound the run to (lib/bound.ts).
 
 type Snapshot = Awaited<ReturnType<typeof repository>>
 const snapshots = new Map<string, Promise<Snapshot>>()
@@ -36,6 +38,7 @@ export default defineTool({
     ]),
   }),
   async execute({ repoPath, request }, ctx) {
+    requireBound('repository', repoPath)
     if (request.kind === 'mcp') {
       const mcp = await connectReadTools(process.env.MCP_READ_CONNECTIONS, ctx.abortSignal)
       try {
@@ -46,7 +49,7 @@ export default defineTool({
         await mcp.close()
       }
     }
-    const repo = await snapshot(repoPath)
+    const repo = await snapshot(requireBound('repository', repoPath))
     if (request.kind === 'list') return repo.tools.list_files.execute!({ contains: request.contains }, call)
     if (request.kind === 'read') return repo.tools.read_files.execute!({ files: request.files }, call)
     return repo.tools.search.execute!({ queries: request.queries, pathContains: request.pathContains }, call)

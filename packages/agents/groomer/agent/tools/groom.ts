@@ -1,5 +1,6 @@
 import { defineWorkflowTool } from 'eve/tools'
 import { z } from 'zod'
+import { requireBound } from '../lib/bound.ts'
 import { FACT_FINDING_JSON_SCHEMA, factFinderMessage, factFindingSchema, prepareGroom, runGroom, type FactFinding, type GroomInput } from '../lib/runner.ts'
 
 // One grooming round under eve. Round zero runs on the fact-finder subagent (the cheap tier; eve
@@ -10,6 +11,8 @@ import { FACT_FINDING_JSON_SCHEMA, factFinderMessage, factFindingSchema, prepare
 /** Whether this run needs round zero, and the fact-finder's message when it does. */
 async function planStep(input: GroomInput): Promise<{ needsFacts: boolean; message: string }> {
   'use step'
+  requireBound('folder', input.folder)
+  requireBound('repository', input.repoPath)
   const prepared = await prepareGroom(input)
   return { needsFacts: prepared.needsFacts && !prepared.stopTicked && !prepared.confirmTicked, message: factFinderMessage(prepared, input.repoPath) }
 }

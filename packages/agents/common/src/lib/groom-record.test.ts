@@ -74,6 +74,12 @@ describe('the Idea summary validator (T14)', () => {
     expect(validateIdeaSummary(summary, groomed)).toEqual({ ok: true })
   })
 
+  it('accepts a reasoning and an answer recorded with their own closing full stop (REBA1.1)', () => {
+    const stopped: GroomRecord = { ...groomed, decisions: [{ ...q1, reasoning: 'Shared editing is the norm.' }, { ...q2, answer: 'Keep forever.', options: ['Keep forever.', 'Expire after 30 days'], recommended: 'Keep forever.' }] }
+    expect(validateIdeaSummary(summary, stopped)).toEqual({ ok: true })
+    expect(groomDecisionSchema.parse({ ...q1, reasoning: 'Shared editing is the norm.' }).reasoning).toBe('Shared editing is the norm')
+  })
+
   it('opens with the marker prefix the Idea is located by', () => {
     expect(summary.startsWith(GROOMER_MARKER_PREFIX)).toBe(true)
   })

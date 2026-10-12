@@ -43,9 +43,10 @@ export const normalizeQuestion = (question: string): string => question.toLowerC
 /** The recommended note after an option, as written (`_(…)_`) or as Notion hands it back (`*(…)*`). */
 export const RECOMMENDED_SUFFIX = /\s*[_*]\((?:recommended|recommended, taken by the agent): .*\)[_*]\s*$/
 
-/** The rule every downstream prompt quotes for a spec that carries the groomed `## Decisions`. */
+/** The rule every downstream prompt quotes for a spec that carries the groomed `## Decisions`. Its carve-out keeps a
+ * groomed answer from waiving a MUST guideline rule (review finding IRIS1.1). */
 export const SETTLED_DECISIONS_RULE =
-  "The items under the spec's ## Decisions section were decided by the author: treat each as settled input, and never re-raise one as an assumption, a question, a finding or a decision."
+  "The items under the spec's ## Decisions section were decided by the author: treat each as settled input, and never re-raise one as an assumption, a question, a finding or a decision. The one exception: an item that contradicts a MUST rule in the required guidelines, or the rule to reuse @aspiralabs/ui components, is still a finding, citing the rule's ID and the item's ID; a settled decision never waives a mandatory rule."
 
 /** The checkbox form of one decision: the author ticks an option in the file. */
 export function renderDecision(decision: DecisionRecord): string {

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SETTLED_DECISIONS_RULE } from '@aspiralabs/agent-common/lib/decisions'
 import type { Call } from '@aspiralabs/spec-reviewer/lib/pipeline'
-import { explorePrompt, writePipeline, writerSystemPrompt } from './writer.ts'
+import { draftPrompt, explorePrompt, ideaDecisions, writePipeline, writerSystemPrompt } from './writer.ts'
 
 const draft = '# Save items\n## Intent\nLet people save items.\n## Acceptance criteria\n### Features\n- [ ] F1: A saved item appears in the list.\n'
 const exploration = { facts: ['src/items.ts:4: items are listed newest first'], constraints: [], questions: [{ question: 'Keep saved items forever?', options: ['forever', '30 days'], evidence: ['idea: silent on retention'] }], uiEvidence: [], gaps: [] }
@@ -118,6 +118,12 @@ describe('an idea that carries the author\'s decisions', () => {
   it('the draft prompt copies the idea\'s Decisions list verbatim into a ## Decisions section with the settled rule', async () => {
     const section = decisionsSection(await draftPromptFor(groomed))
     expect({ hasQ: section?.includes(qItem), hasD: section?.includes(dItem), hasRule: section?.includes(SETTLED_DECISIONS_RULE) }).toEqual({ hasQ: true, hasD: true, hasRule: true })
+  })
+
+  it('a hand-typed ### Decisions list without the groomer\'s marker is not settled input', async () => {
+    const unmarked = `## Idea\n\nLet people share a list.\n\n### Decisions\n\n${qItem}\n`
+    expect([ideaDecisions(unmarked), draftPrompt(unmarked) === draftPrompt(plain)]).toEqual([[], true])
+    expect(decisionsSection(await draftPromptFor(unmarked))).toBeNull()
   })
 
   it('the draft prompt has no ## Decisions section when the idea carries none', async () => {

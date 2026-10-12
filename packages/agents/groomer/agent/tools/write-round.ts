@@ -4,6 +4,7 @@ import { defineTool } from 'eve/tools'
 import { z } from 'zod'
 import { groomPageState } from '@aspiralabs/agent-common/lib/decisions'
 import { readGroomRecord, validateIdeaSummary } from '@aspiralabs/agent-common/lib/groom-record'
+import { requireBound } from '../lib/bound.ts'
 import { roundSchema } from '../lib/rounds.ts'
 
 // The model's only way to write (F23): `round-<n>.json`, validated by roundSchema, and
@@ -57,7 +58,7 @@ export default defineTool({
     write: z.discriminatedUnion('kind', [z.object({ kind: z.literal('round'), round: roundSchema }), z.object({ kind: z.literal('summary'), markdown: z.string().min(1) })]),
   }),
   async execute({ output, write }) {
-    if (basename(resolve(output)) !== 'groom') throw new Error(`${output} is not a groom output folder`)
+    requireBound('output', output)
     const path = write.kind === 'round' ? `round-${write.round.round}.json` : IDEA_SUMMARY_NAME
     const content = write.kind === 'round' ? JSON.stringify(write.round) : write.markdown
     return { written: await writeRound(output, { path, content }) }

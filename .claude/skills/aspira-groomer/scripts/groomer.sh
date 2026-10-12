@@ -236,7 +236,7 @@ recorded=$(printf '%s\n' "$finish" | sed -n 's/^run-status=//p' | head -n 1)
 printf '%s\n' "${recorded:-$status}" > "$RUN/status"
 RUNNER
   chmod +x "$run/run.sh"
-  AGENT="$AGENT" EVE="$eve" REPO="$REPO" GUIDELINES="$GUIDELINES" OUTPUT="$OUT" PROMPT="$prompt" RUN="$run" FOLDER="$folder" screen -dmS "groomer-$(basename "$run")" "$run/run.sh"
+  AGENT="$AGENT" EVE="$eve" REPO="$REPO" GUIDELINES="$GUIDELINES" OUTPUT="$OUT" PROMPT="$prompt" RUN="$run" FOLDER="$folder" GROOMER_REPO="$REPO" GROOMER_FOLDER="$folder" screen -dmS "groomer-$(basename "$run")" "$run/run.sh"
   printf 'started\nrun: %s\nidea: %s\nrepo: %s\noutput: %s\ninstructions: %s\n' "$run" "$idea" "$REPO" "$OUT" "$AGENT/agent/instructions.md"
   agent_line
 }

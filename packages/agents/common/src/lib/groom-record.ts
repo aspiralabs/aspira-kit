@@ -47,13 +47,18 @@ export type Fact = z.infer<typeof factSchema>
  * A groomer question. The decision fields of `decisionSchema` (which stays as it is), plus the
  * `Q<n>` id, the branch, the facts, who decided and the flags the page shows.
  */
+/** A sentence without its closing full stop: the Decisions line adds its own after the answer and the reasoning. */
+export const withoutFullStop = (text: string): string => text.trim().replace(/\.$/, '')
+
 export const groomDecisionSchema = z
   .object({
     id: z.string().regex(/^Q\d+(\.\d+)?$/, 'groomer ids are Q<n> or Q<n>.<m>'),
     question: singleLine,
     options: z.array(singleLine).min(1),
     recommended: singleLine,
-    reasoning: singleLine,
+    // The summary line closes the reasoning with its own full stop (`Why: <reasoning>.`), so one the
+    // model ends it with would not survive the round trip (REBA1.1).
+    reasoning: singleLine.transform(withoutFullStop),
     whyYours: singleLine,
     branch: z.string().min(1),
     facts: z.array(factSchema),
@@ -149,8 +154,12 @@ export function rebuildGroomRecord(pageMarkdown: string): { record: GroomRecord;
   return { record, nextId: `Q${top + 1}` }
 }
 
-/** The groomed `### Decisions` list that sits under the groomer's marker paragraph in an Idea; a hand-written list is not read. */
-function markedDecisions(ideaMarkdown: string): string | null {
+/**
+ * The groomed `### Decisions` list that sits under the groomer's marker paragraph in an Idea; a
+ * hand-written list is not read. Every reader of a card's decisions (the groomer's rebuild, the spec
+ * writer) goes through here, so only a groomed list is ever treated as settled.
+ */
+export function markedDecisions(ideaMarkdown: string): string | null {
   const lines = ideaMarkdown.split('\n')
   const marker = lines.findIndex((line) => line.startsWith(GROOMER_MARKER_PREFIX))
   if (marker === -1) return null
@@ -194,8 +203,8 @@ export function validateIdeaSummary(summary: string, record: GroomRecord): IdeaS
     if (item === undefined || !item.id.startsWith('Q') || parsed.unparsed.length > 0) return refuse(`unexpected block in Decisions: ${line}`)
     const decision = confirmed.get(item.id)
     if (decision === undefined) return refuse(`${item.id} is not a confirmed decision in groom.json`)
-    if ((item.answer ?? '').trim() !== (decision.answer ?? '').trim()) return refuse(`${item.id}: the answer differs from the recorded one`)
-    if ((item.reasoning ?? '').trim() !== decision.reasoning.trim()) return refuse(`${item.id}: the reasoning differs from the recorded one`)
+    if (withoutFullStop(item.answer ?? '') !== withoutFullStop(decision.answer ?? '')) return refuse(`${item.id}: the answer differs from the recorded one`)
+    if (withoutFullStop(item.reasoning ?? '') !== withoutFullStop(decision.reasoning)) return refuse(`${item.id}: the reasoning differs from the recorded one`)
     if (listed.has(item.id)) return refuse(`${item.id} is listed twice`)
     listed.add(item.id)
   }

@@ -81,6 +81,12 @@ it(`${skill} points at agent/instructions.md and restates none of the agent's ru
 // every prompt of the review carries the one sentence that says so, or a phase reopens them.
 const specWithDecisions = '# Feature\n## Intent\nLet members share a list.\n## Decisions\n- **Q1 — Who owns the list?** Answer: The team. Why: Shared.\n## Acceptance criteria\n### Features\n- [ ] F1: Members can share a list.\n'
 
+it('a settled decision never waives a MUST rule: the rule every phase quotes carves it out', () => {
+  // A groomed answer is the author's, but a MUST guideline rule or the @aspiralabs/ui reuse rule is not
+  // the author's to waive; without the carve-out a decision silently exempts the spec (IRIS1.1).
+  expect([SETTLED_DECISIONS_RULE.includes('contradicts a MUST rule in the required guidelines'), SETTLED_DECISIONS_RULE.includes('@aspiralabs/ui'), SETTLED_DECISIONS_RULE.includes('a settled decision never waives a mandatory rule')]).toEqual([true, true, true])
+})
+
 it('the review system prompt says ## Decisions items are settled by the author', () => {
   expect(systemPrompt).toContain(SETTLED_DECISIONS_RULE)
 })
