@@ -405,6 +405,9 @@ importers:
       '@aspiralabs/code-analyzer':
         specifier: workspace:*
         version: link:../code-analyzer
+      '@aspiralabs/groomer':
+        specifier: workspace:*
+        version: link:../groomer
       '@aspiralabs/implementor':
         specifier: workspace:*
         version: link:../implementor

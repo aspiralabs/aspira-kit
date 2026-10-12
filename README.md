@@ -7,7 +7,7 @@ The Aspira Labs development kit. One repo that says everything the organization 
 | `@aspiralabs/ui` | Components, `tokens.css`, component docs (MDX), and an MCP server that serves those docs to agents | `pnpm add @aspiralabs/ui` |
 | `@aspiralabs/config` | `eslint/next`, `eslint/base`, `eslint/library`, `tsconfig/*`, `prettier`, and `agent/*` (constraints, guides, hooks, personas, templates) | `pnpm add -D @aspiralabs/config` |
 | `@aspiralabs/kit` | The CLI. `kit init --stack next` wires a project, `kit add auth` scaffolds Better Auth, `kit doctor` reports its kit version and drift. [Reference](packages/kit/README.md) | `pnpm add -D @aspiralabs/kit` |
-| `@aspiralabs/agents` | The agents, in one dependency: `spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer` (each its own `@aspiralabs/<agent>` package) and `agent-common`. `kit init` adds it and installs their `/aspira-*` skills into the project. [Reference](packages/agents/README.md) | `pnpm add -D @aspiralabs/agents` (via `kit init`) |
+| `@aspiralabs/agents` | The agents, in one dependency: `groomer`, `spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer` (each its own `@aspiralabs/<agent>` package) and `agent-common`. `kit init` adds it and installs their `/aspira-*` skills into the project. [Reference](packages/agents/README.md) | `pnpm add -D @aspiralabs/agents` (via `kit init`) |
 
 Every package is published to **GitHub Packages** under the `aspiralabs` org and versioned in lockstep: one version number across the kit, agents included.
 

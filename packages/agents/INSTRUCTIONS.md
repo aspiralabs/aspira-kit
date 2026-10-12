@@ -146,6 +146,16 @@ agent implementor "Implement specs/feature.md in the GitHub repository owner/nam
 
 **Skill:** `/aspira-implementor <ticket> [--repo owner/name] [--ref BRANCH] [--pr]` launches this agent on the ticket's Plan page (from `Ready: Plan`; it claims the card, pushes `implementation.md` as the page Implementation and, when it opened the PR, sets PR and moves to `In Review: Implementation`); `<plan.review | spec.md> --no-ticket` builds a file with no board. Add `--local` to run the same pipeline in your Claude Code session from the agent's own files; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `implementor/skill/aspira-implementor/`; see **Skills** in `README.md`. Without `--repo`, the launcher builds the current checkout's GitHub `origin` from the current branch, which must be pushed. `--local` builds the local checkout and pushes nothing. It also takes a ticket, which the session first restates as a spec. Review the result with `pr-reviewer`.
 
+## groomer
+
+Grooms a Feature card's Idea in rounds before it reaches Ready: Idea. Each run is one round: it finds what the repository already has for the idea, asks the open product questions on the ticket's Grooming Decisions page, and once the human ticks Confirm with nothing open, writes the Decisions and Terms into the card's Idea. It never touches the board itself; the launcher's ticket step makes the moves.
+
+```bash
+agent groomer "Groom the ticket in $PWD/.work/<id>-<slug> for $PWD"
+```
+
+**Skill:** `/aspira-groomer <ticket> [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR]` launches this agent on the ticket's Idea (from `Idea` or `Grooming`; it moves Idea -> Grooming on start, pushes the page Grooming Decisions each round and, on Confirm, writes the Idea summary and moves Grooming -> Shortlist). It writes to the card, so there is no `--no-ticket` mode. The move from Shortlist to Ready: Idea is the human's. Add `--local` to run the rounds in your Claude Code session from the agent's own files, answering in chat; the first stage is `knowledge`, where the session fetches the Notion rules (or pass `--guidelines`). Source: `groomer/skill/aspira-groomer/`; see **Skills** in `README.md`. Also see `groomer/README.md` for outputs and models. Override the resolved agent with `GROOMER_AGENT_DIR` (kit development only).
+
 ## Checking an agent is healthy
 
 ```bash

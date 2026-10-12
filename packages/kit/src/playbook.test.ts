@@ -42,7 +42,7 @@ describe('the Playbook module', () => {
 describe('Step 1 of the Playbook', () => {
   it('names /aspira-groomer and keeps the Shortlist -> Ready: Idea move as the human\'s', () => {
     const { body } = PLAYBOOK_STEPS[0] ?? { body: '' }
-    const sentences = body.split(/(?<=[.:;])\s+/)
+    const sentences = body.split(/(?<=[.;])\s+/)
     const move = sentences.find((sentence) => /Shortlist\s*(?:→|->|to)\s*Ready: Idea/.test(sentence)) ?? ''
     expect({ namesGroomer: body.includes('/aspira-groomer'), humanMoves: /\b(?:you|yours|human|by hand)\b/i.test(move) }).toEqual({ namesGroomer: true, humanMoves: true })
   })

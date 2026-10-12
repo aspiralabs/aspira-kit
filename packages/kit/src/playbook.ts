@@ -7,7 +7,8 @@
 export type PlaybookRow = { statuses: string[]; step: string; command: string | null; who: string }
 
 export const PLAYBOOK: PlaybookRow[] = [
-  { statuses: ['Idea', 'Grooming', 'Shortlist'], step: 'Step 1: groom the idea, then move the card to Ready: Idea', command: null, who: 'you' },
+  { statuses: ['Idea', 'Grooming'], step: 'Step 1: groom the idea with the groomer, then move the card to Ready: Idea', command: '/aspira-groomer <ID> --local', who: 'you, with an agent' },
+  { statuses: ['Shortlist'], step: 'Approve the groomed idea: move the card to Ready: Idea', command: null, who: 'you' },
   { statuses: ['Ready: Idea'], step: 'Step 2: write the spec', command: '/aspira-spec-writer <ID> --local', who: 'agent' },
   { statuses: ['In Progress: Spec'], step: 'Step 2 is running, or it stopped: rerun it', command: '/aspira-spec-writer <ID> --local', who: 'agent, then you' },
   { statuses: ['In Review: Spec'], step: 'Step 3: debate the spec, answer its decisions, then Step 4: approve it', command: '/aspira-spec-reviewer <ID> --local', who: 'agent, then you' },
@@ -37,7 +38,12 @@ export function commandFor(row: PlaybookRow, id: string): string | null {
 export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
   {
     title: 'Step 1: groom the idea',
-    body: "Write Problem, who has it, and what done looks like in the ticket's Idea section. Move the card Idea → Grooming → Shortlist → Ready: Idea by hand.",
+    body: [
+      '```bash',
+      '/aspira-groomer <ID> --local',
+      '```',
+      "Write Problem, who has it, and what done looks like in the ticket's Idea section, then run the groomer (kit 0.7.0 and later). Needs Idea or Grooming. It moves the card Idea → Grooming when it starts, interviews you in rounds on the ticket's **Grooming Decisions** page, grounded in the repository, and on Confirm writes the Decisions and Terms into the Idea and moves the card Grooming → Shortlist. You read the groomed Idea and move the card Shortlist → Ready: Idea by hand. No agent does this (BOARD-004).",
+    ].join('\n'),
   },
   {
     title: 'Step 2: write the spec',

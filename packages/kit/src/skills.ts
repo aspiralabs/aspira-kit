@@ -10,7 +10,7 @@ import { appRoot } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 
 /** The agents a project gets through @aspiralabs/agents, each with a /aspira-<agent> skill. */
-export const AGENTS = ['spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer'] as const
+export const AGENTS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer'] as const
 export type Agent = (typeof AGENTS)[number]
 
 /** The package that brings every agent into a project. */

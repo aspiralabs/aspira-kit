@@ -9,6 +9,7 @@ Aspira Labs agents, built on [eve](https://vercel.com/eve). One package per agen
 
 | Package | Agent | Spec | State |
 | --- | --- | --- | --- |
+| `packages/agents/groomer` | `groomer` | KIT-8 | grooms a Backlog card's Idea in rounds before Ready: Idea |
 | `packages/agents/spec-writer` | `spec-writer` | `specs/agents-spec-writer.md` | idea to spec: explore, draft, then the official review |
 | `packages/agents/spec-reviewer` | `spec-reviewer` | `specs/agents-spec-reviewer.md` | official three-phase reviewer |
 | `packages/agents/planner` | `planner` | `specs/agents-planner.md` | implementation and test planning |
@@ -18,7 +19,7 @@ Aspira Labs agents, built on [eve](https://vercel.com/eve). One package per agen
 
 ## Skills: one pattern for every agent
 
-Spec: `specs/agents-skill-pattern.md`. Every agent a person runs (spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer) has a Claude Code skill at `<agent>/skill/aspira-<agent>/`, with `SKILL.md` and `scripts/<agent>.sh`. The agent is the single source of truth, and the skill only calls it:
+Spec: `specs/agents-skill-pattern.md`. Every agent a person runs (groomer, spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer) has a Claude Code skill at `<agent>/skill/aspira-<agent>/`, with `SKILL.md` and `scripts/<agent>.sh`. The agent is the single source of truth, and the skill only calls it:
 
 - **Default: launch the agent.** `scripts/<agent>.sh start` runs the agent as a separate process, detached in `screen`. `status` and `wait` follow it. The skill relays the agent's report and never does the work itself.
 - **`--local`: the same pipeline in the session.** `scripts/<agent>.sh local` steps a driver in the agent's package. The driver makes no model calls. Each step prints the next stage as JSON, with every task's prompt written to a file. The session runs those tasks as subagents (in parallel where the stage says), and the driver checks their outputs against the agent's own schemas before it advances. Prompts are assembled at runtime from the agent's own files: `agent/instructions.md`, `agent/subagents/*/instructions.md`, and the prompt and schema modules in `agent/lib/`. Editing the agent changes `--local` with no copy to update. `--finish` exports what exists as incomplete. A change to the source or the rules mid-run is refused.
