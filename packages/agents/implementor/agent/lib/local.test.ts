@@ -5,8 +5,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { DEFAULT_REQUIRED } from '@aspiralabs/agent-common/lib/knowledge'
-import { afterEach, expect, it } from 'vitest'
-import { runLocal, workerBriefTemplate, type LocalResult } from './local.ts'
+import { afterEach, describe, expect, it } from 'vitest'
+import { runLocal, workerBriefTemplate, type LocalResult, exportDirOf } from './local.ts'
 import { rewriteNotesFile } from './notes.ts'
 
 const exec = promisify(execFile)
@@ -345,4 +345,15 @@ it('quotes procedure headings verbatim, on one line', async () => {
   expect(procedureHeading(procedure, 'Run to completion')).toBe('## Run to completion')
   expect(procedureHeading(procedure, 4)).toBe('## 4. Analyze the plan and decide how to parallelize')
   expect(() => procedureHeading(procedure, 9)).toThrow('## 9.')
+})
+
+describe('where a finished run writes its board trace', () => {
+  it('is the run\'s work folder, not the exported trace file inside it', () => {
+    const workDir = '/repo/.work/kit-8-x/plan.review'
+    expect(exportDirOf({ pending: false, status: 'complete', workDir, export: `${workDir}/trace/implementation-local.json`, missing: [] })).toBe(workDir)
+  })
+
+  it('is nothing for a run that exported nothing', () => {
+    expect(exportDirOf({ pending: false, status: 'refused', workDir: '/repo/plan.review', export: null, missing: [] })).toBeNull()
+  })
 })

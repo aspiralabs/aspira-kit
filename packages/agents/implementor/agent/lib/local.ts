@@ -112,6 +112,13 @@ export type LocalDone = {
 /** Any step's result. */
 export type LocalResult = LocalKnowledge | LocalPending | LocalDone
 
+/**
+ * Where a finished run's board trace, agent version and end-of-run board actions go: the run's work
+ * folder (plan.review/), never `export`, which is the path of the trace file inside it. Null for a run
+ * that exported nothing.
+ */
+export const exportDirOf = (result: LocalDone): string | null => (result.export === null ? null : result.workDir)
+
 type Kind = 'plan' | 'spec' | 'ticket'
 type Source = { kind: Kind; path: string; repo: string; workDir: string; planFile: string; reviewFile: string | null; trailer: string | null; note: string | null }
 type Knowledge = { source: 'notion' | 'guidelines'; fingerprint: string; fetchedAt: string | null; pages: RecordedPage[]; config: KnowledgeConfig | null }

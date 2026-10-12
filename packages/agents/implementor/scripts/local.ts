@@ -4,7 +4,7 @@ import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/a
 import { TicketArgumentError } from '@aspiralabs/agent-common/lib/ticket'
 import { afterRun, beforeRun, verifyRun } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { FlowRefused, writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
-import { runLocal } from '../agent/lib/local.ts'
+import { exportDirOf, runLocal } from '../agent/lib/local.ts'
 
 // One step of a --local build. The ticket comes first: the `board` stage (resolve, pull, claim) is
 // printed before anything else, and the driver refuses, before any model stage, when ticket.md does
@@ -56,13 +56,14 @@ try {
         serial: values.serial === true,
         finish: values.finish === true,
       })
-      if (!result.pending && result.export !== null) await recordAgentVersion(result.export, agent)
+      const exported = result.pending ? null : exportDirOf(result)
+      if (exported !== null) await recordAgentVersion(exported, agent)
       if (!result.pending && before.kind === 'ticket') {
-        const exportDir = result.export ?? outputFor(before.folder)
+        const exportDir = exported ?? outputFor(before.folder)
         const board = await afterRun(context, before, { ok: result.status === 'complete', status: result.status, exportDir, verifyCommand: `implementor.sh local ${before.ticket.id} --verify` })
         console.log(JSON.stringify({ ...result, agent, ...board }, null, 2))
       } else {
-        if (!result.pending && result.export !== null) await writeBoardTrace(result.export, before.trace)
+        if (exported !== null) await writeBoardTrace(exported, before.trace)
         console.log(JSON.stringify({ ...result, agent, ticket: before.kind === 'none' ? 'none' : `${before.ticket.id} ${before.ticket.title}`, ...(before.kind === 'none' ? {} : { folder: before.folder }) }, null, 2))
       }
       if (!result.pending && result.status !== 'complete') process.exitCode = 1
