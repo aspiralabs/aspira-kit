@@ -50,7 +50,7 @@ configured_app() {
 # walking up from the working directory, then from this script's location), then this script's own package. $ASPIRA_KIT is never consulted.
 # Sets AGENT, AGENT_SOURCE (env | installed | package), AGENT_VERSION and PROJECT.
 resolve_agent() {
-  local here dir app_dir
+  local here dir app_dir own
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   AGENT="" AGENT_SOURCE="" PROJECT=""
   for dir in "${CODE_ANALYZER_AGENT_DIR:-}" "${STATIC_ANALYSIS_AGENT_DIR:-}"; do
@@ -63,9 +63,16 @@ resolve_agent() {
     if [ -n "$app_dir" ] && AGENT=$(installed_in "$app_dir"); then AGENT_SOURCE=installed; PROJECT=$app_dir; fi
   fi
   if [ -z "$AGENT" ]; then
+    # A kit checkout that installs its own agents (to run /aspira-* on itself) finds this very
+    # package through its root node_modules. That is the package, not a project install, so the
+    # project is still the working directory's.
+    own=$( (cd "$here/../../.." 2>/dev/null && pwd -P) || true)
     for dir in "$PWD" "$here"; do
       while :; do
-        if AGENT=$(installed_in "$dir"); then AGENT_SOURCE=installed; PROJECT=$dir; break 2; fi
+        if AGENT=$(installed_in "$dir"); then
+          if [ "$AGENT" = "$own" ]; then AGENT_SOURCE=package; else AGENT_SOURCE=installed; PROJECT=$dir; fi
+          break 2
+        fi
         [ "$dir" != / ] || break
         dir=$(dirname "$dir")
       done
