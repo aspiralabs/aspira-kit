@@ -1068,6 +1068,15 @@ describe('the groomer finish (separate process)', () => {
     expect(record.decisions.find((decision) => decision.id === 'Q2')).toMatchObject({ decidedBy: 'author', answer: 'Expire after 30 days' })
     expect(said(finished.trace, 'local round 3 discarded, page is at round 2')).toBe(true)
   })
+
+  it('a run working at the page\'s round writes the next round to the page and to groom.json', async () => {
+    const client = fakeBoard('Grooming', {})
+    seedGroomPage(client, renderedPage(groomRecord([confirmed(Q1)], { round: 2 })))
+    const started = await startGroomer(client)
+    await agentRun(started.folder, [confirmed(Q1), Q2], { status: 'needs-author', round: 2 })
+    await finishGroomer(client, started.folder, 'needs-author')
+    expect([(await readGroomJson(started.folder)).round, /^Round 3 · /m.test(groomPageOf(client).markdown)]).toEqual([3, true])
+  })
 })
 
 describe('the ticket CLI for the groomer', () => {

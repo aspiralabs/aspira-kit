@@ -94,7 +94,7 @@ const confirmed = (id: string, branch: string, answer: string) => ({ ...question
 
 /** Every seeded branch visited, so nothing but open questions keeps Confirm away. */
 const allVisited = () => SEEDED.map((id) => ({ id, state: 'visited' as const }))
-const groomRecord = <D extends { decidedBy: 'open' | 'author' }>(round: number, decisions: D[], branches = allVisited()) => ({
+const groomRecord = <D extends { decidedBy: 'open' | 'author' }>(round: number, decisions: D[], branches: { id: string; state: 'open' | 'visited' | 'closed' }[] = allVisited()) => ({
   decisions,
   branches,
   round,

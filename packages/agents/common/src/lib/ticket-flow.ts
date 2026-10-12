@@ -539,6 +539,10 @@ async function finishGroom(options: FinishOptions, client: Board, ticket: Ticket
         const rebuilt = rebuildGroomRecord(classified.kept).record
         working = { ...working, decisions: rebuilt.decisions, branches: rebuilt.branches, round: rebuilt.round }
         check(`local round ${record!.round} discarded, page is at round ${classified.round}`)
+      } else {
+        // This run's rendering is the page's next round: the agent works at the page's round and the
+        // finish, the one writer of the page, numbers what it writes (a discarded record only repairs).
+        working = { ...working, round: classified.round + 1 }
       }
       if (classified.deleted.length > 0) check(`${classified.deleted.length} line(s) of an incomplete or older rendering replaced`)
       try {
