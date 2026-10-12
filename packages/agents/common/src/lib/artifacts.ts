@@ -1,8 +1,12 @@
 import { lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 
+/** What proves a directory is one this helper wrote: the report file it holds (default `trace/review.json`; the groomer passes `trace/groom.json`). */
+export type ArtifactOptions = { marker?: string }
+
 /** Publish a complete report directory; keep the last report if writing fails. */
-export async function writeArtifacts(outputDir: string, files: Record<string, string>, finalize?: () => Record<string, string>) {
+export async function writeArtifacts(outputDir: string, files: Record<string, string>, finalize?: () => Record<string, string>, options: ArtifactOptions = {}) {
+  const marker = options.marker ?? 'trace/review.json'
   const dir = resolve(outputDir)
   await mkdir(dirname(dir), { recursive: true })
   const lock = `${dir}.lock`
@@ -19,8 +23,8 @@ export async function writeArtifacts(outputDir: string, files: Record<string, st
     })
     if (existing) {
       if (!existing.isDirectory() || existing.isSymbolicLink()) throw new Error(`Output is not a review directory: ${dir}`)
-      const report = await readFile(resolve(dir, 'trace/review.json'), 'utf8').catch(() => readFile(resolve(dir, 'review.json'), 'utf8').catch(() => ''))
-      if (!report) throw new Error(`Refusing to replace a directory without trace/review.json: ${dir}`)
+      const report = await readFile(resolve(dir, marker), 'utf8').catch(() => readFile(resolve(dir, basename(marker)), 'utf8').catch(() => ''))
+      if (!report) throw new Error(`Refusing to replace a directory without ${marker}: ${dir}`)
     }
     staging = await mkdtemp(resolve(dirname(dir), `.${basename(dir)}-`))
     async function write(batch: Record<string, string>) {

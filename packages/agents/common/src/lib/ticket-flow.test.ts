@@ -111,7 +111,7 @@ function fakeBoard(status: string, pages: Record<string, string> = { Spec: SPEC,
       const block = { id: nextBlockId(), text, lastEditedBy: state.botId }
       entry.blocks.push(block)
       entry.markdown = markdownOf(entry.blocks)
-      return block.id
+      return { id: block.id }
     },
     async deleteBlock(id) {
       state.calls.push(`delete ${id}`)
@@ -139,7 +139,7 @@ function fakeBoard(status: string, pages: Record<string, string> = { Spec: SPEC,
       state.calls.push(`list-todos ${pageId}`)
       return pageEntry(pageId)
         .blocks.filter((block) => /^- \[[ xX]\] /.test(block.text))
-        .map((block) => ({ id: block.id, checked: /^- \[[xX]\]/.test(block.text), text: plainText(block.text), ...(block.lastEditedBy === undefined ? {} : { lastEditedBy: block.lastEditedBy }) }))
+        .map((block) => ({ id: block.id, checked: /^- \[[xX]\]/.test(block.text), text: plainText(block.text), ...(block.lastEditedBy === undefined ? {} : { lastEditedBy: { id: block.lastEditedBy } }) }))
     },
     async me() {
       state.calls.push('me')
@@ -638,13 +638,13 @@ const pageTexts = (client: Fake) => groomPageOf(client).blocks.map((block) => bl
 const pageBlocks = (client: Fake) => groomPageOf(client).blocks.map((block) => ({ id: block.id, text: block.text }))
 
 /** A person ticks the one unticked box whose line starts with `start`; `by` is the Notion user the to_do listing reports. */
-function tickOnPage(client: Fake, start: string, by: string | undefined = 'human-7'): void {
+function tickOnPage(client: Fake, start: string, by: string | null = 'human-7'): void {
   const entry = groomPageOf(client)
   const hits = entry.blocks.filter((block) => block.text.startsWith(`- [ ] ${start}`))
   if (hits.length !== 1) throw new Error(`expected one unticked box starting with "${start}", found ${hits.length}`)
   const block = hits[0]!
   block.text = `- [x] ${block.text.slice('- [ ] '.length)}`
-  if (by === undefined) delete block.lastEditedBy
+  if (by === null) delete block.lastEditedBy
   else block.lastEditedBy = by
   entry.markdown = markdownOf(entry.blocks)
 }
@@ -1015,7 +1015,7 @@ describe('the groomer finish (separate process)', () => {
     seedGroomPage(client, renderedPage(groomRecord([Q1, Q2, Q3])))
     tickOnPage(client, 'Only its owner', 'human-7')
     tickOnPage(client, 'Keep forever', 'bot-1')
-    tickOnPage(client, 'Under Recipes', undefined)
+    tickOnPage(client, 'Under Recipes', null)
     const started = await startGroomer(client)
     await agentRun(started.folder, [Q1, Q2, Q3], { status: 'needs-author' })
     const finished = await finishGroomer(client, started.folder, 'needs-author')
