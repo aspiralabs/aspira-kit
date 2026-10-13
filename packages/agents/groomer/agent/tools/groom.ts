@@ -1,7 +1,9 @@
 import { defineWorkflowTool } from 'eve/tools'
 import { z } from 'zod'
 import { requireBound } from '../lib/bound.ts'
-import { FACT_FINDING_JSON_SCHEMA, factFinderMessage, factFindingSchema, prepareGroom, runGroom, type FactFinding, type GroomInput } from '../lib/runner.ts'
+import { FACT_FINDING_JSON_SCHEMA, factFindingSchema, type FactFinding } from '../lib/fact-finding.ts'
+// runner.ts reaches Node.js builtins: use it only inside the 'use step' functions below, never in the workflow body.
+import { factFinderMessage, prepareGroom, runGroom, type GroomInput } from '../lib/runner.ts'
 
 // One grooming round under eve. Round zero runs on the fact-finder subagent (the cheap tier; eve
 // has no per-call model, so the tier is the subagent's own), only when no facts are recorded; the

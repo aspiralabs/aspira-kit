@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "eve dev",
-    "build": "eve info",
+    "build": "eve build",
     "info": "eve info",
     "write": "node --env-file-if-exists=../.env.local --env-file-if-exists=.env.development.local --experimental-strip-types scripts/write.ts",
     "write:local": "node --experimental-strip-types scripts/local.ts",

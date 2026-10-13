@@ -10,3 +10,6 @@ concurrency:
 jobs:
   checks:
     uses: ./.github/workflows/kit-checks.yml
+    with:
+      # The agents' eve build needs Node 24 (their engines); products keep kit-checks' default.
+      node-version: "24"

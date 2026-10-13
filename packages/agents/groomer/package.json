@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "eve dev",
-    "build": "eve info",
+    "build": "eve build",
     "info": "eve info",
     "groom": "node --env-file-if-exists=../.env.local --env-file-if-exists=.env.development.local --experimental-strip-types scripts/groom.ts",
     "groom:local": "node --experimental-strip-types scripts/local.ts",

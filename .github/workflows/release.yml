@@ -27,7 +27,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: pnpm
           registry-url: https://npm.pkg.github.com
           scope: "@aspiralabs"
@@ -60,6 +60,7 @@ jobs:
     if: needs.release.outputs.hasChangesets == 'true' && needs.release.outputs.published != 'true'
     uses: ./.github/workflows/kit-checks.yml
     with:
+      node-version: "24"
       ref: changeset-release/main
 
   version-pr-status:
