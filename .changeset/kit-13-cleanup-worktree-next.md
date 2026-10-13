@@ -1,0 +1,8 @@
+---
+'@aspiralabs/kit': minor
+'@aspiralabs/agent-common': minor
+---
+
+`kit cleanup` deletes the `.work/` folders and `.worktrees/<TYPE>-<ID>` ticket worktrees whose card is Released or Dropped, after listing them with the card's live Status and asking (`--yes` skips the question, `--only` limits it to the confirmed paths); it never removes a worktree with uncommitted or unpushed work and deletes only the local branch, with `git branch -d`. `kit worktree <ticket>` creates or reuses the ticket's worktree on its `feat/`, `fix/` or `chore/` branch from `origin/main`, links `.env.local`, and installs and builds. `kit init` installs three kit-owned skills, `/aspira-cleanup`, `/aspira-next` and `/aspira-worktree`, which `kit doctor` checks against the `@aspiralabs/kit` version, and writes `.worktrees/` and (unless already ignored) `.env.local` into `.gitignore`; `kit doctor` fails without them. The Playbook's Step 1 mentions `kit worktree` and Step 12 ends with `kit cleanup`.
+
+`kit next` now finds `@aspiralabs/agent-common` by its package name, so it works in the self-hosting kit checkout, and prints the cause on stderr whenever the board does not answer instead of a bare "see the error above". `@aspiralabs/agent-common`'s `resolve-ticket.ts` also prints the card's `type=` and working-folder `folder=`, and `error=unknown` or `error=unreachable` on failure. `@aspiralabs/kit` now depends on `zod`.

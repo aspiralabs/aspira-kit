@@ -3,14 +3,20 @@
 // kit add auth [--no-passkey] [--expo <scheme>] [--dry-run] [--cwd <path>]
 // kit doctor [--app <dir>] [--cwd <path>]
 // kit next [<ticket>] [--app <dir>] [--cwd <path>]
+// kit cleanup [--yes] [--only <path>...] [--app <dir>] [--cwd <path>]
+// kit worktree <ticket> [--app <dir>] [--cwd <path>]
 // kit playbook
 import { resolve } from 'node:path'
+import { createInterface } from 'node:readline/promises'
 import { resolveProjectRoot, writeAspira } from './aspira.js'
+import { cleanup, type Ask } from './cleanup.js'
+import { parseCleanupArgs, parseWorktreeArgs } from './command-args.js'
 import { doctor } from './doctor.js'
 import { next } from './next.js'
 import { renderPlaybook } from './playbook.js'
 import { initNext } from './stacks/next.js'
 import { addAuthNext } from './stacks/next-auth.js'
+import { worktree } from './worktree.js'
 
 const argv = process.argv.slice(2)
 const command = argv[0]
@@ -22,10 +28,11 @@ const flag = (name: string): string | boolean | undefined => {
   const next = argv[i + 1]
   return next && !next.startsWith('--') ? next : true
 }
-// The project root: --cwd, else the working directory. For doctor and next, a working directory inside
-// the app of a multi-app project (apps/web, where the kit's bin is) stands for the root that wired it.
+// The project root: --cwd, else the working directory. For doctor, next, cleanup and worktree, a working directory
+// inside the app of a multi-app project (apps/web, where the kit's bin is) stands for the root that wired it.
 const explicitCwd = typeof flag('cwd') === 'string' ? resolve(flag('cwd') as string) : undefined
-const cwd = explicitCwd ?? (command === 'doctor' || command === 'next' ? resolveProjectRoot(process.cwd()) : process.cwd())
+const rootFromApp = command === 'doctor' || command === 'next' || command === 'cleanup' || command === 'worktree'
+const cwd = explicitCwd ?? (rootFromApp ? resolveProjectRoot(process.cwd()) : process.cwd())
 const log = (line: string) => console.log(line)
 // --app <dir>: the app that owns package.json and node_modules, relative to the root (apps/web).
 const appFlag = flag('app')
@@ -36,6 +43,8 @@ const usage = `usage:
   kit add auth [--no-passkey] [--expo <scheme>] [--dry-run] [--cwd <path>]
   kit doctor [--app <dir>] [--cwd <path>]
   kit next [<ticket>] [--app <dir>] [--cwd <path>]
+  kit cleanup [--yes] [--only <path>...] [--app <dir>] [--cwd <path>]
+  kit worktree <ticket> [--app <dir>] [--cwd <path>]
   kit playbook
 
   --app <dir>: in a repository whose app (package.json, node_modules) is not the root, that directory,
@@ -72,6 +81,22 @@ async function main(): Promise<number> {
     const ticket = argv[1] !== undefined && !argv[1].startsWith('--') ? argv[1] : undefined
     return next(cwd, ticket, log, undefined, app)
   }
+  if (command === 'cleanup') {
+    const args = parseCleanupArgs(argv.slice(1))
+    if (!args.ok) {
+      console.error(`${args.reason}\n${usage}`)
+      return 2
+    }
+    return cleanup({ projectRoot: cwd, app: args.app, yes: args.yes, only: args.only, ask: terminalAsk(), log, warn: (line) => console.error(line) })
+  }
+  if (command === 'worktree') {
+    const args = parseWorktreeArgs(argv.slice(1))
+    if (!args.ok) {
+      console.error(`${args.reason}\n${usage}`)
+      return 2
+    }
+    return worktree({ projectRoot: cwd, app: args.app, ref: args.ref, log })
+  }
   if (command === 'playbook') {
     process.stdout.write(renderPlaybook())
     return 0
@@ -94,6 +119,21 @@ async function main(): Promise<number> {
   }
   console.error(usage)
   return 2
+}
+
+/** The confirmation reader for kit cleanup: only on an interactive terminal; null on end of input. */
+function terminalAsk(): Ask | undefined {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return undefined
+  return async (prompt) => {
+    const reader = createInterface({ input: process.stdin, output: process.stdout })
+    try {
+      return await reader.question(`${prompt} `)
+    } catch {
+      return null
+    } finally {
+      reader.close()
+    }
+  }
 }
 
 try {

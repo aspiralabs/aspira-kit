@@ -20,3 +20,9 @@ plan.review.lock/
 
 # Per-ticket working folders (AI-DLC); never committed
 .work/
+
+# Per-ticket git worktrees (kit worktree <ID> makes .worktrees/<TYPE>-<ID>, GIT-002)
+.worktrees/
+
+# Local secrets such as NOTION_TOKEN; kit worktree links them into each ticket worktree
+.env.local
