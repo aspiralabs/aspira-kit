@@ -42,7 +42,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
       '```bash',
       '/aspira-groomer <ID> --local',
       '```',
-      "Write Problem, who has it, and what done looks like in the ticket's Idea section, then run the groomer (kit 0.7.0 and later). Needs Idea or Grooming. It moves the card Idea → Grooming when it starts, interviews you in rounds on the ticket's **Grooming Decisions** page, grounded in the repository, and on Confirm writes the Decisions and Terms into the Idea and moves the card Grooming → Shortlist. You read the groomed Idea and move the card Shortlist → Ready: Idea by hand. No agent does this (BOARD-004).",
+      "Write Problem, who has it, and what done looks like in the ticket's Idea section, then run the groomer (kit 0.7.0 and later). Needs Idea or Grooming. It moves the card Idea → Grooming when it starts, interviews you in rounds on the ticket's **Grooming Decisions** page, grounded in the repository, and on Confirm writes the Decisions and Terms into the Idea and moves the card Grooming → Shortlist. You read the groomed Idea and move the card Shortlist → Ready: Idea by hand. No agent does this (BOARD-004). A ticket worked alongside another starts with `kit worktree <ID>` (or `/aspira-worktree <ID>`), which creates `.worktrees/<TYPE>-<ID>` on its branch.",
     ].join('\n'),
   },
   {
@@ -139,13 +139,13 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
   },
   {
     title: 'Step 12: learn',
-    body: "Ask an agent to read the run's `run-analysis.md`, `implementation.md` and review findings and propose entries for the AI Agent Slop Repo, the project's Gotchas, the UI kit gaps page and the Kit agent gaps page. You ratify them. Then delete `.work/<id>-<slug>/`; everything it held is on the ticket.",
+    body: "Ask an agent to read the run's `run-analysis.md`, `implementation.md` and review findings and propose entries for the AI Agent Slop Repo, the project's Gotchas, the UI kit gaps page and the Kit agent gaps page. You ratify them. Then run `kit cleanup` (or `/aspira-cleanup`), which deletes the working folder `.work/<id>-<slug>/` and the ticket worktree once the card is Released; everything they held is on the ticket.",
   },
 ]
 
 /** The intro of the Playbook section, before the table. */
 export const PLAYBOOK_INTRO = [
-  "The ticket's Status says which step is next. Find the status in the table, run that step. Every `/aspira-*` skill takes the ticket ID (or its Notion URL) as its first argument: it checks the Status, refuses before any model call when the Status is not the one it needs, pulls the ticket into the working folder `.work/<id>-<slug>/`, makes its own two board moves and never a third, and puts its output back on the ticket as a child page. Replace `<ID>` with the ticket ID, for example `NOM-4`; `<id>` is the same in lower case. `pnpm kit next <ID>` prints this table's row for a ticket, and `pnpm kit playbook` prints this section.",
+  "The ticket's Status says which step is next. Find the status in the table, run that step. Every `/aspira-*` skill takes the ticket ID (or its Notion URL) as its first argument: it checks the Status, refuses before any model call when the Status is not the one it needs, pulls the ticket into the working folder `.work/<id>-<slug>/`, makes its own two board moves and never a third, and puts its output back on the ticket as a child page. Replace `<ID>` with the ticket ID, for example `NOM-4`; `<id>` is the same in lower case. `pnpm kit next <ID>` (or `/aspira-next <ID>`) prints this table's row for a ticket, and `pnpm kit playbook` prints this section.",
 ].join('\n')
 
 /** The Playbook section as markdown: heading, intro, the Status table, the steps. */

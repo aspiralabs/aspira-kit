@@ -5,7 +5,7 @@
 // The skills live at the project root (where Claude Code looks); the packages are installed under
 // the app that owns package.json (`app` in aspira.json, the root itself for a single-app project).
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { appRoot } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 
@@ -23,21 +23,33 @@ export const skillDir = (projectRoot: string, agent: Agent): string => join(proj
 
 const isPackage = (dir: string, name: string): boolean => readJson<{ name?: string }>(join(dir, 'package.json'))?.name === name
 
-/** The installed @aspiralabs/<agent> package under `appDir` (the directory that owns node_modules), or undefined. Direct installs sit in that node_modules; with pnpm the agents sit beside @aspiralabs/agents in its own folder instead. */
+/**
+ * The installed @aspiralabs/<agent> package under `appDir` (the directory that owns node_modules), or undefined.
+ * Lookup is by package.json name, not folder name. In order: a direct install in that node_modules; then,
+ * from the real @aspiralabs/agents directory, its own node_modules/@aspiralabs/<agent> (where Node resolves
+ * the meta-package's dependency, as in a workspace link) and the sibling folder whose package.json names
+ * the package (pnpm's store, or this repository's packages/agents, where agent-common's folder is `common`).
+ */
 export function agentPackageDir(appDir: string, agent: Agent | 'agent-common'): string | undefined {
+  const name = `@aspiralabs/${agent}`
   const scope = join(appDir, 'node_modules', '@aspiralabs')
   const direct = join(scope, agent)
-  if (isPackage(direct, `@aspiralabs/${agent}`)) {
+  if (isPackage(direct, name)) {
     return direct
   }
   const meta = join(scope, 'agents')
-  if (existsSync(meta)) {
-    const sibling = join(realpathSync(meta), '..', agent)
-    if (isPackage(sibling, `@aspiralabs/${agent}`)) {
-      return sibling
-    }
+  if (!existsSync(meta)) {
+    return undefined
   }
-  return undefined
+  const realMeta = realpathSync(meta)
+  const own = join(realMeta, 'node_modules', '@aspiralabs', agent)
+  if (isPackage(own, name)) {
+    return own
+  }
+  const parent = dirname(realMeta)
+  // The folder named after the package first (the usual case), then any sibling that declares the name.
+  const siblings = [agent, ...readdirSync(parent).filter((entry) => entry !== agent).sort()]
+  return siblings.map((entry) => join(parent, entry)).find((dir) => isPackage(dir, name))
 }
 
 /** The installed version of @aspiralabs/agents under `appDir`, or undefined. */
