@@ -15,7 +15,7 @@ import { z } from 'zod'
 import { slug } from '@aspiralabs/agent-common/lib/ticket'
 import { tail } from '#src/redact.ts'
 import { stateDirOf } from '#src/run-state.ts'
-import { GIT_ARGS, shown, system, type CommandResult, type System, type SystemOptions } from '#src/system.ts'
+import { GIT_ARGS, packageManagerOf, shown, system, type CommandResult, type System, type SystemOptions } from '#src/system.ts'
 
 /** The card's Type: the worktree folder's TYPE and the branch prefix. */
 export const TICKET_TYPES = {
@@ -105,8 +105,7 @@ export async function installCommands(dir: string): Promise<{ command: string; a
       { command: 'pnpm', args: ['build'] },
     ]
   }
-  const manager = existsSync(join(dir, 'pnpm-lock.yaml')) || existsSync(join(dir, 'pnpm-workspace.yaml')) ? 'pnpm' : existsSync(join(dir, 'yarn.lock')) ? 'yarn' : existsSync(join(dir, 'bun.lock')) || existsSync(join(dir, 'bun.lockb')) ? 'bun' : 'npm'
-  return [{ command: manager, args: ['install'] }]
+  return [{ command: packageManagerOf([dir]), args: ['install'] }]
 }
 
 /** Copy the ticket's `.work/<id>-<slug>/` into the worktree, overwriting nothing and leaving the run state behind. */

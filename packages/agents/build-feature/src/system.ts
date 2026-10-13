@@ -9,6 +9,8 @@
 // `system` below against a temp repository with a fake gh on PATH.
 
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 
 export type CommandResult = { code: number; stdout: string; stderr: string }
 /** Where a command runs: the checkout, and the environment whose PATH finds git and gh. */
@@ -51,6 +53,8 @@ export const GIT_ARGS = {
   /** GIT-002: a new branch from origin/main, or (when the branch already exists) that branch. */
   worktreeAdd: (path: string, branch: string, create: boolean) => (create ? ['worktree', 'add', '-b', branch, path, 'origin/main'] : ['worktree', 'add', path, branch]),
   checkIgnore: (path: string) => ['check-ignore', '-q', '--no-index', path],
+  /** A file as it is at `rev` (path from the repository root). */
+  show: (rev: string, path: string) => ['show', `${rev}:${path}`],
 } as const
 
 export const GH_ARGS = {
@@ -98,8 +102,30 @@ export function gitWorktreeAdd(options: SystemOptions, path: string, branch: str
 }
 /** Exit 0 when `path` is gitignored (by the files, not the index). */
 export const gitCheckIgnore = (options: SystemOptions, path: string) => run('git', GIT_ARGS.checkIgnore(path), options)
+/** A file's contents at `rev`; non-zero when the revision or the file is not there. */
+export const gitShowFile = (options: SystemOptions, rev: string, path: string) => run('git', GIT_ARGS.show(rev, path), options)
 /** A project command such as `pnpm install` (the worktree's install and build). */
 export const projectCommand = (options: SystemOptions, command: string, args: readonly string[]) => run(command, args, options)
+
+export type PackageManager = 'pnpm' | 'yarn' | 'bun' | 'npm'
+
+/** The package manager one directory's lock files name, or null when it has none. */
+function packageManagerIn(dir: string): PackageManager | null {
+  const has = (name: string) => existsSync(join(dir, name))
+  if (has('pnpm-lock.yaml') || has('pnpm-workspace.yaml')) return 'pnpm'
+  if (has('yarn.lock')) return 'yarn'
+  if (has('bun.lock') || has('bun.lockb')) return 'bun'
+  return null
+}
+
+/** The package manager a project uses: the first of `dirs` (the app's, then the repository's) with a lock file decides; npm when none has one. */
+export function packageManagerOf(dirs: readonly string[]): PackageManager {
+  for (const dir of dirs) {
+    const manager = packageManagerIn(dir)
+    if (manager !== null) return manager
+  }
+  return 'npm'
+}
 
 /** The URL of an open PR whose head is `branch`, or empty stdout when there is none. */
 export const ghPrList = (options: SystemOptions, branch: string) => run('gh', GH_ARGS.prList(branch), options)
@@ -143,6 +169,7 @@ export const system = {
   gitBranchExists,
   gitWorktreeAdd,
   gitCheckIgnore,
+  gitShowFile,
   projectCommand,
   ghPrList,
   ghPrCreate,

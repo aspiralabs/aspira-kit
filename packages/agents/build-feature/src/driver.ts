@@ -23,9 +23,9 @@
 // ends on the resume command (F32).
 //
 // Steps 6-10 beyond routing live in later-phase modules (gate.ts, step8.ts, step10.ts,
-// review-loop.ts) and the Build Summary and PR body renderers in summary.ts and pr-body.ts. The
-// driver loads each through loadOptional; each phase module exports a `Phase` (below) under the
-// name PHASE_MODULES gives. A phase whose module is not there stops the run naming the file.
+// review-loop.ts) and the Build Summary and PR body renderers in summary.ts and pr-body.ts. They
+// all ship in this package, so the driver imports them statically: each phase module exports a
+// `Phase` (below), bound to its name in PHASES (NOVA1.2).
 
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -34,13 +34,19 @@ import { basename, join, relative } from 'node:path'
 import { z } from 'zod'
 import { slug } from '@aspiralabs/agent-common/lib/ticket'
 import { acceptApproval, approvalFor, approvalStage, recordApproval } from '#src/approval.ts'
-import { addTaken, collectTakenDecisions, isDecisionStep, openDecisions, orderedTaken, takenKeyOf } from '#src/decisions.ts'
+import { addTaken, collectTakenDecisions, isDecisionStep, openDecisions, takenKeyOf } from '#src/decisions.ts'
+import { gatePhase } from '#src/gate.ts'
 import { modelFor, parseModels, subagentModels, type Role } from '#src/models.ts'
 import { BACKWARD_MOVES_SKILL_MAY_MAKE, decideOverrides, findOverrides, overridesStage, recordOverrides } from '#src/overrides.ts'
+import { renderPrBody } from '#src/pr-body.ts'
 import { acceptResolution, cardDifferences, resolveStage, resolveWithToken, type Resolution } from '#src/resolve.ts'
-import { assertNever, modeLine, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, type EndRoute, type Mode, type PhaseName, type StepName } from '#src/route.ts'
+import { assertNever, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, type EndRoute, type Mode, type PhaseName, type StepName } from '#src/route.ts'
+import { reviewPhase } from '#src/review-loop.ts'
 import { readRunState, stateDirOf, writeRunState, type Card, type Failure, type Pending, type RunState } from '#src/run-state.ts'
 import { analyzerClean, readImplementorStatus, readSpecCoverage, readStepResult, stepReportSchema } from '#src/step-results.ts'
+import { releaseRowPhase, step10Phase } from '#src/step10.ts'
+import { step8Phase } from '#src/step8.ts'
+import { renderBuildSummary } from '#src/summary.ts'
 import { shown, system } from '#src/system.ts'
 import { carryTicketFolder, existingWorktree, insideWorktree, locate, prepareWorktree, ticketTypeOf, worktreePath, type Place } from '#src/worktree.ts'
 
@@ -101,31 +107,13 @@ export type Phase = {
   accept(context: PhaseContext, state: RunState, pending: Pending, answer: Record<string, unknown>): Promise<PhaseResult>
 }
 
-/** Where each phase lives and the name it exports. */
-export const PHASE_MODULES: Readonly<Record<PhaseName, { file: string; name: string; label: string }>> = {
-  gate: { file: 'gate.ts', name: 'gatePhase', label: "Step 6's project gate" },
-  step8: { file: 'step8.ts', name: 'step8Phase', label: 'Step 8 (commit, push, draft PR)' },
-  step10: { file: 'step10.ts', name: 'step10Phase', label: "Step 10's repository work" },
-  review: { file: 'review-loop.ts', name: 'reviewPhase', label: "Step 9's review loop" },
-  'release-row': { file: 'step10.ts', name: 'releaseRowPhase', label: "Step 10's release row" },
-}
-
-/** A module under src/ when it is there, or null when the file is missing. */
-async function loadOptional(file: string): Promise<Record<string, unknown> | null> {
-  const specifier = `#src/${file}`
-  try {
-    return (await import(specifier)) as Record<string, unknown>
-  } catch (error) {
-    const { code, message } = error as { code?: string; message?: string }
-    if (code === 'ERR_MODULE_NOT_FOUND' && String(message).includes(file)) return null
-    throw error
-  }
-}
-
-async function loadPhase(name: PhaseName): Promise<Phase | null> {
-  const { file, name: exported } = PHASE_MODULES[name]
-  const phase = (await loadOptional(file))?.[exported] as Partial<Phase> | undefined
-  return typeof phase?.next === 'function' && typeof phase.accept === 'function' ? (phase as Phase) : null
+/** Each later phase by name: the gate, Step 8, Step 10, the review loop and the release row. */
+export const PHASES: Readonly<Record<PhaseName, Phase>> = {
+  gate: gatePhase,
+  step8: step8Phase,
+  step10: step10Phase,
+  review: reviewPhase,
+  'release-row': releaseRowPhase,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -229,52 +217,20 @@ async function readAspira(repo: string): Promise<{ ok: true; aspira: Aspira } | 
 }
 
 // ---------------------------------------------------------------------------------------------
-// The Build Summary and the PR body: rendered by summary.ts and pr-body.ts when they are there,
-// else a plain record of the run, so every stop leaves build-summary.md behind.
+// The Build Summary and the PR body, rendered by summary.ts and pr-body.ts, so every stop leaves
+// build-summary.md behind.
 // ---------------------------------------------------------------------------------------------
-
-function plainSummary(id: string, state: RunState, resume: string): string {
-  const card = state.card
-  const run = state.runs.at(-1)
-  const lines = [`# Build Summary: ${id}${card === null ? '' : ` ${card.title}`}`, '', '## Status', '']
-  if (run?.end !== undefined) lines.push(run.end.message, '')
-  else lines.push(`Run ${run?.runId ?? '(none)'} is in progress.`, '')
-  if (card !== null) lines.push(`Card: ${card.status} (${card.url})`, '')
-  if (run !== undefined) lines.push(modeLine(run.mode), ...(run.worktree === undefined ? [] : [`Worktree: ${run.worktree}`]), '')
-  if (state.failure !== null) lines.push(`Stopped at: ${state.failure.action}${state.failure.command === undefined ? '' : ` (${state.failure.command})`}${state.failure.message === undefined ? '' : `: ${state.failure.message}`}`, '')
-  for (const approval of state.approvals) lines.push(`Run-start approval for ${approval.runId}: ${approval.name} (${approval.notionUserId}) at ${approval.at}, by "${approval.command}"`)
-  for (const move of state.moves) lines.push(`Moved ${move.from} -> ${move.to} at ${move.at} (${move.runId}, on its run-start approval)`)
-  for (const override of state.overrides) lines.push(`Override: ${override.key} changed from ${override.from ?? 'no answer'} to ${override.to}`)
-  if (run?.end?.stopped === true) lines.push('', `Resume: ${resume}`)
-  lines.push('', '## Decisions taken for you', '')
-  const taken = orderedTaken(state.takenKeys)
-  if (taken.length === 0 && state.asked.length === 0) lines.push('None yet.')
-  for (const entry of taken) lines.push(`- \`${entry.key}\`: ${entry.decision.question} Taken: ${entry.decision.answer ?? entry.decision.recommended}.`)
-  if (state.asked.length > 0) {
-    lines.push('', '### Asked in chat', '')
-    for (const asked of state.asked) lines.push(`- ${asked.step}: ${asked.question.replaceAll('\n', ' ')} Answer: ${asked.answer ?? '(no answer)'}`)
-  }
-  lines.push('', '## Steps', '')
-  if (state.steps.length === 0) lines.push('None yet.')
-  for (const step of state.steps) lines.push(`- ${step.step} (${step.runId}): ${step.status}${step.resultLine === undefined ? '' : `: ${step.resultLine}`}`)
-  return `${lines.join('\n')}\n`
-}
 
 async function writeSummary(ctx: Ctx, state: RunState): Promise<void> {
   const ticket = state.card ?? { id: ctx.input.id, title: '', url: '' }
-  const summary = await loadOptional('summary.ts')
   const plan = await readFile(join(ctx.folder, 'plan.review/trace/plan.json'), 'utf8')
     .then((text) => JSON.parse(text) as unknown)
     .catch(() => undefined)
-  const render = summary?.renderBuildSummary
-  const text = typeof render === 'function' ? String(await (render as (input: Record<string, unknown>) => unknown)({ ticket, state, repo: ctx.input.repo, ...(plan === undefined ? {} : { plan }) })) : plainSummary(ctx.input.id, state, ctx.resume)
+  const text = await renderBuildSummary({ ticket, state, repo: ctx.input.repo, ...(plan === undefined ? {} : { plan }) })
   await mkdir(ctx.folder, { recursive: true })
   await writeFile(summaryPath(ctx), text)
-  const prBody = (await loadOptional('pr-body.ts'))?.renderPrBody
-  if (typeof prBody === 'function') {
-    await mkdir(ctx.dir, { recursive: true })
-    await writeFile(join(ctx.dir, 'pr-body.md'), String(await (prBody as (input: Record<string, unknown>) => unknown)({ ticket, state, repo: ctx.input.repo })))
-  }
+  await mkdir(ctx.dir, { recursive: true })
+  await writeFile(join(ctx.dir, 'pr-body.md'), await renderPrBody({ ticket, state, repo: ctx.input.repo }))
 }
 
 /** BOARD-003 on the fetched Feature Board page lists Build Summary among the fixed titles. */
@@ -513,12 +469,6 @@ async function handlePhase(ctx: Ctx, phase: PhaseName, result: PhaseResult): Pro
   }
 }
 
-const missingPhase = (ctx: Ctx, state: RunState, phase: PhaseName) => {
-  const { file, name, label } = PHASE_MODULES[phase]
-  const message = `${label} is not available in this @aspiralabs/build-feature: src/${file} (export ${name}) is missing, so the run stops here.`
-  return stop(ctx, state, message, { stopped: true, failure: { action: phase, message } })
-}
-
 async function endRoute(ctx: Ctx, state: RunState, end: EndRoute): Promise<Out> {
   return stop(ctx, state, end.message, { stopped: end.reason === 'unknown' })
 }
@@ -549,8 +499,7 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
           if (!item.done) return printStep(ctx, current, item.step, item.command)
           continue
         }
-        const phase = await loadPhase(item.phase)
-        if (phase === null) return missingPhase(ctx, current, item.phase)
+        const phase = PHASES[item.phase]
         const result = await phase.next(phaseContext(ctx, current), current)
         if (result.kind !== 'done') return handlePhase(ctx, item.phase, result)
         if (result.note !== undefined) notes.push(result.note)
@@ -792,8 +741,7 @@ async function readAnswer(pending: Pending): Promise<Record<string, unknown> | n
 async function dispatch(ctx: Ctx, state: RunState, pending: Pending, answer: Record<string, unknown>): Promise<Out> {
   if (pending.phase !== undefined && pending.kind !== 'resolve' && pending.kind !== 'move' && pending.kind !== 'step') {
     const name = pending.phase as PhaseName
-    const phase = await loadPhase(name)
-    if (phase === null) return missingPhase(ctx, state, name)
+    const phase = PHASES[name]
     return handlePhase(ctx, name, await phase.accept(phaseContext(ctx, state), state, pending, answer))
   }
   switch (pending.kind) {

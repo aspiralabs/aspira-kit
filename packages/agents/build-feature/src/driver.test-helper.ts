@@ -24,7 +24,11 @@
 //   - step: { step, command, model }; answer the step report { step, status, resultLine, usage }.
 //   - ask: { question }; answer { answer }.
 //   - move: { from, to }; answer { done: true }.  set-pr: { url }; answer { done: true }.
-//   - gate: { commands }; answer { results: [{ command, exitCode, output }] }.
+//   - gate: { commands, run, unset }; `run[i]` is `commands[i]` behind `env -u` for every credential
+//     in `unset` (AVA3.1); the session runs `run[i]` and answers { results: [{ command, exitCode,
+//     output }] } keyed by `commands[i]`. In cloud mode, when the gate scripts in the app's
+//     package.json differ from origin/main, an `ask` stage (phase gate) comes first; the answer
+//     "run" goes on to the gate stage, anything else stops the run.
 //   - step10: answer { docs, docsToPropagate }.  fix: { findings }; answer { decisions, usage }.
 //   - release-row: answer { customerLine, existingRow } to the draft stage; a re-printed stage
 //     carries `error` when the draft was refused; the write stage carries `write: { action }`.
@@ -151,6 +155,8 @@ type ProjectOptions = {
   layout?: 'worktree' | 'checkout'
   /** 'local' (default) calls the driver with --local; 'cloud' without it. */
   mode?: 'local' | 'cloud'
+  /** Extra variables in the session's environment (such as a fake credential the gate must strip). */
+  env?: Record<string, string>
 }
 
 const temps: string[] = []
@@ -242,7 +248,7 @@ export async function project(options: ProjectOptions) {
 
   const env = (): NodeJS.ProcessEnv => {
     const { NOTION_TOKEN: _token, NOTION_API_KEY: _key, ...rest } = process.env
-    return { ...rest, PATH: `${bin}:/usr/bin:/bin`, HOME: dir, GIT_LOG: gitLog, PNPM_LOG: pnpmLog, GH_DIR: ghDir, GH_CREATED_URL: PR_URL, GIT_TERMINAL_PROMPT: '0', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', BUILD_FEATURE_NOW: now, BUILD_FEATURE_AGENT_DIR: '' }
+    return { ...rest, PATH: `${bin}:/usr/bin:/bin`, HOME: dir, GIT_LOG: gitLog, PNPM_LOG: pnpmLog, GH_DIR: ghDir, GH_CREATED_URL: PR_URL, GIT_TERMINAL_PROMPT: '0', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', BUILD_FEATURE_NOW: now, BUILD_FEATURE_AGENT_DIR: '', ...options.env }
   }
 
   async function call(args: string[]): Promise<Result> {

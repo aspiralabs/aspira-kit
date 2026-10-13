@@ -6,19 +6,27 @@
 // each exit code and output tail; a non-zero exit stops the run with that tail (redacted by the
 // Build Summary renderer) before any commit or push.
 //
+// Credentials (AVA3.1): the gate commands run project code (package.json scripts, tests) in this
+// session, which holds push, gh and Notion access. So every command is run as an `env -u` line that
+// removes each credential from its environment (credentialNames), in both modes. In cloud mode the
+// implementor was a separate agent this session never watched, so when the gate scripts in the app's
+// package.json (check, test, test:integration, any script a gate command names, and their npm
+// pre/post hooks) differ from origin/main, the gate first prints an `ask` stage naming them with
+// the diff: the human answers "run" to go on (recorded against those exact script bodies), and any
+// other answer stops the run. Under --local the implementor ran in this session, so they just run.
+//
 // The gate runs once per build: its record is keyed to the implementor's export, so a restart, the
 // analyzer and Step 8 do not run it again. When it finishes it also records which tracked paths
 // were already changed, so Step 8 can tell the analyzer's changes from anything else.
 
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { z } from 'zod'
 import type { Phase, PhaseContext, PhaseResult } from '#src/driver.ts'
 import { tail } from '#src/redact.ts'
 import type { Pending, RunState } from '#src/run-state.ts'
-import { gitStatus, parseStatus } from '#src/system.ts'
+import { gitShowFile, gitStatus, packageManagerOf, parseStatus, shown } from '#src/system.ts'
 
 export const NO_GATE = 'no project gate found'
 
@@ -43,6 +51,9 @@ export const gateRecordSchema = z.object({
 })
 export type GateRecord = z.infer<typeof gateRecordSchema>
 
+/** The script bodies the human answered "run" to (state.phases['gate-scripts']). */
+const reviewSchema = z.object({ key: z.string(), names: z.array(z.string()), answer: z.string() })
+
 /** The gate record in run state, or null when there is none (or it is not one). */
 export function gateRecordOf(state: { phases?: Record<string, unknown> }): GateRecord | null {
   const parsed = gateRecordSchema.safeParse(state.phases?.gate)
@@ -52,9 +63,11 @@ export function gateRecordOf(state: { phases?: Record<string, unknown> }): GateR
 /** What the Build Summary says about the gate: which commands ran and how, or that there was none. */
 export function gateSummaryLines(state: { phases?: Record<string, unknown> }): string[] {
   const record = gateRecordOf(state)
-  if (record === null) return []
-  if (record.status === 'none') return [`Project gate: ${NO_GATE}; the run went on to static analysis.`]
-  const lines = [`Project gate (${record.source ?? 'unknown source'}): ${record.status}.`]
+  const reviewed = reviewSchema.safeParse(state.phases?.['gate-scripts'])
+  const review = reviewed.success ? [`Changed gate scripts run on the human's "run" answer (cloud mode): ${reviewed.data.names.join(', ')}.`] : []
+  if (record === null) return review
+  if (record.status === 'none') return [...review, `Project gate: ${NO_GATE}; the run went on to static analysis.`]
+  const lines = [...review, `Project gate (${record.source ?? 'unknown source'}): ${record.status}.`]
   for (const command of record.commands) {
     const result = record.results.find((candidate) => candidate.command === command)
     lines.push(`- \`${command}\`: ${result === undefined ? 'not run' : `exit ${result.exitCode}`}`)
@@ -90,23 +103,10 @@ export function gateCommandsIn(markdown: string): string[] {
   return commands
 }
 
-/** The package manager the app uses, from its lock file (the app's, then the repository's). */
-function packageManager(dirs: readonly string[]): string {
-  for (const dir of dirs) {
-    if (existsSync(join(dir, 'pnpm-lock.yaml'))) return 'pnpm'
-    if (existsSync(join(dir, 'yarn.lock'))) return 'yarn'
-    if (existsSync(join(dir, 'bun.lock')) || existsSync(join(dir, 'bun.lockb'))) return 'bun'
-  }
-  return 'npm'
-}
-
 const packageSchema = z.looseObject({ scripts: z.record(z.string(), z.unknown()).optional() })
 
-/** The app root package.json scripts check, test and test:integration that exist, or null. */
-export async function fallbackGate(repo: string, app: string): Promise<Gate | null> {
-  const appDir = join(repo, app)
-  const file = join(appDir, 'package.json')
-  const raw = await readFile(file, 'utf8').catch(() => null)
+/** A package.json's scripts that are strings, or null when the text is missing or not a package.json. */
+function scriptsIn(raw: string | null): Record<string, string> | null {
   if (raw === null) return null
   let json: unknown
   try {
@@ -115,10 +115,18 @@ export async function fallbackGate(repo: string, app: string): Promise<Gate | nu
     return null
   }
   const parsed = packageSchema.safeParse(json)
-  const scripts = parsed.success ? (parsed.data.scripts ?? {}) : {}
-  const present = FALLBACK_SCRIPTS.filter((name) => typeof scripts[name] === 'string')
+  if (!parsed.success) return null
+  return Object.fromEntries(Object.entries(parsed.data.scripts ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+}
+
+/** The app root package.json scripts check, test and test:integration that exist, or null. */
+export async function fallbackGate(repo: string, app: string): Promise<Gate | null> {
+  const appDir = join(repo, app)
+  const scripts = scriptsIn(await readFile(join(appDir, 'package.json'), 'utf8').catch(() => null))
+  if (scripts === null) return null
+  const present = FALLBACK_SCRIPTS.filter((name) => scripts[name] !== undefined)
   if (present.length === 0) return null
-  const manager = packageManager([appDir, repo])
+  const manager = packageManagerOf([appDir, repo])
   return { commands: present.map((name) => `${manager} run ${name}`), cwd: appDir, source: `${app === '.' ? '' : `${app}/`}package.json scripts` }
 }
 
@@ -132,6 +140,118 @@ export async function findGate(repo: string, app: string): Promise<Gate | null> 
     if (commands.length > 0) return { commands, cwd: dirname(file), source: file.slice(repo.length + 1) }
   }
   return fallbackGate(repo, app)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Credentials and changed scripts (AVA3.1).
+// ---------------------------------------------------------------------------------------------
+
+/** Credentials a gate command never gets, whether or not they are set. */
+export const CREDENTIALS = ['NOTION_TOKEN', 'NOTION_API_KEY', 'GITHUB_TOKEN', 'GH_TOKEN', 'AI_GATEWAY_API_KEY', 'NPM_TOKEN', 'NODE_AUTH_TOKEN'] as const
+/** A variable named like a credential. */
+const CREDENTIAL_NAME = /_(TOKEN|SECRET|KEY|PASSWORD)$/i
+
+/** The variables a gate command runs without: the fixed credentials and every credential-named variable set in `env`, sorted. */
+export function credentialNames(env: NodeJS.ProcessEnv): string[] {
+  const named = Object.keys(env).filter((name) => CREDENTIAL_NAME.test(name))
+  return [...new Set([...CREDENTIALS, ...named])].sort()
+}
+
+/** `command` as a shell line that runs it with every one of `names` removed from its environment. */
+export function withoutCredentials(command: string, names: readonly string[]): string {
+  return `${shown('env', names.flatMap((name) => ['-u', name]))} ${command}`
+}
+
+/** A gate script whose body differs from the base branch: `base` null when the base has no such script. */
+export type ChangedScript = { name: string; base: string | null; head: string }
+
+const PACKAGE_RUNNERS = new Set(['pnpm', 'npm', 'yarn', 'bun'])
+
+/** The script a gate command runs by name (`pnpm lint`, `npm run check`), or null. */
+function scriptNamed(command: string): string | null {
+  const [program, first, second] = command.trim().split(/\s+/)
+  if (program === undefined || !PACKAGE_RUNNERS.has(program) || first === undefined) return null
+  return first === 'run' || first === 'run-script' ? (second ?? null) : first
+}
+
+/** The gate scripts (and their npm pre/post hooks) whose body in `headRaw` differs from `baseRaw`; a missing or unreadable base has none. */
+export function changedGateScripts(baseRaw: string | null, headRaw: string | null, commands: readonly string[]): ChangedScript[] {
+  const head = scriptsIn(headRaw) ?? {}
+  const base = scriptsIn(baseRaw) ?? {}
+  const named = commands.map(scriptNamed).filter((name): name is string => name !== null)
+  const names = [...new Set([...FALLBACK_SCRIPTS, ...named])].flatMap((name) => [name, `pre${name}`, `post${name}`])
+  const changed: ChangedScript[] = []
+  for (const name of new Set(names)) {
+    const now = head[name]
+    if (now === undefined || now === base[name]) continue
+    changed.push({ name, base: base[name] ?? null, head: now })
+  }
+  return changed
+}
+
+/** The base branch the cloud implementor's changes are compared with. */
+const BASE_REF = 'origin/main'
+
+/** The gate scripts the cloud implementor changed in the app's package.json, against origin/main. */
+async function changedScriptsOf(context: PhaseContext, app: string, commands: readonly string[]): Promise<ChangedScript[]> {
+  const file = join(context.repo, app, 'package.json')
+  const head = await readFile(file, 'utf8').catch(() => null)
+  if (head === null) return []
+  const shownBase = await gitShowFile({ cwd: context.repo, env: context.env }, BASE_REF, relative(context.repo, file))
+  return changedGateScripts(shownBase.code === 0 ? shownBase.stdout : null, head, commands)
+}
+
+const scriptsKey = (changed: readonly ChangedScript[]) => createHash('sha256').update(JSON.stringify(changed)).digest('hex').slice(0, 16)
+
+/** The recorded "run" answer on the changed gate scripts, or null. */
+const reviewOf = (state: RunState) => {
+  const parsed = reviewSchema.safeParse(state.phases['gate-scripts'])
+  return parsed.success ? parsed.data : null
+}
+
+/** The diff of the changed scripts as the human reads it. */
+function scriptsDiff(changed: readonly ChangedScript[]): string {
+  return changed.flatMap((entry) => [...(entry.base === null ? [] : [`- ${JSON.stringify(entry.name)}: ${JSON.stringify(entry.base)}`]), `+ ${JSON.stringify(entry.name)}: ${JSON.stringify(entry.head)}`]).join('\n')
+}
+
+function scriptsAsk(state: RunState, changed: readonly ChangedScript[], file: string): PhaseResult {
+  const names = changed.map((entry) => entry.name)
+  const question = [
+    `In cloud mode the implementor ran as a separate agent, and it changed the package.json scripts the project gate runs (${file}, against ${BASE_REF}): ${names.join(', ')}.`,
+    'The gate runs them in this session, which can push, open PRs and write to Notion, so the run will not run them before you have read them:',
+    '',
+    '```diff',
+    scriptsDiff(changed),
+    '```',
+    '',
+    'Answer "run" to run the gate with these scripts, or anything else to stop the run here.',
+  ].join('\n')
+  return {
+    kind: 'stage',
+    state,
+    stage: 'ask',
+    body: { step: 'gate', question, instructions: 'Ask the human this question in chat, quoted as text, exactly once. Write {"nonce", "answer"} with their answer, in their words, to the output file. Do not answer it yourself.' },
+    data: { part: 'scripts', key: scriptsKey(changed), names },
+  }
+}
+
+const askAnswerSchema = z.object({ nonce: z.string(), answer: z.string().min(1) })
+
+/** The human's answer on the changed scripts: "run" records it and goes on to the gate, anything else stops the run. */
+async function acceptScripts(context: PhaseContext, state: RunState, pending: Pending, answer: Record<string, unknown>): Promise<PhaseResult> {
+  const parsed = askAnswerSchema.safeParse(answer)
+  if (!parsed.success) {
+    const { step, question, instructions } = pending.stage as Record<string, unknown>
+    return { kind: 'stage', state, stage: 'ask', body: { step, question, instructions }, ...(pending.data === undefined ? {} : { data: pending.data }) }
+  }
+  const key = z.string().parse(pending.data?.key)
+  const names = z.array(z.string()).parse(pending.data?.names ?? [])
+  if (parsed.data.answer.trim().toLowerCase() !== 'run') {
+    const message = `the project gate's scripts ${names.join(', ')} changed in cloud mode and were not approved to run (answer: "${parsed.data.answer.replaceAll('\n', ' ')}"), so the run stops before the gate`
+    return { kind: 'stop', state, message, failure: { action: 'gate', message } }
+  }
+  const reviewed: RunState = { ...state, phases: { ...state.phases, 'gate-scripts': { key, names, answer: parsed.data.answer } } }
+  return gateStage(context, reviewed)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -170,15 +290,22 @@ export async function gateStage(context: PhaseContext, state: RunState): Promise
     const record: GateRecord = { key, status: 'none', source: null, commands: [], results: [], dirtyBefore: await dirtyTracked(context) }
     return { kind: 'done', state: withRecord(state, record) }
   }
+  if (context.mode === 'cloud') {
+    const changed = await changedScriptsOf(context, app, gate.commands)
+    if (changed.length > 0 && reviewOf(state)?.key !== scriptsKey(changed)) return scriptsAsk(state, changed, relative(context.repo, join(context.repo, app, 'package.json')))
+  }
+  const unset = credentialNames(context.env)
   return {
     kind: 'stage',
     state,
     stage: 'gate',
     body: {
       commands: gate.commands,
+      run: gate.commands.map((command) => withoutCredentials(command, unset)),
+      unset,
       cwd: gate.cwd,
       source: gate.source,
-      instructions: `Run each command in "commands", in order and exactly as written, in ${gate.cwd} (they are the project gate ${gate.source} names). Change nothing to make them pass. Write {"nonce", "results": [{"command", "exitCode", "output"}]} to the output file, one result per command you ran, with output the last 40 lines it printed. Stop at the first command that fails.`,
+      instructions: `Run each line of "run", in order and exactly as written, in ${gate.cwd}: each is the command at the same index in "commands" (the project gate ${gate.source} names) with every credential in "unset" removed from its environment, so project code never runs with this session's credentials. Change nothing to make them pass. Write {"nonce", "results": [{"command", "exitCode", "output"}]} to the output file, one result per command you ran, "command" being its "commands" entry, with output the last 40 lines it printed. Stop at the first command that fails.`,
     },
     data: { key, commands: gate.commands, source: gate.source },
   }
@@ -212,5 +339,5 @@ async function acceptGate(context: PhaseContext, state: RunState, pending: Pendi
 /** The driver's gate phase (PHASE_MODULES.gate). */
 export const gatePhase: Phase = {
   next: gateStage,
-  accept: acceptGate,
+  accept: (context, state, pending, answer) => (pending.data?.part === 'scripts' ? acceptScripts(context, state, pending, answer) : acceptGate(context, state, pending, answer)),
 }

@@ -235,21 +235,36 @@ function costLines(steps: readonly StepRecord[]): string[] {
 // files narrowed to the ones actually on the branch when that is known (A11).
 // ---------------------------------------------------------------------------------------------
 
-const mermaidLabel = (text: string): string => text.replaceAll('"', "'").replaceAll('\n', ' ')
+/**
+ * A fragment made safe inside a quoted Mermaid label in a fenced block: redact.ts first (SEC-010),
+ * then every backtick, double quote and backslash (redact's own markdown escapes) dropped and every
+ * line break folded to a space, so the label can neither close its quotes nor the fence.
+ */
+const mermaidText = (text: string): string => text.replace(/[`"\\]/g, '').replace(/\s*[\r\n]+\s*/g, ' ')
+const mermaidLabel = async (text: string, repo: string): Promise<string> => mermaidText(await redact(text, repo))
 
-function architectureLines(plan: unknown, changedFiles: readonly string[] | undefined): string[] {
+/** A task id as a Mermaid node id: the id itself when it is a plain word, else a generated one. */
+const nodeId = (id: string, index: number): string => (/^\w+$/.test(id) ? id : `t${index}`)
+
+async function architectureLines(plan: unknown, changedFiles: readonly string[] | undefined, repo: string): Promise<string[]> {
   const tasks = planTasks(plan)
   if (tasks.length === 0) return NONE
+  const nodes = new Map(tasks.map((task, index) => [task.id, nodeId(task.id, index)]))
   const body: string[] = ['flowchart TD']
-  for (const task of tasks) body.push(`  ${task.id}["${task.id}: ${mermaidLabel(task.title)}"]`)
-  for (const task of tasks) for (const dependsOn of task.dependsOn) body.push(`  ${dependsOn} --> ${task.id}`)
+  for (const task of tasks) body.push(`  ${nodes.get(task.id)!}["${await mermaidLabel(`${task.id}: ${task.title}`, repo)}"]`)
+  for (const task of tasks) {
+    for (const dependsOn of task.dependsOn) {
+      const from = nodes.get(dependsOn)
+      if (from !== undefined) body.push(`  ${from} --> ${nodes.get(task.id)!}`)
+    }
+  }
   let index = 0
   for (const task of tasks) {
     const files = (changedFiles === undefined ? task.files : task.files.filter((file) => changedFiles.includes(file))).filter(allowedPath)
     for (const file of files) {
       const node = `f${index}`
       index += 1
-      body.push(`  ${node}["${mermaidLabel(file)}"]`, `  ${task.id} --> ${node}`)
+      body.push(`  ${node}["${await mermaidLabel(file, repo)}"]`, `  ${nodes.get(task.id)!} --> ${node}`)
     }
   }
   return [fence('mermaid', body.join('\n'))]
@@ -265,7 +280,7 @@ const fmtDate = (iso: string): string => iso.replace(/\.\d+Z$/, '').replace(/Z$/
 function timelineLines(steps: readonly StepRecord[]): string[] {
   if (steps.length === 0) return NONE
   const body: string[] = ['gantt', '  dateFormat YYYY-MM-DDTHH:mm:ss', '  title Step timeline']
-  for (const step of orderedSteps(steps)) body.push(`  ${mermaidLabel(step.step)} : ${fmtDate(step.startedAt)}, ${fmtDate(step.endedAt)}`)
+  for (const step of orderedSteps(steps)) body.push(`  ${mermaidText(step.step)} : ${fmtDate(step.startedAt)}, ${fmtDate(step.endedAt)}`)
   return [fence('mermaid', body.join('\n'))]
 }
 
@@ -287,7 +302,7 @@ export async function renderBuildSummary(input: RenderBuildSummaryInput): Promis
     section('Tests written', testsWrittenLines(plan, changedFiles)),
     section('Deviations and assumptions', deviationLines(state)),
     section('Cost and time', costLines(state.steps)),
-    section('Architecture', architectureLines(plan, changedFiles)),
+    section('Architecture', await architectureLines(plan, changedFiles, repo)),
     section('Step timeline', timelineLines(state.steps)),
     mode === 'local' ? 'Reviews ran in the same session as the build, not as a separate pass.' : "Each step and each review ran as that step's own agent run, not in this session.",
   ]

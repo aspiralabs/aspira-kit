@@ -137,6 +137,31 @@ describe('T38 F38 F39: section order, blocking items first, Mermaid sections', (
   }, 30_000)
 })
 
+describe('AVA1.1 SEC-010: plan text in the architecture diagram is redacted and stays inside its fence', () => {
+  it('redacts a token in a task title or file name and keeps backticks, quotes and newlines from breaking the mermaid fence', async () => {
+    const hostile = {
+      ...PLAN,
+      tasks: [
+        { ...PLAN.tasks[0]!, title: 'Break out ```\n## Injected heading\n"quoted" ghp_abc123SECRET' },
+        { ...PLAN.tasks[1]!, changes: [{ ...PLAN.tasks[1]!.changes[0]!, path: 'src/ghp_def456SECRET`x`.ts' }] },
+      ],
+    }
+    const summary = await renderBuildSummary({ ticket: ticket(), state: runState(), repo: await repo(), plan: hostile })
+    const architecture = section(summary, /architecture/i)
+    const fenced = /^```mermaid\n([\s\S]*?)\n```\s*$/.exec(architecture.trim())
+    const body = fenced?.[1] ?? ''
+    const labelled = body.split('\n').filter((line) => line.includes('["'))
+    expect({
+      oneFence: fenced !== null && architecture.split('```').length - 1 === 2,
+      token: summary.includes('ghp_abc123SECRET') || summary.includes('ghp_def456SECRET'),
+      redacted: body.split('[redacted]').length - 1 >= 2,
+      injectedHeading: sections(summary).some((entry) => /injected heading/i.test(entry.heading)),
+      labelsIntact: labelled.length === 4 && labelled.every((line) => /^ {2}\w+\["[^`"\n]*"\]$/.test(line)),
+      label: body.includes('P1: Break out'),
+    }).toEqual({ oneFence: true, token: false, redacted: true, injectedHeading: false, labelsIntact: true, label: true })
+  }, 30_000)
+})
+
 describe('T39 F40 F41: cost and time, and a run with nothing finished', () => {
   it('shows not reported for missing usage, a partial total naming the excluded step, and a labelled estimate', async () => {
     const state = runState({
