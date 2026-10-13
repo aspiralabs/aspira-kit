@@ -224,6 +224,9 @@ export async function project(options: ProjectOptions) {
   await writeFile(join(bin, 'git'), `#!/bin/bash\n{ printf '%s\\x1f' "$@"; printf '\\n'; } >> "$GIT_LOG"\nexec ${realGit} "$@"\n`, { mode: 0o755 })
   // gh: records every call (arguments, and the body it was given) and answers like gh does.
   if (options.gh !== false) await writeFile(join(bin, 'gh'), FAKE_GH, { mode: 0o755 })
+  // Without gh: shadow any gh the machine has on /usr/bin (CI runners ship one) with a stub that
+  // fails like a missing command, so the test does not depend on the machine.
+  else await writeFile(join(bin, 'gh'), '#!/bin/bash\necho "gh: command not found" >&2\nexit 127\n', { mode: 0o755 })
   if (options.existingPr !== undefined) await writeFile(join(ghDir, 'pr'), `${options.existingPr}\n`)
   // pnpm: logs where it ran and its arguments, and succeeds.
   await writeFile(join(bin, 'pnpm'), `#!/bin/bash\nprintf '%s %s\\n' "$PWD" "$*" >> "$PNPM_LOG"\n`, { mode: 0o755 })
