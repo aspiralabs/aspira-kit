@@ -2,15 +2,21 @@
 // The ticket is resolved live through the installed agents' board module (the one Notion client,
 // run with node and amaro like the skill launchers do); without it, or when the board cannot be
 // reached, the Status recorded in the ticket's working folder stands in and the output says so.
-import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { appRoot, isNotionUrl, readAspira, readApp } from './aspira.js'
 import { type Log } from './fs.js'
-import { AGENTS, agentPackageDir } from './skills.js'
 import { commandFor, nextStep } from './playbook.js'
+import { isTicketRef } from './ticket-handle.js'
+import { lookupTicket } from './ticket-lookup.js'
 
-export type ResolvedTicket = { id: string; title: string; url: string; status: string }
+export { isTicketRef }
+
+/** A ticket on the board. `type` and `folder` come from the resolve script when it prints them: undefined when it does not, '' for an empty Type. */
+export type ResolvedTicket = { id: string; title: string; url: string; status: string; type?: string; folder?: string }
+
+/** Where liveResolver writes its one warning line: process.stderr, or a capture in tests. */
+export type Writer = { write: (chunk: string) => unknown }
 
 /** Resolves a ticket on a board; null when it cannot (the agents are not installed, no token, no network). `appDir` owns node_modules: `<projectRoot>/<app>` from aspira.json, or the root. */
 export type Resolver = (board: string, ref: string, projectRoot: string, appDir: string) => ResolvedTicket | null
@@ -40,43 +46,12 @@ export function workTickets(projectRoot: string): { folder: string; ticket: Reso
     })
 }
 
-const isTicketRef = (value: string) => /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(value) || /^\d+$/.test(value) || isNotionUrl(value)
-
-/** The first `<ancestor of dir>/node_modules/<relative>` that exists, as Node resolution would find it. */
-function findUpModule(dir: string, relative: string): string | undefined {
-  for (let current = dir; ; current = dirname(current)) {
-    const candidate = join(current, 'node_modules', relative)
-    if (existsSync(candidate)) return candidate
-    if (dirname(current) === current) return undefined
-  }
-}
-
-/** The default resolver: the @aspiralabs/agent-common installed under the app's node_modules, run with its resolve script and the project's .env.local (the root's, then the app's, which wins). */
-export const liveResolver: Resolver = (board, ref, projectRoot, appDir) => {
-  const common = agentPackageDir(appDir, 'agent-common')
-  if (common === undefined) return null
-  const script = join(common, 'scripts', 'resolve-ticket.ts')
-  // amaro is a dependency of the six agents, not of agent-common. Resolve it the way Node would from
-  // an agent's real location: the first ancestor with node_modules/amaro (pnpm keeps a package's
-  // dependencies two levels up from a scoped package; npm and yarn hoist them to the app's root).
-  const amaro = [common, ...AGENTS.map((agent) => agentPackageDir(appDir, agent)), appDir]
-    .filter((dir): dir is string => dir !== undefined)
-    .map((dir) => findUpModule(realpathSync(dir), join('amaro', 'dist', 'register-strip.mjs')))
-    .find((candidate) => candidate !== undefined)
-  if (!existsSync(script) || amaro === undefined) {
-    process.stderr.write(`kit next: ${existsSync(script) ? 'amaro (the TypeScript loader the agents ship with) is not installed' : `${script} is missing`}\n`)
-    return null
-  }
-  const envFiles = [...new Set([join(projectRoot, '.env.local'), join(appDir, '.env.local')])].filter((file) => existsSync(file))
-  const args = ['--import', amaro, '--experimental-strip-types', ...envFiles.map((file) => `--env-file=${file}`), script, ref, '--board', board]
-  const run = spawnSync('node', args, { cwd: projectRoot, encoding: 'utf8' })
-  if (run.status !== 0) {
-    process.stderr.write(`kit next: the board resolver failed:\n${run.stderr ?? ''}`)
-    return null
-  }
-  const fields = Object.fromEntries(run.stdout.split('\n').filter((line) => line.includes('=')).map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]))
-  if (!fields.id || !fields.status) return null
-  return { id: fields.id, title: fields.title ?? '', url: fields.url ?? '', status: fields.status }
+/** The default resolver: lookupTicket, with the ticket or null. Each null writes exactly one line, `kit next: <why>`, to `writer`. */
+export function liveResolver(board: string, ref: string, projectRoot: string, appDir: string, writer: Writer = process.stderr): ResolvedTicket | null {
+  const result = lookupTicket(board, ref, projectRoot, appDir)
+  if ('ticket' in result) return result.ticket
+  writer.write(`kit next: ${result.detail}\n`)
+  return null
 }
 
 /** Print the next step for a ticket. Exit 0 with a step, 1 when the ticket or the board cannot be found, 2 for a bad argument. `app` (--app) overrides the one in aspira.json. */

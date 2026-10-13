@@ -37,7 +37,8 @@ beforeAll(() => {
   }
   // Pack the kit package itself (already built to dist), so the project installs @aspiralabs/kit
   // from a tarball too: the build-feature launcher resolves the Playbook through its own package
-  // export, not a path into this checkout's packages/kit/src.
+  // export, not a path into this checkout's packages/kit/src, and kit doctor checks the kit-owned
+  // skills against the installed kit.
   const kitDir = join(repo, 'packages', 'kit')
   const kitFile = run('pnpm', ['pack', '--pack-destination', tarballs], kitDir).trim().split('\n').at(-1)!
   const kitTarball = `file:${join(tarballs, kitFile.split('/').at(-1)!)}`
@@ -55,7 +56,7 @@ beforeAll(() => {
 })
 
 describe('an installed project', () => {
-  it('has every agent under node_modules and kit init writes the eight skills from them', async () => {
+  it('has every agent under node_modules and kit init writes the eight agent skills from them and the three kit-owned skills', async () => {
     expect(JSON.parse(readFileSync(join(app, 'node_modules', '@aspiralabs', 'agents', 'package.json'), 'utf8'))).toMatchObject({ name: '@aspiralabs/agents' })
     // kit init's install step adds the registry packages; here it is a no-op, the tarballs are already installed.
     const bin = join(scratch, 'bin')
@@ -69,7 +70,9 @@ describe('an installed project', () => {
     } finally {
       process.env.PATH = path
     }
-    expect(lines.filter((l) => l.startsWith('write  .claude/skills/aspira-')).length).toBe(8)
+    const written = lines.filter((l) => l.startsWith('write  .claude/skills/aspira-'))
+    expect(written.filter((l) => AGENTS.some((agent) => l.startsWith(`write  .claude/skills/aspira-${agent} `))).length).toBe(8)
+    expect(written.filter((l) => /^write {2}\.claude\/skills\/aspira-(cleanup|next|worktree) /.test(l)).length).toBe(3)
     expect(lines.some((l) => l.startsWith('write  .claude/skills/aspira-groomer'))).toBe(true)
     const version = (JSON.parse(readFileSync(join(repo, 'packages/agents/meta/package.json'), 'utf8')) as { version: string }).version
     for (const agent of AGENTS) {
@@ -79,7 +82,9 @@ describe('an installed project', () => {
     }
     const report: string[] = []
     doctor(app, (line) => report.push(line))
-    expect(report.filter((l) => l.startsWith('ok   .claude/skills/aspira-')).length).toBe(8)
+    const skillLines = report.filter((l) => l.startsWith('ok   .claude/skills/aspira-'))
+    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/agents')).length).toBe(8)
+    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/kit')).length).toBe(3)
     expect(report.some((l) => l.startsWith('@aspiralabs/agents') && l.includes(`installed ${version}`))).toBe(true)
   })
 

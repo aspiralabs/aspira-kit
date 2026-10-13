@@ -14,7 +14,7 @@ import { join, basename } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { deepMerge, hasJsonComments, readJson, writeIfAbsent, writeJson, type Log } from '../fs.js'
 import { appRoot, isWorkspaceRoot, normalizeApp, writeAspira } from '../aspira.js'
-import { mcpServer } from '../doctor.js'
+import { ENV_LOCAL_ENTRY, envLocalIgnored, gitRootOf, hasLine, mcpServer, WORKTREES_ENTRY } from '../doctor.js'
 import { AGENTS_PACKAGE, installSkills } from '../skills.js'
 
 export type InitOptions = { projectRoot: string; app?: string; dryRun: boolean; log: Log; board?: string; releases?: string }
@@ -70,6 +70,15 @@ export function withAllowBuilds(yaml: string, names: string[]): string {
   return `${next.join('\n')}\n`
 }
 
+/**
+ * The directory that owns the lockfile and .npmrc, where install and build run: the project root when
+ * the app sits in a workspace rooted there (isWorkspaceRoot), else the app's own directory.
+ */
+export function workspaceDirOf(projectRoot: string, app: string | undefined): string {
+  return isWorkspaceRoot(projectRoot, app) ? projectRoot : appRoot(projectRoot, app)
+}
+
+/** The package manager whose lockfile is in `root`: pnpm, yarn or npm, and pnpm when there is none. */
 export function packageManager(root: string): 'pnpm' | 'npm' | 'yarn' {
   if (existsSync(join(root, 'pnpm-lock.yaml'))) {
     return 'pnpm'
@@ -317,27 +326,56 @@ export const GITIGNORE_ENTRIES: ReadonlyArray<readonly [entry: string, comment: 
   ['.aspira/', "# the audit log the kit's hooks write (.aspira/audit.jsonl)"],
 ]
 
+const readText = (path: string): string => (existsSync(path) ? readFileSync(path, 'utf8') : '')
+
+/** Appends each entry, with its comment above it, to the .gitignore at `path`, after a blank line when it has content. */
+function appendIgnore(path: string, current: string, entries: ReadonlyArray<readonly [string, string]>, opts: Resolved): void {
+  opts.log(`update ${path} (ignore ${entries.map(([entry]) => entry).join(', ')})`)
+  if (!opts.dryRun) {
+    writeFileSync(path, `${current.trimEnd()}${current ? '\n\n' : ''}${entries.map(([entry, comment]) => `${comment}\n${entry}\n`).join('')}`)
+  }
+}
+
 function gitignore(opts: Resolved): void {
   // Per-ticket working folders are pulled from the Notion ticket and never committed; the audit log
   // the hooks write at the root would otherwise dirty the tree on the first tool call.
   const path = join(opts.projectRoot, '.gitignore')
-  const current = existsSync(path) ? readFileSync(path, 'utf8') : ''
+  const current = readText(path)
+  const wanted: Array<readonly [string, string]> = [...GITIGNORE_ENTRIES]
   const missing = GITIGNORE_ENTRIES.filter(([entry]) => !new RegExp(`^${entry.replace('.', '\\.').replace(/\/$/, '')}/?$`, 'm').test(current))
+  // Ticket worktrees live at the git repository root, so .worktrees/ goes into that root's .gitignore.
+  // .env.local (the secrets kit worktree links) goes into the project's unless git already ignores
+  // every linked copy, through a glob such as .env*.local. Outside a git repository neither applies.
+  const gitRoot = gitRootOf(opts.projectRoot)
+  if (gitRoot === undefined) {
+    opts.log(`skip   ${WORKTREES_ENTRY[0]} and ${ENV_LOCAL_ENTRY[0]} ignore lines (not in a git repository)`)
+  } else {
+    if (gitRoot === opts.projectRoot) {
+      wanted.push(WORKTREES_ENTRY)
+      if (!hasLine(current, WORKTREES_ENTRY[0])) missing.push(WORKTREES_ENTRY)
+    } else {
+      const rootPath = join(gitRoot, '.gitignore')
+      const rootCurrent = readText(rootPath)
+      if (hasLine(rootCurrent, WORKTREES_ENTRY[0])) opts.log(`keep   ${rootPath} (${WORKTREES_ENTRY[0]} ignored)`)
+      else appendIgnore(rootPath, rootCurrent, [WORKTREES_ENTRY], opts)
+    }
+    if (hasLine(current, ENV_LOCAL_ENTRY[0]) || !envLocalIgnored(opts.projectRoot, opts.app)) {
+      wanted.push(ENV_LOCAL_ENTRY)
+      if (!hasLine(current, ENV_LOCAL_ENTRY[0])) missing.push(ENV_LOCAL_ENTRY)
+    }
+  }
   if (missing.length === 0) {
-    opts.log(`keep   ${path} (${GITIGNORE_ENTRIES.map(([entry]) => entry).join(', ')} ignored)`)
+    opts.log(`keep   ${path} (${wanted.map(([entry]) => entry).join(', ')} ignored)`)
     return
   }
-  opts.log(`update ${path} (ignore ${missing.map(([entry]) => entry).join(', ')})`)
-  if (!opts.dryRun) {
-    writeFileSync(path, `${current.trimEnd()}${current ? '\n\n' : ''}${missing.map(([entry, comment]) => `${comment}\n${entry}\n`).join('')}`)
-  }
+  appendIgnore(path, current, missing, opts)
 }
 
 export async function initNext(options: InitOptions): Promise<void> {
   const app = options.app === undefined ? undefined : normalizeApp(options.app)
   const appDir = appRoot(options.projectRoot, app)
   const workspace = isWorkspaceRoot(options.projectRoot, app)
-  const opts: Resolved = { ...options, app: app === '.' ? undefined : app, appDir, workspace, workspaceDir: workspace ? options.projectRoot : appDir }
+  const opts: Resolved = { ...options, app: app === '.' ? undefined : app, appDir, workspace, workspaceDir: workspaceDirOf(options.projectRoot, app) }
   if (opts.app && !existsSync(join(opts.appDir, 'package.json'))) {
     throw new Error(`--app ${opts.app}: no package.json in ${opts.appDir}; --app names the directory that owns package.json and node_modules, relative to ${opts.projectRoot}`)
   }

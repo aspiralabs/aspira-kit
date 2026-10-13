@@ -22,14 +22,32 @@ const VERSION = '0.9.0'
 type Settings = { hooks: Record<string, { matcher: string; hooks: { command: string }[] }[]> }
 type Mcp = { mcpServers: Record<string, { command: string; args: string[] }> }
 
+/** Runs git in `dir`, as the kit and a human would. */
+const git = (dir: string, ...args: string[]) => spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' })
+
+/** The .gitignore kit init leaves at a project root that is also the git root and held only node_modules. */
+const WIRED_GITIGNORE = [
+  'node_modules',
+  '',
+  '# per-ticket working folders (pulled from the Notion ticket, never committed)',
+  '.work/',
+  "# the audit log the kit's hooks write (.aspira/audit.jsonl)",
+  '.aspira/',
+  '# per-ticket git worktrees (kit worktree <ID> makes .worktrees/<TYPE>-<ID>)',
+  '.worktrees/',
+  '# local secrets such as NOTION_TOKEN; kit worktree links them into each ticket worktree',
+  '.env.local',
+  '',
+].join('\n')
+
 const logs = () => {
   const lines: string[] = []
   return { lines, log: (line: string) => lines.push(line) }
 }
 
-/** A repository with no root package.json whose Next app is apps/web, with the kit packages installed there the way pnpm lays them out. */
-function repository(): { root: string; app: string } {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kit-app-')))
+/** A repository with no root package.json whose Next app is apps/web, with the kit packages installed there the way pnpm lays them out; at `base` when given, else in a new temporary folder. */
+function repository(base?: string): { root: string; app: string } {
+  const root = base ?? realpathSync(mkdtempSync(join(tmpdir(), 'kit-app-')))
   const app = join(root, 'apps', 'web')
   mkdirSync(join(app, 'app'), { recursive: true })
   writeFileSync(join(app, 'package.json'), JSON.stringify({ name: 'web', private: true, dependencies: { '@aspiralabs/ui': VERSION }, devDependencies: { '@aspiralabs/config': VERSION, '@aspiralabs/kit': VERSION, '@aspiralabs/agents': VERSION } }))
@@ -82,6 +100,7 @@ async function init(root: string, extra: { app?: string; board?: string; dryRun?
 describe('kit init --stack next --app apps/web at the repository root', () => {
   it('writes the package files in the app and the Claude-facing files at the root, with paths pointing into the app', async () => {
     const { root, app } = repository()
+    expect(git(root, 'init', '-q').status).toBe(0)
     const lines = await init(root, { app: 'apps/web', board: BOARD })
     expect(lines[0]).toBe(`stack  next (${root}; app apps/web)`)
     // Package-level: in apps/web, nothing of it at the root.
@@ -113,7 +132,7 @@ describe('kit init --stack next --app apps/web at the repository root', () => {
       expect(existsSync(join(app, '.claude'))).toBe(false)
     }
     expect(JSON.parse(readFileSync(join(root, 'aspira.json'), 'utf8'))).toEqual({ board: BOARD, app: 'apps/web' })
-    expect(readFileSync(join(root, '.gitignore'), 'utf8')).toMatch(/^node_modules\n\n# per-ticket[^\n]*\n\.work\/\n# the audit log[^\n]*\n\.aspira\/\n$/)
+    expect(readFileSync(join(root, '.gitignore'), 'utf8')).toBe(WIRED_GITIGNORE)
     expect(existsSync(join(app, '.gitignore'))).toBe(false)
   })
 
@@ -205,6 +224,77 @@ function workspace(): { root: string; app: string } {
   writeFileSync(join(app, 'tsconfig.json'), '{\n  "extends": "@aspiralabs/config/tsconfig/next.json",\n  "compilerOptions": {\n    // Next requires react-jsx.\n    "jsx": "react-jsx", /* "a // string" */\n    "paths": { "@/*": ["./*"] },\n  },\n}\n')
   return { root, app }
 }
+
+describe('kit init and kit doctor: the .worktrees/ and .env.local ignore lines', () => {
+  it('writes .worktrees/ and .env.local once, and a rerun leaves the .gitignore as it was', async () => {
+    const { root } = repository()
+    expect(git(root, 'init', '-q').status).toBe(0)
+    await init(root, { app: 'apps/web', board: BOARD })
+    const first = readFileSync(join(root, '.gitignore'), 'utf8')
+    await init(root, { app: 'apps/web', board: BOARD })
+    expect({ first, second: readFileSync(join(root, '.gitignore'), 'utf8') }).toEqual({ first: WIRED_GITIGNORE, second: WIRED_GITIGNORE })
+  })
+
+  it('adds no .env.local line when a glob such as .env*.local already ignores it', async () => {
+    const { root } = repository()
+    writeFileSync(join(root, '.gitignore'), 'node_modules\n.env*.local\n')
+    expect(git(root, 'init', '-q').status).toBe(0)
+    await init(root, { app: 'apps/web', board: BOARD })
+    const lines = readFileSync(join(root, '.gitignore'), 'utf8').split('\n')
+    expect({ hasLine: lines.includes('.env.local'), ignored: git(root, 'check-ignore', '-q', '--no-index', '.env.local').status }).toEqual({ hasLine: false, ignored: 0 })
+  })
+
+  it("writes .worktrees/ into the git root's .gitignore when the project sits below it", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), 'kit-git-root-')))
+    expect(git(repo, 'init', '-q').status).toBe(0)
+    const product = join(repo, 'product')
+    repository(product)
+    writeFileSync(join(product, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/web' }))
+    await init(product, { app: 'apps/web', board: BOARD })
+    const rootIgnore = existsSync(join(repo, '.gitignore')) ? readFileSync(join(repo, '.gitignore'), 'utf8').split('\n') : []
+    expect({ hasLine: rootIgnore.includes('.worktrees/'), ignored: git(repo, 'check-ignore', '-q', '--no-index', '.worktrees/FEATURE-KIT-1').status }).toEqual({ hasLine: true, ignored: 0 })
+  })
+
+  it('doctor fails on each missing ignore line in a git repository, passes after an init rerun, and skips both checks outside one', async () => {
+    const { root } = repository()
+    expect(git(root, 'init', '-q').status).toBe(0)
+    await init(root, { app: 'apps/web', board: BOARD })
+    writeFileSync(join(root, '.gitignore'), 'node_modules\n.work/\n.aspira/\n')
+    const before = logs()
+    const beforeCode = doctor(root, before.log)
+    const problems = before.lines.filter((line) => line.startsWith('FAIL'))
+    expect({ code: beforeCode, count: problems.length, worktrees: problems.filter((line) => line.includes('.worktrees/')).length, envLocal: problems.filter((line) => line.includes('.env.local')).length }).toEqual({ code: 1, count: 2, worktrees: 1, envLocal: 1 })
+    await init(root, { app: 'apps/web', board: BOARD })
+    expect(doctor(root, () => {})).toBe(0)
+    // The same project outside any git repository: both checks say skipped and count as no problem.
+    const { root: plain } = repository()
+    await init(plain, { app: 'apps/web', board: BOARD })
+    writeFileSync(join(plain, '.gitignore'), 'node_modules\n.work/\n.aspira/\n')
+    const outside = logs()
+    const outsideCode = doctor(plain, outside.log)
+    const ignoreLines = outside.lines.filter((line) => line.includes('.worktrees/') || line.includes('.env.local'))
+    expect({
+      code: outsideCode,
+      worktrees: ignoreLines.some((line) => line.includes('.worktrees/')),
+      envLocal: ignoreLines.some((line) => line.includes('.env.local')),
+      allSkipped: ignoreLines.every((line) => line.includes('skipped') && !line.startsWith('FAIL')),
+    }).toEqual({ code: 0, worktrees: true, envLocal: true, allSkipped: true })
+  })
+
+  it("this repository's own .gitignore ignores .worktrees/ and .env.local", () => {
+    const top = git(kit, 'rev-parse', '--show-toplevel').stdout.trim()
+    const committed = readFileSync(join(top, '.gitignore'), 'utf8')
+    // Only the .gitignore counts: a fresh repository leaves .git/info/exclude (shared by every worktree here) behind.
+    const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'kit-own-ignore-')))
+    expect(git(scratch, 'init', '-q').status).toBe(0)
+    writeFileSync(join(scratch, '.gitignore'), committed)
+    expect({
+      worktrees: git(scratch, 'check-ignore', '-q', '--no-index', '.worktrees/FEATURE-KIT-1').status,
+      envLocal: git(scratch, 'check-ignore', '-q', '--no-index', '.env.local').status,
+      exactLine: committed.split('\n').includes('.worktrees/'),
+    }).toEqual({ worktrees: 0, envLocal: 0, exactLine: true })
+  })
+})
 
 describe('kit init --stack next --app apps/web in a workspace whose root has its own package.json', () => {
   it('uses the root .npmrc and prettier config, keeps the commented tsconfig, and keeps the root kit packages on the app version', async () => {
@@ -305,7 +395,9 @@ describe('kit doctor with an app', () => {
     expect(flagged.lines).toContain('ok   .mcp.json registers aspiralabs-ui from apps/web/node_modules')
     expect(flagged.lines).toContain('ok   .gitignore ignores .aspira/ (the audit log the hooks write)')
     expect(flagged.lines).toContain('ok   aspira.json names the Feature Board and the app (apps/web)')
-    expect(flagged.lines.filter((l) => l.startsWith('ok   .claude/skills/aspira-')).length).toBe(8)
+    const skillLines = flagged.lines.filter((l) => l.startsWith('ok   .claude/skills/aspira-'))
+    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/agents')).length).toBe(8)
+    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/kit')).length).toBe(3)
     expect(flagged.lines.at(-1)).toBe('healthy')
     // Without the flag: the app comes from aspira.json.
     const fromConfig = logs()
@@ -352,6 +444,21 @@ describe('kit next with an app', () => {
     mkdirSync(join(root, 'apps', 'mobile'))
     expect(next(root, 'NOM-4', log, resolver, 'apps/mobile')).toBe(0)
     expect(seen[1]![3]).toBe(join(root, 'apps', 'mobile'))
+  })
+
+  it('prints the same five lines for a ticket that also carries its type and working-folder name', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kit-next-typed-')))
+    writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: BOARD }))
+    const resolver: Resolver = () => {
+      const ticket = { id: 'NOM-4', title: 'Explore pagination', url: 'https://app.notion.com/p/abc', status: 'Ready: Spec', type: 'Feature', folder: 'nom-4-explore-pagination' }
+      return ticket
+    }
+    const { lines, log } = logs()
+    const code = next(root, 'NOM-4', log, resolver)
+    expect({ code, lines }).toEqual({
+      code: 0,
+      lines: ['ticket   NOM-4 Explore pagination (https://app.notion.com/p/abc)', 'status   Ready: Spec', 'next     Step 5: plan', 'run      /aspira-planner NOM-4 --local', 'who      agent'],
+    })
   })
 
   const amaro = join(dirname(dirname(kit)), 'packages', 'agents', 'implementor', 'node_modules', 'amaro')
