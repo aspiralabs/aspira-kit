@@ -4,7 +4,7 @@
 // kit doctor [--app <dir>] [--cwd <path>]
 // kit next [<ticket>] [--app <dir>] [--cwd <path>]
 // kit cleanup [--yes] [--only <path>...] [--app <dir>] [--cwd <path>]
-// kit worktree <ticket> [--app <dir>] [--cwd <path>]
+// kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
 // kit playbook
 import { resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
@@ -44,7 +44,7 @@ const usage = `usage:
   kit doctor [--app <dir>] [--cwd <path>]
   kit next [<ticket>] [--app <dir>] [--cwd <path>]
   kit cleanup [--yes] [--only <path>...] [--app <dir>] [--cwd <path>]
-  kit worktree <ticket> [--app <dir>] [--cwd <path>]
+  kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
   kit playbook
 
   --app <dir>: in a repository whose app (package.json, node_modules) is not the root, that directory,
@@ -95,7 +95,7 @@ async function main(): Promise<number> {
       console.error(`${args.reason}\n${usage}`)
       return 2
     }
-    return worktree({ projectRoot: cwd, app: args.app, ref: args.ref, log })
+    return worktree({ projectRoot: cwd, app: args.app, ref: args.ref, install: args.install, log })
   }
   if (command === 'playbook') {
     process.stdout.write(renderPlaybook())

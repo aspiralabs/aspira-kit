@@ -26,6 +26,8 @@ export type WorktreeOptions = {
   ref: string
   /** Looks the ticket up on the board; the installed agents' resolver by default. */
   lookup?: TicketLookup
+  /** `--install`: run install and build even on a reused branch this machine did not make under today's name. */
+  install?: boolean | undefined
   log: Log
 }
 
@@ -213,6 +215,9 @@ export function worktree(options: WorktreeOptions): number {
     return 1
   }
   const [existing] = matches
+  // A branch from origin only, or one under another name, may hold scripts nobody here has read; install and
+  // build would run them with .env.local linked in, so they wait for --install (AVA1.1).
+  let unreviewed = false
   let branch = wanted
   let addArgs = ['worktree', 'add', '-b', wanted, target, 'origin/main']
   if (existing !== undefined) {
@@ -224,6 +229,7 @@ export function worktree(options: WorktreeOptions): number {
     const isLocal = local.includes(existing)
     const startPoint = isLocal ? existing : `origin/${existing}`
     branch = existing
+    unreviewed = !isLocal || existing !== wanted
     log(`branch   reusing ${startPoint}${existing === wanted ? '' : ` (differs from ${wanted}, the name the card's title gives today)`}`)
     const last = git(main, ['log', '-1', '--format=%h %s', startPoint])
     if (last.status === 0) log(`commit   ${last.stdout.trim()}`)
@@ -247,6 +253,9 @@ export function worktree(options: WorktreeOptions): number {
   const workDir = workspaceDirOf(worktreeProject, app)
   if (!existsSync(join(workDir, 'package.json'))) {
     log(`skip     install and build (no package.json in ${workDir})`)
+  } else if (unreviewed && options.install !== true) {
+    const pm = packageManager(workDir)
+    log(`skip     install and build: ${branch} was not made here under today's name, so its scripts are unread; read its last commit above, then run ${pm} install and ${pm} run build in ${workDir}, or rerun with --install`)
   } else {
     const pm = packageManager(workDir)
     if (!runStep(log, 'install', workDir, pm, ['install'])) {

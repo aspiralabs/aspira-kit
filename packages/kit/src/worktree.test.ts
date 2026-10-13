@@ -129,12 +129,12 @@ const answer =
 
 type Run = { code: number; lines: string[]; out: string }
 
-async function run(projectRoot: string, ref: string, result: TicketLookupResult): Promise<Run> {
+async function run(projectRoot: string, ref: string, result: TicketLookupResult, install = false): Promise<Run> {
   const lines: string[] = []
   const log = (line: string): void => {
     lines.push(...line.split('\n'))
   }
-  const code = await Promise.resolve(worktree({ projectRoot, app: undefined, ref, lookup: answer(result), log }))
+  const code = await Promise.resolve(worktree({ projectRoot, app: undefined, ref, lookup: answer(result), install, log }))
   while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
   return { code, lines, out: lines.join('\n') }
 }
@@ -223,26 +223,43 @@ describe('kit worktree: creating a ticket worktree', () => {
 })
 
 describe('kit worktree: an existing branch', () => {
-  it('T45 reuses a local branch made under an older title and prints its last commit before installing', async () => {
-    const { main } = fixture()
+  /** A local branch for KIT-13 under an older title, holding one commit `start work`; returns its short sha. */
+  function oldTitleBranch(main: string): string {
     git(main, 'checkout', '-q', '-b', 'feat/kit-13-old-title', 'origin/main')
     writeFileSync(join(main, 'work.txt'), 'started\n')
     git(main, 'add', 'work.txt')
     git(main, 'commit', '-q', '-m', 'start work')
     const sha = git(main, 'log', '-1', '--format=%h')
     git(main, 'checkout', '-q', 'chore/other')
+    return sha
+  }
+
+  it('T45 reuses a local branch made under an older title, prints its last commit, and leaves install and build to you (AVA1.1)', async () => {
+    const { main } = fixture()
+    const sha = oldTitleBranch(main)
     const result = await run(main, 'KIT-13', feature({ folder: 'kit-13-new-title' }))
     expect(result.code).toBe(0)
     expect(currentBranch(handlePath(main, 'FEATURE-KIT-13'))).toBe('feat/kit-13-old-title')
     expect(result.lines.some((line) => /reus/i.test(line) && line.includes('feat/kit-13-old-title'))).toBe(true)
     expect(result.out).toContain('feat/kit-13-new-title')
+    expect(result.lines.some((line) => line.includes(sha) && line.includes('start work'))).toBe(true)
+    // The step lines runStep logs (`install  <dir>: npm install`); the skip line names the commands without running them.
+    expect(result.lines.some((line) => line.startsWith('install ') || line.startsWith('build '))).toBe(false)
+    expect(result.lines.some((line) => line.startsWith('skip') && line.includes('--install'))).toBe(true)
+  })
+
+  it('T45 with --install runs install and build on a reused branch, after printing its last commit', async () => {
+    const { main } = fixture()
+    const sha = oldTitleBranch(main)
+    const result = await run(main, 'KIT-13', feature({ folder: 'kit-13-new-title' }), true)
+    expect(result.code).toBe(0)
     const commit = result.lines.findIndex((line) => line.includes(sha) && line.includes('start work'))
     const install = result.lines.findIndex((line) => line.includes('npm install'))
     expect(commit).toBeGreaterThanOrEqual(0)
     expect(install).toBeGreaterThan(commit)
   })
 
-  it('T45 checks out a branch that exists only on origin, tracking it', async () => {
+  it('T45 checks out a branch that exists only on origin, tracking it, and runs none of its scripts (AVA1.1)', async () => {
     const { main } = fixture()
     git(main, 'push', '-q', 'origin', 'origin/main:refs/heads/feat/kit-13-remote')
     git(main, 'update-ref', '-d', 'refs/remotes/origin/feat/kit-13-remote')
@@ -251,6 +268,8 @@ describe('kit worktree: an existing branch', () => {
     expect(result.code).toBe(0)
     expect(currentBranch(wt)).toBe('feat/kit-13-remote')
     expect(git(wt, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}')).toBe('origin/feat/kit-13-remote')
+    expect(result.lines.some((line) => line.startsWith('install ') || line.startsWith('build '))).toBe(false)
+    expect(result.lines.some((line) => line.startsWith('skip') && line.includes('--install'))).toBe(true)
   })
 
   it('T45 refuses when more than one branch matches the ticket, listing them', async () => {

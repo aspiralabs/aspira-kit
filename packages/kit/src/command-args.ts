@@ -7,7 +7,7 @@ export type UsageError = { ok: false; reason: string }
 
 export type CleanupArgs = { ok: true; yes: boolean; only: string[] | undefined; app: string | undefined; cwd: string | undefined }
 
-export type WorktreeArgs = { ok: true; ref: string; app: string | undefined; cwd: string | undefined }
+export type WorktreeArgs = { ok: true; ref: string; app: string | undefined; cwd: string | undefined; install: boolean }
 
 const usageError = (reason: string): UsageError => ({ ok: false, reason })
 
@@ -59,6 +59,7 @@ export function parseWorktreeArgs(args: readonly string[]): WorktreeArgs | Usage
   let ref: string | undefined
   let app: string | undefined
   let cwd: string | undefined
+  let install = false
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (arg === undefined) continue
@@ -68,6 +69,8 @@ export function parseWorktreeArgs(args: readonly string[]): WorktreeArgs | Usage
       if (arg === '--app') app = value
       else cwd = value
       i++
+    } else if (arg === '--install') {
+      install = true
     } else if (isFlag(arg)) {
       return usageError(`unknown option for kit worktree: ${arg}`)
     } else if (ref !== undefined) {
@@ -79,5 +82,5 @@ export function parseWorktreeArgs(args: readonly string[]): WorktreeArgs | Usage
     }
   }
   if (ref === undefined) return usageError('kit worktree needs a ticket ID, for example kit worktree KIT-13')
-  return { ok: true, ref, app, cwd }
+  return { ok: true, ref, app, cwd, install }
 }

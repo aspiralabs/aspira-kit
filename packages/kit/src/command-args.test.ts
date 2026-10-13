@@ -14,8 +14,9 @@ describe('parseCleanupArgs', () => {
 })
 
 describe('parseWorktreeArgs', () => {
-  it('takes one ticket ID', () => {
-    expect(parseWorktreeArgs(['KIT-13'])).toMatchObject({ ok: true, ref: 'KIT-13' })
+  it('takes one ticket ID, with install off unless --install is given', () => {
+    expect(parseWorktreeArgs(['KIT-13'])).toMatchObject({ ok: true, ref: 'KIT-13', install: false })
+    expect(parseWorktreeArgs(['KIT-13', '--install'])).toMatchObject({ ok: true, ref: 'KIT-13', install: true })
   })
 
   it('refuses no ID, a value that is not a ticket, and an unknown flag', () => {

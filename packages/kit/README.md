@@ -190,12 +190,12 @@ The mapping is `src/playbook.ts`, the one source of the Status table. `kit playb
 
 ```bash
 pnpm kit cleanup [--yes] [--only <path>...] [--app <dir>] [--cwd <path>]
-pnpm kit worktree <ticket> [--app <dir>] [--cwd <path>]
+pnpm kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
 ```
 
 `kit cleanup` lists every working folder under `.work/` (in the main checkout and in each ticket worktree) and every ticket worktree at `.worktrees/<TYPE>-<ID>` (TYPE `FEATURE`, `BUG` or `CHORE`) with the card's **live** Status, and marks for deletion only those whose card is Released or Dropped. On a terminal it asks `Delete N folders and remove M worktrees? [y/N]`; `--yes` skips the question, `--only <path>...` (with `--yes`) deletes only the listed paths that are still marked, and without a terminal and `--yes` it lists and deletes nothing. A worktree with uncommitted or unpushed work (commits not on any remote-tracking branch after `git fetch --prune`) is kept, even with `--yes`; worktrees are removed without `--force` and their local branch with `git branch -d`, never a remote branch. The main checkout, worktrees outside `.worktrees/` and folders it cannot match to a card are never touched, and every skip says why. It exits `0` when every marked item was deleted, `1` when there is no board or a deletion failed, `2` for a bad argument.
 
-`kit worktree <ticket>` resolves the card, refuses a Released or Dropped card or one without a Feature, Bug or Chore Type, and creates `.worktrees/<TYPE>-<ID>` at the repository root on `<feat|fix|chore>/<id>-<slug>` from `origin/main` (after a fetch), reusing the ticket's branch or worktree when one exists. It links the main checkout's `.env.local` files into the worktree, then runs the project's install and build there, naming each command. `/aspira-worktree` runs it and continues the Claude Code session in the new worktree.
+`kit worktree <ticket>` resolves the card, refuses a Released or Dropped card or one without a Feature, Bug or Chore Type, and creates `.worktrees/<TYPE>-<ID>` at the repository root on `<feat|fix|chore>/<id>-<slug>` from `origin/main` (after a fetch), reusing the ticket's branch or worktree when one exists. It links the main checkout's `.env.local` files into the worktree, then runs the project's install and build there, naming each command. When it reuses a branch that exists only on `origin`, or one under a name other than the card's today, it prints the branch's last commit and skips install and build, because that branch's scripts have not been read on this machine: read it, then install yourself or rerun with `--install`. `/aspira-worktree` runs it and continues the Claude Code session in the new worktree.
 
 ## Working on the CLI
 
