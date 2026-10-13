@@ -64,9 +64,10 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string): number 
   // The Feature Board: aspira.json with a Notion URL, which the skills and kit next read.
   const aspira = checkAspira(projectRoot)
   checks.push([aspira.ok ? `aspira.json names the Feature Board${app ? ` and the app (${app})` : ''}` : aspira.reason ?? 'aspira.json', () => aspira.ok])
-  // The /aspira-* skills: present, complete, and from the installed @aspiralabs/agents version.
+  // The /aspira-* skills: present, complete, and from the installed version of the package that ships
+  // them (@aspiralabs/agents for the agent skills, @aspiralabs/kit for the kit's own).
   for (const skill of checkSkills(projectRoot, app)) {
-    checks.push([skill.ok ? `.claude/skills/aspira-${skill.agent} matches ${AGENTS_PACKAGE}` : skill.reason ?? `.claude/skills/aspira-${skill.agent}`, () => skill.ok])
+    checks.push([skill.ok ? `.claude/skills/aspira-${skill.name} matches ${skill.package}` : skill.reason ?? `.claude/skills/aspira-${skill.name}`, () => skill.ok])
   }
   for (const [label, ok] of checks) {
     const pass = ok()
