@@ -28,9 +28,19 @@ function project(version: string, layout: Layout = 'npm'): string {
     writeFileSync(join(dir, 'skill', `aspira-${agent}`, 'scripts', `${agent}.sh`), '#!/bin/bash\necho hi\n')
     chmodSync(join(dir, 'skill', `aspira-${agent}`, 'scripts', `${agent}.sh`), 0o644)
   }
+  // build-feature: not yet an Agent in skills.ts, but a fake package laid out the same way, so the
+  // eight-skill expectations below have a real fixture to install from once it is.
+  const buildFeature = pkg('build-feature', join(scope, 'build-feature'))
+  mkdirSync(join(buildFeature, 'skill', 'aspira-build-feature', 'scripts'), { recursive: true })
+  writeFileSync(join(buildFeature, 'skill', 'aspira-build-feature', 'SKILL.md'), `---\nname: aspira-build-feature\n---\n# build-feature ${version}\n`)
+  writeFileSync(join(buildFeature, 'skill', 'aspira-build-feature', 'scripts', 'build-feature.sh'), '#!/bin/bash\necho hi\n')
+  chmodSync(join(buildFeature, 'skill', 'aspira-build-feature', 'scripts', 'build-feature.sh'), 0o644)
   writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'app', devDependencies: { '@aspiralabs/agents': version } }))
   return root
 }
+
+/** `.claude/skills/aspira-build-feature`, the one not yet in AGENTS. */
+const buildFeatureSkillDir = (root: string) => join(root, '.claude', 'skills', 'aspira-build-feature')
 
 const logs = () => {
   const lines: string[] = []
@@ -48,7 +58,7 @@ describe('agentPackageDir', () => {
 })
 
 describe('installSkills', () => {
-  it('writes the seven skill folders as copies of the installed packages, each with .kit-version, and keeps them on a re-run', () => {
+  it('writes the eight skill folders as copies of the installed packages, each with .kit-version, and keeps them on a re-run', () => {
     const root = project('0.5.0', 'pnpm')
     const first = logs()
     expect(installSkills({ projectRoot: root, dryRun: false, log: first.log })).toEqual([])
@@ -59,10 +69,22 @@ describe('installSkills', () => {
       // The launcher is executable even when the package manager dropped the bit.
       expect(statSync(join(dir, 'scripts', `${agent}.sh`)).mode & 0o111).not.toBe(0)
     }
-    expect(first.lines.filter((l) => l.startsWith('write ')).length).toBe(7)
+    expect(first.lines.filter((l) => l.startsWith('write ')).length).toBe(8)
+    // build-feature installs the same way as the other seven agents, pinned to .kit-version.
+    const buildFeature = buildFeatureSkillDir(root)
+    expect(readFileSync(join(buildFeature, 'SKILL.md'), 'utf8')).toContain('# build-feature 0.5.0')
+    expect(readFileSync(join(buildFeature, VERSION_FILE), 'utf8')).toBe('0.5.0\n')
     const again = logs()
     installSkills({ projectRoot: root, dryRun: false, log: again.log })
     expect(again.lines.every((l) => l.startsWith('keep   '))).toBe(true)
+  })
+
+  it('checkSkills reports aspira-build-feature missing its launcher when scripts/build-feature.sh is removed', () => {
+    const root = project('0.5.0', 'pnpm')
+    installSkills({ projectRoot: root, dryRun: false, log: () => {} })
+    rmSync(join(buildFeatureSkillDir(root), 'scripts', 'build-feature.sh'))
+    const missing = checkSkills(root).find((c) => c.reason?.includes('aspira-build-feature'))
+    expect(missing?.reason).toBe('.claude/skills/aspira-build-feature/scripts/build-feature.sh is missing')
   })
 
   it('rewrites a skill after a bump, drops stale files, and changes nothing in a dry run', () => {
@@ -76,7 +98,7 @@ describe('installSkills', () => {
     symlinkSync(join(bumped, 'node_modules'), join(root, 'node_modules'))
     const dry = logs()
     installSkills({ projectRoot: root, dryRun: true, log: dry.log })
-    expect(dry.lines.filter((l) => l.startsWith('update ')).length).toBe(7)
+    expect(dry.lines.filter((l) => l.startsWith('update ')).length).toBe(8)
     expect(readFileSync(join(skillDir(root, 'planner'), VERSION_FILE), 'utf8')).toBe('0.5.0\n')
     installSkills({ projectRoot: root, dryRun: false, log: () => {} })
     expect(readFileSync(join(skillDir(root, 'planner'), VERSION_FILE), 'utf8')).toBe('0.6.0\n')
@@ -126,7 +148,7 @@ describe('checkSkills and kit doctor', () => {
     installSkills({ projectRoot: root, dryRun: false, log: () => {} })
     const healthy = logs()
     expect(doctor(root, healthy.log)).toBe(0)
-    expect(healthy.lines.filter((l) => l.startsWith('ok   .claude/skills/aspira-')).length).toBe(7)
+    expect(healthy.lines.filter((l) => l.startsWith('ok   .claude/skills/aspira-')).length).toBe(8)
     expect(checkSkills(root).every((c) => c.ok)).toBe(true)
 
     writeFileSync(join(skillDir(root, 'pr-reviewer'), VERSION_FILE), '0.4.0\n')
