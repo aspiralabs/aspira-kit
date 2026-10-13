@@ -74,15 +74,23 @@ export function renderDecisions(decisions: readonly DecisionRecord[], options: {
   return lines.join('\n')
 }
 
-/** An answer the author ticked in a decisions file. */
-export type Answer = { id: string; question: string; answer: string }
+/** An answer the author ticked in a decisions file. `takenByAgent`: the ticked option was still the
+ * one the agent itself took (its `(recommended, taken by the agent: ...)` suffix), so this is the
+ * agent's own tick, not a real answer from the author. */
+export type Answer = { id: string; question: string; answer: string; takenByAgent?: boolean }
+
+/** The suffix that marks a ticked option as the agent's own recommended pick, not the author's tick. */
+const TAKEN_BY_AGENT_SUFFIX = /[_*]\(recommended, taken by the agent:/
 
 /** The decisions with exactly one ticked option. Two ticks under one question is no answer. */
 export function parseTickedDecisions(markdown: string): Answer[] {
   const answers: Answer[] = []
-  let current: { id: string; question: string; ticked: string[] } | null = null
+  let current: { id: string; question: string; ticked: { text: string; takenByAgent: boolean }[] } | null = null
   const flush = () => {
-    if (current !== null && current.ticked.length === 1) answers.push({ id: current.id, question: current.question, answer: current.ticked[0]! })
+    if (current !== null && current.ticked.length === 1) {
+      const only = current.ticked[0]!
+      answers.push({ id: current.id, question: current.question, answer: only.text, ...(only.takenByAgent ? { takenByAgent: true } : {}) })
+    }
   }
   for (const line of markdown.split('\n')) {
     const heading = line.match(/^## (\S+) — (.+)$/)
@@ -92,19 +100,28 @@ export function parseTickedDecisions(markdown: string): Answer[] {
       continue
     }
     const tick = line.match(/^- \[[xX]\] (.+)$/)
-    if (tick !== null && current !== null) current.ticked.push(tick[1]!.replace(RECOMMENDED_SUFFIX, '').trim())
+    if (tick !== null && current !== null) current.ticked.push({ text: tick[1]!.replace(RECOMMENDED_SUFFIX, '').trim(), takenByAgent: TAKEN_BY_AGENT_SUFFIX.test(tick[1]!) })
   }
   flush()
   return answers
 }
 
-/** An open decision whose question the author answered becomes the author's; the rest stay as they are. */
+/**
+ * An open decision whose question the author answered becomes the author's; the agent's own tick
+ * on an open decision is never read as the author's (F10). An agent decision whose tick still sits
+ * on the recommended option stays the agent's; ticking a different option overrides it to the
+ * author's (F19). An author decision is never moved.
+ */
 export function applyAnswers<T extends DecisionRecord>(decisions: readonly T[], answers: readonly Answer[]): T[] {
-  const byQuestion = new Map(answers.map((answer) => [normalizeQuestion(answer.question), answer.answer]))
+  const byQuestion = new Map(answers.map((answer) => [normalizeQuestion(answer.question), answer]))
   return decisions.map((decision) => {
-    if (decision.decidedBy !== 'open') return decision
-    const answer = byQuestion.get(normalizeQuestion(decision.question))
-    return answer === undefined ? decision : { ...decision, decidedBy: 'author' as const, answer }
+    const found = byQuestion.get(normalizeQuestion(decision.question))
+    if (decision.decidedBy === 'open') {
+      if (found === undefined || found.takenByAgent === true) return decision
+      return { ...decision, decidedBy: 'author' as const, answer: found.answer }
+    }
+    if (decision.decidedBy === 'agent' && found !== undefined && found.answer !== decision.answer) return { ...decision, decidedBy: 'author' as const, answer: found.answer }
+    return decision
   })
 }
 
@@ -137,6 +154,7 @@ export const GROOM_LINE_PATTERNS = {
   twoTicks: /^Two ticks on \d{4}-\d{2}-\d{2}; tick one to answer$/,
   twoNewTicks: /^Two new ticks on \d{4}-\d{2}-\d{2}; tick one to revise$/,
   decided: /^Decided by the author: (.+?)(?: \(revised (\d{4}-\d{2}-\d{2})\))?\.$/,
+  taken: /^Taken by the agent to keep going: (.+?)\. Tick another option to reverse it\.$/,
   todo: /^- \[([ xX])\] (.*)$/,
   why: /^Why it is yours to decide: (.+)$/,
   confirmed: /^Confirmed \d{4}-\d{2}-\d{2}$/,
@@ -168,6 +186,14 @@ const optionIndex = (options: readonly string[], text: string): number => option
 export function applyAnswersById<T extends GroomDecision>(decisions: readonly T[], answers: readonly Answer[], twoTicks: readonly string[] = []): T[] {
   const byId = new Map(answers.map((answer) => [answer.id, answer.answer]))
   return decisions.map((decision) => {
+    if (decision.decidedBy === 'agent') {
+      if (twoTicks.includes(decision.id)) return { ...decision, flag: 'twoTicks' as const }
+      const answer = byId.get(decision.id)
+      if (answer === undefined || normalizeQuestion(answer) === normalizeQuestion(decision.recommended)) return decision
+      const { flag: _flag, ...rest } = decision
+      const index = optionIndex(decision.options, answer)
+      return { ...rest, decidedBy: 'author' as const, answer: index === -1 ? answer : decision.options[index]! } as T
+    }
     if (decision.decidedBy !== 'open') return decision
     if (twoTicks.includes(decision.id)) return { ...decision, flag: 'twoTicks' as const }
     const answer = byId.get(decision.id)
@@ -239,8 +265,14 @@ export function renderGroomPage(record: GroomRecord, options: GroomRenderOptions
     for (const fact of decision.facts) blocks.push(`Fact: ${fact.path}:${fact.line}${fact.quote === undefined ? '' : ` — \`${fact.quote}\``}`)
     if (decision.flag === 'twoTicks') blocks.push(`Two ticks on ${options.date}; tick one to answer`)
     if (decision.flag === 'twoNewTicks') blocks.push(`Two new ticks on ${options.date}; tick one to revise`)
-    const ticked = decision.decidedBy === 'author' && decision.answer !== null ? optionIndex(decision.options, decision.answer) : -1
+    const ticked =
+      decision.decidedBy === 'author' && decision.answer !== null
+        ? optionIndex(decision.options, decision.answer)
+        : decision.decidedBy === 'agent'
+          ? optionIndex(decision.options, decision.recommended)
+          : -1
     if (decision.decidedBy === 'author' && decision.answer !== null) blocks.push(`Decided by the author: ${decision.answer}${decision.revisedAt === undefined ? '' : ` (revised ${decision.revisedAt})`}.`)
+    if (decision.decidedBy === 'agent') blocks.push(`Taken by the agent to keep going: ${decision.recommended}. Tick another option to reverse it.`)
     blocks.push(decision.options.map((option, index) => `- [${index === ticked ? 'x' : ' '}] ${option}${option === decision.recommended ? ` _(recommended: ${decision.reasoning})_` : ''}`).join('\n'))
     blocks.push(`Why it is yours to decide: ${decision.whyYours}`)
   }
@@ -270,6 +302,8 @@ export type GroomPageBlock = {
   branch?: string
   facts: { path: string; line: number; quote?: string }[]
   decided?: { answer: string; revisedAt?: string }
+  /** The recommended option, when the agent took it to keep going. */
+  taken?: string
   todos: GroomToDo[]
   whyYours?: string
 }
@@ -348,12 +382,14 @@ export function readGroomPage(markdown: string, knownIds?: readonly string[]): G
       const branch = line.match(P.branch)
       const fact = line.match(P.fact)
       const decided = line.match(P.decided)
+      const taken = line.match(P.taken)
       const why = line.match(P.why)
       if (todo !== null) block.todos.push({ checked: todo[1] !== ' ', text: todo[2]!, line, at })
       else if (branch !== null && block.branch === undefined) block.branch = branch[1]!
       else if (fact !== null) block.facts.push({ path: fact[1]!, line: Number(fact[2]), ...(fact[3] !== undefined ? { quote: fact[3] } : {}) })
       else if (P.twoTicks.test(line) || P.twoNewTicks.test(line)) continue
       else if (decided !== null && block.decided === undefined) block.decided = { answer: decided[1]!, ...(decided[2] !== undefined ? { revisedAt: decided[2] } : {}) }
+      else if (taken !== null && block.taken === undefined) block.taken = taken[1]!.trim()
       else if (why !== null && block.whyYours === undefined) block.whyYours = why[1]!
       else read.carried.push({ under: block.id, text: line, at })
     } else if (region.kind === 'confirm' || region.kind === 'stop') {

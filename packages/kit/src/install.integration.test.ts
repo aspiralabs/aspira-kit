@@ -55,7 +55,7 @@ beforeAll(() => {
 })
 
 describe('an installed project', () => {
-  it('has every agent under node_modules and kit init writes the seven skills from them', async () => {
+  it('has every agent under node_modules and kit init writes the eight skills from them', async () => {
     expect(JSON.parse(readFileSync(join(app, 'node_modules', '@aspiralabs', 'agents', 'package.json'), 'utf8'))).toMatchObject({ name: '@aspiralabs/agents' })
     // kit init's install step adds the registry packages; here it is a no-op, the tarballs are already installed.
     const bin = join(scratch, 'bin')
@@ -69,7 +69,7 @@ describe('an installed project', () => {
     } finally {
       process.env.PATH = path
     }
-    expect(lines.filter((l) => l.startsWith('write  .claude/skills/aspira-')).length).toBe(7)
+    expect(lines.filter((l) => l.startsWith('write  .claude/skills/aspira-')).length).toBe(8)
     expect(lines.some((l) => l.startsWith('write  .claude/skills/aspira-groomer'))).toBe(true)
     const version = (JSON.parse(readFileSync(join(repo, 'packages/agents/meta/package.json'), 'utf8')) as { version: string }).version
     for (const agent of AGENTS) {
@@ -79,7 +79,7 @@ describe('an installed project', () => {
     }
     const report: string[] = []
     doctor(app, (line) => report.push(line))
-    expect(report.filter((l) => l.startsWith('ok   .claude/skills/aspira-')).length).toBe(7)
+    expect(report.filter((l) => l.startsWith('ok   .claude/skills/aspira-')).length).toBe(8)
     expect(report.some((l) => l.startsWith('@aspiralabs/agents') && l.includes(`installed ${version}`))).toBe(true)
   })
 
