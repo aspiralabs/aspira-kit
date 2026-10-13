@@ -129,9 +129,10 @@ absolute_file() {
 }
 # The ticket argument (F1 of the ticket flow): a board ID such as NOM-4, a Notion page URL, nothing
 # (the one folder under .work/ that holds a ticket.md), or a spec path with --no-ticket. Sets
-# POSITIONAL, NO_TICKET, FORCE_PULL, VERIFY, GUIDELINES, REPO, OUT, FINISH and, with --no-ticket, SPEC.
+# POSITIONAL, NO_TICKET, FORCE_PULL, VERIFY, GUIDELINES, REPO, OUT, FINISH, TAKE_RECOMMENDED and, with
+# --no-ticket, SPEC.
 parse() {
-  POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" SPEC=""
+  POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED="" SPEC=""
   while [ $# -gt 0 ]; do
     case $1 in
       --no-ticket) NO_TICKET=1; shift ;;
@@ -141,6 +142,7 @@ parse() {
       --repo) [ $# -ge 2 ] || die "--repo needs a path"; REPO=$2; shift 2 ;;
       --output) [ $# -ge 2 ] || die "--output needs a path"; OUT=$2; shift 2 ;;
       --finish) FINISH=1; shift ;;
+      --take-recommended) TAKE_RECOMMENDED=1; shift ;;
       -*) die "unknown option: $1" ;;
       *) [ -z "$POSITIONAL" ] || die "one ticket at a time (or one spec with --no-ticket)"; POSITIONAL=${1#@}; shift ;;
     esac
@@ -180,7 +182,7 @@ ticket_start() {
 }
 cmd_start() {
   parse "$@"
-  [ -z "$FINISH$VERIFY" ] || die "--finish and --verify are for local"
+  [ -z "$FINISH$VERIFY$TAKE_RECOMMENDED" ] || die "--finish, --verify and --take-recommended are for local"
   local run prompt eve="" folder="" spec
   resolve_agent
   node_args
@@ -245,6 +247,7 @@ cmd_local() {
   [ -z "$FORCE_PULL" ] || args+=(--force-pull)
   [ -z "$VERIFY" ] || args+=(--verify)
   [ -z "$FINISH" ] || args+=(--finish)
+  [ -z "$TAKE_RECOMMENDED" ] || args+=(--take-recommended)
   resolve_agent
   agent_node scripts/local.ts "${args[@]}"
 }
@@ -276,5 +279,5 @@ case ${1:-} in
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
   local) shift; cmd_local "$@" ;;
-  *) die "usage: planner.sh start [TICKET | SPEC --no-ticket] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] | status RUN | wait RUN [--max SECONDS] | local [TICKET | SPEC --no-ticket] [--force-pull] [--verify] [--guidelines FILE] [--repo DIR] [--output DIR] [--finish]" ;;
+  *) die "usage: planner.sh start [TICKET | SPEC --no-ticket] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] | status RUN | wait RUN [--max SECONDS] | local [TICKET | SPEC --no-ticket] [--force-pull] [--verify] [--guidelines FILE] [--repo DIR] [--output DIR] [--finish] [--take-recommended]" ;;
 esac
