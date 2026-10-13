@@ -72,8 +72,8 @@ type Out = { state: RunState; stage: Stage }
 export type PhaseContext = { id: string; repo: string; folder: string; dir: string; runId: string; now: string; aspira: Aspira; card: Card; resume: string; env: NodeJS.ProcessEnv }
 
 export type PhaseResult =
-  /** Nothing (more) for this phase now: the run goes on to the next item. */
-  | { kind: 'done'; state: RunState }
+  /** Nothing (more) for this phase now: the run goes on to the next item. `note`: a line the end of the run adds (a skipped item). */
+  | { kind: 'done'; state: RunState; note?: string }
   /** Print a stage this phase owns (gate, set-pr, step10, fix, release-row, ask); its answer comes back to accept(). */
   | { kind: 'stage'; state: RunState; stage: Exclude<StageKind, 'resolve' | 'approval' | 'overrides' | 'step' | 'move' | 'summary' | 'end'>; body: Record<string, unknown>; data?: Record<string, unknown> }
   /** Run a step (the pr-reviewer); its report is recorded like every step's. */
@@ -457,6 +457,7 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
       return requestMove(ctx, state, { from: next.from, to: next.to }, { status: card.status, pr: card.pr, dev: card.dev })
     case 'sequence': {
       let current = state
+      const notes: string[] = []
       for (const item of next.items) {
         if (item.kind === 'step') {
           if (!item.done) return printStep(ctx, current, item.step, item.command)
@@ -466,9 +467,10 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
         if (phase === null) return missingPhase(ctx, current, item.phase)
         const result = await phase.next(phaseContext(ctx, current), current)
         if (result.kind !== 'done') return handlePhase(ctx, item.phase, result)
+        if (result.note !== undefined) notes.push(result.note)
         current = result.state
       }
-      return endRoute(ctx, current, next.then)
+      return endRoute(ctx, current, notes.length === 0 ? next.then : { ...next.then, message: [next.then.message, ...notes].join('\n') })
     }
     case 'end':
       return endRoute(ctx, state, next)
