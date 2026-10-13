@@ -1,5 +1,16 @@
 # @aspiralabs/code-analyzer
 
+## 0.7.0
+
+### Patch Changes
+
+- 00fb30a: The skill launchers work in a repository that installs its own agents, such as the kit checkout running `/aspira-*` on itself: a launcher that finds its own package through the root `node_modules` treats it as the package, so the project (and its `.env.local`) is still the working directory's.
+- Updated dependencies [9212f60]
+- Updated dependencies [f99dcc2]
+- Updated dependencies [f8eb4f6]
+- Updated dependencies [1b303a9]
+  - @aspiralabs/agent-common@0.7.0
+
 ## 0.6.1
 
 ### Patch Changes
