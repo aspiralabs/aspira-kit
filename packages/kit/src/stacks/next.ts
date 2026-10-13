@@ -70,6 +70,15 @@ export function withAllowBuilds(yaml: string, names: string[]): string {
   return `${next.join('\n')}\n`
 }
 
+/**
+ * The directory that owns the lockfile and .npmrc, where install and build run: the project root when
+ * the app sits in a workspace rooted there (isWorkspaceRoot), else the app's own directory.
+ */
+export function workspaceDirOf(projectRoot: string, app: string | undefined): string {
+  return isWorkspaceRoot(projectRoot, app) ? projectRoot : appRoot(projectRoot, app)
+}
+
+/** The package manager whose lockfile is in `root`: pnpm, yarn or npm, and pnpm when there is none. */
 export function packageManager(root: string): 'pnpm' | 'npm' | 'yarn' {
   if (existsSync(join(root, 'pnpm-lock.yaml'))) {
     return 'pnpm'
@@ -366,7 +375,7 @@ export async function initNext(options: InitOptions): Promise<void> {
   const app = options.app === undefined ? undefined : normalizeApp(options.app)
   const appDir = appRoot(options.projectRoot, app)
   const workspace = isWorkspaceRoot(options.projectRoot, app)
-  const opts: Resolved = { ...options, app: app === '.' ? undefined : app, appDir, workspace, workspaceDir: workspace ? options.projectRoot : appDir }
+  const opts: Resolved = { ...options, app: app === '.' ? undefined : app, appDir, workspace, workspaceDir: workspaceDirOf(options.projectRoot, app) }
   if (opts.app && !existsSync(join(opts.appDir, 'package.json'))) {
     throw new Error(`--app ${opts.app}: no package.json in ${opts.appDir}; --app names the directory that owns package.json and node_modules, relative to ${opts.projectRoot}`)
   }
