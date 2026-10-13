@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "eve dev",
-    "build": "eve info",
+    "build": "eve build",
     "info": "eve info",
     "implement:local": "node --experimental-strip-types scripts/local.ts",
     "test": "vitest run",

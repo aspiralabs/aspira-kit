@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "eve dev",
-    "build": "eve info",
+    "build": "eve build",
     "info": "eve info",
     "review": "node --env-file-if-exists=../.env.local --env-file-if-exists=.env.development.local --experimental-strip-types scripts/review.ts",
     "review:local": "node --experimental-strip-types scripts/local.ts",
