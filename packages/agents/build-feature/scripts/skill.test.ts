@@ -45,21 +45,25 @@ const run = (args: string[], cwd: string, env: NodeJS.ProcessEnv) =>
     (error: { code?: number; stdout?: string; stderr?: string }) => ({ code: typeof error.code === 'number' ? error.code : -1, output: `${error.stdout ?? ''}${error.stderr ?? ''}` }),
   )
 
-describe('T13 F2: the launcher runs only --local', () => {
-  it('exits non-zero saying only --local is supported, for local without --local and for start', async () => {
-    const { repo, env } = await sandbox()
-    const outcomes = [await run(['local', 'KIT-11'], repo, env), await run(['start', 'KIT-11'], repo, env)]
-    expect(outcomes.map(({ code, output }) => ({ failed: code !== 0 && code !== 127, said: /only --local is supported/i.test(output) }))).toEqual([
-      { failed: true, said: true },
-      { failed: true, said: true },
-    ])
+describe('T13 F2: the launcher runs with or without --local', () => {
+  it('runs the driver for local with --local, passing --local through', async () => {
+    const { repo, env, calls } = await sandbox()
+    const outcome = await run(['local', 'KIT-11', '--local'], repo, env)
+    const line = (await calls()).split('\n').find((entry) => entry.startsWith('node ')) ?? ''
+    expect({ code: outcome.code, driver: line.includes('scripts/local.ts KIT-11'), local: line.split(' ').includes('--local') }).toEqual({ code: 0, driver: true, local: true })
   })
 
-  it('creates no .work/ folder or run state and never invokes the driver', async () => {
+  it('runs the driver for local without --local (each step in its cloud mode), passing no --local', async () => {
     const { repo, env, calls } = await sandbox()
-    await run(['local', 'KIT-11'], repo, env)
-    await run(['start', 'KIT-11'], repo, env)
-    expect({ launcher: existsSync(launcher), work: existsSync(join(repo, '.work')), calls: await calls() }).toEqual({ launcher: true, work: false, calls: '' })
+    const outcome = await run(['local', 'KIT-11'], repo, env)
+    const line = (await calls()).split('\n').find((entry) => entry.startsWith('node ')) ?? ''
+    expect({ code: outcome.code, refused: /only --local/i.test(outcome.output), driver: line.includes('scripts/local.ts KIT-11'), local: line.split(' ').includes('--local') }).toEqual({ code: 0, refused: false, driver: true, local: false })
+  })
+
+  it('refuses start, status and wait: the run itself is always this session, and never invokes the driver', async () => {
+    const { repo, env, calls } = await sandbox()
+    const outcomes = [await run(['start', 'KIT-11'], repo, env), await run(['wait', 'KIT-11'], repo, env)]
+    expect({ failed: outcomes.map(({ code }) => code !== 0 && code !== 127), work: existsSync(join(repo, '.work')), calls: await calls() }).toEqual({ failed: [true, true], work: false, calls: '' })
   })
 })
 

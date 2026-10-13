@@ -15,7 +15,7 @@ import { orderedTaken } from '#src/decisions.ts'
 import { gateSummaryLines } from '#src/gate.ts'
 import { MODELS, type ModelName } from '#src/models.ts'
 import { redact, tail } from '#src/redact.ts'
-import { STEPS } from '#src/route.ts'
+import { modeLine, RESUME, STEPS } from '#src/route.ts'
 import type { RunState, StepRecord } from '#src/run-state.ts'
 
 export type BuildSummaryTicket = { id: string; title: string; url: string }
@@ -115,6 +115,7 @@ async function statusLines(input: RenderBuildSummaryInput, resume: string): Prom
   else if (run !== undefined) lines.push(`Run ${run.runId} is in progress.`, '')
   const card = state.card ?? null
   if (card !== null) lines.push(`Card: ${card.status} (${card.url})`, '')
+  if (run !== undefined) lines.push(modeLine(run.mode), ...(run.worktree === undefined ? [] : [`Worktree: ${run.worktree}`]), '')
   const gate = gateSummaryLines(state)
   if (gate.length > 0) lines.push(...gate, '')
   const remaining = orderedRemaining(state.remaining)
@@ -272,13 +273,12 @@ function timelineLines(steps: readonly StepRecord[]): string[] {
 // The renderer.
 // ---------------------------------------------------------------------------------------------
 
-/** `/aspira-build-feature <id> --local`: the command the resume line and the session both use. */
-const resumeCommand = (id: string): string => `/aspira-build-feature ${id} --local`
 
 /** The Build Summary for this run state, cumulative over every run of the ticket (A16). Pure: no writes, no Notion calls. */
 export async function renderBuildSummary(input: RenderBuildSummaryInput): Promise<string> {
   const { ticket, state, repo, plan, changedFiles } = input
-  const resume = resumeCommand(ticket.id)
+  const mode = state.runs.at(-1)?.mode ?? 'local'
+  const resume = RESUME(ticket.id, mode)
   const title = await redact(ticket.title, repo)
   const header = `# Build Summary: ${ticket.id}${title === '' ? '' : ` ${title}`}`
   const sections = [
@@ -289,7 +289,7 @@ export async function renderBuildSummary(input: RenderBuildSummaryInput): Promis
     section('Cost and time', costLines(state.steps)),
     section('Architecture', architectureLines(plan, changedFiles)),
     section('Step timeline', timelineLines(state.steps)),
-    'Reviews ran in the same session as the build, not as a separate pass.',
+    mode === 'local' ? 'Reviews ran in the same session as the build, not as a separate pass.' : "Each step and each review ran as that step's own agent run, not in this session.",
   ]
   return `${header}\n\n${sections.join('\n')}\n`
 }

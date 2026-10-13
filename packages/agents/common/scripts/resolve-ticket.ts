@@ -8,7 +8,7 @@ try {
   const [ref] = positionals
   if (ref === undefined || values.board === undefined) throw new Error('Usage: resolve-ticket.ts <ticket> --board <Feature Board URL>')
   const ticket = await board({ board: values.board }).resolveTicket(ref)
-  for (const [key, value] of Object.entries({ id: ticket.id, title: ticket.title, url: ticket.url, status: ticket.status, pr: ticket.pr ?? '', dev: ticket.dev ?? '' })) console.log(`${key}=${value.replaceAll('\n', ' ')}`)
+  for (const [key, value] of Object.entries({ id: ticket.id, title: ticket.title, url: ticket.url, status: ticket.status, pr: ticket.pr ?? '', dev: ticket.dev ?? '', type: ticket.type ?? '' })) console.log(`${key}=${value.replaceAll('\n', ' ')}`)
 } catch (error) {
   console.error(`resolve-ticket: ${error instanceof Error ? error.message : String(error)}`)
   process.exitCode = 1

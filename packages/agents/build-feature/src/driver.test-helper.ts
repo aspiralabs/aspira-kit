@@ -8,8 +8,8 @@
 // NOTION_TOKEN and NOTION_API_KEY are never passed to the driver.
 //
 // The stage contract these tests pin (the driver prints exactly one JSON object per call):
-//   { stage, runId, nonce?, output?, ... }  stage is one of resolve, approval, overrides, step, ask,
-//   move, set-pr, gate, step10, fix, release-row, summary, end. A stage that needs an answer has a
+//   { stage, runId, nonce?, output?, ... }  stage is one of resolve, approval, overrides, worktree,
+//   step, ask, move, set-pr, gate, step10, fix, release-row, summary, end. A stage that needs an answer has a
 //   `nonce` and an `output` path; the session writes `{ nonce, ...answer }` as JSON to `output`
 //   and calls the driver again with `--run <runId>`. A call without `--run` is a new invocation
 //   (a run start, refused while a run is in progress unless `--force-run`).
@@ -17,6 +17,10 @@
 //     right before a move carries `move: { from, to }`.
 //   - approval: answer { notionUserId, name, at } or { error }.
 //   - overrides: `pages: { <step>: <path> }`; the session writes each pulled decisions page there.
+//   - worktree: { worktree, branch }; the session moves into `worktree`; with an output it answers {}
+//     and calls again with --run from there, without one (no runId) it reruns the command there.
+//   - resolve answers carry the card's `type` (Feature, Bug, Chore), which names the worktree (F50).
+//   - step: also { mode: 'local' | 'cloud', cwd } (F2).
 //   - step: { step, command, model }; answer the step report { step, status, resultLine, usage }.
 //   - ask: { question }; answer { answer }.
 //   - move: { from, to }; answer { done: true }.  set-pr: { url }; answer { done: true }.
@@ -29,7 +33,14 @@
 //   - end: { stopped, message, resume? }; the message's last line is the resume command on a stop.
 //   Stages that act on Notion list the actions as `notion: [{ op: 'read' | 'write', target, page? }]`.
 // The origin is compared as configured (`git config remote.origin.url`, here the GitHub URL);
-// pushes reach the bare repository through git's pushInsteadOf.
+// fetches and pushes reach the bare repository through git's insteadOf.
+//
+// The project is laid out as GIT-002 leaves it (F50): the main checkout at `<tmp>/repo` on main, and
+// the ticket's worktree at `<tmp>/repo/.worktrees/<TYPE>-KIT-11` on the ticket branch, which is
+// where the driver runs (`h.repo`). `layout: 'checkout'` leaves out the worktree, so the driver
+// runs from the main checkout and makes the worktree itself; `h.cd(dir)` moves the session there.
+// `mode: 'cloud'` calls the driver without --local (F2). `pnpm` is a fake on PATH that logs its
+// working directory and arguments.
 
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -56,6 +67,11 @@ export const GITHUB = 'https://github.com/aspiralabs/fixture.git'
 export const REPOSITORY = 'aspiralabs/fixture'
 export const PR_URL = 'https://github.com/aspiralabs/fixture/pull/7'
 export const RESUME = '/aspira-build-feature KIT-11 --local'
+export const RESUME_CLOUD = '/aspira-build-feature KIT-11'
+/** The card's Type to the worktree name and branch prefix (GIT-001, GIT-002). */
+export const TYPES: Record<string, { dir: string; prefix: string }> = { Feature: { dir: 'FEATURE', prefix: 'feat' }, Bug: { dir: 'BUG', prefix: 'fix' }, Chore: { dir: 'CHORE', prefix: 'chore' } }
+export const branchFor = (type: string): string => `${TYPES[type]!.prefix}/kit-11-x`
+export const worktreeFor = (main: string, type = 'Feature'): string => join(main, '.worktrees', `${TYPES[type]!.dir}-KIT-11`)
 export const NOW = '2026-10-12T09:00:00.000Z'
 export const APPROVER = { notionUserId: 'user-1', name: 'Ada Approver', at: NOW }
 
@@ -65,7 +81,7 @@ export const BOARD_RULES_WITH_SUMMARY = '# Feature Board\n\n**BOARD-003 — MUST
 
 export type Stage = { stage: string; runId?: string; nonce?: string; output?: string; [key: string]: unknown }
 export type Result = { code: number; stage: Stage | null; text: string }
-export type Card = { found: boolean; status: string; pr: string | null; dev: string | null; title: string }
+export type Card = { found: boolean; status: string; pr: string | null; dev: string | null; title: string; type: string | null }
 export type Usage = { tokens: number | null; wallMs: number | null } | null
 export type DecisionFixture = { id: string; question: string; options: string[]; recommended: string; reasoning: string; whyYours: string; decidedBy: 'open' | 'author' | 'agent'; answer: string | null }
 export type Handler = (stage: Stage) => Promise<'return' | void>
@@ -127,6 +143,14 @@ type ProjectOptions = {
   pushed?: boolean
   /** Extra files committed on the branch with the build commit. */
   files?: Record<string, string>
+  /** Files committed on main in the initial commit (so a new worktree from origin/main has them). */
+  mainFiles?: Record<string, string>
+  /** The card's Type. Default Feature; null leaves it empty. */
+  type?: string | null
+  /** 'worktree' (default): the driver runs in the ticket's worktree. 'checkout': only the main checkout on main, no worktree yet. */
+  layout?: 'worktree' | 'checkout'
+  /** 'local' (default) calls the driver with --local; 'cloud' without it. */
+  mode?: 'local' | 'cloud'
 }
 
 const temps: string[] = []
@@ -141,41 +165,58 @@ export type Project = Awaited<ReturnType<typeof project>>
 export async function project(options: ProjectOptions) {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'build-feature-')))
   temps.push(dir)
-  const repo = join(dir, 'repo')
+  const main = join(dir, 'repo')
   const origin = join(dir, 'origin.git')
   const bin = join(dir, 'bin')
   const ghDir = join(dir, 'gh')
   const gitLog = join(dir, 'git.log')
+  const pnpmLog = join(dir, 'pnpm.log')
   await mkdir(join(ghDir, 'calls'), { recursive: true })
   await mkdir(bin)
   await writeFile(gitLog, '')
+  await writeFile(pnpmLog, '')
 
   await exec('git', ['init', '-q', '--bare', '-b', 'main', origin])
-  await exec('git', ['init', '-q', '-b', 'main', repo])
-  await git(repo, 'remote', 'add', 'origin', GITHUB)
-  await git(repo, 'config', `url.${origin}.pushInsteadOf`, GITHUB)
+  await exec('git', ['init', '-q', '-b', 'main', main])
+  await git(main, 'remote', 'add', 'origin', GITHUB)
+  await git(main, 'config', `url.${origin}.insteadOf`, GITHUB)
+  await git(main, 'config', `url.${origin}.pushInsteadOf`, GITHUB)
   const aspira = options.aspira === undefined ? { board: BOARD, repository: REPOSITORY } : options.aspira
-  if (aspira !== null) await writeFile(join(repo, 'aspira.json'), `${JSON.stringify(aspira, null, 2)}\n`)
-  await mkdir(join(repo, 'src'))
-  await writeFile(join(repo, 'README.md'), '# Fixture\n')
-  await writeFile(join(repo, 'src/app.ts'), 'export const app = 1\n')
-  await git(repo, 'add', '.')
-  await git(repo, 'commit', '-qm', 'init')
-  await exec('git', ['-C', repo, 'push', '-q', origin, 'main'])
-  const branch = options.branch ?? BRANCH
-  if (branch !== 'main') await git(repo, 'switch', '-q', '-c', branch)
-  await writeFile(join(repo, 'src/feature.ts'), 'export const feature = 1\n')
-  for (const [path, content] of Object.entries(options.files ?? {})) {
-    await mkdir(dirname(join(repo, path)), { recursive: true })
-    await writeFile(join(repo, path), content)
+  if (aspira !== null) await writeFile(join(main, 'aspira.json'), `${JSON.stringify(aspira, null, 2)}\n`)
+  await mkdir(join(main, 'src'))
+  await writeFile(join(main, 'README.md'), '# Fixture\n')
+  await writeFile(join(main, 'src/app.ts'), 'export const app = 1\n')
+  for (const [path, content] of Object.entries(options.mainFiles ?? {})) {
+    await mkdir(dirname(join(main, path)), { recursive: true })
+    await writeFile(join(main, path), content)
   }
-  await git(repo, 'add', '.')
-  await git(repo, 'commit', '-qm', 'KIT-11: build')
-  if (options.pushed === true) await exec('git', ['-C', repo, 'push', '-q', origin, `${branch}:${branch}`])
-  const base = (await git(repo, 'rev-parse', 'main')).stdout.trim()
+  await git(main, 'add', '.')
+  await git(main, 'commit', '-qm', 'init')
+  await git(main, 'push', '-q', 'origin', 'main')
+  const type = options.type === undefined ? 'Feature' : options.type
+  const branch = options.branch ?? BRANCH
+  let repo = main
+  if (options.layout !== 'checkout') {
+    // GIT-002: the ticket's worktree under .worktrees/, excluded locally.
+    repo = worktreeFor(main, type ?? 'Feature')
+    await writeFile(join(main, '.git/info/exclude'), '.worktrees/\n')
+    if (branch === 'main') {
+      await git(main, 'switch', '-q', '--detach')
+      await git(main, 'worktree', 'add', '-q', repo, 'main')
+    } else await git(main, 'worktree', 'add', '-q', '-b', branch, repo, 'main')
+    await writeFile(join(repo, 'src/feature.ts'), 'export const feature = 1\n')
+    for (const [path, content] of Object.entries(options.files ?? {})) {
+      await mkdir(dirname(join(repo, path)), { recursive: true })
+      await writeFile(join(repo, path), content)
+    }
+    await git(repo, 'add', '.')
+    await git(repo, 'commit', '-qm', 'KIT-11: build')
+    if (options.pushed === true) await git(repo, 'push', '-q', 'origin', `${branch}:${branch}`)
+  }
+  const base = (await git(main, 'rev-parse', 'main')).stdout.trim()
 
-  const folder = join(repo, '.work', SLUG)
-  const stateDir = join(folder, '.local', 'build-feature')
+  let folder = join(repo, '.work', SLUG)
+  let stateDir = join(folder, '.local', 'build-feature')
   await mkdir(folder, { recursive: true })
 
   // git: the real binary, behind a wrapper that logs each call's arguments (unit separator between them).
@@ -184,9 +225,12 @@ export async function project(options: ProjectOptions) {
   // gh: records every call (arguments, and the body it was given) and answers like gh does.
   if (options.gh !== false) await writeFile(join(bin, 'gh'), FAKE_GH, { mode: 0o755 })
   if (options.existingPr !== undefined) await writeFile(join(ghDir, 'pr'), `${options.existingPr}\n`)
+  // pnpm: logs where it ran and its arguments, and succeeds.
+  await writeFile(join(bin, 'pnpm'), `#!/bin/bash\nprintf '%s %s\\n' "$PWD" "$*" >> "$PNPM_LOG"\n`, { mode: 0o755 })
   await symlink(process.execPath, join(bin, 'node'))
 
-  const card: Card = { found: true, status: options.status, pr: options.pr ?? null, dev: 'user-1', title: TITLE }
+  const card: Card = { found: true, status: options.status, pr: options.pr ?? null, dev: 'user-1', title: TITLE, type }
+  const local = options.mode !== 'cloud'
   const stages: Stage[] = []
   const answered: { stage: Stage; answer: Record<string, unknown> }[] = []
   let runId: string | undefined
@@ -195,11 +239,11 @@ export async function project(options: ProjectOptions) {
 
   const env = (): NodeJS.ProcessEnv => {
     const { NOTION_TOKEN: _token, NOTION_API_KEY: _key, ...rest } = process.env
-    return { ...rest, PATH: `${bin}:/usr/bin:/bin`, HOME: dir, GIT_LOG: gitLog, GH_DIR: ghDir, GH_CREATED_URL: PR_URL, GIT_TERMINAL_PROMPT: '0', BUILD_FEATURE_NOW: now, BUILD_FEATURE_AGENT_DIR: '' }
+    return { ...rest, PATH: `${bin}:/usr/bin:/bin`, HOME: dir, GIT_LOG: gitLog, PNPM_LOG: pnpmLog, GH_DIR: ghDir, GH_CREATED_URL: PR_URL, GIT_TERMINAL_PROMPT: '0', BUILD_FEATURE_NOW: now, BUILD_FEATURE_AGENT_DIR: '' }
   }
 
   async function call(args: string[]): Promise<Result> {
-    const outcome = await exec(process.execPath, ['--import', LOADER, DRIVER, ID, '--local', '--repo', repo, ...args], { cwd: repo, env: env() }).then(
+    const outcome = await exec(process.execPath, ['--import', LOADER, DRIVER, ID, ...(local ? ['--local'] : []), '--repo', repo, ...args], { cwd: repo, env: env() }).then(
       ({ stdout, stderr }) => ({ code: 0, stdout, stderr }),
       (error: { code?: number; stdout?: string; stderr?: string }) => ({ code: typeof error.code === 'number' ? error.code : -1, stdout: error.stdout ?? '', stderr: error.stderr ?? '' }),
     )
@@ -220,10 +264,17 @@ export async function project(options: ProjectOptions) {
 
   const h = {
     dir,
-    repo,
+    main,
+    get repo() {
+      return repo
+    },
     origin,
-    folder,
-    stateDir,
+    get folder() {
+      return folder
+    },
+    get stateDir() {
+      return stateDir
+    },
     base,
     card,
     stages,
@@ -234,6 +285,14 @@ export async function project(options: ProjectOptions) {
     setNow(value: string) {
       now = value
     },
+    /** The session moves into `dir` (the worktree a worktree stage names): later calls run there. */
+    cd(target: string) {
+      repo = target
+      folder = join(repo, '.work', SLUG)
+      stateDir = join(folder, '.local', 'build-feature')
+    },
+    /** Every pnpm call: `<cwd> <args>`. */
+    pnpmCalls: async () => (await readFile(pnpmLog, 'utf8')).split('\n').filter((line) => line !== ''),
     /** A new invocation: `/aspira-build-feature KIT-11 --local` as the human typed it. */
     start: (extra: string[] = []) => call(extra),
     /** The session calling the driver again within the run. */
@@ -250,7 +309,7 @@ export async function project(options: ProjectOptions) {
       answered.push({ stage, answer: body })
     },
 
-    resolution: (): Record<string, unknown> => (card.found ? { found: true, id: ID, title: card.title, url: TICKET_URL, status: card.status, pr: card.pr, dev: card.dev } : { found: false, id: ID }),
+    resolution: (): Record<string, unknown> => (card.found ? { found: true, id: ID, title: card.title, url: TICKET_URL, status: card.status, pr: card.pr, dev: card.dev, type: card.type } : { found: false, id: ID }),
 
     /**
      * Answer the stages the session performs without a model (resolve, approval, overrides, move,

@@ -18,7 +18,8 @@ const text = z.string().min(1)
 export const usageSchema = z.object({ tokens: z.number().nonnegative().nullable(), wallMs: z.number().nonnegative().nullable() }).nullable()
 export type Usage = z.infer<typeof usageSchema>
 
-export const cardSchema = z.object({ id: text, title: z.string(), url: z.string(), status: text, pr: z.string().nullable(), dev: z.string().nullable() })
+/** `type`: the card's Type (Feature, Bug, Chore), which names the worktree and the branch prefix (F50). */
+export const cardSchema = z.object({ id: text, title: z.string(), url: z.string(), status: text, pr: z.string().nullable(), dev: z.string().nullable(), type: z.string().nullable().default(null) })
 export type Card = z.infer<typeof cardSchema>
 
 const runSchema = z.object({
@@ -27,12 +28,16 @@ const runSchema = z.object({
   command: text,
   startedAt: text,
   endedAt: z.string().nullable().default(null),
-  /** Why it ended: stopped, finished, replaced. */
+  /** Why it ended: stopped, finished, replaced, or moved (it went on in the ticket's worktree, F50). */
   ended: z.string().nullable().default(null),
   /** The run id this run replaced with --force-run. */
   replaced: z.string().optional(),
   /** The end stage, kept so a later --finish prints it again. */
   end: z.object({ message: z.string(), stopped: z.boolean() }).optional(),
+  /** How each step ran (F2): 'local' (--local, in the session) or 'cloud' (each step skill's default mode). */
+  mode: z.enum(['local', 'cloud']).default('local'),
+  /** The ticket's worktree the run worked in (F50). */
+  worktree: z.string().optional(),
 })
 export type RunRecord = z.infer<typeof runSchema>
 

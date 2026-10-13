@@ -12,8 +12,26 @@ export const STEPS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'imp
 export type StepName = (typeof STEPS)[number]
 export const isStep = (value: string): value is StepName => (STEPS as readonly string[]).includes(value)
 
-/** The steps the run passes --take-recommended to: an agent decision never stops the run. */
+/**
+ * The steps the run passes --take-recommended to under --local: an agent decision never stops the
+ * run. Their default (cloud) modes refuse the flag ("--take-recommended only applies to local"), so
+ * a cloud run passes nothing and a needs-author result stops it, naming the open decisions.
+ */
 export const TAKE_RECOMMENDED: readonly StepName[] = ['groomer', 'spec-writer', 'spec-reviewer', 'planner']
+
+/**
+ * How the run runs each step (F2, Q10 revised): 'local' runs the step skill with --local in this
+ * session; 'cloud' runs its default mode, which starts the step's cloud agent and waits on it.
+ */
+export const MODES = ['local', 'cloud'] as const
+export type Mode = (typeof MODES)[number]
+
+/** The command that resumes a run: `/aspira-build-feature <ID>`, with --local in local mode. */
+export const RESUME = (id: string, mode: Mode = 'local'): string => `/aspira-build-feature ${id}${mode === 'local' ? ' --local' : ''}`
+
+/** The line the Build Summary gives the mode. */
+export const modeLine = (mode: Mode): string =>
+  mode === 'local' ? 'Mode: --local (every step ran its skill with --local in this session)' : "Mode: cloud (every step ran its skill's default mode: the step's own agent, started and waited on)"
 
 /** The later-phase modules, in run order. */
 export const PHASES = ['gate', 'step8', 'step10', 'review', 'release-row'] as const
@@ -50,6 +68,8 @@ export type RouteFacts = {
   implementor: string | null
   /** The code-analyzer finished clean after the last build. */
   analyzerClean: boolean
+  /** How each step runs. Default 'local'. */
+  mode?: Mode
 }
 
 /** The end of an exhaustive switch over a union (TS-008). */
@@ -63,13 +83,17 @@ const stepOf = (command: string): StepName => {
   return name
 }
 
-/** A row's command as the run invokes it: ID filled, <app-dir> filled, --take-recommended where it applies. */
-export function stepCommand(status: string, facts: Pick<RouteFacts, 'id' | 'app'>): StepRoute {
+/**
+ * A row's command as the run invokes it: ID filled, <app-dir> filled; under --local the row's
+ * --local and --take-recommended where it applies, in cloud mode the same command without --local.
+ */
+export function stepCommand(status: string, facts: Pick<RouteFacts, 'id' | 'app' | 'mode'>): StepRoute {
   const row = nextStep(status)
   const filled = row === null ? null : commandFor(row, facts.id)
   if (filled === null) throw new Error(`the Playbook row for ${status} has no command`)
   const command = filled.replaceAll('<app-dir>', facts.app)
   const step = stepOf(command)
+  if ((facts.mode ?? 'local') === 'cloud') return { kind: 'step', step, command: command.split(' ').filter((word) => word !== '--local').join(' ') }
   return { kind: 'step', step, command: TAKE_RECOMMENDED.includes(step) ? `${command} --take-recommended` : command }
 }
 

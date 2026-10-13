@@ -6,9 +6,10 @@
 //   tracked files its auto-fixes changed after the gate finished, and the app .gitignore it adds its
 //   output folder to) with a message citing the ticket ID. Nothing under .static-analysis/ or .work/
 //   is ever staged. Anything else still changed after the commit stops the run, naming it.
-// - pushGuarded: refuses unless HEAD is feat/<id>-<slug>, that branch is not the base branch, and
-//   origin is the repository the PR property and aspira.json `repository` name (each when set).
-//   `git push -u origin <branch>`, never forced; a rejection stops the run with git's message; an
+// - pushGuarded: refuses unless HEAD is <prefix>/<id>-<slug> (feat/, fix/ or chore/ from the card's
+//   Type, GIT-001), that branch is not the base branch, and origin is the repository the PR
+//   property and aspira.json `repository` name (each when set). `git push -u origin HEAD` from the
+//   ticket's worktree (F50), never forced; a rejection stops the run with git's message; an
 //   up-to-date push is fine.
 // - openOrReusePr: an open PR whose head is the branch is reused; otherwise `gh pr create --draft`
 //   with the rendered pr-body.md. The set-pr stage is printed only when the card's PR property
@@ -22,21 +23,21 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { slug } from '@aspiralabs/agent-common/lib/ticket'
 import { addTaken, collectTakenDecisions } from '#src/decisions.ts'
 import type { Phase, PhaseContext, PhaseResult } from '#src/driver.ts'
 import { gateRecordOf } from '#src/gate.ts'
 import { renderPrBody } from '#src/pr-body.ts'
 import { tail } from '#src/redact.ts'
 import { STEP8_MOVE } from '#src/route.ts'
+import { ticketBranch } from '#src/worktree.ts'
 import type { Failure, Pending, RunState } from '#src/run-state.ts'
 import { GH_ARGS, GIT_ARGS, parseStatus, shown, system, type CommandResult, type System, type SystemOptions } from '#src/system.ts'
 
 /** The branch every PR targets. */
 export const BASE_BRANCH = 'main'
 
-/** The branch a ticket is built on: feat/<id>-<slug>. */
-export const featureBranch = (id: string, title: string): string => `feat/${id.toLowerCase()}${slug(title) === '' ? '' : `-${slug(title)}`}`
+/** The branch a ticket is built on: <prefix>/<id>-<slug>, the prefix from the card's Type (GIT-001). */
+export const featureBranch = (id: string, title: string, type: string | null): string => ticketBranch(id, title, type)
 
 /** Folders the run never stages: the analyzer's output and the run's own work folder. */
 export const isExcludedPath = (path: string): boolean => path.startsWith('.work/') || path.startsWith('.static-analysis/') || path.includes('/.static-analysis/')
@@ -160,7 +161,7 @@ export function repositoryOf(value: string): string | null {
 /** Whether the push is allowed: HEAD on the ticket branch, not the base, origin the named repository. */
 async function guard(context: PhaseContext, sys: System): Promise<Outcome<string>> {
   const options = optionsOf(context)
-  const expected = featureBranch(context.id, context.card.title)
+  const expected = featureBranch(context.id, context.card.title, context.card.type)
   const current = await sys.gitCurrentBranch(options)
   if (current.code !== 0) return failed('push', shown('git', GIT_ARGS.currentBranch), current, 'the run could not read the current branch')
   const branch = current.stdout.trim()
@@ -189,8 +190,8 @@ export async function pushGuarded(context: PhaseContext, state: RunState, sys: S
   if (head.code !== 0) return failed('push', shown('git', GIT_ARGS.head), head, 'the run could not read HEAD')
   const sha = head.stdout.trim()
   if (state.step8.pushed && recordOf(state).pushedHead === sha) return { ok: true, value: state }
-  const pushed = await sys.gitPush(options, allowed.value)
-  if (pushed.code !== 0) return failed('git push', shown('git', GIT_ARGS.push(allowed.value)), pushed, 'the push was rejected; the run never forces a push')
+  const pushed = await sys.gitPush(options)
+  if (pushed.code !== 0) return failed('git push', shown('git', GIT_ARGS.push), pushed, 'the push was rejected; the run never forces a push')
   return { ok: true, value: withRecord({ ...state, step8: { ...state.step8, pushed: true } }, { pushedHead: sha }) }
 }
 
@@ -230,7 +231,7 @@ const PR_URL = /^https:\/\/\S+\/pull\/\d+$/
 /** Reuse the open PR whose head is the branch, or open a draft PR with the rendered body. */
 export async function openOrReusePr(context: PhaseContext, state: RunState, sys: System = system): Promise<Outcome<RunState>> {
   const options = optionsOf(context)
-  const branch = featureBranch(context.id, context.card.title)
+  const branch = featureBranch(context.id, context.card.title, context.card.type)
   const listed = await sys.ghPrList(options, branch)
   if (listed.code !== 0) return failed('gh pr list', shown('gh', GH_ARGS.prList(branch)), listed, 'the run could not look up an open PR for the branch')
   const open = listed.stdout.trim().split('\n').at(-1)?.trim() ?? ''

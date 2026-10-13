@@ -9,7 +9,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
-import { BRANCH, PR_URL, cleanup, project, taken, writeStepExport, type Project, type Result, type StepReportOptions } from './driver.test-helper.ts'
+import { BRANCH, PR_URL, branchFor, cleanup, project, taken, writeStepExport, type Project, type Result, type StepReportOptions } from './driver.test-helper.ts'
 
 const exec = promisify(execFile)
 afterEach(cleanup)
@@ -76,6 +76,24 @@ describe('T28 F24: the push guard', () => {
     const end = await analyzed(h)
     const pushes = (await h.gitCalls()).filter((args) => args.includes('push'))
     expect({ end: end.stage?.stage, rejection: /rejected|non-fast-forward|fetch first/i.test(await h.summary()), tried: pushes.length > 0, forced: pushes.filter(forced) }).toEqual({ end: 'end', rejection: true, tried: true, forced: [] })
+  }, SLOW)
+})
+
+describe('F50: the push from the worktree', () => {
+  it('pushes with git push -u origin HEAD from the worktree, never forced', async () => {
+    const h = await project({ status: 'In Progress: Implementation' })
+    await analyzed(h)
+    const pushes = (await h.gitCalls()).filter((args) => args.includes('push'))
+    const head = (await h.git('rev-parse', 'HEAD')).stdout.trim()
+    expect({ pushes, origin: await h.originHead() }).toEqual({ pushes: [['push', '-u', 'origin', 'HEAD']], origin: head })
+  }, SLOW)
+
+  it('builds a Bug on fix/kit-11-x: the guard, the push and the PR head use the Type prefix', async () => {
+    const h = await project({ status: 'In Progress: Implementation', type: 'Bug', branch: branchFor('Bug') })
+    const setPr = await analyzed(h)
+    const create = (await h.ghCalls()).find(({ args }) => args[0] === 'pr' && args[1] === 'create')
+    const head = create?.args[create.args.indexOf('--head') + 1]
+    expect({ stage: setPr.stage?.stage, origin: (await h.originHead(branchFor('Bug'))) !== null, head }).toEqual({ stage: 'set-pr', origin: true, head: 'fix/kit-11-x' })
   }, SLOW)
 })
 

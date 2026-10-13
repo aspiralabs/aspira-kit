@@ -2,7 +2,8 @@
 // an argument array (never a shell string) in the project checkout and returns what the command
 // did as { code, stdout, stderr }. Nothing here throws on a failed command; a missing binary comes
 // back as code 127 with the spawn error in stderr, so the caller can record the command and its
-// error and stop (F33). No function here ever passes a force flag to git push (F24).
+// error and stop (F33). No function here ever passes a force flag to git push (F24), and none
+// removes a worktree (F50).
 //
 // The phases take a `System` so a caller can stand in for the boundary; the tests use the real
 // `system` below against a temp repository with a fake gh on PATH.
@@ -31,9 +32,9 @@ function run(command: string, args: readonly string[], options: SystemOptions): 
 /** A command line as it is shown in the Build Summary. */
 export const shown = (command: string, args: readonly string[]): string => [command, ...args.map((arg) => (/^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", "'\\''")}'`))].join(' ')
 
-/** A ref the run may push: a plain branch name, never a refspec or an option. */
+/** A branch name the run creates a worktree on: never an option or a refspec. */
 function assertPlainBranch(branch: string): void {
-  if (branch === '' || branch.startsWith('-') || branch.startsWith('+') || branch.includes(':') || /\s/.test(branch)) throw new Error(`"${branch}" is not a branch name the run pushes`)
+  if (branch === '' || branch.startsWith('-') || branch.startsWith('+') || branch.includes(':') || /\s/.test(branch)) throw new Error(`"${branch}" is not a branch name the run works on`)
 }
 
 export const GIT_ARGS = {
@@ -41,7 +42,15 @@ export const GIT_ARGS = {
   head: ['rev-parse', 'HEAD'],
   remoteUrl: ['config', '--get', 'remote.origin.url'],
   status: ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
-  push: (branch: string) => ['push', '-u', 'origin', branch],
+  /** F50: the push is always from the ticket's worktree, of HEAD, after the guard checked HEAD's branch. */
+  push: ['push', '-u', 'origin', 'HEAD'],
+  toplevel: ['rev-parse', '--show-toplevel'],
+  commonDir: ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+  fetchMain: ['fetch', 'origin', 'main'],
+  branchExists: (branch: string) => ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`],
+  /** GIT-002: a new branch from origin/main, or (when the branch already exists) that branch. */
+  worktreeAdd: (path: string, branch: string, create: boolean) => (create ? ['worktree', 'add', '-b', branch, path, 'origin/main'] : ['worktree', 'add', path, branch]),
+  checkIgnore: (path: string) => ['check-ignore', '-q', '--no-index', path],
 } as const
 
 export const GH_ARGS = {
@@ -71,11 +80,26 @@ export async function gitCommit(options: SystemOptions, paths: readonly string[]
   return run('git', ['commit', '-m', message, '--', ...paths], options)
 }
 
-/** `git push -u origin <branch>`: never forced. */
-export function gitPush(options: SystemOptions, branch: string): Promise<CommandResult> {
+/** `git push -u origin HEAD` from the worktree: never forced. */
+export const gitPush = (options: SystemOptions) => run('git', GIT_ARGS.push, options)
+
+/** The top of the working tree the command runs in (a worktree's own root inside a worktree). */
+export const gitToplevel = (options: SystemOptions) => run('git', GIT_ARGS.toplevel, options)
+/** The main repository's .git directory, absolute, from the checkout or any of its worktrees. */
+export const gitCommonDir = (options: SystemOptions) => run('git', GIT_ARGS.commonDir, options)
+/** `git fetch origin main`, so a new worktree starts from the current origin/main. */
+export const gitFetchMain = (options: SystemOptions) => run('git', GIT_ARGS.fetchMain, options)
+/** Exit 0 when the local branch exists. */
+export const gitBranchExists = (options: SystemOptions, branch: string) => run('git', GIT_ARGS.branchExists(branch), options)
+/** `git worktree add` (GIT-002). The run never removes a worktree. */
+export function gitWorktreeAdd(options: SystemOptions, path: string, branch: string, create: boolean): Promise<CommandResult> {
   assertPlainBranch(branch)
-  return run('git', GIT_ARGS.push(branch), options)
+  return run('git', GIT_ARGS.worktreeAdd(path, branch, create), options)
 }
+/** Exit 0 when `path` is gitignored (by the files, not the index). */
+export const gitCheckIgnore = (options: SystemOptions, path: string) => run('git', GIT_ARGS.checkIgnore(path), options)
+/** A project command such as `pnpm install` (the worktree's install and build). */
+export const projectCommand = (options: SystemOptions, command: string, args: readonly string[]) => run(command, args, options)
 
 /** The URL of an open PR whose head is `branch`, or empty stdout when there is none. */
 export const ghPrList = (options: SystemOptions, branch: string) => run('gh', GH_ARGS.prList(branch), options)
@@ -106,5 +130,24 @@ export function parseStatus(stdout: string): StatusEntry[] {
 }
 
 /** Every external operation, so a phase can be handed a stand-in for the boundary. */
-export const system = { gitCurrentBranch, gitHead, gitRemoteUrl, gitStatus, gitCommit, gitPush, ghPrList, ghPrCreate, ghPrEdit, ghPrReady, ghPrView }
+export const system = {
+  gitCurrentBranch,
+  gitHead,
+  gitRemoteUrl,
+  gitStatus,
+  gitCommit,
+  gitPush,
+  gitToplevel,
+  gitCommonDir,
+  gitFetchMain,
+  gitBranchExists,
+  gitWorktreeAdd,
+  gitCheckIgnore,
+  projectCommand,
+  ghPrList,
+  ghPrCreate,
+  ghPrEdit,
+  ghPrReady,
+  ghPrView,
+}
 export type System = typeof system

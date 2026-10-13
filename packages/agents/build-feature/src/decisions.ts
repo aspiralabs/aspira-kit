@@ -123,6 +123,27 @@ export async function collectTakenDecisions(step: Exclude<DecisionStep, 'fix'>, 
   return { ok: true, ...takeDecisions(step, context.runId, list.items, source.item) }
 }
 
+const openItem = z.looseObject({ id: z.string().min(1), question: z.string().min(1), decidedBy: z.literal('open') })
+
+/** The decisions a step left open (`decidedBy: 'open'`), for the stop message of a needs-author result; empty when its export has none or cannot be read. */
+export async function openDecisions(step: Exclude<DecisionStep, 'fix'>, folder: string): Promise<{ id: string; question: string }[]> {
+  const source = DECISION_SOURCES[step]
+  const raw = await readFile(join(folder, source.file), 'utf8').catch(() => null)
+  if (raw === null) return []
+  let json: unknown
+  try {
+    json = JSON.parse(raw)
+  } catch {
+    return []
+  }
+  const list = source.list(json)
+  if (!list.ok) return []
+  return list.items.flatMap((item) => {
+    const parsed = openItem.safeParse(item)
+    return parsed.success ? [{ id: parsed.data.id, question: parsed.data.question }] : []
+  })
+}
+
 /** The state with each taken key added once (F12). */
 export function addTaken(state: RunState, taken: readonly TakenKey[]): RunState {
   const known = new Set(state.takenKeys.map((entry) => entry.key))

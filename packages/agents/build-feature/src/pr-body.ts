@@ -14,6 +14,7 @@ export type PrBodyTicket = { id: string; title: string; url: string }
 export type RenderPrBodyInput = { ticket: PrBodyTicket; state: RunState; repo: string }
 
 const SAME_SESSION_NOTICE = "This build's steps and its reviews all ran in the same session: no separate review pass followed."
+const CLOUD_NOTICE = "This build's steps and its reviews each ran as that step's own agent run (cloud mode), not in one session."
 
 /** The PR body for this run state: the decisions taken after Ready: Plan first, then the same-session notice, then a link to the Build Summary. */
 export async function renderPrBody(input: RenderPrBodyInput): Promise<string> {
@@ -29,6 +30,6 @@ export async function renderPrBody(input: RenderPrBodyInput): Promise<string> {
       lines.push(`- \`${entry.key}\`: ${question} Taken: ${answer}.`)
     }
   }
-  lines.push('', SAME_SESSION_NOTICE, '', `See this ticket's **Build Summary** page for the full report: ${ticket.url}`)
+  lines.push('', (state.runs.at(-1)?.mode ?? 'local') === 'local' ? SAME_SESSION_NOTICE : CLOUD_NOTICE, '', `See this ticket's **Build Summary** page for the full report: ${ticket.url}`)
   return `${lines.join('\n')}\n`
 }

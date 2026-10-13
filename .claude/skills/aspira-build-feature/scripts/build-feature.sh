@@ -1,8 +1,9 @@
 #!/bin/bash
-# Launch /aspira-build-feature. This skill only runs the official build-feature driver with
-# --local: the stages it prints are performed as subagents of this Claude Code session (SKILL.md).
-# There is no separate-process mode (no start/status/wait): a run makes no model call by itself,
-# so nothing needs detaching.
+# Launch /aspira-build-feature. This skill only steps the official build-feature driver: the stages
+# it prints are performed by this Claude Code session and its subagents (SKILL.md). With --local
+# every step runs its skill with --local; without it every step runs its skill's default mode (the
+# step's cloud agent, which the step skill starts and waits on). build-feature itself has no
+# start/status/wait: the run is always this session, and the driver makes no model call.
 set -euo pipefail
 
 NAME=build-feature
@@ -115,13 +116,10 @@ node_args() {
   local file
   for file in "$PROJECT/.env.local" "$AGENT/.env.local" "$AGENT/.env.development.local"; do [ ! -f "$file" ] || NODE_ARGS+=("--env-file=$file"); done
 }
-usage() { die "/aspira-build-feature runs only with --local: local <ID> --local [--run RUNID] [--force-run] [--finish]. start, status and wait are not supported: only --local is supported."; }
+usage() { die "usage: build-feature.sh local <ID> [--local] [--run RUNID] [--force-run] [--finish]. With --local every step runs its skill with --local; without it every step runs its skill's cloud agent."; }
 cmd_local() {
   [ $# -ge 1 ] || usage
   local id=$1; shift
-  local saw_local=""
-  for arg in "$@"; do [ "$arg" != --local ] || saw_local=1; done
-  [ -n "$saw_local" ] || die "/aspira-build-feature runs only with --local: only --local is supported. Pass --local, for example: build-feature.sh local $id --local"
   local repo
   repo=$(git -C "$PWD" rev-parse --show-toplevel) || die "run inside a Git repo"
   resolve_agent
@@ -131,6 +129,6 @@ cmd_local() {
 }
 case ${1:-} in
   local) shift; cmd_local "$@" ;;
-  start|status|wait|watch) die "/aspira-build-feature runs only with --local: only --local is supported." ;;
+  start|status|wait|watch) die "/aspira-build-feature has no $1: the run is always this session. Use local <ID> --local (steps in this session) or local <ID> (each step's cloud agent)." ;;
   *) usage ;;
 esac
