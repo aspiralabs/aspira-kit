@@ -239,7 +239,7 @@ export async function project(options: ProjectOptions) {
 
   const env = (): NodeJS.ProcessEnv => {
     const { NOTION_TOKEN: _token, NOTION_API_KEY: _key, ...rest } = process.env
-    return { ...rest, PATH: `${bin}:/usr/bin:/bin`, HOME: dir, GIT_LOG: gitLog, PNPM_LOG: pnpmLog, GH_DIR: ghDir, GH_CREATED_URL: PR_URL, GIT_TERMINAL_PROMPT: '0', BUILD_FEATURE_NOW: now, BUILD_FEATURE_AGENT_DIR: '' }
+    return { ...rest, PATH: `${bin}:/usr/bin:/bin`, HOME: dir, GIT_LOG: gitLog, PNPM_LOG: pnpmLog, GH_DIR: ghDir, GH_CREATED_URL: PR_URL, GIT_TERMINAL_PROMPT: '0', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', BUILD_FEATURE_NOW: now, BUILD_FEATURE_AGENT_DIR: '' }
   }
 
   async function call(args: string[]): Promise<Result> {
