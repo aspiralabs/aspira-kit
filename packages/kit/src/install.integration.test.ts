@@ -35,10 +35,13 @@ beforeAll(() => {
     if (manifest.name === '@aspiralabs/agents') agentsTarball = spec
     else overrides[manifest.name] = spec
   }
+  // The kit itself, as a project installs it: kit doctor checks the kit-owned skills against it.
+  const kitFile = run('pnpm', ['pack', '--pack-destination', tarballs], kit).trim().split('\n').at(-1)!
+  const kitTarball = `file:${join(tarballs, kitFile.split('/').at(-1)!)}`
   app = join(scratch, 'app')
   mkdirSync(join(app, 'app'), { recursive: true })
   writeFileSync(join(app, 'app', 'globals.css'), '@import "tailwindcss";\n')
-  writeFileSync(join(app, 'package.json'), `${JSON.stringify({ name: 'scratch-app', private: true, type: 'module', devDependencies: { '@aspiralabs/agents': agentsTarball } }, null, 2)}\n`)
+  writeFileSync(join(app, 'package.json'), `${JSON.stringify({ name: 'scratch-app', private: true, type: 'module', devDependencies: { '@aspiralabs/agents': agentsTarball, '@aspiralabs/kit': kitTarball } }, null, 2)}\n`)
   // The meta-package's dependencies point at the tarballs, not a registry (pnpm 12 reads overrides from the workspace file),
   // and pnpm 12 wants every dependency with a build script approved; none is needed to run the agents.
   const builds = readFileSync(join(repo, 'pnpm-workspace.yaml'), 'utf8').replace(/^packages:[\s\S]*?\n\n/, '').replace(/patchedDependencies:[\s\S]*$/, '')
@@ -48,7 +51,7 @@ beforeAll(() => {
 })
 
 describe('an installed project', () => {
-  it('has every agent under node_modules and kit init writes the seven skills from them', async () => {
+  it('has every agent under node_modules and kit init writes the seven agent skills from them and the three kit-owned skills', async () => {
     expect(JSON.parse(readFileSync(join(app, 'node_modules', '@aspiralabs', 'agents', 'package.json'), 'utf8'))).toMatchObject({ name: '@aspiralabs/agents' })
     // kit init's install step adds the registry packages; here it is a no-op, the tarballs are already installed.
     const bin = join(scratch, 'bin')
@@ -62,7 +65,9 @@ describe('an installed project', () => {
     } finally {
       process.env.PATH = path
     }
-    expect(lines.filter((l) => l.startsWith('write  .claude/skills/aspira-')).length).toBe(7)
+    const written = lines.filter((l) => l.startsWith('write  .claude/skills/aspira-'))
+    expect(written.filter((l) => AGENTS.some((agent) => l.startsWith(`write  .claude/skills/aspira-${agent} `))).length).toBe(7)
+    expect(written.filter((l) => /^write {2}\.claude\/skills\/aspira-(cleanup|next|worktree) /.test(l)).length).toBe(3)
     expect(lines.some((l) => l.startsWith('write  .claude/skills/aspira-groomer'))).toBe(true)
     const version = (JSON.parse(readFileSync(join(repo, 'packages/agents/meta/package.json'), 'utf8')) as { version: string }).version
     for (const agent of AGENTS) {
@@ -72,7 +77,9 @@ describe('an installed project', () => {
     }
     const report: string[] = []
     doctor(app, (line) => report.push(line))
-    expect(report.filter((l) => l.startsWith('ok   .claude/skills/aspira-')).length).toBe(7)
+    const skillLines = report.filter((l) => l.startsWith('ok   .claude/skills/aspira-'))
+    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/agents')).length).toBe(7)
+    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/kit')).length).toBe(3)
     expect(report.some((l) => l.startsWith('@aspiralabs/agents') && l.includes(`installed ${version}`))).toBe(true)
   })
 
