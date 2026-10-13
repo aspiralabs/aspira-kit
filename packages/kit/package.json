@@ -20,7 +20,9 @@
     "lint": "eslint src",
     "test": "vitest run"
   },
-  "dependencies": {},
+  "dependencies": {
+    "zod": "4.5.4"
+  },
   "devDependencies": {
     "@aspiralabs/config": "workspace:*",
     "@types/node": "^22",
