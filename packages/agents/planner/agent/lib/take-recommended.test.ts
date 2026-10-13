@@ -108,6 +108,8 @@ it('keeps an agent-taken decision as the agent\'s on a second --take-recommended
   expect(first.status).toBe('ready')
 
   // A second export of the same spec, reading the first run's trace/decisions.md back as its answers.
+  // The first export removed its work directory, knowledge included, so the second run needs it again.
+  await writeKnowledge(f.knowledge)
   const second = await exportWithDecisions(input, env)
   expect(second.status).toBe('ready')
   for (const decision of second.decisions) expect(decision.decidedBy).toBe('agent')

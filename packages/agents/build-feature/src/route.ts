@@ -1,0 +1,123 @@
+// The live Status picks what the run does next, through the Playbook's own table
+// (@aspiralabs/kit/playbook): a step (the row's command with the ID filled in), a Ready move for
+// the rows a human used to do by hand, the later phases (gate, Step 8, Step 10, the review loop,
+// the release row), or the end of the run. What the rows cannot say is decided here, from facts
+// the driver reads: whether a review covers the current spec.md, what the implementor's last
+// result was, and whether the analyzer finished clean.
+
+import { commandFor, nextStep } from '@aspiralabs/kit/playbook'
+
+/** The steps, in Playbook order. */
+export const STEPS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer'] as const
+export type StepName = (typeof STEPS)[number]
+export const isStep = (value: string): value is StepName => (STEPS as readonly string[]).includes(value)
+
+/** The steps the run passes --take-recommended to: an agent decision never stops the run. */
+export const TAKE_RECOMMENDED: readonly StepName[] = ['groomer', 'spec-writer', 'spec-reviewer', 'planner']
+
+/** The later-phase modules, in run order. */
+export const PHASES = ['gate', 'step8', 'step10', 'review', 'release-row'] as const
+export type PhaseName = (typeof PHASES)[number]
+
+/** The Ready moves a human used to make by hand, which the run makes on its run-start approval (F15, F16). */
+export const READY_MOVES: readonly { from: string; to: string }[] = [
+  { from: 'Shortlist', to: 'Ready: Idea' },
+  { from: 'In Review: Spec', to: 'Ready: Spec' },
+  { from: 'In Review: Plan', to: 'Ready: Plan' },
+]
+
+/** The one move Step 8 makes, after the PR property reads back (BOARD-005). */
+export const STEP8_MOVE = { from: 'In Progress: Implementation', to: 'In Review: Implementation' } as const
+
+export type StepRoute = { kind: 'step'; step: StepName; command: string }
+export type SequenceItem = { kind: 'phase'; phase: PhaseName } | (StepRoute & { done: boolean })
+export type EndRoute = { kind: 'end'; reason: 'nothing-to-do' | 'dropped' | 'unknown' | 'finished'; message: string }
+
+export type Route =
+  | StepRoute
+  | { kind: 'readyMove'; from: string; to: string }
+  /** Walk the items in order: a phase decides itself whether it has work left; a step runs unless done. */
+  | { kind: 'sequence'; items: SequenceItem[]; then: EndRoute }
+  | EndRoute
+
+export type RouteFacts = {
+  id: string
+  /** aspira.json `app`, or '.' (A2). */
+  app: string
+  /** In Review: Spec: a review (spec.written/ or a ready spec-reviewer run) covers the current spec.md (A6). */
+  specCovered: boolean
+  /** The implementor's last exported status (implementation-local.json), or null. */
+  implementor: string | null
+  /** The code-analyzer finished clean after the last build. */
+  analyzerClean: boolean
+}
+
+/** The end of an exhaustive switch over a union (TS-008). */
+export const assertNever = (value: never): never => {
+  throw new Error(`unhandled case: ${JSON.stringify(value)}`)
+}
+
+const stepOf = (command: string): StepName => {
+  const name = /^\/aspira-([a-z-]+)\s/.exec(command)?.[1] ?? ''
+  if (!isStep(name)) throw new Error(`the Playbook command "${command}" names no step the run knows`)
+  return name
+}
+
+/** A row's command as the run invokes it: ID filled, <app-dir> filled, --take-recommended where it applies. */
+export function stepCommand(status: string, facts: Pick<RouteFacts, 'id' | 'app'>): StepRoute {
+  const row = nextStep(status)
+  const filled = row === null ? null : commandFor(row, facts.id)
+  if (filled === null) throw new Error(`the Playbook row for ${status} has no command`)
+  const command = filled.replaceAll('<app-dir>', facts.app)
+  const step = stepOf(command)
+  return { kind: 'step', step, command: TAKE_RECOMMENDED.includes(step) ? `${command} --take-recommended` : command }
+}
+
+/** What the run does for a live Status. */
+export function routeStatus(status: string, facts: RouteFacts): Route {
+  const row = nextStep(status)
+  const named = row?.statuses.find((candidate) => candidate.toLowerCase() === status.trim().toLowerCase())
+  if (row === null || named === undefined) return { kind: 'end', reason: 'unknown', message: `unknown Status "${status}" for ${facts.id}: the Playbook has no row for it, so the run cannot pick a step` }
+  switch (named) {
+    case 'Idea':
+    case 'Grooming':
+    case 'Ready: Idea':
+    case 'In Progress: Spec':
+    case 'Ready: Spec':
+    case 'In Progress: Plan':
+    case 'Ready: Plan':
+      return stepCommand(named, facts)
+    case 'Shortlist':
+    case 'In Review: Plan': {
+      const move = READY_MOVES.find((candidate) => candidate.from === named)!
+      return { kind: 'readyMove', from: move.from, to: move.to }
+    }
+    case 'In Review: Spec':
+      return facts.specCovered ? { kind: 'readyMove', from: 'In Review: Spec', to: 'Ready: Spec' } : stepCommand(named, facts)
+    case 'In Progress: Implementation': {
+      if (facts.implementor !== 'complete') return stepCommand('Ready: Plan', facts)
+      return {
+        kind: 'sequence',
+        items: [{ kind: 'phase', phase: 'gate' }, { ...stepCommand(named, facts), done: facts.analyzerClean }, { kind: 'phase', phase: 'step8' }],
+        then: { kind: 'end', reason: 'unknown', message: `${facts.id} is still in In Progress: Implementation after Step 8; resolve it again` },
+      }
+    }
+    case 'In Review: Implementation':
+      return {
+        kind: 'sequence',
+        items: [
+          { kind: 'phase', phase: 'step10' },
+          { kind: 'phase', phase: 'review' },
+          { kind: 'phase', phase: 'release-row' },
+        ],
+        then: { kind: 'end', reason: 'finished', message: `${facts.id}: the PR is reviewed and ready for a human to merge (BOARD-004); the run never merges and never moves the card to Ready: Implementation` },
+      }
+    case 'Ready: Implementation':
+    case 'Released':
+      return { kind: 'end', reason: 'nothing-to-do', message: `nothing to do: ${facts.id} is in ${named}; ${row.step}` }
+    case 'Dropped':
+      return { kind: 'end', reason: 'dropped', message: `ticket is dropped: ${facts.id} is in Dropped and is not being built` }
+    default:
+      return { kind: 'end', reason: 'unknown', message: `unknown Status "${status}" for ${facts.id}: the run has no route for it` }
+  }
+}

@@ -19,7 +19,7 @@ const RESEARCH_STEPS = 10
 /** Correction passes planning gets when its plan fails the checks a model can fix. */
 export const REPAIR_ROUNDS = 2
 
-export type PlanInput = { specPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean }
+export type PlanInput = { specPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean; takeRecommended?: boolean }
 
 /** The repository snapshot a plan is grounded in, as `repository` returns it. */
 export type PlanRepository = Awaited<ReturnType<typeof repository>>
@@ -162,8 +162,14 @@ export function missingUiReads(uiRequired: boolean, reads: { tool: string; ok: b
 /** ready: structural checks passed; needs-author: product decisions remain; incomplete: anything else. */
 export type PlanStatus = 'ready' | 'needs-author' | 'incomplete'
 
-/** The plan's status and every reason it is not ready, in the order the agent reports them. Sets plan.decisions to the merged decisions; `answers` are the author's ticks from the previous plan. */
-export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<PlanRepository, 'gaps' | 'files' | 'tracked'>; research: Research | null; plan: Plan | null; phaseErrors: { phase: string; error: string | null }[]; uiRequired: boolean; reads: { tool: string; ok: boolean }[]; cancelled: boolean; answers?: Answer[] }): { status: PlanStatus; problems: string[]; decisions: DecisionRecord[] } {
+/**
+ * The plan's status and every reason it is not ready, in the order the agent reports them. Sets
+ * plan.decisions to the merged decisions; `answers` are the author's ticks from the previous plan.
+ * `takeRecommended` (threaded from the driver through to plan.ts's mergeDecisions) takes every
+ * decision still open as the agent's recommended option; the status rule (needs-author only while a
+ * decision is open) is unchanged, so a run with nothing left open is ready.
+ */
+export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<PlanRepository, 'gaps' | 'files' | 'tracked'>; research: Research | null; plan: Plan | null; phaseErrors: { phase: string; error: string | null }[]; uiRequired: boolean; reads: { tool: string; ok: boolean }[]; cancelled: boolean; answers?: Answer[]; takeRecommended?: boolean }): { status: PlanStatus; problems: string[]; decisions: DecisionRecord[] } {
   const { spec, guidelines, repo, research, plan } = args
   const problems = [...repo.gaps]
   for (const phase of args.phaseErrors) if (phase.error) problems.push(`${phase.phase}: ${phase.error}`)
@@ -175,7 +181,7 @@ export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<
   if (missingUiReads(args.uiRequired && (plan === null || touchesUi(plan)), args.reads)) problems.push('UI planning requires successful list_components and get_component MCP reads')
   if (args.cancelled) problems.push('Planning cancelled')
   for (const rule of uncoveredRules(guidelines, [...(research?.checks ?? []), ...(plan?.checks ?? [])])) problems.push(`Uncovered guideline: ${rule}`)
-  const decisions = mergeDecisions([research?.decisions ?? [], plan?.decisions ?? []], args.answers ?? [])
+  const decisions = mergeDecisions([research?.decisions ?? [], plan?.decisions ?? []], args.answers ?? [], args.takeRecommended ?? false)
   if (plan) plan.decisions = decisions
   const status: PlanStatus = problems.length ? 'incomplete' : decisions.some((decision) => decision.decidedBy === 'open') ? 'needs-author' : 'ready'
   return { status, problems, decisions }
@@ -275,7 +281,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         plan = revised
       }
     }
-    const { status, problems, decisions } = assessPlan({ spec, guidelines, repo, research, plan, phaseErrors: trace.phases, uiRequired, reads: mcp.reads, cancelled: options.signal?.aborted === true, answers })
+    const { status, problems, decisions } = assessPlan({ spec, guidelines, repo, research, plan, phaseErrors: trace.phases, uiRequired, reads: mcp.reads, cancelled: options.signal?.aborted === true, answers, takeRecommended: input.takeRecommended ?? false })
     const reviewMs = Date.now() - started - prepareMs
     const exportStarted = Date.now()
     const files: Record<string, string> = {

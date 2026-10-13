@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
+import { takenDecision } from '@aspiralabs/agent-common/lib/decisions'
 import { modelSession, reviewModelCall, reviewModels } from '@aspiralabs/spec-reviewer/lib/models'
 import { readAnswers, renderDecisionsFile, renderFindings, renderFindingsSection } from '@aspiralabs/spec-reviewer/lib/report'
 import { systemPrompt as reviewSystemPrompt } from '@aspiralabs/spec-reviewer/lib/review'
@@ -9,7 +10,8 @@ import { repository } from './repository.ts'
 import { runAnalysis } from './run-analysis.ts'
 import { draftSchema, exploreSchema, uiPattern, writePipeline, writerSystemPrompt, type WriteResult } from './writer.ts'
 
-export type RunInput = { ideaPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean }
+/** `takeRecommended` (F10): every decision the draft review leaves open is taken as the agent's recommended option instead of waiting on the author. */
+export type RunInput = { ideaPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean; takeRecommended?: boolean }
 
 /** The output directory: the explicit one, else spec.written/ beside the idea. */
 export const reportDirFor = (input: Pick<RunInput, 'ideaPath' | 'outputDir'>) => resolve(input.outputDir ?? resolve(dirname(input.ideaPath), 'spec.written'))
@@ -32,16 +34,26 @@ export async function prepareWrite(input: RunInput, signal: AbortSignal) {
   if (!guidelines.trim()) throw new Error('Required guidelines snapshot is empty')
   if (/TRUNCATED by the Notion API/i.test(guidelines)) throw new Error('Required guidelines snapshot is truncated')
   const uiRequired = input.uiRequired ?? uiPattern.test(idea)
-  return { dir, idea, guidelines, repo, uiRequired, answers }
+  return { dir, idea, guidelines, repo, uiRequired, answers, takeRecommended: input.takeRecommended ?? false }
 }
 export type Prepared = Awaited<ReturnType<typeof prepareWrite>>
 
 export const writeContext = ({ repo, idea }: Prepared, catalog: string) =>
   `${repo.instructions}\n${repo.packet(idea)}\nAspira UI catalog (read in preparation): ${catalog}\nSnapshot gaps: ${repo.gaps.join('; ')}`
 
-/** Repository snapshot gaps block readiness in every mode. */
-export function applySnapshotGaps(result: WriteResult, { repo }: Prepared) {
+/**
+ * Repository snapshot gaps block readiness in every mode. With take-recommended, every decision the
+ * draft review left open is recorded with takenDecision before trace/decisions.md and review.json
+ * are written (both callers, runWrite and --local's runLocal, call this right after the pipeline and
+ * before export), so status is ready when nothing else is open; no decision is ever decidedBy
+ * 'author' unless an author actually ticked it.
+ */
+export function applySnapshotGaps(result: WriteResult, { repo, takeRecommended }: Prepared) {
   if (repo.gaps.length) { result.problems.push(...repo.gaps); result.status = 'incomplete' }
+  if (takeRecommended && result.status === 'needs-author') {
+    result.authorDecisions = result.authorDecisions.map((decision) => (decision.decidedBy === 'open' ? takenDecision(decision.id, decision) : decision))
+    result.status = result.authorDecisions.some((decision) => decision.decidedBy === 'open') ? 'needs-author' : 'ready'
+  }
 }
 
 const list = (items: string[]) => (items.length ? items.map((item) => `- ${item}`).join('\n') : '- none')
