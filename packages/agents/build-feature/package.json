@@ -1,0 +1,47 @@
+{
+  "name": "@aspiralabs/build-feature",
+  "version": "0.6.1",
+  "description": "/aspira-build-feature: the one /aspira-* skill that orchestrates the other skills, taking a Feature Board ticket from wherever it is to a reviewed, merge-ready PR, one step per subagent.",
+  "type": "module",
+  "imports": {
+    "#src/*": "./src/*"
+  },
+  "scripts": {
+    "build": "echo '@aspiralabs/build-feature has no build step'",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src scripts"
+  },
+  "dependencies": {
+    "@aspiralabs/agent-common": "workspace:*",
+    "@aspiralabs/kit": "workspace:*",
+    "amaro": "^1.2.1",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@aspiralabs/config": "workspace:*",
+    "@types/node": "^24",
+    "eslint": "^9.39.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "MIT",
+  "files": [
+    "src",
+    "scripts",
+    "skill",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aspiralabs/aspira-kit.git",
+    "directory": "packages/agents/build-feature"
+  },
+  "homepage": "https://github.com/aspiralabs/aspira-kit/tree/main/packages/agents/build-feature",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

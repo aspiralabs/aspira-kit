@@ -15,7 +15,8 @@
       "@aspiralabs/implementor",
       "@aspiralabs/code-analyzer",
       "@aspiralabs/pr-reviewer",
-      "@aspiralabs/groomer"
+      "@aspiralabs/groomer",
+      "@aspiralabs/build-feature"
     ]
   ],
   "access": "public",
