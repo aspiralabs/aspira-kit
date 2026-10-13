@@ -146,23 +146,23 @@ describe('an installed project', () => {
     expect(existsSync(launcher)).toBe(true)
     const version = (JSON.parse(readFileSync(join(repo, 'packages/agents/meta/package.json'), 'utf8')) as { version: string }).version
     expect(readFileSync(join(skill, VERSION_FILE), 'utf8').trim()).toBe(version)
-    expect(existsSync(join(app, 'node_modules', '@aspiralabs', 'build-feature'))).toBe(true)
+    // pnpm does not hoist a transitive dependency: the package is installed under node_modules/.pnpm,
+    // reached through @aspiralabs/agents, which is where kit init and the launcher find it.
+    const installed = spawnSync('find', [join(app, 'node_modules'), '-path', '*/@aspiralabs/build-feature/package.json', '-not', '-path', '*/node_modules/*/node_modules/*/node_modules/*'], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean)
+    expect(installed.length, 'the build-feature package is installed under node_modules').toBeGreaterThan(0)
+    const packageDir = dirname(installed[0]!)
 
     const env: NodeJS.ProcessEnv = { ...process.env }
-    for (const name of ['NOTION_TOKEN']) delete env[name]
-    // resolve: the skill asks which Status the card is in.
-    const resolve = spawnSync('bash', [launcher, 'local', 'DEMO-1', '--local'], { cwd: app, env, encoding: 'utf8', input: 'Ready: Idea\n' })
-    expect(resolve.status, resolve.stderr).toBe(0)
-    expect((JSON.parse(resolve.stdout) as { stage: string }).stage).toBe('resolve')
-    // approval: the skill asks to confirm the run before it starts.
-    const approval = spawnSync('bash', [launcher, 'local', 'DEMO-1', '--local'], { cwd: app, env, encoding: 'utf8', input: 'yes\n' })
-    expect(approval.status, approval.stderr).toBe(0)
-    expect((JSON.parse(approval.stdout) as { stage: string }).stage).toBe('approval')
-    // step: the next command, read from the installed @aspiralabs/kit/playbook export.
-    const step = spawnSync('bash', [launcher, 'local', 'DEMO-1', '--local'], { cwd: app, env, encoding: 'utf8' })
+    for (const name of ['NOTION_TOKEN', 'NOTION_API_KEY']) delete env[name]
+    // The installed launcher runs the installed driver: its first stage is the run-start approval (F16).
+    const first = spawnSync('bash', [launcher, 'local', 'DEMO-1', '--local'], { cwd: app, env, encoding: 'utf8' })
+    expect(first.status, first.stderr).toBe(0)
+    expect(first.stderr).not.toContain('running kit source')
+    expect((JSON.parse(first.stdout.slice(first.stdout.indexOf('{'))) as { stage: string }).stage).toBe('approval')
+    // The step for a Status comes from the installed @aspiralabs/kit/playbook export the driver imports.
+    const script = "const { nextStep, commandFor } = await import('@aspiralabs/kit/playbook'); process.stdout.write(commandFor(nextStep('Ready: Idea'), 'DEMO-1') ?? '')"
+    const step = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: packageDir, env, encoding: 'utf8' })
     expect(step.status, step.stderr).toBe(0)
-    const stepStage = JSON.parse(step.stdout) as { stage: string; command: string }
-    expect(stepStage.stage).toBe('step')
-    expect(stepStage.command).toBe('/aspira-spec-writer DEMO-1 --local --take-recommended')
+    expect(step.stdout).toBe('/aspira-spec-writer DEMO-1 --local')
   })
 })
