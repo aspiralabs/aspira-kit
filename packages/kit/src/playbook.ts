@@ -42,7 +42,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
       '```bash',
       '/aspira-groomer <ID> --local',
       '```',
-      "Write Problem, who has it, and what done looks like in the ticket's Idea section, then run the groomer (kit 0.7.0 and later). Needs Idea or Grooming. It moves the card Idea → Grooming when it starts, interviews you in rounds on the ticket's **Grooming Decisions** page, grounded in the repository, and on Confirm writes the Decisions and Terms into the Idea and moves the card Grooming → Shortlist. You read the groomed Idea and move the card Shortlist → Ready: Idea by hand. No agent does this (BOARD-004). A ticket worked alongside another starts with `kit worktree <ID>` (or `/aspira-worktree <ID>`), which creates `.worktrees/<TYPE>-<ID>` on its branch.",
+      "Write Problem, who has it, and what done looks like in the ticket's Idea section, then run the groomer (kit 0.7.0 and later). Needs Idea or Grooming. It moves the card Idea → Grooming when it starts, interviews you in rounds on the ticket's **Grooming Decisions** page, grounded in the repository, and on Confirm writes the Decisions and Terms into the Idea and moves the card Grooming → Shortlist. You read the groomed Idea and move the card Shortlist → Ready: Idea by hand. No agent does this (BOARD-001). The one exception: an /aspira-build-feature run makes this move itself, on its recorded run-start approval. A ticket worked alongside another starts with `kit worktree <ID>` (or `/aspira-worktree <ID>`), which creates `.worktrees/<TYPE>-<ID>` on its branch.",
     ].join('\n'),
   },
   {
@@ -68,7 +68,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
   },
   {
     title: 'Step 4: approve the spec',
-    body: 'You read it. Move the card to Ready: Spec. No agent does this (BOARD-004).',
+    body: 'You read it. Move the card to Ready: Spec by hand. No agent does this (BOARD-004). The one exception: an /aspira-build-feature run makes this move itself, on its recorded run-start approval.',
   },
   {
     title: 'Step 5: plan',
@@ -77,7 +77,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
       '/aspira-planner <ID> --local',
       '```',
       'Needs Ready: Spec. The skill sets Dev, moves the card to In Progress: Plan, pulls `spec.reviewed/spec.reviewed.md` from the Spec Reviewed page and plans from it. Output: `plan.review/plan.reviewed.md`, `run-analysis.md`, `trace/`. On success it puts the plan on the ticket as **Plan** and moves the card to In Review: Plan. Read `trace/review.json`:',
-      '- `ready`: read the plan, then move the card to Ready: Plan by hand.',
+      '- `ready`: read the plan, then move the card to Ready: Plan by hand. The one exception: an /aspira-build-feature run makes this move itself, on its recorded run-start approval.',
       '- `needs-author`: answer the decisions it lists in the plan, then rerun; the card is In Review: Plan, so move it back to In Progress: Plan first (BOARD-007).',
       '- `incomplete`: read `problems` in the same file; most are missing evidence. The card stays In Progress: Plan; rerun once. If it stays incomplete, that is a kit bug: log it on Kit agent gaps.',
     ].join('\n'),

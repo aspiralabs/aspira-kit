@@ -1,7 +1,7 @@
 ---
 name: aspira-groomer
 description: Groom a Feature card's Idea in rounds before it reaches Ready: Idea, with the official groomer agent. It finds what the repository already has for the idea, asks the product decisions the Idea leaves open, records the answers on the card's Grooming Decisions page and, once the human confirms, writes the Decisions and Terms into the card's Idea and moves the card to Shortlist. By default it runs the groomer as a separate process; with --local the rounds run inside this Claude Code session, in chat. Use for /aspira-groomer or requests to groom an idea or a card.
-argument-hint: [<ticket ID | Notion URL>] [--local] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR]
+argument-hint: [<ticket ID | Notion URL>] [--local] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] [--take-recommended]
 ---
 
 # Groomer
@@ -43,10 +43,10 @@ Both print the agent package and version, the log tail, and from `groom/trace/gr
 ## `--local`: the rounds in this session
 
 ```bash
-<skill-dir>/scripts/groomer.sh local [<ticket>] [--force-pull] [--force-run] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--verify] [--finish]
+<skill-dir>/scripts/groomer.sh local [<ticket>] [--force-pull] [--force-run] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--verify] [--finish] [--take-recommended]
 ```
 
-Each call prints one JSON step and makes no model call. Do what the step says, then call `local` again with the same ticket.
+Each call prints one JSON step and makes no model call. Do what the step says, then call `local` again with the same ticket. `--take-recommended` takes every open question whose branch is not an exit criterion (problem, who, done) as the agent's recommended option instead of waiting on the author; an exit-criterion question, and Confirm, are always asked in chat.
 
 1. **Board** (first). `stage: "board"` lists the board work for this session to perform with the Notion MCP, as data in `actions`: `resolve` (write `ticket.md` in the given `format`), `pull` (write the page to the named file as plain markdown), `mark` (append the run paragraph to Grooming Decisions, creating the page when the card has none) and `move`. Perform every action, update `ticket.md` as each `then` says, and call `local` again. Never move a card anywhere a stage does not list.
 2. **Knowledge.** The engineering guidelines are mandatory: without them the driver refuses to start and prints `stage: "knowledge"` with `knowledge.dir`, `knowledge.root`, `knowledge.required`, `maxDepth`, `maxPages` and any `problems`. Build that folder with the Notion MCP: `INDEX.md` (the `root` page), one file per linked page (kebab-case title, starting `<!-- <title> · <url> -->`), and `REQUIRED.md` (every `required` page in order, each as `# <page title>`, then `<!-- <url> -->`, then its full content, separated by `---`). If a page is truncated or cannot be fetched, stop and say so. With `--guidelines`, pass the same snapshot to every call.

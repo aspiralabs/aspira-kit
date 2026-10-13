@@ -10,12 +10,12 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { writeAspira } from './aspira.js'
 import { doctor } from './doctor.js'
-import { AGENTS, skillDir } from './skills.js'
+import { AGENTS, skillDir, VERSION_FILE } from './skills.js'
 import { initNext } from './stacks/next.js'
 
 const kit = dirname(dirname(fileURLToPath(import.meta.url)))
 const repo = dirname(dirname(kit))
-const PACKAGES = ['common', 'spec-reviewer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'groomer', 'meta']
+const PACKAGES = ['common', 'spec-reviewer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'groomer', 'build-feature', 'meta']
 const run = (cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) => execFileSync(cmd, args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
 let scratch: string
@@ -35,9 +35,14 @@ beforeAll(() => {
     if (manifest.name === '@aspiralabs/agents') agentsTarball = spec
     else overrides[manifest.name] = spec
   }
-  // The kit itself, as a project installs it: kit doctor checks the kit-owned skills against it.
-  const kitFile = run('pnpm', ['pack', '--pack-destination', tarballs], kit).trim().split('\n').at(-1)!
+  // Pack the kit package itself (already built to dist), so the project installs @aspiralabs/kit
+  // from a tarball too: the build-feature launcher resolves the Playbook through its own package
+  // export, not a path into this checkout's packages/kit/src, and kit doctor checks the kit-owned
+  // skills against the installed kit.
+  const kitDir = join(repo, 'packages', 'kit')
+  const kitFile = run('pnpm', ['pack', '--pack-destination', tarballs], kitDir).trim().split('\n').at(-1)!
   const kitTarball = `file:${join(tarballs, kitFile.split('/').at(-1)!)}`
+  overrides['@aspiralabs/kit'] = kitTarball
   app = join(scratch, 'app')
   mkdirSync(join(app, 'app'), { recursive: true })
   writeFileSync(join(app, 'app', 'globals.css'), '@import "tailwindcss";\n')
@@ -51,7 +56,7 @@ beforeAll(() => {
 })
 
 describe('an installed project', () => {
-  it('has every agent under node_modules and kit init writes the seven agent skills from them and the three kit-owned skills', async () => {
+  it('has every agent under node_modules and kit init writes the eight agent skills from them and the three kit-owned skills', async () => {
     expect(JSON.parse(readFileSync(join(app, 'node_modules', '@aspiralabs', 'agents', 'package.json'), 'utf8'))).toMatchObject({ name: '@aspiralabs/agents' })
     // kit init's install step adds the registry packages; here it is a no-op, the tarballs are already installed.
     const bin = join(scratch, 'bin')
@@ -66,7 +71,7 @@ describe('an installed project', () => {
       process.env.PATH = path
     }
     const written = lines.filter((l) => l.startsWith('write  .claude/skills/aspira-'))
-    expect(written.filter((l) => AGENTS.some((agent) => l.startsWith(`write  .claude/skills/aspira-${agent} `))).length).toBe(7)
+    expect(written.filter((l) => AGENTS.some((agent) => l.startsWith(`write  .claude/skills/aspira-${agent} `))).length).toBe(8)
     expect(written.filter((l) => /^write {2}\.claude\/skills\/aspira-(cleanup|next|worktree) /.test(l)).length).toBe(3)
     expect(lines.some((l) => l.startsWith('write  .claude/skills/aspira-groomer'))).toBe(true)
     const version = (JSON.parse(readFileSync(join(repo, 'packages/agents/meta/package.json'), 'utf8')) as { version: string }).version
@@ -78,7 +83,7 @@ describe('an installed project', () => {
     const report: string[] = []
     doctor(app, (line) => report.push(line))
     const skillLines = report.filter((l) => l.startsWith('ok   .claude/skills/aspira-'))
-    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/agents')).length).toBe(7)
+    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/agents')).length).toBe(8)
     expect(skillLines.filter((l) => l.includes('matches @aspiralabs/kit')).length).toBe(3)
     expect(report.some((l) => l.startsWith('@aspiralabs/agents') && l.includes(`installed ${version}`))).toBe(true)
   })
@@ -129,5 +134,40 @@ describe('an installed project', () => {
     const stale = spawnSync('bash', [launcher, 'local', spec, '--no-ticket', '--output', out, '--guidelines', guidelines], { cwd: app, env: { ...env, ASPIRA_KIT: join(scratch, 'nowhere') }, encoding: 'utf8' })
     expect(stale.status, stale.stderr).toBe(0)
     expect(readdirSync(join(app, 'node_modules', '@aspiralabs'))).toContain('agents')
+  })
+
+  it('kit init installs the build-feature skill from node_modules, and its launcher resolves the next step through @aspiralabs/kit/playbook', async () => {
+    const lines: string[] = []
+    const path = process.env.PATH
+    process.env.PATH = `${join(scratch, 'bin')}:${path}`
+    try {
+      await initNext({ projectRoot: app, dryRun: false, log: (line) => lines.push(line) })
+    } finally {
+      process.env.PATH = path
+    }
+    const skill = join(app, '.claude', 'skills', 'aspira-build-feature')
+    expect(existsSync(join(skill, 'SKILL.md'))).toBe(true)
+    const launcher = join(skill, 'scripts', 'build-feature.sh')
+    expect(existsSync(launcher)).toBe(true)
+    const version = (JSON.parse(readFileSync(join(repo, 'packages/agents/meta/package.json'), 'utf8')) as { version: string }).version
+    expect(readFileSync(join(skill, VERSION_FILE), 'utf8').trim()).toBe(version)
+    // pnpm does not hoist a transitive dependency: the package is installed under node_modules/.pnpm,
+    // reached through @aspiralabs/agents, which is where kit init and the launcher find it.
+    const installed = spawnSync('find', [join(app, 'node_modules'), '-path', '*/@aspiralabs/build-feature/package.json', '-not', '-path', '*/node_modules/*/node_modules/*/node_modules/*'], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean)
+    expect(installed.length, 'the build-feature package is installed under node_modules').toBeGreaterThan(0)
+    const packageDir = dirname(installed[0]!)
+
+    const env: NodeJS.ProcessEnv = { ...process.env }
+    for (const name of ['NOTION_TOKEN', 'NOTION_API_KEY']) delete env[name]
+    // The installed launcher runs the installed driver: its first stage is the run-start approval (F16).
+    const first = spawnSync('bash', [launcher, 'local', 'DEMO-1', '--local'], { cwd: app, env, encoding: 'utf8' })
+    expect(first.status, first.stderr).toBe(0)
+    expect(first.stderr).not.toContain('running kit source')
+    expect((JSON.parse(first.stdout.slice(first.stdout.indexOf('{'))) as { stage: string }).stage).toBe('approval')
+    // The step for a Status comes from the installed @aspiralabs/kit/playbook export the driver imports.
+    const script = "const { nextStep, commandFor } = await import('@aspiralabs/kit/playbook'); process.stdout.write(commandFor(nextStep('Ready: Idea'), 'DEMO-1') ?? '')"
+    const step = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: packageDir, env, encoding: 'utf8' })
+    expect(step.status, step.stderr).toBe(0)
+    expect(step.stdout).toBe('/aspira-spec-writer DEMO-1 --local')
   })
 })

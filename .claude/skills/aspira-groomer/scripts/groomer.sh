@@ -129,9 +129,10 @@ absolute_file() {
 }
 # The ticket argument (F1 of the ticket flow): a board ID such as NOM-4, a Notion page URL, or nothing
 # (the one folder under .work/ that holds a ticket.md). The groomer writes to the card, so it has no
-# --no-ticket mode. Sets POSITIONAL, FORCE_PULL, FORCE_RUN, VERIFY, GUIDELINES, REPO, OUT and FINISH.
+# --no-ticket mode. Sets POSITIONAL, FORCE_PULL, FORCE_RUN, VERIFY, GUIDELINES, REPO, OUT, FINISH and
+# TAKE_RECOMMENDED.
 parse() {
-  POSITIONAL="" FORCE_PULL="" FORCE_RUN="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH=""
+  POSITIONAL="" FORCE_PULL="" FORCE_RUN="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED=""
   while [ $# -gt 0 ]; do
     case $1 in
       --no-ticket) die "the groomer writes to the card; it needs a Feature Board ticket" ;;
@@ -142,6 +143,7 @@ parse() {
       --repo) [ $# -ge 2 ] || die "--repo needs a path"; REPO=$2; shift 2 ;;
       --output) [ $# -ge 2 ] || die "--output needs a path"; OUT=$2; shift 2 ;;
       --finish) FINISH=1; shift ;;
+      --take-recommended) TAKE_RECOMMENDED=1; shift ;;
       -*) die "unknown option: $1" ;;
       *) [ -z "$POSITIONAL" ] || die "one ticket at a time"; POSITIONAL=${1#@}; shift ;;
     esac
@@ -189,6 +191,7 @@ cmd_start() {
   parse "$@"
   [ -z "$FINISH" ] || die "--finish only applies to local"
   [ -z "$VERIFY" ] || die "--verify only applies to local"
+  [ -z "$TAKE_RECOMMENDED" ] || die "--take-recommended only applies to local"
   [ -z "$OUT" ] || die "--output: the groomer always writes to .work/<id>-<slug>/groom, where its finish step reads the record"
   local run prompt eve="" folder="" idea
   resolve_agent
@@ -255,6 +258,7 @@ cmd_local() {
   [ -z "$FORCE_RUN" ] || args+=(--force-run)
   [ -z "$VERIFY" ] || args+=(--verify)
   [ -z "$FINISH" ] || args+=(--finish)
+  [ -z "$TAKE_RECOMMENDED" ] || args+=(--take-recommended)
   resolve_agent
   agent_node scripts/local.ts "${args[@]}"
 }
@@ -306,5 +310,5 @@ case ${1:-} in
   local) shift; cmd_local "$@" ;;
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
-  *) die "usage: groomer.sh start [TICKET] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] | status RUN | wait RUN [--max SECONDS] | local [TICKET] [--force-pull] [--force-run] [--verify] [--guidelines FILE] [--repo DIR] [--finish]" ;;
+  *) die "usage: groomer.sh start [TICKET] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] | status RUN | wait RUN [--max SECONDS] | local [TICKET] [--force-pull] [--force-run] [--verify] [--guidelines FILE] [--repo DIR] [--finish] [--take-recommended]" ;;
 esac

@@ -1,6 +1,7 @@
-// The /aspira-* skills a project runs its agents with. Each agent package ships its skill under
-// skill/aspira-<agent>/ (SKILL.md and scripts/<agent>.sh); `kit init` copies that folder into the
-// project's .claude/skills/ and pins it to the installed @aspiralabs/agents version in .kit-version.
+// The installed /aspira-* skill packages: the seven agents and the build-feature orchestrating
+// skill. Each package ships its skill under skill/aspira-<agent>/ (SKILL.md and scripts/<agent>.sh);
+// `kit init` copies that folder into the project's .claude/skills/ and pins it to the installed
+// @aspiralabs/agents version in .kit-version.
 // The kit ships three skills of its own (/aspira-cleanup, /aspira-next, /aspira-worktree) under
 // skills/aspira-<name>/, launchers for its own commands; they are copied the same way, pinned to the
 // kit's version, and installed whether or not @aspiralabs/agents is.
@@ -14,7 +15,7 @@ import { appRoot } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 
 /** The agents a project gets through @aspiralabs/agents, each with a /aspira-<agent> skill. */
-export const AGENTS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer'] as const
+export const AGENTS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'build-feature'] as const
 export type Agent = (typeof AGENTS)[number]
 
 /** The skills @aspiralabs/kit ships itself, each a /aspira-<name> launcher for `kit <name>`. */

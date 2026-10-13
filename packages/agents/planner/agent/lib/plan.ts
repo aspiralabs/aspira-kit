@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
-import { applyAnswers, decisionSchema, normalizeQuestion, parseTickedDecisions, renderDecision, renderDecisions, type Answer, type Decision, type DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
+import { applyAnswers, decisionSchema, normalizeQuestion, parseTickedDecisions, renderDecision, renderDecisions, takenDecision, type Answer, type Decision, type DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
 import { allowedPath } from '@aspiralabs/agent-common/lib/repository'
 import { countBySeverity, findingsHeader, severityHeading, sortBySeverity, type Severity } from '@aspiralabs/agent-common/lib/severity'
 import { specFeatures } from '@aspiralabs/agent-common/lib/spec'
@@ -125,8 +125,14 @@ export function validatePlan(plan: Plan, spec: string, files: Map<string, string
   return errors
 }
 
-/** Research's and planning's decisions as one list, D1, D2, ..., the same question once, with the author's ticked answers applied. */
-export function mergeDecisions(lists: readonly (readonly Decision[])[], answers: readonly Answer[] = []): DecisionRecord[] {
+/**
+ * Research's and planning's decisions as one list, D1, D2, ..., the same question once, with the
+ * author's ticked answers applied. With `takeRecommended` (F10), every decision still open after the
+ * author's ticks are applied is taken as the agent's recommended option instead of waiting on the
+ * author; a tick the agent made itself is ignored by `applyAnswers`, so a rerun never records it as
+ * the author's.
+ */
+export function mergeDecisions(lists: readonly (readonly Decision[])[], answers: readonly Answer[] = [], takeRecommended = false): DecisionRecord[] {
   const seen = new Set<string>()
   const merged: DecisionRecord[] = []
   for (const decision of lists.flat()) {
@@ -135,7 +141,8 @@ export function mergeDecisions(lists: readonly (readonly Decision[])[], answers:
     seen.add(key)
     merged.push({ ...decision, id: `D${merged.length + 1}`, decidedBy: 'open', answer: null })
   }
-  return applyAnswers(merged, answers)
+  const applied = applyAnswers(merged, answers)
+  return takeRecommended ? applied.map((decision) => (decision.decidedBy === 'open' ? takenDecision(decision.id, decision) : decision)) : applied
 }
 
 /** The ticks the author made in the previous plan's trace/decisions.md, or none when there is no previous plan. */

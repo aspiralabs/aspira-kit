@@ -22,7 +22,7 @@ const agent = await agentVersion(new URL('..', import.meta.url))
 try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { repo: { type: 'string' }, ticket: { type: 'string' }, 'no-ticket': { type: 'string' }, guidelines: { type: 'string' }, output: { type: 'string' }, 'force-pull': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' } },
+    options: { repo: { type: 'string' }, ticket: { type: 'string' }, 'no-ticket': { type: 'string' }, guidelines: { type: 'string' }, output: { type: 'string' }, 'force-pull': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' } },
   })
   if (values.repo === undefined || positionals.length > 0 || (values.ticket !== undefined && values['no-ticket'] !== undefined)) throw new Error(usage)
   const repo = values.repo
@@ -44,7 +44,7 @@ try {
         repoPath: repo,
         ...(values.guidelines === undefined ? {} : { guidelinesPath: values.guidelines }),
         ...(outputDir === undefined ? {} : { outputDir }),
-        finish: values.finish === true,
+        finish: values.finish === true, takeRecommended: values['take-recommended'] === true,
       })
       if (!result.pending) await recordAgentVersion(result.dir, agent)
       if (!result.pending && before.kind === 'ticket') {

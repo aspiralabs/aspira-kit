@@ -9,7 +9,7 @@ import { readAnswers, renderDecisionsFile, renderFindings, renderFindingsSection
 import { repository } from './repository.ts'
 import { systemPrompt } from './review.ts'
 
-export type RunInput = { specPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean }
+export type RunInput = { specPath: string; repoPath: string; guidelinesPath: string; outputDir?: string; uiRequired?: boolean; takeRecommended?: boolean }
 
 /** The report directory: the explicit output directory, else spec.reviewed/ beside the spec. */
 export const reportDirFor = (input: Pick<RunInput, 'specPath' | 'outputDir'>) => resolve(input.outputDir ?? resolve(dirname(input.specPath), 'spec.reviewed'))
@@ -75,7 +75,7 @@ export async function runReview(input: RunInput, options: { signal?: AbortSignal
   const { ledger, calls } = session
   const call = session.record(reviewModelCall(session, models, tools, componentTool))
   try {
-    const result = await runPipeline({ spec, guidelines, context: reviewContext(prepared, JSON.stringify(catalog)), uiRequired, answers }, call, options)
+    const result = await runPipeline({ spec, guidelines, context: reviewContext(prepared, JSON.stringify(catalog)), uiRequired, answers, takeRecommended: input.takeRecommended ?? false }, call, options)
     if (uiRequired && !['list_components', 'get_component'].every((name) => mcp.reads.some((read) => read.ok && read.tool.endsWith(`__${name}`)))) {
       result.problems.push('UI review requires successful list_components and get_component MCP reads')
       result.status = 'incomplete'
