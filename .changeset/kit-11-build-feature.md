@@ -1,0 +1,15 @@
+---
+'@aspiralabs/build-feature': minor
+'@aspiralabs/kit': minor
+'@aspiralabs/agents': minor
+'@aspiralabs/agent-common': minor
+'@aspiralabs/groomer': minor
+'@aspiralabs/planner': minor
+'@aspiralabs/spec-writer': minor
+'@aspiralabs/spec-reviewer': minor
+'@aspiralabs/pr-reviewer': minor
+---
+
+New `/aspira-build-feature` skill: a skill-only package, `@aspiralabs/build-feature`, that steps a deterministic driver through the whole AI-DLC process for a Feature Board ticket — idea to a reviewed, merge-ready PR — running each stage as a subagent of a `--local` Claude Code session instead of launching an agent. `kit init` installs it with the other `/aspira-*` skills via `@aspiralabs/agents`.
+
+`groomer`, `spec-writer`, `spec-reviewer` and `planner` take a shared `--take-recommended` option that answers non-exit-criteria questions with the recommended choice instead of asking, so build-feature's steps can run unattended; the decision records which answers were agent-taken so a rerun or a human override can tell. `@aspiralabs/kit` now exports a `playbook` entry point (`@aspiralabs/kit/playbook`) that build-feature's driver imports to route each ticket Status.

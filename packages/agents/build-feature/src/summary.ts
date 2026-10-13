@@ -12,6 +12,7 @@ import { compareIds } from '@aspiralabs/agent-common/lib/decisions'
 import { allowedPath } from '@aspiralabs/agent-common/lib/repository'
 import { SEVERITIES } from '@aspiralabs/agent-common/lib/severity'
 import { orderedTaken } from '#src/decisions.ts'
+import { gateSummaryLines } from '#src/gate.ts'
 import { MODELS, type ModelName } from '#src/models.ts'
 import { redact, tail } from '#src/redact.ts'
 import { STEPS } from '#src/route.ts'
@@ -114,6 +115,8 @@ async function statusLines(input: RenderBuildSummaryInput, resume: string): Prom
   else if (run !== undefined) lines.push(`Run ${run.runId} is in progress.`, '')
   const card = state.card ?? null
   if (card !== null) lines.push(`Card: ${card.status} (${card.url})`, '')
+  const gate = gateSummaryLines(state)
+  if (gate.length > 0) lines.push(...gate, '')
   const remaining = orderedRemaining(state.remaining)
   if (remaining.length > 0) {
     lines.push('Remaining findings:', '')
