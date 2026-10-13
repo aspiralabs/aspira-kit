@@ -1,7 +1,7 @@
 ---
 name: aspira-spec-reviewer
 description: Review a feature spec against its repository and Aspira engineering guidelines with the official spec-review pipeline, then report findings, a reviewed spec and a run analysis. By default it runs spec-reviewer as a separate process and reports back; with --local the same pipeline runs inside this Claude Code session. Use for /aspira-spec-reviewer or requests to review a spec.
-argument-hint: [<ticket ID | Notion URL> | <spec.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR]
+argument-hint: [<ticket ID | Notion URL> | <spec.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended]
 ---
 
 # Spec review
@@ -39,10 +39,10 @@ The run is detached. Tell the user it started and where results will go, then us
 ## `--local`: run the pipeline in this session
 
 ```bash
-<skill-dir>/scripts/spec-reviewer.sh local [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo DIR] [--output DIR] [--finish] [--verify]
+<skill-dir>/scripts/spec-reviewer.sh local [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo DIR] [--output DIR] [--finish] [--verify] [--take-recommended]
 ```
 
-Each `local` call is one synchronous step. It makes no model calls: it prints JSON naming the next `stage` and its tasks, each with a `prompt` file assembled at that moment from the agent's own files and the `output` file to write, or the finished report. Every result carries `orchestrator`, the agent's `agent/instructions.md`: read the file named in `orchestrator` in full once, before the first phase. In this mode the `local` steps stand in for the agent's review tool, and you stand in for its router. Run the tasks as subagents and do not edit the prompt files: their content is exactly what the agent's phases get.
+Each `local` call is one synchronous step. `--take-recommended` takes every decision still open at reconciliation as the agent's recommended option instead of waiting on the author. It makes no model calls: it prints JSON naming the next `stage` and its tasks, each with a `prompt` file assembled at that moment from the agent's own files and the `output` file to write, or the finished report. Every result carries `orchestrator`, the agent's `agent/instructions.md`: read the file named in `orchestrator` in full once, before the first phase. In this mode the `local` steps stand in for the agent's review tool, and you stand in for its router. Run the tasks as subagents and do not edit the prompt files: their content is exactly what the agent's phases get.
 
 1. **Board** (first, with a ticket). `stage: "board"` lists the board work for this session to perform with the Notion MCP, as data in `actions`. A `resolve` action names the ticket and the board: fetch the ticket and write `ticket.md` at `write` in exactly the `format` given. A `pull` action names a child page and the file to write it to as plain markdown. Perform every action, then call `local` again; the driver reads `ticket.md`, refuses when its Status is not the one the reviewer needs, and lists what is still missing until the folder is in sync. Never move a card anywhere the stage does not list.
 2. **Knowledge.** The engineering guidelines are mandatory; the driver refuses to start without them. With `--guidelines`, pass the same snapshot to every call. Otherwise the first call prints `stage: "knowledge"` with `knowledge.dir`, `knowledge.root` (the agent's `KNOWLEDGE_PAGE`), `knowledge.required` (the agent's `KNOWLEDGE_REQUIRED` pages, in order), `maxDepth`, `maxPages` and any `problems` with a folder already there. Build that folder with the Notion MCP the way the agent's `load-knowledge` does:

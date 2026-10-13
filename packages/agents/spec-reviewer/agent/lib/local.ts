@@ -149,7 +149,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     throw new Error('pending in the session')
   }
 
-  const result = await runPipeline({ spec, guidelines, context, uiRequired, answers }, call)
+  const result = await runPipeline({ spec, guidelines, context, uiRequired, answers, takeRecommended: input.takeRecommended ?? false }, call)
   if (tasks.length) {
     tasks.sort((a, b) => PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase))
     return { pending: true as const, status: 'pending', stage: STAGES[stageOf(tasks[0]!.phase)], workDir: work, orchestrator, tasks }

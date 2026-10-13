@@ -1,7 +1,7 @@
 ---
 name: aspira-spec-writer
 description: Turn a feature idea (a file, a Notion card or inline text) into a reviewed spec with the official spec-writer pipeline. It explores the repository, writes an initial draft in the Aspira spec contract, then runs the official spec review on that draft, and reports the written spec, the draft, open author decisions and a run analysis. By default it runs spec-writer as a separate process on Claude and OpenAI models; with --local the same pipeline runs inside this Claude Code session. Use for /aspira-spec-writer or requests to write a spec from an idea.
-argument-hint: [<ticket ID | Notion URL> | <idea.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR]
+argument-hint: [<ticket ID | Notion URL> | <idea.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended]
 ---
 
 # Spec writer
@@ -46,8 +46,10 @@ The run is detached. Tell the user it started and where results will go, then us
 ## `--local`: run the pipeline in this session
 
 ```bash
-<skill-dir>/scripts/spec-writer.sh local [<ticket> | <idea.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo DIR] [--output DIR] [--finish] [--verify]
+<skill-dir>/scripts/spec-writer.sh local [<ticket> | <idea.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo DIR] [--output DIR] [--finish] [--verify] [--take-recommended]
 ```
+
+`--take-recommended` takes every decision the draft review leaves open as the agent's recommended option instead of waiting on the author.
 
 Each `local` call is one synchronous step. It makes no model calls: it prints JSON naming the next `stage` and its tasks, each with a `prompt` file assembled at that moment from the agent's own files and the `output` file to write, or the finished report. Every result carries `orchestrator`, the agent's `agent/instructions.md`: read the file named in `orchestrator` in full once, before the first phase. In this mode the `local` steps stand in for the agent's write tool, and you stand in for its router. Run the tasks as subagents and do not edit the prompt files: their content is exactly what the agent's phases get.
 

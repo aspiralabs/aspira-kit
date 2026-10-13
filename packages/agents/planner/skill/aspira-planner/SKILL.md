@@ -1,7 +1,7 @@
 ---
 name: aspira-planner
 description: Turn a reviewed business spec into concrete implementation tasks and unit/integration test checklists by calling the Aspira planner agent. By default it runs the planner as a separate process; with --local the same pipeline runs inside this Claude Code session. Use for /aspira-planner or requests to generate an implementation plan with this agent.
-argument-hint: [<ticket ID | Notion URL> | <spec.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR]
+argument-hint: [<ticket ID | Notion URL> | <spec.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended]
 ---
 
 # Spec to plan
@@ -29,10 +29,10 @@ The helper detaches the run and prints its run/log directory. Tell the user wher
 ## --local: the same pipeline in this session
 
 ```bash
-<skill-dir>/scripts/planner.sh local [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output] [--finish] [--verify]
+<skill-dir>/scripts/planner.sh local [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output] [--finish] [--verify] [--take-recommended]
 ```
 
-Each call is one synchronous step that makes no model call and launches nothing. It prints JSON: the next stage, or the exported plan once `pending` is `false`. The driver assembles every prompt from the agent's own files when the step runs, so nothing here restates them. `--local` is not independent of this session: every phase runs on this session's model, and no cost is itemized.
+Each call is one synchronous step that makes no model call and launches nothing. `--take-recommended` takes every decision still open after the author's ticks as the agent's recommended option instead of waiting on the author. It prints JSON: the next stage, or the exported plan once `pending` is `false`. The driver assembles every prompt from the agent's own files when the step runs, so nothing here restates them. `--local` is not independent of this session: every phase runs on this session's model, and no cost is itemized.
 
 1. Stage `board` (first, with a ticket): the board work for this session to perform with the Notion MCP, listed as data in `actions`. A `resolve` action names the ticket and the board: fetch the ticket and write `ticket.md` at `write` in exactly the `format` given. A `pull` action names a child page and the file to write it to as plain markdown. A `set` action and a `move` action name the property and the Status to set on the ticket page, and `then` says what to update in `ticket.md` afterwards. Perform every action, then call `local` again; the driver reads `ticket.md`, refuses when its Status is not the one the planner needs, and lists what is still missing until the folder is in sync. Never move a card anywhere the stage does not list.
 2. Read the file named by `router` once. It is `agent/instructions.md` verbatim, with how its tools map onto this driver. Follow it as the planner's router would.

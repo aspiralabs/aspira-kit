@@ -16,10 +16,13 @@ Aspira Labs agents, built on [eve](https://vercel.com/eve). One package per agen
 | `packages/agents/pr-reviewer` | `pr-reviewer` | `specs/agents-pr-reviewer.md` | working |
 | `packages/agents/code-analyzer` | `code-analyzer` | `specs/agents-code-analyzer.md` | detect, run, auto-fix, model-fix, loop until clean |
 | `packages/agents/implementor` | `implementor` | `specs/agents-implementor.md` | builds a plan test-first, parallel lanes |
+| `packages/agents/build-feature` | — (skill-only, no eve agent) | KIT-11 | orchestrates the other skills' steps into one AI-DLC run, idea to merge-ready PR |
 
 ## Skills: one pattern for every agent
 
-Spec: `specs/agents-skill-pattern.md`. Every agent a person runs (groomer, spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer) has a Claude Code skill at `<agent>/skill/aspira-<agent>/`, with `SKILL.md` and `scripts/<agent>.sh`. The agent is the single source of truth, and the skill only calls it:
+Spec: `specs/agents-skill-pattern.md`. Every agent a person runs (groomer, spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer) has a Claude Code skill at `<agent>/skill/aspira-<agent>/`, with `SKILL.md` and `scripts/<agent>.sh`. The agent is the single source of truth, and the skill only calls it. `@aspiralabs/build-feature` is the one documented exception: a skill-only package with no `agent/` and no eve agent, whose `/aspira-build-feature` skill runs other skills' steps as subagents of this session instead of launching an agent, `--local` only.
+
+Architecture Decision Record (Proposed): https://app.notion.com/p/3f83e59b225881a2bc2cf2317d7b27a7 covers both the shared `--take-recommended` option on the step agents (below) and this skill-only exception for `@aspiralabs/build-feature`.
 
 - **Default: launch the agent.** `scripts/<agent>.sh start` runs the agent as a separate process, detached in `screen`. `status` and `wait` follow it. The skill relays the agent's report and never does the work itself.
 - **`--local`: the same pipeline in the session.** `scripts/<agent>.sh local` steps a driver in the agent's package. The driver makes no model calls. Each step prints the next stage as JSON, with every task's prompt written to a file. The session runs those tasks as subagents (in parallel where the stage says), and the driver checks their outputs against the agent's own schemas before it advances. Prompts are assembled at runtime from the agent's own files: `agent/instructions.md`, `agent/subagents/*/instructions.md`, and the prompt and schema modules in `agent/lib/`. Editing the agent changes `--local` with no copy to update. `--finish` exports what exists as incomplete. A change to the source or the rules mid-run is refused.
@@ -111,6 +114,8 @@ Package scripts (`dev`, `info`, `typecheck`, `lint`) need no `exec`: `pnpm -C <d
 6. Add its skill as **Skills** above describes: `skill/aspira-<name>/` with `SKILL.md` and `scripts/<name>.sh`, plus a `--local` driver and its tests.
 
 Root `typecheck`, `lint` and `test` (which packs every package) pick the package up for free. Root `build` filters on `./packages/*` and skips it.
+
+A skill-only package (`@aspiralabs/build-feature` is the one so far) skips the `agent/` steps above: no `agent.ts`, no `instructions.md`, no eve agent to discover, no `.env.local` symlink. It still joins the `fixed` group, `meta/package.json`, and `packages/kit/src/skills.ts`, and still ships `skill/aspira-<name>/` with `SKILL.md` and `scripts/<name>.sh`.
 
 ## Shared conventions
 

@@ -1,10 +1,10 @@
-import { SETTLED_DECISIONS_RULE, applyAnswers, normalizeQuestion, openDecisions, parseDecisionsList, type Answer, type DecisionRecord, type DecisionsListItem } from '@aspiralabs/agent-common/lib/decisions'
+import { SETTLED_DECISIONS_RULE, applyAnswers, normalizeQuestion, openDecisions, parseDecisionsList, takenDecision, type Answer, type DecisionRecord, type DecisionsListItem } from '@aspiralabs/agent-common/lib/decisions'
 import { applyEdits, checkContract, checkedRuleIds, lenses, lensRules, reviewSchema, ruleIds, synthesisSchema, validateReview, type Finding, type Review, type Synthesis, type Lens } from './review.ts'
 
 export type Request = { phase: string; prompt: string; signal: AbortSignal }
 export type Call = (request: Request) => Promise<unknown>
-/** `answers`: what the author ticked in the previous run's trace/decisions.md; a matching open decision is recorded as theirs. */
-export type Input = { spec: string; guidelines: string; context: string; uiRequired: boolean; answers?: Answer[] }
+/** `answers`: what the author ticked in the previous run's trace/decisions.md; a matching open decision is recorded as theirs. `takeRecommended`: every decision still open is taken as the agent's recommended option instead of waiting on the author (F10). */
+export type Input = { spec: string; guidelines: string; context: string; uiRequired: boolean; answers?: Answer[]; takeRecommended?: boolean }
 
 /** The body of the spec's `## Decisions` section, up to the next heading of level 2 or shallower; empty when there is none. */
 function decisionsSectionOf(spec: string): string {
@@ -106,7 +106,10 @@ export async function runPipeline(input: Input, call: Call, options: { signal?: 
     if (!resolution || resolution.status === 'unresolved' || !resolution.evidence.length) problems.push(`${gap.id} ${gap.source}: ${gap.text}`)
   }
   if (options.signal?.aborted) problems.push('Review cancelled')
-  const { decisions: authorDecisions, settledByAuthor, unparsedDecisionItems } = authorDecisionsOf(input.spec, synthesis, input.answers)
+  const { decisions: decided, settledByAuthor, unparsedDecisionItems } = authorDecisionsOf(input.spec, synthesis, input.answers)
+  // With take-recommended, record open decisions with takenDecision before the status is computed,
+  // so status is ready when nothing else is open (F10).
+  const authorDecisions = input.takeRecommended ? decided.map((decision) => (decision.decidedBy === 'open' ? takenDecision(decision.id, decision) : decision)) : decided
   const status = problems.length ? 'incomplete' : openDecisions(authorDecisions).length ? 'needs-author' : 'ready'
   return { status, problems, authorDecisions, settledByAuthor, unparsedDecisionItems, findings, reviews, gaps, synthesis, candidate, phases, reviewMs: Date.now() - started }
 }

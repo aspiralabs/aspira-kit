@@ -21,7 +21,7 @@ export type GroomRunStatus = (typeof GROOM_RUN_STATUSES)[number]
 export const GROOM_BRANCHES = ['problem', 'who', 'done', 'intent', 'f-list', 'tests', 'constraints', 'out-of-scope', 'blast-radius', ...LENSES] as const
 
 /** Prefixes a quoted line may not start with: each is a line the page parser reads. */
-const GROOM_LINE_PREFIXES = ['#', '- [', 'Run:', 'Decided by', 'Confirmed', 'Confirm was', 'Branch:', 'Fact:', 'Two ticks', 'Two new ticks', 'Why it is yours']
+const GROOM_LINE_PREFIXES = ['#', '- [', 'Run:', 'Decided by', 'Taken by the agent', 'Confirmed', 'Confirm was', 'Branch:', 'Fact:', 'Two ticks', 'Two new ticks', 'Why it is yours']
 
 const singleLine = z
   .string()
@@ -134,8 +134,8 @@ export function rebuildGroomRecord(pageMarkdown: string): { record: GroomRecord;
       whyYours: block.whyYours ?? '',
       branch: block.branch ?? 'problem',
       facts: block.facts,
-      decidedBy: block.decided === undefined ? 'open' : 'author',
-      answer: block.decided === undefined ? null : answerIndex === -1 ? block.decided.answer : options[answerIndex]!,
+      decidedBy: block.decided !== undefined ? 'author' : block.taken !== undefined ? 'agent' : 'open',
+      answer: block.decided !== undefined ? (answerIndex === -1 ? block.decided.answer : options[answerIndex]!) : block.taken !== undefined ? recommended : null,
       ...(block.decided?.revisedAt !== undefined ? { revisedAt: block.decided.revisedAt } : {}),
     }
   })

@@ -23,7 +23,7 @@ const agent = await agentVersion(new URL('..', import.meta.url))
 try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { repo: { type: 'string' }, ticket: { type: 'string' }, guidelines: { type: 'string' }, 'force-pull': { type: 'boolean' }, 'force-run': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' } },
+    options: { repo: { type: 'string' }, ticket: { type: 'string' }, guidelines: { type: 'string' }, 'force-pull': { type: 'boolean' }, 'force-run': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' } },
   })
   if (values.repo === undefined || positionals.length > 0) throw new Error(usage)
   const repo = values.repo
@@ -43,7 +43,7 @@ try {
     if (before.kind === 'stage') console.log(JSON.stringify({ ...before.stage, agent }, null, 2))
     else if (before.kind === 'none') throw new FlowRefused('the groomer writes to the card; it needs a Feature Board ticket')
     else {
-      const step = await runLocal({ folder: before.folder, repoPath: repo, ...(values.guidelines === undefined ? {} : { guidelinesPath: values.guidelines }), finish: values.finish === true })
+      const step = await runLocal({ folder: before.folder, repoPath: repo, ...(values.guidelines === undefined ? {} : { guidelinesPath: values.guidelines }), finish: values.finish === true, takeRecommended: values['take-recommended'] === true })
       const ticket = `${before.ticket.id} ${before.ticket.title}`
       if (step.stage === 'board' && 'runStatus' in step && step.runStatus !== undefined) {
         const output = outputFor(before.folder)

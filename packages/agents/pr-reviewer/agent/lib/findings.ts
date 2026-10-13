@@ -3,9 +3,11 @@
 // file, the PR comment and the counts the verdict is computed from always agree
 // (specs/agents-human-lists.md F1, F2). Pure: text in, text out.
 
-import { SEVERITIES, countsLine, severityHeading, severityRank, totalFindings, type Counts, type Severity } from '@aspiralabs/agent-common/lib/severity'
+import { SEVERITIES, countsLine, severityHeading, severityRank, totalFindings, type Severity } from '@aspiralabs/agent-common/lib/severity'
+import { countsFromFindings } from '@aspiralabs/agent-common/lib/findings-counts'
 
-const TITLE = /^# Findings\b/m
+export { countsFromFindings }
+
 const SECTION = /^## (.+?)\s*$/
 const ENTRY = /^### \[([^\]]+)\]\s*(.*)$/
 const TOTALS = /^Totals: .*$/m
@@ -24,21 +26,6 @@ function sectionsOf(markdown: string): Section[] {
     else sections.at(-1)!.lines.push(line)
   }
   return sections
-}
-
-/**
- * The counts from findings.md, or null when the text is not a findings file. Counts the
- * `### [ID]` findings under each `## <Severity>` heading, so the verdict never depends on how
- * the model worded its totals line.
- */
-export function countsFromFindings(findings: string): Counts | null {
-  if (!TITLE.test(findings)) return null
-  const counts: Counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 }
-  for (const section of sectionsOf(findings)) {
-    if (section.severity === null) continue
-    counts[section.severity] += section.lines.filter((line) => ENTRY.test(line)).length
-  }
-  return counts
 }
 
 /**

@@ -3,13 +3,13 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
-import { applyAnswersById, classifyRenderings, normalizeQuestion, parseGroomPage, renderGroomPage, reviseAnswers, type Answer } from '@aspiralabs/agent-common/lib/decisions'
+import { applyAnswersById, classifyRenderings, normalizeQuestion, parseGroomPage, renderGroomPage, reviseAnswers, takenDecision, type Answer } from '@aspiralabs/agent-common/lib/decisions'
 import { GROOMER_MARKER_PREFIX, groomRecordSchema, readGroomRecord, rebuildGroomRecord, validateIdeaSummary, writeGroomRecord, type GroomDecision, type GroomRecord, type GroomRunStatus } from '@aspiralabs/agent-common/lib/groom-record'
 import { allowedPath } from '@aspiralabs/agent-common/lib/repository'
 import { readTicketMd } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { GROOM_PAGE, groomPaths, type GroomPaths as Paths } from './paths.ts'
 import { knowledgeConfig, loadKnowledge, snapshotKnowledge, type Env, type Knowledge, type KnowledgePlan, type KnowledgeRequired } from './local-knowledge.ts'
-import { allBranchesVisited, applyRound, frontier, nextQuestionId, roundSchema, roundZeroReport, seedBranches, type Round } from './rounds.ts'
+import { allBranchesVisited, applyRound, EXIT_CRITERIA, frontier, nextQuestionId, roundSchema, roundZeroReport, seedBranches, type Round } from './rounds.ts'
 
 // --local: the groomer's procedure with the Claude Code session as the model. Each call is one step
 // of a stage machine, read from the files the session writes, and never calls a model itself:
@@ -34,7 +34,7 @@ export const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../
 /** The agent's instructions: the authority every prompt file points the session at. */
 export const orchestratorFile = (agentDir: string = PACKAGE_DIR) => join(agentDir, 'agent', 'instructions.md')
 
-export type LocalInput = { folder: string; repoPath: string; guidelinesPath?: string; finish?: boolean }
+export type LocalInput = { folder: string; repoPath: string; guidelinesPath?: string; finish?: boolean; takeRecommended?: boolean }
 
 /** Seams for tests: the agent package whose files and env are read. */
 export type LocalDeps = { agentDir?: string; env?: Env }
@@ -192,6 +192,19 @@ async function readRound(paths: Paths, n: number, base: GroomRecord, repo: strin
   }
 }
 
+/**
+ * --take-recommended (F10): every open question whose branch is not an exit criterion (rounds.ts
+ * EXIT_CRITERIA) is taken as the agent's recommended option instead of waiting on the author; an
+ * exit-criterion question, and Confirm, are always asked in chat. A no-op without the flag.
+ */
+function applyTakeRecommended(record: GroomRecord, take: boolean): GroomRecord {
+  if (!take) return record
+  const decisions = record.decisions.map((decision) =>
+    decision.decidedBy === 'open' && !(EXIT_CRITERIA as readonly string[]).includes(decision.branch) ? (takenDecision(decision.id, decision) as GroomDecision) : decision,
+  )
+  return { ...record, decisions, open: decisions.filter((decision) => decision.decidedBy === 'open').length }
+}
+
 const readExclusions = 'Never read .env* files, secrets or credentials files, private keys (*.pem, *.key, *.p12, *.pfx, id_rsa, id_ed25519), .npmrc, .netrc, .git, node_modules or .work/; the agent\'s repository tools cannot read them either.'
 const knowledgeNote = (knowledge: Pick<Knowledge, 'source' | 'path' | 'requiredFile'>) =>
   knowledge.source === 'folder'
@@ -316,7 +329,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     return { ...pending(), stage: 'round' as const, task }
   }
   files.round = 'valid'
-  const { round, applied } = read
+  const { round } = read
+  const applied = applyTakeRecommended(read.applied, input.takeRecommended === true)
 
   const answersFile = paths.answers(n)
   const rawAnswers = await readText(answersFile)

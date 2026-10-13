@@ -9,9 +9,9 @@ import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
 
 const repo = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))))
-const PACKAGES = ['ui', 'config', 'kit', 'agents/common', 'agents/spec-writer', 'agents/spec-reviewer', 'agents/planner', 'agents/implementor', 'agents/code-analyzer', 'agents/pr-reviewer', 'agents/groomer', 'agents/meta']
+const PACKAGES = ['ui', 'config', 'kit', 'agents/common', 'agents/spec-writer', 'agents/spec-reviewer', 'agents/planner', 'agents/implementor', 'agents/code-analyzer', 'agents/pr-reviewer', 'agents/groomer', 'agents/build-feature', 'agents/meta']
 
-it('bumps all twelve published packages to one version from a single changeset', () => {
+it('bumps all thirteen published packages to one version from a single changeset', () => {
   const config = JSON.parse(readFileSync(join(repo, '.changeset', 'config.json'), 'utf8')) as { fixed: string[][]; ignore: string[] }
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kit-release-')))
   mkdirSync(join(dir, '.changeset'))

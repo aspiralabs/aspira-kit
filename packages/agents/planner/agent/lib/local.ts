@@ -31,6 +31,8 @@ export type LocalInput = {
   guidelinesPath?: string
   /** Export what exists now, with the missing phases recorded. */
   finish?: boolean
+  /** Take every open decision's recommended option as the agent's (F10). */
+  takeRecommended?: boolean
 }
 
 /** Seams for tests: the agent's environment and the package the agent files are read from. */
@@ -253,7 +255,7 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
   const phaseErrors = calls.filter((call) => call.error !== undefined).map((call) => ({ phase: call.phase, error: call.error ?? null }))
   // The previous plan's trace/decisions.md, with the options the author ticked, is read before the export replaces it.
   const answers = await readAnswers(prepared.dir)
-  const { status, problems, decisions } = assessPlan({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan, phaseErrors, uiRequired: prepared.uiRequired, reads, cancelled: false, answers })
+  const { status, problems, decisions } = assessPlan({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan, phaseErrors, uiRequired: prepared.uiRequired, reads, cancelled: false, answers, takeRecommended: input.takeRecommended ?? false })
   const totalMs = Date.now() - Date.parse(state.startedAt)
   const phaseRows = (['research', 'planning', ...calls.map((call) => call.phase).filter((phase) => phase.startsWith('repair-'))] as PhaseId[]).map((phase) => {
     const call = calls.find((item) => item.phase === phase)
