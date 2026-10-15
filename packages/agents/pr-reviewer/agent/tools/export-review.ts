@@ -6,19 +6,9 @@ import { REVIEW_DIR, REVIEW_SUBDIR, ignoreRule, needsIgnoreRule, optionalPath, p
 import { sortFindingsMarkdown } from '../lib/findings'
 import { FILES, roundFilesInOrder, slugify } from '../lib/review'
 import { TARGET_FILE, stampReviewed, targetFileSchema } from '../lib/target'
+import { MODELS } from '../lib/models'
 import { USAGE_LEDGER, parseLedger, renderCostMarkdown, summarizeUsage } from '../lib/usage'
 
-// Which model each agent runs on, for the cost table. Keep in step with the agent.ts files.
-const MODELS: Record<string, string> = {
-  'pr-reviewer': 'anthropic/claude-sonnet-5',
-  ava: 'anthropic/claude-opus-5.5',
-  cole: 'anthropic/claude-opus-5.5',
-  nova: 'anthropic/claude-opus-5.5',
-  reba: 'anthropic/claude-opus-5.5',
-  dex: 'anthropic/claude-opus-5.5',
-  iris: 'anthropic/claude-opus-5.5',
-  quinn: 'openai/gpt-6-luna',
-}
 
 // Sandboxes are per session and disposable. This copies the review's markdown out to
 // the host so the person keeps it: the fix list, the summary, the transcript, what was

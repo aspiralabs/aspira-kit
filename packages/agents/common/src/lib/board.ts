@@ -5,7 +5,7 @@
 
 import { z } from 'zod'
 import { GROOMER_MARKER_PREFIX } from './groom-record.ts'
-import { NOTION_API, NOTION_VERSION, pageIdFrom } from './knowledge.ts'
+import { KNOWLEDGE_ENV, MAX_DEPTH, MAX_PAGES, NOTION_API, NOTION_VERSION, childPagesOf, pageIdFrom } from './knowledge.ts'
 import { chunkText, markdownToBlocks, notionToMarkdown, type Block } from './notion-markdown.ts'
 import { propertyText } from './notion.ts'
 
@@ -87,6 +87,14 @@ export type Board = {
   listToDos(pageId: string): Promise<ToDo[]>
   /** The integration's own user. */
   me(): Promise<{ id: string }>
+  /** Uploads a JSON file to Notion (create, then a multipart send) and returns the upload's id and status. Never the upload URL. */
+  uploadFile(name: string, content: string): Promise<{ id: string; status: string }>
+  /** Appends one file block naming a finished upload to the end of a page and returns the created block's id. */
+  appendFileBlock(pageId: string, uploadId: string): Promise<{ id: string }>
+  /** The names of the file blocks at the top level of a page, in page order, across every page of the block list. */
+  fileBlockNames(pageId: string): Promise<string[]>
+  /** The Feature Board rules page as markdown, found by the knowledge walk from KNOWLEDGE_PAGE; null when it cannot be found or read. */
+  rulesPage(): Promise<string | null>
 }
 
 /** The `code` of a BoardError that means the board answered and has no such ticket, as opposed to a board that could not answer. */
@@ -162,6 +170,13 @@ const RichTextShape = z.array(z.object({ plain_text: z.string().optional(), text
 const TextBody = z.object({ rich_text: RichTextShape })
 const ToDoBody = z.object({ rich_text: RichTextShape, checked: z.boolean() })
 const LastEditedBy = z.object({ last_edited_by: z.object({ id: z.string() }).optional() })
+/** A Notion file upload as the create and send answers carry it. Its upload URL is never read. */
+export const UploadShape = z.object({ id: z.string(), status: z.string() })
+const FileBody = z.object({ name: z.string() })
+const MarkdownShape = z.object({ markdown: z.string(), truncated: z.boolean().optional() })
+
+/** The title of the guidelines page that holds the Feature Board rules. */
+const RULES_TITLE = 'feature board'
 
 /** Blocks a write never deletes: deleting one archives a page, a database or content shared elsewhere. */
 const KEPT_TYPES = new Set(['child_page', 'child_database', 'synced_block'])
@@ -210,12 +225,15 @@ export function board(options: BoardOptions): Board {
   // (what Notion shows) or its data source id (what the API queries). Resolved once, on first use.
   let source: string = given
 
+  // The one request path. A FormData body goes as is, so fetch sets the multipart boundary; any other body is JSON.
   async function call<T>(path: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET', body?: unknown): Promise<T> {
     if (!token) throw new BoardError(`${BOARD_ENV} is not set; the board needs the Notion integration token`)
     const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'Notion-Version': NOTION_VERSION }
-    if (body !== undefined) headers['Content-Type'] = 'application/json'
+    const multipart = body instanceof FormData
+    if (body !== undefined && !multipart) headers['Content-Type'] = 'application/json'
+    const payload = body === undefined ? undefined : multipart ? body : JSON.stringify(body)
     for (let attempt = 0; ; attempt += 1) {
-      const response = await request(`${api}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
+      const response = await request(`${api}${path}`, { method, headers, body: payload })
       if (response.status === 429 && attempt < RETRIES) {
         await sleep(Number(response.headers.get('retry-after') ?? '1') * 1000)
         continue
@@ -604,6 +622,64 @@ export function board(options: BoardOptions): Board {
     async me() {
       const user = await parsed(UserShape, '/users/me')
       return { id: user.id }
+    },
+
+    async uploadFile(name, content) {
+      const created = await parsed(UploadShape, '/file_uploads', 'POST', { filename: name, content_type: 'application/json' })
+      const form = new FormData()
+      form.append('file', new Blob([content], { type: 'application/json' }), name)
+      const sent = await parsed(UploadShape, `/file_uploads/${created.id}/send`, 'POST', form)
+      return { id: sent.id, status: sent.status }
+    },
+
+    async appendFileBlock(pageId, uploadId) {
+      const created = await parsed(Created, `/blocks/${pageId}/children`, 'PATCH', { children: [{ type: 'file', file: { type: 'file_upload', file_upload: { id: uploadId } } }] })
+      const id = created.results[0]?.id
+      if (id === undefined) throw new BoardError(`Notion created no file block under ${pageId}`)
+      return { id }
+    },
+
+    async fileBlockNames(pageId) {
+      const names: string[] = []
+      for (const block of await blocksOf(pageId)) {
+        if (block.type !== 'file') continue
+        const file = FileBody.safeParse(block.file)
+        if (!file.success) throw new BoardError(`Notion answered the file block ${block.id} with an unexpected shape: ${file.error.message}`)
+        names.push(file.data.name)
+      }
+      return names
+    },
+
+    async rulesPage() {
+      // The knowledge walk: breadth first from KNOWLEDGE_PAGE, MAX_DEPTH levels and MAX_PAGES pages at most.
+      const root = pageIdFrom(process.env[KNOWLEDGE_ENV.page] ?? '')
+      if (root === undefined) return null
+      try {
+        const seen = new Set<string>([root])
+        let level = [root]
+        for (let depth = 0; depth <= MAX_DEPTH && level.length > 0 && seen.size <= MAX_PAGES; depth += 1) {
+          const next: string[] = []
+          for (const id of level) {
+            // A page the walk cannot read is skipped, as the knowledge walk skips it; only the rules page itself must read.
+            const page = await parsed(MarkdownShape, `/pages/${id}/markdown`).catch(() => undefined)
+            if (page === undefined) continue
+            for (const child of childPagesOf(page.markdown)) {
+              if (child.title.trim().toLowerCase() === RULES_TITLE) {
+                const rules = await parsed(MarkdownShape, `/pages/${child.id}/markdown`)
+                return rules.truncated === true ? null : notionToMarkdown(rules.markdown)
+              }
+              if (seen.has(child.id) || seen.size >= MAX_PAGES) continue
+              seen.add(child.id)
+              next.push(child.id)
+            }
+          }
+          level = next
+        }
+        return null
+      } catch {
+        // Unreadable rules attach nothing; the caller reports it (OBS-002).
+        return null
+      }
     },
   }
 }

@@ -145,6 +145,21 @@ function fakeBoard(status: string, pages: Record<string, string> = { Spec: SPEC,
       state.calls.push('me')
       return { id: state.botId }
     },
+    async uploadFile(name) {
+      state.calls.push(`upload ${name}`)
+      return { id: `upload-${name}`, status: 'uploaded' }
+    },
+    async appendFileBlock(pageId, uploadId) {
+      state.calls.push(`append file ${uploadId} to ${pageId}`)
+      return { id: nextBlockId() }
+    },
+    async fileBlockNames() {
+      return []
+    },
+    // No rules page: the attach gate stays closed, so these flow tests make no telemetry attach.
+    async rulesPage() {
+      return null
+    },
   }
   return state
 }
