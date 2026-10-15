@@ -9,7 +9,7 @@ import { parseArgs } from 'node:util'
 import { board as makeBoard, type Board } from './board.ts'
 import { nextAction, writeProgressNote } from './progress-note.ts'
 import { exitCodeFor, readRunStatus, REFUSED_EXIT, USAGE_EXIT } from './run-status.ts'
-import { GATES, SKILLS, reportHeader, type Skill } from './ticket.ts'
+import { GATES, SKILLS, TicketArgumentError, reportHeader, type Skill } from './ticket.ts'
 import { FlowRefused, finishFlow, inputFileFor, readAspira, readTicketMd, startFlow } from './ticket-flow.ts'
 import { noBoardMessage, resolveArgument, UsageError } from './ticket-driver.ts'
 
@@ -124,7 +124,8 @@ export async function ticketCli(
     }
     throw new UsageError(usage(skill))
   } catch (error) {
-    if (error instanceof FlowRefused) {
+    // A wrong ticket argument is a refusal before any folder exists (F15), as handleRunError has it.
+    if (error instanceof FlowRefused || error instanceof TicketArgumentError) {
       io.err(`${skill}: refused: ${error.message}`)
       return REFUSED_EXIT
     }

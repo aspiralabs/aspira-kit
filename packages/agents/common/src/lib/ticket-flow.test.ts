@@ -10,6 +10,7 @@ import { ticketCli } from './ticket-cli'
 import { afterRun, beforeRun, boardStateDir, verifyRun, type DriverContext } from './ticket-driver'
 import { FlowRefused, finishFlow, findWorkFolders, inputFileFor, localBoardVerify, readAspira, readBoardTrace, readTicketMd, startFlow, type FlowFinish } from './ticket-flow'
 import { TICKET_FILE, renderTicketMd, type BoardAction, type RunStatus, type Skill } from './ticket'
+import type { ReasonCode } from './run-status'
 import type { GroomRunStatus } from './groom-record.ts'
 
 // A board built from the recorded NOM-4 fixture values, in process: the same shape board.ts returns,
@@ -250,7 +251,7 @@ describe('finishFlow (separate process)', () => {
     await mkdir(join(exportDir, 'trace'), { recursive: true })
     await writeFile(join(exportDir, 'plan.reviewed.md'), '# Plan\n\n- T1\n')
     client.calls = []
-    const finished = await finishFlow({ skill: 'planner', folder: started.folder, ok: true, runStatus: 'ready', exportDir, board: BOARD, client, trace: started.trace })
+    const finished = await finishFlow({ skill: 'planner', folder: started.folder, runStatus: 'ready', exportDir, board: BOARD, client, trace: started.trace })
     expect(client.calls).toEqual(['push Plan', 'move In Progress: Plan -> In Review: Plan'])
     expect(client.pages.Plan?.markdown).toBe('# Plan\n\n- T1\n')
     expect(finished.header[0]).toBe(`Ticket: NOM-4 Explore pagination (${URL})`)
@@ -272,7 +273,7 @@ describe('finishFlow (separate process)', () => {
     // Pushing again replaces the page and keeps its URL.
     await writeFile(join(exportDir, 'plan.reviewed.md'), '# Plan v2\n')
     client.status = 'In Progress: Plan'
-    const again = await finishFlow({ skill: 'planner', folder: started.folder, ok: true, runStatus: 'ready', exportDir, board: BOARD, client })
+    const again = await finishFlow({ skill: 'planner', folder: started.folder, runStatus: 'ready', exportDir, board: BOARD, client })
     expect(again.trace.pushed[0]?.url).toBe(trace.pushed[0]?.url)
     expect(client.pages.Plan?.markdown).toBe('# Plan v2\n')
   })
@@ -281,7 +282,7 @@ describe('finishFlow (separate process)', () => {
     const client = fakeBoard('Ready: Spec')
     const started = await startFlow({ skill: 'planner', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
     client.calls = []
-    const finished = await finishFlow({ skill: 'planner', folder: started.folder, ok: false, runStatus: 'incomplete', board: BOARD, client })
+    const finished = await finishFlow({ skill: 'planner', folder: started.folder, runStatus: 'incomplete', board: BOARD, client })
     expect(client.calls).toEqual([])
     expect(client.status).toBe('In Progress: Plan')
     expect(finished.remaining).toContain('stays in "In Progress: Plan"')
@@ -295,26 +296,27 @@ describe('finishFlow (separate process)', () => {
     await writeFile(join(started.folder, 'spec.reviewed/spec.reviewed.md'), 'reviewed v2')
     await writeFile(join(started.folder, 'spec.reviewed/trace/decisions.md'), '# Decisions\n')
     client.calls = []
-    await finishFlow({ skill: 'spec-reviewer', folder: started.folder, ok: true, runStatus: 'ready', board: BOARD, client })
+    await finishFlow({ skill: 'spec-reviewer', folder: started.folder, runStatus: 'ready', board: BOARD, client })
     expect(client.calls).toEqual(['push Spec Reviewed'])
     client.calls = []
-    const needs = await finishFlow({ skill: 'spec-reviewer', folder: started.folder, ok: true, runStatus: 'needs-author', board: BOARD, client })
+    const needs = await finishFlow({ skill: 'spec-reviewer', folder: started.folder, runStatus: 'needs-author', board: BOARD, client })
     expect(client.calls).toEqual(['push Spec Reviewed', 'push Spec Review Decisions'])
     expect(needs.trace.pushed.map((p) => p.title)).toEqual(['Spec Reviewed', 'Spec Review Decisions'])
     expect(client.status).toBe('In Review: Spec')
   })
 
-  it('reports a push failure with the local path and still makes the success move', async () => {
+  it('reports a push failure with the local path, ends incomplete and makes no success move (F53, BOARD-007)', async () => {
     const client = fakeBoard('Ready: Spec')
     const started = await startFlow({ skill: 'planner', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
     const plan = join(started.folder, 'plan.review/plan.reviewed.md')
     await mkdir(join(started.folder, 'plan.review'), { recursive: true })
     await writeFile(plan, '# Plan\n')
     client.pushPage = async () => { throw new Error('Notion 500 (internal): down') }
-    const finished = await finishFlow({ skill: 'planner', folder: started.folder, ok: true, runStatus: 'ready', board: BOARD, client })
+    const finished = await finishFlow({ skill: 'planner', folder: started.folder, runStatus: 'ready', board: BOARD, client })
     expect(finished.pushFailures).toEqual([`Plan: Notion 500 (internal): down; the output is at ${plan}`])
-    expect(client.status).toBe('In Review: Plan')
-    expect(finished.trace.actions.at(-2)).toMatchObject({ action: 'push', ok: false, error: 'Notion 500 (internal): down' })
+    expect(finished.runStatus).toBe('incomplete')
+    expect(client.status).toBe('In Progress: Plan')
+    expect(finished.trace.actions.at(-1)).toMatchObject({ action: 'push', ok: false, error: 'Notion 500 (internal): down' })
   })
 
   it('the implementor sets PR and moves to In Review: Implementation only when it opened the PR', async () => {
@@ -322,12 +324,12 @@ describe('finishFlow (separate process)', () => {
     const started = await startFlow({ skill: 'implementor', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
     await writeFile(join(started.folder, 'plan.review/implementation.md'), '# Implementation\n')
     client.calls = []
-    const noPr = await finishFlow({ skill: 'implementor', folder: started.folder, ok: true, runStatus: 'complete', board: BOARD, client })
+    const noPr = await finishFlow({ skill: 'implementor', folder: started.folder, runStatus: 'ready', board: BOARD, client })
     expect(client.calls).toEqual(['push Implementation'])
     expect(client.status).toBe('In Progress: Implementation')
     expect(noPr.remaining).toContain('opening the PR is the remaining step')
     client.calls = []
-    const withPr = await finishFlow({ skill: 'implementor', folder: started.folder, ok: true, runStatus: 'complete', prUrl: 'https://github.com/aspiralabs/nomnomzz/pull/9', board: BOARD, client })
+    const withPr = await finishFlow({ skill: 'implementor', folder: started.folder, runStatus: 'ready', prUrl: 'https://github.com/aspiralabs/nomnomzz/pull/9', board: BOARD, client })
     expect(client.calls).toEqual(['push Implementation', 'set PR=https://github.com/aspiralabs/nomnomzz/pull/9', 'move In Progress: Implementation -> In Review: Implementation'])
     expect(withPr.remaining).toBeNull()
     expect((await readTicketMd(started.folder))?.pr).toBe('https://github.com/aspiralabs/nomnomzz/pull/9')
@@ -424,7 +426,7 @@ describe('the --local board stage (planner against a stub session)', () => {
     const exportDir = join(folderOf(), 'plan.review')
     await mkdir(join(exportDir, 'trace'), { recursive: true })
     await writeFile(join(exportDir, 'plan.reviewed.md'), '# Plan\n')
-    const end = await afterRun(ctx, ready, { ok: true, status: 'ready', exportDir, verifyCommand: 'planner.sh local NOM-4 --verify' })
+    const end = await afterRun(ctx, ready, { status: 'ready', exportDir, verifyCommand: 'planner.sh local NOM-4 --verify' })
     expect(end.board.actions).toEqual([
       { action: 'push', page: URL, title: 'Plan', file: join(exportDir, 'plan.reviewed.md'), then: expect.stringContaining('"Plan" row') },
       { action: 'move', page: URL, from: 'In Progress: Plan', to: 'In Review: Plan', then: expect.stringContaining('In Review: Plan') },
@@ -464,7 +466,7 @@ describe('the --local board stage (planner against a stub session)', () => {
     if (ready.kind !== 'ticket') throw new Error('expected the ticket')
     const exportDir = join(folderOf(), 'plan.review')
     await mkdir(exportDir, { recursive: true })
-    const end = await afterRun(ctx, ready, { ok: false, status: 'incomplete', exportDir, verifyCommand: 'planner.sh local NOM-4 --verify' })
+    const end = await afterRun(ctx, ready, { status: 'incomplete', exportDir, verifyCommand: 'planner.sh local NOM-4 --verify' })
     expect(end.board.actions).toEqual([])
     expect(end.board.verify).toBeNull()
     expect((await readBoardTrace(exportDir))!.trace.verified).toBe(true)
@@ -493,7 +495,8 @@ describe('the ticket CLI for the launchers', () => {
     expect(await ticketCli('planner', ['start', 'NOM-4', '--repo', repo], io, {})).toBe(3)
     expect(errors[0]).toContain('has no aspira.json')
     await writeFile(join(repo, 'aspira.json'), JSON.stringify({ board: BOARD }))
-    expect(await ticketCli('planner', ['start', 'docs/spec.md', '--repo', repo], io, {})).toBe(2)
+    // A path without --no-ticket is a wrong argument: refused (F15), as every --local driver's handleRunError reports it.
+    expect(await ticketCli('planner', ['start', 'docs/spec.md', '--repo', repo], io, {})).toBe(3)
     expect(errors.at(-1)).toContain('pass --no-ticket')
     expect(await ticketCli('planner', ['bogus', '--repo', repo], io, {})).toBe(2)
     expect(errors.at(-1)).toContain('Usage: ticket.ts start')
@@ -608,6 +611,8 @@ const groomRecord = (decisions: GroomDecision[], fields: Partial<GroomRecord> = 
   open: decisions.filter((decision) => decision.decidedBy === 'open').length,
   page: {},
   status: 'needs-author',
+  reasonCode: null,
+  reason: null,
   ...fields,
 })
 
@@ -693,9 +698,9 @@ const ideaSummaryOf = (decisions: GroomDecision[]) =>
  * What the groomer's agent leaves in the working folder at the end of its run: the record (keeping what
  * the start step wrote into it), the rendering in groom/trace/decisions.md and, on a confirm, the Idea summary.
  */
-async function agentRun(folder: string, decisions: GroomDecision[], fields: { status: GroomRunStatus; round?: number; summary?: boolean }): Promise<GroomRecord> {
+async function agentRun(folder: string, decisions: GroomDecision[], fields: { status: GroomRunStatus; reasonCode?: ReasonCode | null; round?: number; summary?: boolean }): Promise<GroomRecord> {
   const current = await readGroomJson(folder)
-  const record: GroomRecord = { ...current, decisions, branches: BRANCHES.map((id) => ({ id, state: 'visited' as const })), round: fields.round ?? 1, open: decisions.filter((decision) => decision.decidedBy === 'open').length, status: fields.status }
+  const record: GroomRecord = { ...current, decisions, branches: BRANCHES.map((id) => ({ id, state: 'visited' as const })), round: fields.round ?? 1, open: decisions.filter((decision) => decision.decidedBy === 'open').length, status: fields.status, reasonCode: fields.reasonCode ?? null }
   await writeFile(groomJsonPath(folder), `${JSON.stringify(record, null, 2)}\n`)
   await writeFile(decisionsPath(folder), renderGroomPage(record, { date: today(), notes: [] }))
   if (fields.summary === true) await writeFile(summaryPath(folder), ideaSummaryOf(decisions))
@@ -703,7 +708,7 @@ async function agentRun(folder: string, decisions: GroomDecision[], fields: { st
 }
 
 const startGroomer = (client: Fake, extra: { forceRun?: boolean; force?: boolean } = {}) => startFlow({ skill: 'groomer', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client, ...extra })
-const finishGroomer = (client: Fake, folder: string, runStatus: RunStatus, ok = true) => finishFlow({ skill: 'groomer', folder, ok, runStatus, exportDir: join(folder, 'groom'), board: BOARD, client })
+const finishGroomer = (client: Fake, folder: string, runStatus: RunStatus, reasonCode: ReasonCode | null = null) => finishFlow({ skill: 'groomer', folder, runStatus, reasonCode, exportDir: join(folder, 'groom'), board: BOARD, client })
 
 /** Every string a finish returned or recorded, so a sentence can be looked for wherever the step put it. */
 function textsOf(value: unknown): string[] {
@@ -834,11 +839,12 @@ describe('the groomer finish (separate process)', () => {
     tickOnPage(client, 'Only its owner')
     tickOnPage(client, 'Stop grooming')
     const started = await startGroomer(client)
-    await agentRun(started.folder, [Q1, Q2], { status: 'stopped' })
-    const finished = await finishGroomer(client, started.folder, 'stopped')
+    await agentRun(started.folder, [Q1, Q2], { status: 'needs-author', reasonCode: 'paused' })
+    const finished = await finishGroomer(client, started.folder, 'needs-author', 'paused')
     const page = groomPageOf(client).markdown
-    expect((await readGroomJson(started.folder)).status).toBe('stopped')
-    expect(finished.runStatus).toBe('stopped')
+    expect(await readGroomJson(started.folder)).toMatchObject({ status: 'needs-author', reasonCode: 'paused' })
+    expect(finished.runStatus).toBe('needs-author')
+    expect(finished.remaining).toContain('Grooming stopped at the human\'s request')
     expect(questionBlock(page, 'Q1')).toContain('Decided by the author: Only its owner.')
     expect(page).toContain('- [ ] Stop grooming')
     expect(page).not.toMatch(/^Run: /m)
@@ -852,15 +858,15 @@ describe('the groomer finish (separate process)', () => {
     seedGroomPage(client, withConfirm(renderedPage(groomRecord(decisions)), false))
     tickOnPage(client, 'Confirm')
     const started = await startGroomer(client)
-    await agentRun(started.folder, decisions, { status: 'confirmed', summary: true })
-    const finished = await cli('groomer', ['finish', '--ok', '--run-status', 'confirmed', '--folder', started.folder, '--export', join(started.folder, 'groom')], client)
+    await agentRun(started.folder, decisions, { status: 'ready', summary: true })
+    const finished = await cli('groomer', ['finish', '--run-status', 'ready', '--folder', started.folder, '--export', join(started.folder, 'groom')], client)
     const page = groomPageOf(client).markdown
     expect(client.status).toBe('Shortlist')
     expect(page).toContain('- [x] Confirm')
     expect(page).toContain(`Confirmed ${today()}`)
     expect(client.ideaSummary).toBe(ideaSummaryOf(decisions))
-    expect((await readGroomJson(started.folder)).status).toBe('confirmed')
-    expect(finished.out[0]).toBe('run-status=confirmed')
+    expect((await readGroomJson(started.folder)).status).toBe('ready')
+    expect(finished.out[0]).toBe('run-status=ready')
     expect(finished.code).toBe(0)
   })
 
@@ -870,23 +876,23 @@ describe('the groomer finish (separate process)', () => {
     seedGroomPage(client, withConfirm(renderedPage(groomRecord(decisions)), false))
     tickOnPage(client, 'Confirm')
     const started = await startGroomer(client)
-    await agentRun(started.folder, decisions, { status: 'confirmed', summary: true })
+    await agentRun(started.folder, decisions, { status: 'ready', summary: true })
     client.status = cardStatusAtFinish
     client.calls = []
     return { client, folder: started.folder, summary: ideaSummaryOf(decisions) }
   }
 
-  it('a card a human already moved to Shortlist is not moved again, and the run still ends confirmed', async () => {
+  it('a card a human already moved to Shortlist is not moved again, and the run still ends ready', async () => {
     const { client, folder } = await confirmRun('Shortlist')
-    const finished = await finishGroomer(client, folder, 'confirmed')
+    const finished = await finishGroomer(client, folder, 'ready')
     expect(client.calls.filter((call) => call.startsWith('move'))).toEqual([])
-    expect((await readGroomJson(folder)).status).toBe('confirmed')
+    expect((await readGroomJson(folder)).status).toBe('ready')
     expect(said(finished.trace, 'already in Shortlist; no move')).toBe(true)
   })
 
   it('a card in Dropped at the finish re-read ends incomplete, and the summary already written stays', async () => {
     const { client, folder, summary } = await confirmRun('Dropped')
-    const finished = await finishGroomer(client, folder, 'confirmed')
+    const finished = await finishGroomer(client, folder, 'ready')
     expect((await readGroomJson(folder)).status).toBe('incomplete')
     expect(finished.runStatus).toBe('incomplete')
     expect(said(finished, 'NOM-4 is in "Dropped", not "Grooming"; the Idea summary was written and stays')).toBe(true)
@@ -950,15 +956,15 @@ describe('the groomer finish (separate process)', () => {
     expect(client.status).toBe('Grooming')
   })
 
-  it('confirmed reported over a page with no Confirm tick is recorded needs-author, with the reported word and a check entry', async () => {
+  it('ready reported over a page with no Confirm tick is recorded needs-author, with the reported word and a check entry', async () => {
     const decisions = [confirmed(Q1)]
     const client = fakeBoard('Grooming', {})
     seedGroomPage(client, withConfirm(renderedPage(groomRecord(decisions)), false))
     const started = await startGroomer(client)
-    await agentRun(started.folder, decisions, { status: 'confirmed', summary: true })
-    const finished = await finishGroomer(client, started.folder, 'confirmed')
+    await agentRun(started.folder, decisions, { status: 'ready', summary: true })
+    const finished = await finishGroomer(client, started.folder, 'ready')
     const record = await readGroomJson(started.folder)
-    expect(record).toMatchObject({ status: 'needs-author', reportedStatus: 'confirmed' })
+    expect(record).toMatchObject({ status: 'needs-author', reportedStatus: 'ready' })
     expect(finished.runStatus).toBe('needs-author')
     expect(finished.trace.actions.filter((action) => action.action === 'check').map((action) => action.detail)).toContainEqual(expect.stringContaining('confirmed reported, 0 open on Grooming Decisions; recorded needs-author'))
     expect(client.status).toBe('Grooming')
@@ -992,9 +998,9 @@ describe('the groomer finish (separate process)', () => {
     expect(client.calls.filter((call) => call.startsWith('move'))).toEqual([])
   })
 
-  it('a confirm run over a card in Dropped returns incomplete, not confirmed', async () => {
+  it('a confirm run over a card in Dropped returns incomplete, not ready', async () => {
     const { client, folder } = await confirmRun('Dropped')
-    const finished = await finishGroomer(client, folder, 'confirmed')
+    const finished = await finishGroomer(client, folder, 'ready')
     expect(finished.runStatus).toBe('incomplete')
   })
 
@@ -1030,15 +1036,15 @@ describe('the groomer finish (separate process)', () => {
     expect(said(finished.trace, 'tick on Q3 not attributable; left open')).toBe(true)
   })
 
-  it('a Confirm the groomer itself rendered ticked is never attributed: the run over it ends confirmed', async () => {
+  it('a Confirm the groomer itself rendered ticked is never attributed: the run over it ends ready', async () => {
     const decisions = [confirmed(Q1)]
     const client = fakeBoard('Shortlist', {})
-    seedGroomPage(client, withConfirm(renderedPage(groomRecord(decisions, { status: 'confirmed' })), true, 'Confirmed 2026-10-10'))
+    seedGroomPage(client, withConfirm(renderedPage(groomRecord(decisions, { status: 'ready' })), true, 'Confirmed 2026-10-10'))
     const started = await startGroomer(client)
-    await agentRun(started.folder, decisions, { status: 'confirmed', summary: true })
-    const finished = await finishGroomer(client, started.folder, 'confirmed')
-    expect(finished.runStatus).toBe('confirmed')
-    expect((await readGroomJson(started.folder)).status).toBe('confirmed')
+    await agentRun(started.folder, decisions, { status: 'ready', summary: true })
+    const finished = await finishGroomer(client, started.folder, 'ready')
+    expect(finished.runStatus).toBe('ready')
+    expect((await readGroomJson(started.folder)).status).toBe('ready')
     expect(client.status).toBe('Shortlist')
   })
 
@@ -1098,7 +1104,7 @@ describe('the ticket CLI for the groomer', () => {
     const started = await startGroomer(client)
     const marker = (await readGroomJson(started.folder)).markerBlockId
     await agentRun(started.folder, [Q1, Q2], { status: 'needs-author' })
-    const finished = await cli('groomer', ['finish', '--ok', '--run-status', 'needs-author', '--folder', started.folder, '--export', join(started.folder, 'groom')], client)
+    const finished = await cli('groomer', ['finish', '--run-status', 'needs-author', '--folder', started.folder, '--export', join(started.folder, 'groom')], client)
     const url = groomPageOf(client).page.url
     expect(finished.out.slice(0, 7)).toEqual([
       'run-status=needs-author',
@@ -1110,19 +1116,20 @@ describe('the ticket CLI for the groomer', () => {
       'Open questions: 2',
     ])
     expect(finished.out).toContain(`Answer the 2 open question(s) on Grooming Decisions (${url}), then run groomer again; it reads the ticks.`)
-    expect(finished.code).toBe(0)
+    // Only ready exits 0; needs-author is a run status, exit 1 (F5, A2).
+    expect(finished.code).toBe(1)
     expect(groomPageOf(client).blocks.map((block) => block.id)).not.toContain(marker)
     expect(groomPageOf(client).markdown).toBe(await readFile(decisionsPath(started.folder), 'utf8'))
     expect(await readGroomJson(started.folder)).toMatchObject({ status: 'needs-author', open: 2, page: { url } })
   })
 
-  it('the spec reviewer\'s finish output and exit code are today\'s', async () => {
+  it('the spec reviewer\'s finish output is today\'s, and needs-author exits 1 (F5, A2)', async () => {
     const client = fakeBoard('In Review: Spec')
     const started = await startFlow({ skill: 'spec-reviewer', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
     await mkdir(join(started.folder, 'spec.reviewed/trace'), { recursive: true })
     await writeFile(join(started.folder, 'spec.reviewed/spec.reviewed.md'), 'reviewed v2')
     await writeFile(join(started.folder, 'spec.reviewed/trace/decisions.md'), '# Decisions\n')
-    const finished = await cli('spec-reviewer', ['finish', '--ok', '--run-status', 'needs-author', '--folder', started.folder], client)
+    const finished = await cli('spec-reviewer', ['finish', '--run-status', 'needs-author', '--folder', started.folder], client)
     expect(finished.out).toEqual([
       `Ticket: NOM-4 Explore pagination (${URL})`,
       'Status: In Review: Spec -> In Review: Spec (no move)',
@@ -1130,7 +1137,7 @@ describe('the ticket CLI for the groomer', () => {
       `Working folder: ${started.folder}`,
       `Board trace: ${join(started.folder, 'board.json')}`,
     ])
-    expect(finished.code).toBe(0)
+    expect(finished.code).toBe(1)
   })
 
   it('without aspira.json the groomer is refused naming kit init and never offering --no-ticket, in the CLI and the driver alike', async () => {
@@ -1232,7 +1239,7 @@ describe('the groomer --local board stage (against a stub session)', () => {
     await writeFile(groomJsonPath(folder), `${JSON.stringify(withPage, null, 2)}\n`)
     await writeFile(decisionsPath(folder), rendering)
     await writeFile(join(folder, 'groom.local', `page-${round}.md`), rendering)
-    if (record.status === 'confirmed') await writeFile(summaryPath(folder), ideaSummaryOf(record.decisions))
+    if (record.status === 'ready') await writeFile(summaryPath(folder), ideaSummaryOf(record.decisions))
   }
 
   const verifyCommand = 'groomer.sh local NOM-4 --verify'
@@ -1263,7 +1270,7 @@ describe('the groomer --local board stage (against a stub session)', () => {
     seedGroomPage(client, renderedPage(groomRecord([Q1])))
     const ready = await localReady(client)
     await localRound(client, groomRecord([Q1]), 1)
-    const end = await afterRun(ctxOf('groomer'), ready, { ok: true, status: 'needs-author', exportDir: exportOf(), verifyCommand, round: 1 })
+    const end = await afterRun(ctxOf('groomer'), ready, { status: 'needs-author', exportDir: exportOf(), verifyCommand, round: 1 })
     await perform(client, end.board.actions)
     const ticket = (await readTicketMd(folderOf()))!
     await writeFile(join(folderOf(), TICKET_FILE), renderTicketMd({ ...ticket, dev: 'Claude' }))
@@ -1280,7 +1287,7 @@ describe('the groomer --local board stage (against a stub session)', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-10-11T10:05:30Z'))
     try {
-      await afterRun(ctxOf('groomer'), ready, { ok: true, status: 'needs-author', exportDir: exportOf(), verifyCommand, round: 1 })
+      await afterRun(ctxOf('groomer'), ready, { status: 'needs-author', exportDir: exportOf(), verifyCommand, round: 1 })
     } finally {
       vi.useRealTimers()
     }
@@ -1304,13 +1311,13 @@ describe('the groomer --local board stage (against a stub session)', () => {
     const stateDir = boardStateDir(folderOf(), 'groomer')
     const url = groomPageOf(client).page.url
     await localRound(client, groomRecord([Q1]), 1)
-    const first = await afterRun(ctxOf('groomer'), ready, { ok: true, status: 'needs-author', exportDir: exportOf(), verifyCommand, round: 1 })
+    const first = await afterRun(ctxOf('groomer'), ready, { status: 'needs-author', exportDir: exportOf(), verifyCommand, round: 1 })
     await perform(client, first.board.actions)
     expect((await verifyRun(ctxOf('groomer'), { positional: 'NOM-4' }, exportOf)).verified).toBe(true)
     expect(existsSync(stateDir)).toBe(true)
     expect((await readGroomJson(folderOf())).page.url).toBe(url)
-    await localRound(client, groomRecord([confirmed(Q1)], { status: 'confirmed' }), 2)
-    const second = await afterRun(ctxOf('groomer'), ready, { ok: true, status: 'confirmed', exportDir: exportOf(), verifyCommand, round: 2 })
+    await localRound(client, groomRecord([confirmed(Q1)], { status: 'ready' }), 2)
+    const second = await afterRun(ctxOf('groomer'), ready, { status: 'ready', exportDir: exportOf(), verifyCommand, round: 2 })
     await perform(client, second.board.actions)
     const verified = await verifyRun(ctxOf('groomer'), { positional: 'NOM-4' }, exportOf)
     expect(verified.verified).toBe(true)
@@ -1322,7 +1329,7 @@ describe('the groomer --local board stage (against a stub session)', () => {
     const client = fakeBoard('Ready: Idea')
     const ready = await localReady(client, 'spec-writer')
     await writeFile(join(folderOf(), 'spec.md'), '## Intent\n\nWritten.\n')
-    const end = await afterRun(ctxOf('spec-writer'), ready, { ok: true, status: 'ready', exportDir: folderOf(), verifyCommand: 'spec-writer.sh local NOM-4 --verify' })
+    const end = await afterRun(ctxOf('spec-writer'), ready, { status: 'ready', exportDir: folderOf(), verifyCommand: 'spec-writer.sh local NOM-4 --verify' })
     await perform(client, end.board.actions)
     const ticket = (await readTicketMd(folderOf()))!
     ticket.pages.Spec = { ...ticket.pages.Spec!, lastEditedAt: '2020-01-01T00:00:00.000Z' }
@@ -1336,21 +1343,21 @@ describe('the groomer --local board stage (against a stub session)', () => {
     const ready = await localReady(client)
     await localRound(client, groomRecord([Q1]), 1)
     await rm(decisionsPath(folderOf()))
-    await expect(afterRun(ctxOf('groomer'), ready, { ok: true, status: 'needs-author', exportDir: exportOf(), verifyCommand, round: 1 })).rejects.toThrow('groom/trace/decisions.md is missing; the round did not render Grooming Decisions')
+    await expect(afterRun(ctxOf('groomer'), ready, { status: 'needs-author', exportDir: exportOf(), verifyCommand, round: 1 })).rejects.toThrow('groom/trace/decisions.md is missing; the round did not render Grooming Decisions')
 
     await rm(join(repo, '.work'), { recursive: true, force: true })
     const reviewer = fakeBoard('In Review: Spec')
     const reviewReady = await localReady(reviewer, 'spec-reviewer')
-    const end = await afterRun(ctxOf('spec-reviewer'), reviewReady, { ok: true, status: 'needs-author', exportDir: join(folderOf(), 'spec.reviewed'), verifyCommand: 'spec-reviewer.sh local NOM-4 --verify' })
+    const end = await afterRun(ctxOf('spec-reviewer'), reviewReady, { status: 'needs-author', exportDir: join(folderOf(), 'spec.reviewed'), verifyCommand: 'spec-reviewer.sh local NOM-4 --verify' })
     expect(end.board.actions.map((action) => [action.action, field(action, 'title')])).toEqual([['push', 'Spec Reviewed']])
   })
 
-  it('a confirmed round lists unmark, replace, resolve, write-idea and the Shortlist move, in that order', async () => {
+  it('a ready (confirmed) round lists unmark, replace, resolve, write-idea and the Shortlist move, in that order', async () => {
     const client = fakeBoard('Grooming', {})
     seedGroomPage(client, renderedPage(groomRecord([Q1])))
     const ready = await localReady(client)
-    await localRound(client, groomRecord([confirmed(Q1)], { status: 'confirmed' }), 1)
-    const end = await afterRun(ctxOf('groomer'), ready, { ok: true, status: 'confirmed', exportDir: exportOf(), verifyCommand, round: 1 })
+    await localRound(client, groomRecord([confirmed(Q1)], { status: 'ready' }), 1)
+    const end = await afterRun(ctxOf('groomer'), ready, { status: 'ready', exportDir: exportOf(), verifyCommand, round: 1 })
     expect(end.board.actions.map((action) => action.action)).toEqual(['unmark', 'replace', 'resolve', 'write-idea', 'move'])
     expect(end.board.actions.at(-1)).toMatchObject({ action: 'move', from: 'Grooming', to: 'Shortlist' })
   })
@@ -1360,7 +1367,7 @@ describe('the groomer --local board stage (against a stub session)', () => {
     seedGroomPage(client, renderedPage(groomRecord([Q1])))
     const ready = await localReady(client)
     await localRound(client, groomRecord([Q1], { status: 'incomplete' }), 1)
-    const end = await afterRun(ctxOf('groomer'), ready, { ok: false, status: 'incomplete', exportDir: exportOf(), verifyCommand, round: 1 })
+    const end = await afterRun(ctxOf('groomer'), ready, { status: 'incomplete', exportDir: exportOf(), verifyCommand, round: 1 })
     expect(end.board.actions.map((action) => action.action)).toEqual(['unmark'])
   })
 })

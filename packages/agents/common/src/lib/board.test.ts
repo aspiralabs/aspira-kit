@@ -787,7 +787,7 @@ describe('finishFlow for the groomer, a tick made on Notion', () => {
       }),
     )
 
-    await finishFlow({ skill: 'groomer', folder, ok: true, runStatus: 'needs-author', board: `collection://${DS}`, client })
+    await finishFlow({ skill: 'groomer', folder, runStatus: 'needs-author', board: `collection://${DS}`, client })
 
     const page = stored.get(GD) ?? []
     expect(page.map(plain)).toContain('Decided by the author: The team.')

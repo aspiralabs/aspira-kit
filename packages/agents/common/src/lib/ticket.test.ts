@@ -446,10 +446,23 @@ describe('run status words', () => {
     return [...words].sort()
   }
 
-  it('every word a sibling launcher passes, partial included, reads as one of the five new run statuses (F7, A1)', () => {
+  it('every sibling launcher passes its trace\'s own status, falling back only to incomplete, and that reads as a run status (F5, F6)', () => {
+    // Since KIT-2 a launcher no longer derives a word in shell: it hands ticket-cli finish the
+    // trace's top-level status, and the only literal it can add is the incomplete fallback for a
+    // missing or unreadable trace (F6).
     const words = launcherWords()
-    expect(words).toEqual(['clean', 'complete', 'incomplete', 'needs-author', 'partial', 'ready'])
+    expect(words).toEqual(['incomplete'])
     expect(words.filter((word) => readRunStatus(word) === null)).toEqual([])
+    for (const skill of SIBLINGS) {
+      const script = readFileSync(new URL(`../../../${skill}/skill/aspira-${skill}/scripts/${skill}.sh`, import.meta.url), 'utf8')
+      expect(script, skill).toMatch(/\.status \?\? 'incomplete'/)
+      expect(script, skill).toContain('--run-status "$status"')
+    }
+  })
+
+  it('every word an older installed launcher passed, partial included, still reads as one of the five new run statuses (F7, A1)', () => {
+    const before = ['clean', 'complete', 'incomplete', 'needs-author', 'partial', 'ready']
+    expect(before.map((word) => readRunStatus(word)?.status)).toEqual(['ready', 'ready', 'incomplete', 'needs-author', 'incomplete', 'ready'])
   })
 
   it('the five new run statuses are ready, needs-author, incomplete, refused and blocked', () => {
