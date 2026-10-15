@@ -70,7 +70,7 @@ async function ghEnv(options: { gh?: boolean } = {}): Promise<{ env: NodeJS.Proc
   await mkdir(bin, { recursive: true })
   if (options.gh !== false) await writeFile(join(bin, 'gh'), FAKE_GH, { mode: 0o755 })
   const { NOTION_TOKEN: _token, NOTION_API_KEY: _key, ...rest } = process.env
-  return { env: { ...rest, PATH: `${bin}:/usr/bin:/bin` }, ghDir }
+  return { env: { ...rest, PATH: `${bin}:/usr/bin:/bin`, GH_DIR: ghDir }, ghDir }
 }
 
 async function ghCalls(ghDir: string): Promise<string[][]> {
