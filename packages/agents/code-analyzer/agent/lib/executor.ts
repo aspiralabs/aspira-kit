@@ -31,10 +31,22 @@ export function insideRoot(root: string, path: string): string | null {
   return rel
 }
 
+/** Credentials an analyzer command never gets, whether or not they are set: the same list build-feature's gate unsets (packages/agents/build-feature/src/gate.ts). The Notion token is for the knowledge walk only (F52). */
+export const CREDENTIALS = ['NOTION_TOKEN', 'NOTION_API_KEY', 'GITHUB_TOKEN', 'GH_TOKEN', 'AI_GATEWAY_API_KEY', 'NPM_TOKEN', 'NODE_AUTH_TOKEN'] as const
+/** A variable named like a credential. */
+const CREDENTIAL_NAME = /_(TOKEN|SECRET|KEY|PASSWORD)$/i
+const FIXED_CREDENTIALS = new Set<string>(CREDENTIALS)
+
+/** The environment a host analyzer command runs in: `env` without any credential, plus CI-style output settings. */
+export function analyzerEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const kept = Object.fromEntries(Object.entries(env).filter(([name]) => !FIXED_CREDENTIALS.has(name) && !CREDENTIAL_NAME.test(name)))
+  return { ...kept, CI: '1', FORCE_COLOR: '0', NO_COLOR: '1' }
+}
+
 export function hostExecutor(root: string): Executor {
   const exec = (command: string, options: RunOptions = {}): Promise<RunResult> => new Promise((done) => {
     const cwd = options.cwd ? resolve(root, options.cwd) : root
-    const child = execFile('bash', ['-c', command], { cwd, env: { ...process.env, CI: '1', FORCE_COLOR: '0', NO_COLOR: '1' }, maxBuffer: 64 * 1024 * 1024, timeout: options.timeoutMs, killSignal: 'SIGKILL', signal: options.signal }, (error, stdout, stderr) => {
+    const child = execFile('bash', ['-c', command], { cwd, env: analyzerEnv(process.env), maxBuffer: 64 * 1024 * 1024, timeout: options.timeoutMs, killSignal: 'SIGKILL', signal: options.signal }, (error, stdout, stderr) => {
       const killed = Boolean(error && 'killed' in error && (error as { killed?: boolean }).killed)
       const code = error && typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : error ? 1 : 0
       done({ exitCode: killed ? 124 : code, stdout: String(stdout), stderr: String(stderr), timedOut: killed && Boolean(options.timeoutMs) })
