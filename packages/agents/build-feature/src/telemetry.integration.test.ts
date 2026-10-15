@@ -544,8 +544,9 @@ describe('KIT-19 T27 F9 F22: an earlier run state and step reports in three shap
     seen.after.push(label(implementor))
     h.setNow(at('10:30:00'))
     await reportUsage(h, implementor.stage, 'complete', { tokens: 'lots', subagents: [{ label: 'lane A', totalTokens: 10 }, { label: 'lane B', totalTokens: 'many' }] })
-    const gate = await h.advance()
-    seen.after.push(label(gate))
+    // With no gate commands in the fixture, the step after the implementor is the code-analyzer (as driver test T26 pins).
+    const next = await h.advance()
+    seen.after.push(label(next))
     seen.implementorStatus = ((await h.state()).steps ?? []).find((record) => record.step === 'implementor')?.status
     h.setNow(at('10:40:00'))
     await stopWith(h)
@@ -555,7 +556,7 @@ describe('KIT-19 T27 F9 F22: an earlier run state and step reports in three shap
   }, SLOW)
 
   it('loads the earlier state and goes on after every report', () => {
-    expect(seen.after).toEqual(['planner', 'implementor', 'gate'])
+    expect(seen.after).toEqual(['planner', 'implementor', 'code-analyzer'])
   })
 
   it('puts each reported subagent once under its step with the start and end the session recorded', () => {

@@ -17,7 +17,8 @@ const exec = promisify(execFile)
 afterEach(cleanup)
 
 const SLOW = 120_000
-const commandOf = (result: Result) => (result.stage?.stage === 'step' ? result.stage.command : `<${result.stage?.stage ?? 'no stage'}>`)
+// The step command without its trailing --parent-run <run>:<nonce> (KIT-19), which these tests do not pin.
+const commandOf = (result: Result) => (result.stage?.stage === 'step' ? String(result.stage.command).replace(/ --parent-run \S+$/, '') : `<${result.stage?.stage ?? 'no stage'}>`)
 const gitIn = async (dir: string, ...args: string[]) => (await exec('git', ['-C', dir, ...args])).stdout.trim()
 const SPEC = '# X\n\n## Acceptance criteria\n\n- [ ] F1: it works.\n'
 

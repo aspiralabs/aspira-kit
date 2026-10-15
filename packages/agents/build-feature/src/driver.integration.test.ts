@@ -54,7 +54,8 @@ const lastLine = (text: unknown) => String(text ?? '').trimEnd().split('\n').at(
 const firstLine = (text: unknown) => String(text ?? '').trimStart().split('\n')[0]
 const noStepOrMove = (h: Project) => !kinds(h.stages).some((kind) => kind === 'step' || kind === 'move')
 const moveOf = (stage: Stage | null) => (stage?.stage === 'move' ? { from: stage.from, to: stage.to } : { stage: stage?.stage ?? 'no stage' })
-const commandOf = (result: Result) => (result.stage?.stage === 'step' ? result.stage.command : `<${result.stage?.stage ?? 'no stage'}>`)
+// The step command without its trailing --parent-run <run>:<nonce> (KIT-19), which these tests do not pin.
+const commandOf = (result: Result) => (result.stage?.stage === 'step' ? String(result.stage.command).replace(/ --parent-run \S+$/, '') : `<${result.stage?.stage ?? 'no stage'}>`)
 /** Everything the run told the session at the end: the last stage, the output and the summary file. */
 const told = async (h: Project, result: Result) => `${result.text}\n${JSON.stringify(result.stage)}\n${await h.summary()}`
 
