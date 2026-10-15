@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
 import { TicketArgumentError } from '@aspiralabs/agent-common/lib/ticket'
-import { afterRun, beforeRun, verifyRun } from '@aspiralabs/agent-common/lib/ticket-driver'
+import { afterRun, attachArg, beforeRun, sessionUsageStep, verifyRun } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { FlowRefused, writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { KnowledgeRequired, knowledgeStage, runLocal } from '../agent/lib/local.ts'
 
@@ -15,25 +15,29 @@ import { KnowledgeRequired, knowledgeStage, runLocal } from '../agent/lib/local.
 // spec is copied to the working folder's spec.md, the file pushed to the ticket as Spec. --verify is
 // the last step: ticket.md must show what the end stage expected. --finish exports what exists as
 // incomplete. Every step names the agent package that ran (`agent`), and an export records it in its trace.
-const usage = 'Usage: pnpm run write:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <absolute-idea>) [--guidelines FILE] [--output DIR] [--force-pull] [--verify] [--finish]'
+const usage = 'Usage: pnpm run write:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <absolute-idea>) [--guidelines FILE] [--output DIR] [--force-pull] [--verify] [--finish] [--parent-run RUN:NONCE] [--attach JSON]'
 const REFUSED = 3
+const SKILL = 'spec-writer' as const
+
+/** The session usage report of a --local hand run: <export>/trace/session-usage.json (KIT-19, F9). */
+const sessionUsageFile = (exportDir: string) => join(exportDir, 'trace', 'session-usage.json')
 
 const agent = await agentVersion(new URL('..', import.meta.url))
 try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { repo: { type: 'string' }, ticket: { type: 'string' }, 'no-ticket': { type: 'string' }, guidelines: { type: 'string' }, output: { type: 'string' }, 'force-pull': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' } },
+    options: { repo: { type: 'string' }, ticket: { type: 'string' }, 'no-ticket': { type: 'string' }, guidelines: { type: 'string' }, output: { type: 'string' }, 'force-pull': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' }, 'parent-run': { type: 'string' }, attach: { type: 'string' } },
   })
   if (values.repo === undefined || positionals.length > 0 || (values.ticket !== undefined && values['no-ticket'] !== undefined)) throw new Error(usage)
   const repo = values.repo
-  const context = { skill: 'spec-writer' as const, repo }
+  const context = { skill: SKILL, repo }
   const outputFor = (folder: string) => values.output ?? join(folder, 'spec.written')
   if (values.verify === true) {
-    const verified = await verifyRun(context, { positional: values.ticket }, outputFor)
+    const verified = await verifyRun(context, { positional: values.ticket, attach: attachArg(values.attach) }, outputFor)
     console.log(JSON.stringify({ pending: false, stage: 'board-verify', ...verified, agent }, null, 2))
     if (!verified.verified) process.exitCode = 1
   } else {
-    const before = await beforeRun(context, { positional: values['no-ticket'] ?? values.ticket, noTicket: values['no-ticket'] !== undefined, forcePull: values['force-pull'] })
+    const before = await beforeRun(context, { positional: values['no-ticket'] ?? values.ticket, noTicket: values['no-ticket'] !== undefined, forcePull: values['force-pull'], parentRun: values['parent-run'] })
     if (before.kind === 'stage') {
       console.log(JSON.stringify({ ...before.stage, agent }, null, 2))
     } else {
@@ -51,11 +55,12 @@ try {
         // The written spec becomes the working folder's spec.md: the file the ticket's Spec page is pushed from.
         const spec = result.spec === null ? null : join(before.folder, 'spec.md')
         if (result.spec !== null && spec !== null) await copyFile(result.spec, spec)
-        const board = await afterRun(context, before, { ok: result.status !== 'incomplete' && result.spec !== null, status: result.status, exportDir: result.dir, verifyCommand: `spec-writer.sh local ${before.ticket.id} --verify` })
+        const board = await afterRun(context, before, { ok: result.status !== 'incomplete' && result.spec !== null, status: result.status, exportDir: result.dir, verifyCommand: `spec-writer.sh local ${before.ticket.id} --verify`, sessionUsage: sessionUsageFile(result.dir) })
         console.log(JSON.stringify({ ...result, agent, ...board, ...(spec === null ? {} : { ticketSpec: spec }) }, null, 2))
       } else {
         if (!result.pending) await writeBoardTrace(result.dir, before.trace)
-        console.log(JSON.stringify({ ...result, agent, ticket: before.kind === 'none' ? 'none' : `${before.ticket.id} ${before.ticket.title}`, ...(before.kind === 'none' ? {} : { folder: before.folder }) }, null, 2))
+        const report = before.kind === 'ticket' && result.pending ? await sessionUsageStep(SKILL, before.folder, sessionUsageFile(outputFor(before.folder))) : {}
+        console.log(JSON.stringify({ ...result, agent, ticket: before.kind === 'none' ? 'none' : `${before.ticket.id} ${before.ticket.title}`, ...(before.kind === 'none' ? {} : { folder: before.folder }), ...report }, null, 2))
       }
       if (!result.pending && result.status !== 'ready') process.exitCode = 1
     }

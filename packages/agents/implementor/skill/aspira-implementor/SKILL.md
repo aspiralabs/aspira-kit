@@ -1,7 +1,7 @@
 ---
 name: aspira-implementor
 description: Implement a feature test-first under the Aspira engineering rules in Notion, from a planner plan, a spec or a ticket, with the official implementor agent. By default it launches the implementor agent on the GitHub repository and reports back; with --local the agent's own procedure runs inside this Claude Code session on the local checkout, with subagents for the parallel lanes. Use for /aspira-implementor or requests to implement, build or execute a plan, spec or ticket.
-argument-hint: [<ticket ID | Notion URL> | <plan.review | plan.reviewed.md | spec.md> --no-ticket] [--local] [--force-pull] [--repo owner/name | --repo DIR] [--ref BRANCH] [--pr] [--max-parallel N] [--serial] [--guidelines FILE]
+argument-hint: [<ticket ID | Notion URL> | <plan.review | plan.reviewed.md | spec.md> --no-ticket] [--local] [--force-pull] [--repo owner/name | --repo DIR] [--ref BRANCH] [--pr] [--max-parallel N] [--serial] [--guidelines FILE] [--parent-run RUN:NONCE]
 ---
 
 # Aspira implementor
@@ -34,7 +34,7 @@ Use the default for unattended builds on GitHub. Use `--local` for a local check
 ## Default: launch the agent
 
 ```bash
-<skill-dir>/scripts/implementor.sh start [<ticket> | <path-in-repo> --no-ticket] [--force-pull] [--repo owner/name | --repo DIR] [--ref BRANCH] [--pr]
+<skill-dir>/scripts/implementor.sh start [<ticket> | <path-in-repo> --no-ticket] [--force-pull] [--repo owner/name | --repo DIR] [--ref BRANCH] [--pr] [--parent-run RUN:NONCE]
 ```
 
 With a ticket, the launcher makes the board moves itself, through the shared board module with `NOTION_TOKEN` from the project's `.env.local`: the ticket step before the agent starts (a refusal exits 3 and launches nothing), and the push, the PR property and the success move after it exits, appended to the run's log and recorded in `plan.review/trace/board.json`. The pulled plan must be committed and pushed like any other source. With `--repo owner/name` (or a GitHub URL) and `--no-ticket`, the source is a path inside that repository. Without it, the launcher uses the repository of the current directory: it reads `owner/name` from the `origin` remote and starts from the current branch. It refuses a source that is not committed and pushed, since the agent can only see what is on GitHub. `--pr` asks the agent for a draft pull request.
@@ -44,7 +44,7 @@ The launcher resolves the agent from `IMPLEMENTOR_AGENT_DIR` (kit development on
 ## `--local`: run the agent's procedure in this session
 
 ```bash
-<skill-dir>/scripts/implementor.sh local [<ticket> | <plan.review | plan.reviewed.md | spec.md> --no-ticket] [--force-pull] [--repo DIR] [--guidelines FILE] [--max-parallel N] [--serial] [--work DIR] [--finish] [--verify]
+<skill-dir>/scripts/implementor.sh local [<ticket> | <plan.review | plan.reviewed.md | spec.md> --no-ticket] [--force-pull] [--repo DIR] [--guidelines FILE] [--max-parallel N] [--serial] [--work DIR] [--finish] [--verify] [--parent-run RUN:NONCE] [--attach JSON]
 ```
 
 Each `local` call makes no model call. It prints one JSON stage, and you do what it lists, then call `local` again with the same source and options. Repeat until it prints `"pending": false`.
@@ -62,6 +62,21 @@ Each `local` call makes no model call. It prints one JSON stage, and you do what
 The run directory `<work dir>/implementation.local/` holds the knowledge, prompts, outputs and state between steps. If the source or the knowledge folder changes mid-run, `local` refuses to continue; delete the run directory to start again. On export the driver writes `<work dir>/trace/implementation-local.json` (every prompt and output, the gate, and the Notion pages used with their hashes) and removes the run directory.
 
 `--local` runs on this session's model, so the workers are not independent of the session that may have written the spec. Say so in the report.
+
+## Run telemetry
+
+Every run of this skill on a ticket writes one telemetry file, `.work/<id>-<slug>/telemetry/<run-id>.json` (OpenTelemetry JSON: the run, its waves' subagents, with timings, tokens, tool calls and cost where they are measured), and attaches it to the end of the ticket page when the Feature Board rules list it (BOARD-003). A telemetry failure is a notice beside the result: it never changes the run's status, the card's move or the exit code.
+
+- **Default.** The launcher does it all: `ticket.ts start` prints `run-id=` and `run-started=`, and the finish step after the agent exits writes the file from them and attaches it. Nothing to do here.
+- **`--local`.** The session reports its own usage, since only it sees its subagents:
+  1. Record the wall-clock start and end (ISO 8601) of every subagent you launch (every lane worker of every wave is its own entry), with the total tokens, tool uses and duration the Agent tool reports for it, and its model when you know it.
+  2. Every pending step on a ticket prints `sessionUsage` with a `file` and a `runId`. Before the call that exports the run (the call after the last wave's outputs are written, or `--finish`), write that `file` (`plan.review/trace/session-usage.json`) as JSON: `{"runId": "<runId>", "subagents": [{"label": "…", "startedAt": "…", "endedAt": "…", "totalTokens": 0, "toolUses": 0, "wallMs": 0, "model": "…"}]}`, one entry per subagent in launch order. `label` is a short name of your own (`research`, `lane A`), never the task's description or prompt text. Leave out a number you do not have; never guess one. Without the file the run's telemetry records the subagents as missing.
+  3. The export's `board.actions` then end with two telemetry actions. `read` (`target: "board-rules"`): fetch the Feature Board rules page with the Notion MCP (`notion-fetch`, read-only) and write it to `file` as plain markdown, one rule per line. `attach`: only when one line of the rules you saved contains every string of `onlyIf`, attach `file`, as `name`, in one file block at the end of the ticket page `page`: `notion-create-attachment` for a file of at most 200 KiB, otherwise `notion-create-file-upload`, then `notion-update-page`. Attach no other file, to no other page, and never edit or delete another block.
+  4. Pass the result to the verify step: `local <ticket> --verify --attach '{"blockId":"<the new block id>"}'`, or `--attach '{"error":"<why>"}'` when the rules do not allow it or the attach failed. A missing, refused or failed attach is a notice in the verify output, never a failed verify.
+- **`--parent-run <run-id>:<nonce>`** (a step of an `/aspira-build-feature` run, which prints it on the step's command). Skip all of the above: the run writes no usage report, reads no rules and attaches nothing; build-feature records the step in its own telemetry. Pass `--parent-run` unchanged on every call of the launcher, `start` or `local`, `--verify` included. A malformed value, or one that does not name the pending step of the build-feature run on the ticket, is refused (exit 3) naming `--parent-run`.
+- **`--no-ticket`** runs write no telemetry.
+
+The separate-process implementor records timing only: its run has no usage file, so its telemetry carries the run's start and end without phases.
 
 ## Report
 

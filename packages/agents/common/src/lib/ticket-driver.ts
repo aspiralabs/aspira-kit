@@ -6,6 +6,7 @@
 import { constants, existsSync } from 'node:fs'
 import { access, mkdir, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { z } from 'zod'
 import { agentVersion } from './agent-version.ts'
 import { readGroomRecord } from './groom-record.ts'
 import { checkParentRun, encodeTrace, parentRunSchema, releaseRunId, reserveRunId, telemetryDir, telemetryFile, writeTelemetry, type Gap, type SpanInput, type SpanUsage } from './telemetry.ts'
@@ -42,6 +43,26 @@ export type DriverContext = { skill: Skill; repo: string; env?: Record<string, s
 
 /** Where the driver keeps its board state between calls: inside the working folder, outside the run's own work dir. */
 export const boardStateDir = (folder: string, skill: Skill) => localStateDir(folder, skill)
+
+/** The session's telemetry attach result, `--attach '{"blockId": …}'` or `'{"error": …}'`, for the verify step (KIT-19, F14). */
+const attachSchema = z.union([z.object({ blockId: z.string().min(1) }), z.object({ error: z.string().min(1) })])
+
+/** A local driver's --attach value as the verify step takes it; one that does not parse is recorded as an attach error, never a failed verify (OBS-002). */
+export function attachArg(value: string | undefined): TelemetryAttachResult | undefined {
+  if (value === undefined) return undefined
+  try {
+    const parsed = attachSchema.safeParse(JSON.parse(value))
+    return parsed.success ? parsed.data : { error: '--attach is not {"blockId": "…"} or {"error": "…"}' }
+  } catch {
+    return { error: '--attach is not JSON' }
+  }
+}
+
+/** Where the session writes its usage report for this hand run and the run id it names (KIT-19, F9); nothing for a step of a build-feature run (--parent-run). */
+export async function sessionUsageStep(skill: Skill, folder: string, file: string): Promise<{ sessionUsage?: { file: string; runId: string } }> {
+  const run = await readLocalRun(boardStateDir(folder, skill))
+  return run?.runId === undefined || run.parentRun !== undefined ? {} : { sessionUsage: { file, runId: run.runId } }
+}
 
 /** The refusal for a repository with no board. A row that refuses --no-ticket (the groomer) does not offer it. */
 export const noBoardMessage = (repo: string, skill: Skill): string =>

@@ -1,7 +1,7 @@
 ---
 name: aspira-pr-reviewer
 description: Run the official pr-reviewer agent on a pull request (a GitHub PR or a local branch) and report its result. By default it launches pr-reviewer as a separate process; with --local the same agent pipeline runs inside this Claude Code session, using the agent's own instruction files. Use for /aspira-pr-reviewer or requests to review a PR or branch with this agent.
-argument-hint: [<ticket ID | Notion URL> | <github-pr | repo-path> --no-ticket] [--local] [--force-pull] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--yes]
+argument-hint: [<ticket ID | Notion URL> | <github-pr | repo-path> --no-ticket] [--local] [--force-pull] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--yes] [--parent-run RUN:NONCE]
 ---
 
 # PR review
@@ -39,7 +39,7 @@ The launcher resolves the package from `PR_REVIEWER_AGENT_DIR` (kit development 
 ## Default: launch the agent
 
 ```bash
-<skill-dir>/scripts/pr-reviewer.sh start [<ticket> | <github-pr | repo-path> --no-ticket] [--force-pull] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--yes]
+<skill-dir>/scripts/pr-reviewer.sh start [<ticket> | <github-pr | repo-path> --no-ticket] [--force-pull] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--yes] [--parent-run RUN:NONCE]
 ```
 
 With a ticket, the launcher does the board work itself, through the shared board module with `NOTION_TOKEN` from the project's `.env.local`: the ticket step before the estimate (resolve, gate, pull; a refusal exits 3 and launches nothing), and the push of `review.md` as `PR Review` after the agent exits, appended to the run's log and recorded in `trace/board.json`. Before it detaches, it prints an estimate: the diff size in changed lines, the seats and round cap, and a dollar range from the `cost.md` files of this package's previous reviews (seeded from the NOM-4 review until there are any), with one line saying `--local` costs session usage instead. The estimate is printed, not confirmed; show it to the user as printed, and pass `--yes` only for an unattended run. It then detaches the agent in `screen` and prints a run directory. Tell the user it started. Check it with `status <run-dir>`, or with `wait <run-dir> --max 30` between updates. The wait returns without stopping the agent, so keep checking until it finishes or the user cancels. Do not automatically retry failed or incomplete reviews: every run is paid. If the launch fails, report the error. When the run finishes, the log holds the agent's reply; relay it.
@@ -49,7 +49,7 @@ With a ticket, the launcher does the board work itself, through the shared board
 `local` replays the agent's pipeline with this session as the model. It makes no model calls itself. It stands in for the agent's tools: it loads the PR, checks the guidelines, builds the packet, runs the round loop, exports and comments. It prints the next stage, with each turn's prompt assembled at that moment from the agent's own files, and you run those turns as subagents. You are the orchestrator here: read the file named in `orchestrator` in full before the first stage. It is the authority for what you do and how you report. Run the turns as listed and do not edit the prompt files.
 
 ```bash
-<skill-dir>/scripts/pr-reviewer.sh local [<ticket> | <github-pr | repo-path> --no-ticket] [--force-pull] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--knowledge DIR] [--finish] [--verify]
+<skill-dir>/scripts/pr-reviewer.sh local [<ticket> | <github-pr | repo-path> --no-ticket] [--force-pull] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--knowledge DIR] [--finish] [--verify] [--parent-run RUN:NONCE] [--attach JSON]
 ```
 
 Pass the same ticket (or source) and options to every call.
@@ -83,6 +83,19 @@ A task that comes back with an `error` wrote an output that failed its schema, a
 The work directory, `<output>.local/`, holds the prompts, the packet and the outputs between steps and, by default, the guidelines folder. It is removed after export. Every prompt and output is kept in `trace/calls.json` and the guidelines in `trace/guidelines/`. If the branch, the working tree, the PR head or the guidelines change mid-review, `local` refuses to continue; delete the work directory to start again.
 
 `--local` is not independent of this session: every seat and Quinn run on this session's model. Say so when you report a `--local` review.
+
+## Run telemetry
+
+Every run of this skill on a ticket writes one telemetry file, `.work/<id>-<slug>/telemetry/<run-id>.json` (OpenTelemetry JSON: the run, its agents and subagents, with timings, tokens, tool calls and cost where they are measured), and attaches it to the end of the ticket page when the Feature Board rules list it (BOARD-003). A telemetry failure is a notice beside the result: it never changes the run's status, the card's move or the exit code.
+
+- **Default.** The launcher does it all: `ticket.ts start` prints `run-id=` and `run-started=`, and the finish step after the agent exits writes the file from them and attaches it. Nothing to do here.
+- **`--local`.** The session reports its own usage, since only it sees its subagents:
+  1. Record the wall-clock start and end (ISO 8601) of every subagent you launch, with the total tokens, tool uses and duration the Agent tool reports for it, and its model when you know it.
+  2. Every pending step on a ticket prints `sessionUsage` with a `file` and a `runId`. Before the call that exports the review (the **Export** step, or `--finish`), write that `file` (`pr-review/trace/session-usage.json`) as JSON: `{"runId": "<runId>", "subagents": [{"label": "…", "startedAt": "…", "endedAt": "…", "totalTokens": 0, "toolUses": 0, "wallMs": 0, "model": "…"}]}`, one entry per subagent in launch order. `label` is a short name of your own (`research`, `lane A`), never the task's description or prompt text. Leave out a number you do not have; never guess one. Without the file the run's telemetry records the subagents as missing.
+  3. The export's `board.actions` then end with two telemetry actions. `read` (`target: "board-rules"`): fetch the Feature Board rules page with the Notion MCP (`notion-fetch`, read-only) and write it to `file` as plain markdown, one rule per line. `attach`: only when one line of the rules you saved contains every string of `onlyIf`, attach `file`, as `name`, in one file block at the end of the ticket page `page`: `notion-create-attachment` for a file of at most 200 KiB, otherwise `notion-create-file-upload`, then `notion-update-page`. Attach no other file, to no other page, and never edit or delete another block.
+  4. Pass the result to the verify step: `local <ticket> --verify --attach '{"blockId":"<the new block id>"}'`, or `--attach '{"error":"<why>"}'` when the rules do not allow it or the attach failed. A missing, refused or failed attach is a notice in the verify output, never a failed verify.
+- **`--parent-run <run-id>:<nonce>`** (a step of an `/aspira-build-feature` run, which prints it on the step's command). Skip all of the above: the run writes no usage report, reads no rules and attaches nothing; build-feature records the step in its own telemetry. Pass `--parent-run` unchanged on every call of the launcher, `start` or `local`, `--verify` included. A malformed value, or one that does not name the pending step of the build-feature run on the ticket, is refused (exit 3) naming `--parent-run`.
+- **`--no-ticket`** runs write no telemetry.
 
 ## Results
 

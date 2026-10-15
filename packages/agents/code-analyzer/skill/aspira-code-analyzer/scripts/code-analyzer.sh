@@ -138,13 +138,25 @@ local_dir() {
 absolute_path() {
   case $1 in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac
 }
+# --parent-run <run-id>:<nonce> marks a step of a build-feature run (KIT-19): ticket.ts and the local
+# driver check that it names the run's pending step, and the step writes and attaches no telemetry of
+# its own. A malformed value is refused here, before anything runs (exit 3, as ticket.ts refuses).
+check_parent_run() {
+  local pattern='^run-[0-9]{8}T[0-9]{6}Z(-[0-9]+)?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+  [ -n "$PARENT_RUN" ] || return 0
+  if [[ ! $PARENT_RUN =~ $pattern ]]; then
+    echo "$NAME: refused: --parent-run must be <run-id>:<nonce>, the build-feature run id and the nonce of its pending step" >&2
+    exit 3
+  fi
+}
 # The board step before a separate-process run: resolve the ticket, check its Status (a refusal exits 3
 # before anything is launched) and pull its pages into .work/<id>-<slug>/. The analyzer claims nothing.
-# Reads the key=value lines of scripts/ticket.ts into T_FOLDER, T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS.
+# Reads the key=value lines of scripts/ticket.ts into T_FOLDER, T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS,
+# and the run id and start time finish takes back into T_RUN_ID and T_RUN_STARTED (none with --parent-run).
 ticket_start() {
   local ticket=$1 top=$2 out code line key value
   out=$(mktemp "${TMPDIR:-/tmp}/code-analyzer-ticket.XXXXXX")
-  agent_node scripts/ticket.ts start "$ticket" --repo "$top" ${FORCE_PULL:+--force-pull} > "$out"; code=$?
+  agent_node scripts/ticket.ts start "$ticket" --repo "$top" ${FORCE_PULL:+--force-pull} ${PARENT_RUN:+--parent-run "$PARENT_RUN"} > "$out"; code=$?
   if [ "$code" != 0 ]; then rm -f "$out"; exit "$code"; fi
   T_FOLDER="" T_ID="" T_TITLE="" T_URL="" T_BEFORE="" T_STATUS=""
   while IFS= read -r line; do
@@ -152,6 +164,7 @@ ticket_start() {
     case $key in
       folder) T_FOLDER=$value ;; id) T_ID=$value ;; title) T_TITLE=$value ;; url) T_URL=$value ;;
       before) T_BEFORE=$value ;; status) T_STATUS=$value ;;
+      run-id) T_RUN_ID=$value ;; run-started) T_RUN_STARTED=$value ;;
     esac
   done < "$out"
   rm -f "$out"
@@ -160,7 +173,7 @@ ticket_start() {
 # The repository root the ticket's working folder lives under: the git top of the working directory.
 repo_top() { git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$PWD"; }
 cmd_start() {
-  local source="" push="" ref="" out="" rounds="" warnings="" knowledge="" guidelines="" no_ticket="" app="" FORCE_PULL=""
+  local source="" push="" ref="" out="" rounds="" warnings="" knowledge="" guidelines="" no_ticket="" app="" FORCE_PULL="" PARENT_RUN="" T_RUN_ID="" T_RUN_STARTED=""
   while [ $# -gt 0 ]; do
     case $1 in
       --push) push=1; shift ;;
@@ -173,14 +186,18 @@ cmd_start() {
       --knowledge) [ $# -ge 2 ] || die "--knowledge needs a folder"; [ -d "$2" ] || die "--knowledge is a folder (REQUIRED.md, INDEX.md, pages): $2"; knowledge=$(cd "$2" && pwd -P); shift 2 ;;
       --guidelines) [ $# -ge 2 ] || die "--guidelines needs a file"; [ -f "$2" ] || die "--guidelines is a REQUIRED.md file: $2"; guidelines=$(absolute_path "$2"); shift 2 ;;
       --max-rounds) [ $# -ge 2 ] || die "--max-rounds needs a number"; rounds=$2; shift 2 ;;
+      --parent-run) [ $# -ge 2 ] || die "--parent-run needs <run-id>:<nonce>"; PARENT_RUN=$2; shift 2 ;;
+      --attach) die "--attach is for local --verify" ;;
       --local) die "--local runs in this session: use the local command, not start" ;;
       --verify) die "--verify is for local" ;;
       -*) die "unknown option: $1" ;;
       *) [ -z "$source" ] || die "one ticket at a time (or one repository with --no-ticket)"; source=${1#@}; shift ;;
     esac
   done
+  check_parent_run
   local run mode slug prompt eve="" ticket="" folder="" top=""
   if [ -n "$no_ticket" ]; then
+    [ -z "$PARENT_RUN" ] || die "--parent-run names a step of a build-feature run on a ticket; it does not go with --no-ticket"
     [ -n "$source" ] || die "usage: code-analyzer.sh start <repo-path | github-url | owner/name> --no-ticket [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output DIR] [--max-rounds N] [--fix-warnings]"
     [ -z "$app" ] || die "--app goes with a ticket; with --no-ticket name the directory as the argument"
   else
@@ -251,11 +268,16 @@ printf '%s\n' "$code" > "$RUN/exit"
 # The board step after the run: the analyzer pushes nothing and makes no move; the trace records the run.
 if [ -n "$FOLDER" ]; then
   if [ "$code" = 0 ]; then outcome=--ok; status=clean; else outcome=--failed; status=partial; fi
-  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO_TOP" --folder "$FOLDER" "$outcome" --run-status "$status" --export "$OUTPUT" >> "$RUN/log" 2>&1
+  # The run's telemetry (KIT-19): the run id and start time ticket.ts start printed, or the build-feature
+  # step this run is (--parent-run), which writes none of its own.
+  telemetry=()
+  [ -z "$RUN_ID" ] || telemetry+=(--run-id "$RUN_ID" --run-started "$RUN_STARTED")
+  [ -z "$PARENT_RUN" ] || telemetry+=(--parent-run "$PARENT_RUN")
+  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO_TOP" --folder "$FOLDER" "$outcome" --run-status "$status" --export "$OUTPUT" ${telemetry[@]+"${telemetry[@]}"} >> "$RUN/log" 2>&1
 fi
 RUNNER
   chmod +x "$run/run.sh"
-  MODE="$mode" AGENT="$AGENT" EVE="$eve" SOURCE="$source" OUTPUT="$out" ROUNDS="$rounds" WARNINGS="$warnings" KNOWLEDGE="$knowledge" GUIDELINES="$guidelines" PROMPT="$prompt" RUN="$run" FOLDER="$folder" REPO_TOP="$top" screen -dmS "static-analysis-$(basename "$run")" "$run/run.sh"
+  MODE="$mode" AGENT="$AGENT" EVE="$eve" SOURCE="$source" OUTPUT="$out" ROUNDS="$rounds" WARNINGS="$warnings" KNOWLEDGE="$knowledge" GUIDELINES="$guidelines" PROMPT="$prompt" RUN="$run" FOLDER="$folder" REPO_TOP="$top" RUN_ID="$T_RUN_ID" RUN_STARTED="$T_RUN_STARTED" PARENT_RUN="$PARENT_RUN" screen -dmS "static-analysis-$(basename "$run")" "$run/run.sh"
   printf 'started\nrun: %s\nmode: %s\nsource: %s\noutput: %s\n' "$run" "$mode" "$source" "$out"
   agent_line
 }
@@ -263,7 +285,7 @@ RUNNER
 # With a ticket the driver prints the board stage first (the ticket's resolve and pull for the
 # session to perform), then the knowledge and fix stages, then the exported run with the board trace.
 cmd_local() {
-  local source="" args=() no_ticket="" app="" ticket="" top
+  local source="" args=() no_ticket="" app="" ticket="" top PARENT_RUN=""
   while [ $# -gt 0 ]; do
     case $1 in
       --local) shift ;;
@@ -272,11 +294,15 @@ cmd_local() {
       --no-fix|--fix-warnings|--finish|--force-pull|--verify) args+=("$1"); shift ;;
       --knowledge|--guidelines|--output) [ $# -ge 2 ] || die "$1 needs a path"; args+=("$1" "$(absolute_path "$2")"); shift 2 ;;
       --max-rounds) [ $# -ge 2 ] || die "--max-rounds needs a number"; args+=("$1" "$2"); shift 2 ;;
+      --parent-run) [ $# -ge 2 ] || die "--parent-run needs <run-id>:<nonce>"; PARENT_RUN=$2; args+=("$1" "$2"); shift 2 ;;
+      --attach) [ $# -ge 2 ] || die "--attach needs the telemetry attach result as JSON"; args+=("$1" "$2"); shift 2 ;;
       -*) die "unknown option: $1" ;;
       *) [ -z "$source" ] || die "one ticket at a time (or one repository with --no-ticket)"; source=${1#@}; shift ;;
     esac
   done
+  check_parent_run
   if [ -n "$no_ticket" ]; then
+    [ -z "$PARENT_RUN" ] || die "--parent-run names a step of a build-feature run on a ticket; it does not go with --no-ticket"
     [ -n "$source" ] || die "usage: code-analyzer.sh local <repo-path> --no-ticket [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish]"
     [ -z "$app" ] || die "--app goes with a ticket; with --no-ticket name the directory as the argument"
     [ -d "$source" ] || die "--local needs a local path; a GitHub repository is fixed in the eve sandbox (use start): $source"
@@ -321,5 +347,5 @@ case ${1:-} in
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
   local) shift; cmd_local "$@" ;;
-  *) die "usage: code-analyzer.sh start [TICKET [--app DIR] | SOURCE --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output DIR] [--max-rounds N] [--fix-warnings] | status RUN | wait RUN [--max SECONDS] | local [TICKET [--app DIR] | REPO-PATH --no-ticket] [--force-pull] [--verify] [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish]" ;;
+  *) die "usage: code-analyzer.sh start [TICKET [--app DIR] | SOURCE --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output DIR] [--max-rounds N] [--fix-warnings] [--parent-run RUN:NONCE] | status RUN | wait RUN [--max SECONDS] | local [TICKET [--app DIR] | REPO-PATH --no-ticket] [--force-pull] [--verify] [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish] [--parent-run RUN:NONCE] [--attach JSON]" ;;
 esac

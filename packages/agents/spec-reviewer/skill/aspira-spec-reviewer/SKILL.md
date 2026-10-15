@@ -1,7 +1,7 @@
 ---
 name: aspira-spec-reviewer
 description: Review a feature spec against its repository and Aspira engineering guidelines with the official spec-review pipeline, then report findings, a reviewed spec and a run analysis. By default it runs spec-reviewer as a separate process and reports back; with --local the same pipeline runs inside this Claude Code session. Use for /aspira-spec-reviewer or requests to review a spec.
-argument-hint: [<ticket ID | Notion URL> | <spec.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended]
+argument-hint: [<ticket ID | Notion URL> | <spec.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended] [--parent-run RUN:NONCE]
 ---
 
 # Spec review
@@ -29,7 +29,7 @@ Use the default when the review should be independent of the person or session t
 ## Default: run the agent
 
 ```bash
-<skill-dir>/scripts/spec-reviewer.sh start [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output]
+<skill-dir>/scripts/spec-reviewer.sh start [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output] [--parent-run RUN:NONCE]
 ```
 
 The launcher does the board work itself, through the shared board module with `NOTION_TOKEN` from the project's `.env.local`: the ticket step before the agent starts (a refusal exits 3 and launches nothing), and the pushes after it exits, appended to the run's log and recorded in `trace/board.json`. With `--guidelines` the launcher runs the agent's CLI on that snapshot; otherwise it runs the eve entry point, which loads the guidelines with `load-knowledge` (Notion credentials and its Docker sandbox). The launcher resolves the package from `SPEC_REVIEWER_AGENT_DIR` (kit development only; the report says so), then the installed `@aspiralabs/spec-reviewer` under the project's `node_modules`, then its own location A launcher that resolves to a kit checkout prints one line saying it is running kit source, not the installed version. Every `start`, `status` and `local` output names the agent package and version that ran (`agent:` line, or `agent` in the JSON), and an export records it in `trace/agent-version.json`., and prints the run directory and the agent's `instructions:` file.
@@ -39,7 +39,7 @@ The run is detached. Tell the user it started and where results will go, then us
 ## `--local`: run the pipeline in this session
 
 ```bash
-<skill-dir>/scripts/spec-reviewer.sh local [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo DIR] [--output DIR] [--finish] [--verify] [--take-recommended]
+<skill-dir>/scripts/spec-reviewer.sh local [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo DIR] [--output DIR] [--finish] [--verify] [--take-recommended] [--parent-run RUN:NONCE] [--attach JSON]
 ```
 
 Each `local` call is one synchronous step. `--take-recommended` takes every decision still open at reconciliation as the agent's recommended option instead of waiting on the author. It makes no model calls: it prints JSON naming the next `stage` and its tasks, each with a `prompt` file assembled at that moment from the agent's own files and the `output` file to write, or the finished report. Every result carries `orchestrator`, the agent's `agent/instructions.md`: read the file named in `orchestrator` in full once, before the first phase. In this mode the `local` steps stand in for the agent's review tool, and you stand in for its router. Run the tasks as subagents and do not edit the prompt files: their content is exactly what the agent's phases get.
@@ -57,6 +57,19 @@ Each `local` call is one synchronous step. `--take-recommended` takes every deci
 6. **Report.** The last call prints `status`, `dir`, `findings`, `problems` and `authorDecisions`, and, with a ticket, `board` again (stage `board-end`): the `push` of `spec.reviewed.md` to the ticket as the page `Spec Reviewed` and, for `needs-author`, of `trace/decisions.md` as `Spec Review Decisions` (create each page, or replace the content of the page with that title; then record its URL in the Pages table of `ticket.md`). Perform them with the Notion MCP, then run the command in `board.verify.command` (`local <ticket> --verify`): the driver checks `ticket.md`, completes `trace/board.json`, and prints the report lines. If a push fails, say so with the local path of the reviewed spec and still make the move the stage lists, if any. Report it as the file named in `orchestrator` says.
 
 A task that comes back with an `error` wrote an output that failed its schema: send that error back once, to the same subagent or a new one with the same message plus the error. If it fails again or a subagent cannot finish, run `local ... --finish` to export what exists with the missing phases recorded as failures. The work directory, `<output>.local/`, holds the knowledge folder, prompts and outputs between steps and is removed after export; every prompt and output is kept in `trace/calls.json`, the rules used (source, files and hashes) in `trace/review.json`, and every board action with the Status before and after in `trace/board.json`. If the spec, the guidelines or the repository change mid-run, `local` refuses to continue; delete the work directory to start again.
+
+## Run telemetry
+
+Every run of this skill on a ticket writes one telemetry file, `.work/<id>-<slug>/telemetry/<run-id>.json` (OpenTelemetry JSON: the run, its phases and subagents, with timings, tokens, tool calls and cost where they are measured), and attaches it to the end of the ticket page when the Feature Board rules list it (BOARD-003). A telemetry failure is a notice beside the result: it never changes the run's status, the card's move or the exit code.
+
+- **Default.** The launcher does it all: `ticket.ts start` prints `run-id=` and `run-started=`, and the finish step after the agent exits writes the file from them and attaches it. Nothing to do here.
+- **`--local`.** The session reports its own usage, since only it sees its subagents:
+  1. Record the wall-clock start and end (ISO 8601) of every subagent you launch, with the total tokens, tool uses and duration the Agent tool reports for it, and its model when you know it.
+  2. Every pending step on a ticket prints `sessionUsage` with a `file` and a `runId`. Before the call that exports the run (the call after the last phase output is written, or `--finish`), write that `file` (`spec.reviewed/trace/session-usage.json`) as JSON: `{"runId": "<runId>", "subagents": [{"label": "…", "startedAt": "…", "endedAt": "…", "totalTokens": 0, "toolUses": 0, "wallMs": 0, "model": "…"}]}`, one entry per subagent in launch order. `label` is a short name of your own (`research`, `lane A`), never the task's description or prompt text. Leave out a number you do not have; never guess one. Without the file the run's telemetry records the subagents as missing.
+  3. The export's `board.actions` then end with two telemetry actions. `read` (`target: "board-rules"`): fetch the Feature Board rules page with the Notion MCP (`notion-fetch`, read-only) and write it to `file` as plain markdown, one rule per line. `attach`: only when one line of the rules you saved contains every string of `onlyIf`, attach `file`, as `name`, in one file block at the end of the ticket page `page`: `notion-create-attachment` for a file of at most 200 KiB, otherwise `notion-create-file-upload`, then `notion-update-page`. Attach no other file, to no other page, and never edit or delete another block.
+  4. Pass the result to the verify step: `local <ticket> --verify --attach '{"blockId":"<the new block id>"}'`, or `--attach '{"error":"<why>"}'` when the rules do not allow it or the attach failed. A missing, refused or failed attach is a notice in the verify output, never a failed verify.
+- **`--parent-run <run-id>:<nonce>`** (a step of an `/aspira-build-feature` run, which prints it on the step's command). Skip all of the above: the run writes no usage report, reads no rules and attaches nothing; build-feature records the step in its own telemetry. Pass `--parent-run` unchanged on every call of the launcher, `start` or `local`, `--verify` included. A malformed value, or one that does not name the pending step of the build-feature run on the ticket, is refused (exit 3) naming `--parent-run`.
+- **`--no-ticket`** runs write no telemetry.
 
 ## Reporting
 

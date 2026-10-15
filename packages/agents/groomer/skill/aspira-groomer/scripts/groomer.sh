@@ -127,12 +127,23 @@ absolute_file() {
   [ -f "$1" ] || die "no such file: $1"
   echo "$(cd "$(dirname "$1")" && pwd -P)/$(basename "$1")"
 }
+# --parent-run <run-id>:<nonce> marks a step of a build-feature run (KIT-19): ticket.ts and the local
+# driver check that it names the run's pending step, and the step writes and attaches no telemetry of
+# its own. A malformed value is refused here, before anything runs (exit 3, as ticket.ts refuses).
+check_parent_run() {
+  local pattern='^run-[0-9]{8}T[0-9]{6}Z(-[0-9]+)?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+  [ -n "$PARENT_RUN" ] || return 0
+  if [[ ! $PARENT_RUN =~ $pattern ]]; then
+    echo "$NAME: refused: --parent-run must be <run-id>:<nonce>, the build-feature run id and the nonce of its pending step" >&2
+    exit 3
+  fi
+}
 # The ticket argument (F1 of the ticket flow): a board ID such as NOM-4, a Notion page URL, or nothing
 # (the one folder under .work/ that holds a ticket.md). The groomer writes to the card, so it has no
-# --no-ticket mode. Sets POSITIONAL, FORCE_PULL, FORCE_RUN, VERIFY, GUIDELINES, REPO, OUT, FINISH and
-# TAKE_RECOMMENDED.
+# --no-ticket mode. Sets POSITIONAL, FORCE_PULL, FORCE_RUN, VERIFY, GUIDELINES, REPO, OUT, FINISH,
+# TAKE_RECOMMENDED, PARENT_RUN and ATTACH (the --local verify step's telemetry attach result).
 parse() {
-  POSITIONAL="" FORCE_PULL="" FORCE_RUN="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED=""
+  POSITIONAL="" FORCE_PULL="" FORCE_RUN="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
   while [ $# -gt 0 ]; do
     case $1 in
       --no-ticket) die "the groomer writes to the card; it needs a Feature Board ticket" ;;
@@ -144,10 +155,13 @@ parse() {
       --output) [ $# -ge 2 ] || die "--output needs a path"; OUT=$2; shift 2 ;;
       --finish) FINISH=1; shift ;;
       --take-recommended) TAKE_RECOMMENDED=1; shift ;;
+      --parent-run) [ $# -ge 2 ] || die "--parent-run needs <run-id>:<nonce>"; PARENT_RUN=$2; shift 2 ;;
+      --attach) [ $# -ge 2 ] || die "--attach needs the telemetry attach result as JSON"; ATTACH=$2; shift 2 ;;
       -*) die "unknown option: $1" ;;
       *) [ -z "$POSITIONAL" ] || die "one ticket at a time"; POSITIONAL=${1#@}; shift ;;
     esac
   done
+  check_parent_run
   REPO=$(git -C "${REPO:-$PWD}" rev-parse --show-toplevel) || die "run inside a Git repo or pass --repo"
   [ -z "$GUIDELINES" ] || GUIDELINES=$(absolute_file "$GUIDELINES")
   if [ -n "$POSITIONAL" ] && [ -e "$POSITIONAL" ]; then
@@ -161,12 +175,13 @@ board_url() { sed -nE 's/.*"board"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$R
 # exits 3 before anything is launched), pull its pages into .work/<id>-<slug>/ (Grooming Decisions
 # included), put this run's marker on that page and make the start move. A board the integration
 # cannot read gets the BOARD-010 hint. Reads the key=value lines of scripts/ticket.ts into T_FOLDER,
-# T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS, T_INPUT.
+# T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS, T_INPUT, and the run id and start time finish takes back
+# into T_RUN_ID and T_RUN_STARTED (none with --parent-run).
 ticket_start() {
   local out err code=0 line key value board
   out=$(mktemp "${TMPDIR:-/tmp}/groomer-ticket.XXXXXX")
   err=$(mktemp "${TMPDIR:-/tmp}/groomer-ticket-err.XXXXXX")
-  agent_node scripts/ticket.ts start "$POSITIONAL" --repo "$REPO" ${FORCE_PULL:+--force-pull} ${FORCE_RUN:+--force-run} > "$out" 2> "$err" || code=$?
+  agent_node scripts/ticket.ts start "$POSITIONAL" --repo "$REPO" ${FORCE_PULL:+--force-pull} ${FORCE_RUN:+--force-run} ${PARENT_RUN:+--parent-run "$PARENT_RUN"} > "$out" 2> "$err" || code=$?
   cat "$err" >&2
   if [ "$code" != 0 ]; then
     if grep -Eq 'Notion [0-9]{3} \(' "$err"; then
@@ -182,6 +197,7 @@ ticket_start() {
     case $key in
       folder) T_FOLDER=$value ;; id) T_ID=$value ;; title) T_TITLE=$value ;; url) T_URL=$value ;;
       before) T_BEFORE=$value ;; status) T_STATUS=$value ;; input) T_INPUT=$value ;;
+      run-id) T_RUN_ID=$value ;; run-started) T_RUN_STARTED=$value ;;
     esac
   done < "$out"
   rm -f "$out"
@@ -192,6 +208,7 @@ cmd_start() {
   [ -z "$FINISH" ] || die "--finish only applies to local"
   [ -z "$VERIFY" ] || die "--verify only applies to local"
   [ -z "$TAKE_RECOMMENDED" ] || die "--take-recommended only applies to local"
+  [ -z "$ATTACH" ] || die "--attach only applies to local --verify"
   [ -z "$OUT" ] || die "--output: the groomer always writes to .work/<id>-<slug>/groom, where its finish step reads the record"
   local run prompt eve="" folder="" idea
   resolve_agent
@@ -233,13 +250,18 @@ printf '%s\n' "$code" > "$RUN/exit"
 # one writer of the final word, which it prints first as run-status=<word>.
 status=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).status ?? 'incomplete' } catch { 'incomplete' }" "$OUTPUT/trace/groom.json" 2>/dev/null || echo incomplete)
 case $status in needs-author|confirmed|stopped) outcome=--ok ;; *) outcome=--failed ;; esac
-finish=$(node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" "$outcome" --run-status "$status" --export "$OUTPUT" 2>&1)
+# The run's telemetry (KIT-19): the run id and start time ticket.ts start printed, or the build-feature
+# step this run is (--parent-run), which writes none of its own.
+telemetry=()
+[ -z "$RUN_ID" ] || telemetry+=(--run-id "$RUN_ID" --run-started "$RUN_STARTED")
+[ -z "$PARENT_RUN" ] || telemetry+=(--parent-run "$PARENT_RUN")
+finish=$(node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" "$outcome" --run-status "$status" --export "$OUTPUT" ${telemetry[@]+"${telemetry[@]}"} 2>&1)
 printf '%s\n' "$finish" >> "$RUN/log"
 recorded=$(printf '%s\n' "$finish" | sed -n 's/^run-status=//p' | head -n 1)
 printf '%s\n' "${recorded:-$status}" > "$RUN/status"
 RUNNER
   chmod +x "$run/run.sh"
-  AGENT="$AGENT" EVE="$eve" REPO="$REPO" GUIDELINES="$GUIDELINES" OUTPUT="$OUT" PROMPT="$prompt" RUN="$run" FOLDER="$folder" GROOMER_REPO="$REPO" GROOMER_FOLDER="$folder" screen -dmS "groomer-$(basename "$run")" "$run/run.sh"
+  AGENT="$AGENT" EVE="$eve" REPO="$REPO" GUIDELINES="$GUIDELINES" OUTPUT="$OUT" PROMPT="$prompt" RUN="$run" FOLDER="$folder" GROOMER_REPO="$REPO" GROOMER_FOLDER="$folder" RUN_ID="$T_RUN_ID" RUN_STARTED="$T_RUN_STARTED" PARENT_RUN="$PARENT_RUN" screen -dmS "groomer-$(basename "$run")" "$run/run.sh"
   printf 'started\nrun: %s\nidea: %s\nrepo: %s\noutput: %s\ninstructions: %s\n' "$run" "$idea" "$REPO" "$OUT" "$AGENT/agent/instructions.md"
   agent_line
 }
@@ -258,6 +280,8 @@ cmd_local() {
   [ -z "$FORCE_RUN" ] || args+=(--force-run)
   [ -z "$VERIFY" ] || args+=(--verify)
   [ -z "$FINISH" ] || args+=(--finish)
+  [ -z "$PARENT_RUN" ] || args+=(--parent-run "$PARENT_RUN")
+  [ -z "$ATTACH" ] || args+=(--attach "$ATTACH")
   [ -z "$TAKE_RECOMMENDED" ] || args+=(--take-recommended)
   resolve_agent
   agent_node scripts/local.ts "${args[@]}"
@@ -310,5 +334,5 @@ case ${1:-} in
   local) shift; cmd_local "$@" ;;
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
-  *) die "usage: groomer.sh start [TICKET] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] | status RUN | wait RUN [--max SECONDS] | local [TICKET] [--force-pull] [--force-run] [--verify] [--guidelines FILE] [--repo DIR] [--finish] [--take-recommended]" ;;
+  *) die "usage: groomer.sh start [TICKET] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] [--parent-run RUN:NONCE] | status RUN | wait RUN [--max SECONDS] | local [TICKET] [--force-pull] [--force-run] [--verify] [--guidelines FILE] [--repo DIR] [--finish] [--take-recommended] [--parent-run RUN:NONCE] [--attach JSON]" ;;
 esac

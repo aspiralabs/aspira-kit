@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
 import { TicketArgumentError } from '@aspiralabs/agent-common/lib/ticket'
-import { afterRun, beforeRun, verifyRun } from '@aspiralabs/agent-common/lib/ticket-driver'
+import { afterRun, attachArg, beforeRun, sessionUsageStep, verifyRun } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { FlowRefused, writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { KnowledgeRequired, runLocal } from '../agent/lib/local.ts'
 
@@ -13,8 +13,12 @@ import { KnowledgeRequired, runLocal } from '../agent/lib/local.ts'
 // push of review.md as the PR Review page; the reviewer makes no move). --verify is the last step.
 // --finish exports what exists as incomplete. Without the engineering guidelines folder it refuses
 // (exit 3) and prints the pages to fetch. Every step names the agent package that ran (`agent`).
-const usage = 'Usage: pnpm review:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <github-pr | absolute-repo-path>) [--branch B] [--base main] [--max-rounds N] [--output DIR] [--knowledge DIR] [--since DIR] [--max-cost USD] [--no-comment] [--force-pull] [--verify] [--finish]'
+const usage = 'Usage: pnpm review:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <github-pr | absolute-repo-path>) [--branch B] [--base main] [--max-rounds N] [--output DIR] [--knowledge DIR] [--since DIR] [--max-cost USD] [--no-comment] [--force-pull] [--verify] [--finish] [--parent-run RUN:NONCE] [--attach JSON]'
 const REFUSED = 3
+const SKILL = 'pr-reviewer' as const
+
+/** The session usage report of a --local hand run: <export>/trace/session-usage.json (KIT-19, F9). */
+const sessionUsageFile = (exportDir: string) => join(exportDir, 'trace', 'session-usage.json')
 
 const agent = await agentVersion(new URL('..', import.meta.url))
 try {
@@ -35,19 +39,21 @@ try {
       'force-pull': { type: 'boolean' },
       verify: { type: 'boolean' },
       finish: { type: 'boolean' },
+      'parent-run': { type: 'string' },
+      attach: { type: 'string' },
     },
   })
   if (values.repo === undefined || positionals.length > 0 || (values.ticket !== undefined && values['no-ticket'] !== undefined)) throw new Error(usage)
   const repo = values.repo
   const rounds = values['max-rounds']
-  const context = { skill: 'pr-reviewer' as const, repo }
+  const context = { skill: SKILL, repo }
   const outputFor = (folder: string) => values.output ?? join(folder, 'pr-review')
   if (values.verify === true) {
-    const verified = await verifyRun(context, { positional: values.ticket }, outputFor)
+    const verified = await verifyRun(context, { positional: values.ticket, attach: attachArg(values.attach) }, outputFor)
     console.log(JSON.stringify({ pending: false, stage: 'board-verify', ...verified, agent }, null, 2))
     if (!verified.verified) process.exitCode = 1
   } else {
-    const before = await beforeRun(context, { positional: values['no-ticket'] ?? values.ticket, noTicket: values['no-ticket'] !== undefined, forcePull: values['force-pull'] })
+    const before = await beforeRun(context, { positional: values['no-ticket'] ?? values.ticket, noTicket: values['no-ticket'] !== undefined, forcePull: values['force-pull'], parentRun: values['parent-run'] })
     if (before.kind === 'stage') {
       console.log(JSON.stringify({ ...before.stage, agent }, null, 2))
     } else {
@@ -69,11 +75,12 @@ try {
       })
       if (!result.pending) await recordAgentVersion(result.dir, agent)
       if (!result.pending && before.kind === 'ticket') {
-        const board = await afterRun(context, before, { ok: result.status === 'complete', status: result.status, exportDir: result.dir, verifyCommand: `pr-reviewer.sh local ${before.ticket.id} --verify` })
+        const board = await afterRun(context, before, { ok: result.status === 'complete', status: result.status, exportDir: result.dir, verifyCommand: `pr-reviewer.sh local ${before.ticket.id} --verify`, sessionUsage: sessionUsageFile(result.dir) })
         console.log(JSON.stringify({ ...result, agent, ...board }, null, 2))
       } else {
         if (!result.pending) await writeBoardTrace(result.dir, before.trace)
-        console.log(JSON.stringify({ ...result, agent, ticket: before.kind === 'none' ? 'none' : `${before.ticket.id} ${before.ticket.title}`, ...(before.kind === 'none' ? {} : { folder: before.folder }) }, null, 2))
+        const report = before.kind === 'ticket' && result.pending ? await sessionUsageStep(SKILL, before.folder, sessionUsageFile(outputFor(before.folder))) : {}
+        console.log(JSON.stringify({ ...result, agent, ticket: before.kind === 'none' ? 'none' : `${before.ticket.id} ${before.ticket.title}`, ...(before.kind === 'none' ? {} : { folder: before.folder }), ...report }, null, 2))
       }
       if (!result.pending && result.status !== 'complete') process.exitCode = 1
     }
