@@ -1,12 +1,16 @@
 // What every agent's --local driver (scripts/local.ts) does around its runLocal: resolve the ticket
 // argument, run the board stage before knowledge, and at the end print the board actions for the
 // session with the trace written into the export. One module, so the six drivers behave the same
-// and are tested once. Nothing here touches an agent's own pipeline.
+// and are tested once. Nothing here touches an agent's own pipeline. It also writes
+// `.work/<id>-<slug>/progress.md` at every return to the session, so a crashed or resumed run
+// always has a Next action to read (F14-F21).
 
 import { existsSync } from 'node:fs'
-import { mkdir, rename, rm } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { readGroomRecord } from './groom-record.ts'
+import { appendRefusal, nextAction, PROGRESS_NOTE_FILE, writeProgressNote, type ProgressNote } from './progress-note.ts'
+import { redact } from './redact.ts'
 import { REFUSED_EXIT, USAGE_EXIT, exitCodeFor, readRunStatus, type ReasonCode, type RunStatus } from './run-status.ts'
 import { TICKET_FILE, TicketArgumentError, WORK_DIR, ticketArgument, type BoardTrace, type Skill, type TicketArgument, type TicketRecord } from './ticket.ts'
 import { FlowRefused, findWorkFolders, inputFileFor, localBoardEnd, localBoardStep, localBoardVerify, localStateDir, noTicketTrace, readAspira, readTicketMd, type BoardStage } from './ticket-flow.ts'
@@ -56,6 +60,21 @@ export async function resolveArgument(context: DriverContext, args: DriverTicket
   return argument
 }
 
+/** A note's fields this module does not yet have a real value for (no run has an id of its own here); every call site fills in what it knows. */
+const NO_RUN_ID = '-'
+
+/** Writes (or best-effort skips) the progress note for one driver stage. Never throws: a note is a convenience, not a gate. */
+async function note(context: DriverContext, folder: string | null, build: () => Promise<ProgressNote | null> | ProgressNote | null): Promise<void> {
+  if (folder === null) return
+  try {
+    const built = await build()
+    if (built === null) return
+    await writeProgressNote({ folder, repo: context.repo, notionToken: context.env?.NOTION_TOKEN, note: built })
+  } catch {
+    // A note is best-effort: a failure here must never stop the run it is trying to describe.
+  }
+}
+
 /** Before the agent runs: the board stage, or the ticket with its input file (F5, F6, F8). */
 export async function beforeRun(context: DriverContext, args: DriverTicketArgs): Promise<BeforeRun> {
   const argument = await resolveArgument(context, args)
@@ -70,7 +89,19 @@ export async function beforeRun(context: DriverContext, args: DriverTicketArgs):
     await rename(join(shared, 'board.json'), join(stateDir, 'board.json'))
   }
   const step = await localBoardStep({ skill: context.skill, repo: context.repo, argument, board: config.board, stateDir, force: args.forcePull, forceRun: args.forceRun, dev: context.dev, env: context.env, ...(context.beforeClaim === undefined ? {} : { beforeClaim: context.beforeClaim }) })
-  if ('stage' in step) return { kind: 'stage', stage: step.stage }
+  if ('stage' in step) {
+    // Never clobber a note a finished run already left (Step 6's Next action, say) with a bare
+    // "still resolving" announcement: only write one here when the ticket has none yet.
+    const alreadyNoted = step.stage.folder !== null && (await readFile(join(step.stage.folder, PROGRESS_NOTE_FILE), 'utf8').catch(() => undefined)) !== undefined
+    if (!alreadyNoted) {
+      await note(context, step.stage.folder, async () => {
+        const ticket = step.stage.folder === null ? null : await readTicketMd(step.stage.folder)
+        if (ticket === null) return null
+        return { id: ticket.id, title: ticket.title, skill: context.skill, runId: NO_RUN_ID, runStatus: 'needs-author', status: ticket.status, expectedStatus: null, outputs: [], completed: [], decisions: [], openIssues: [], nextAction: nextAction({ kind: 'continue', id: ticket.id, skill: context.skill }) }
+      })
+    }
+    return { kind: 'stage', stage: step.stage }
+  }
   const input = GATES[context.skill].input === undefined ? null : inputFileFor(context.skill, step.ready.folder)
   const ticket = step.ready.ticket
   return { kind: 'ticket', argument: { ...argument, folder: step.ready.folder }, folder: step.ready.folder, input, statusBefore: step.ready.statusBefore, ticket: { id: ticket.id, title: ticket.title, url: ticket.url, status: ticket.status, ...(ticket.pr === undefined ? {} : { pr: ticket.pr }) }, trace: step.ready.trace }
@@ -95,6 +126,20 @@ export async function afterRun(context: DriverContext, before: BeforeRun & { kin
     ...(run.round === undefined ? {} : { round: run.round }),
     ...(board === undefined ? {} : { board }),
   })
+  await note(context, before.folder, () => ({
+    id: before.ticket.id,
+    title: before.ticket.title,
+    skill: context.skill,
+    runId: NO_RUN_ID,
+    runStatus: run.status,
+    status: before.ticket.status,
+    expectedStatus: end.verify?.status ?? null,
+    outputs: [],
+    completed: [],
+    decisions: [],
+    openIssues: end.remaining === null ? [] : [end.remaining],
+    nextAction: end.verify === null ? null : { step: `Verify the board actions ${context.skill} asked for`, do: [], run: [end.verify.command], session: end.verify.command },
+  }))
   return {
     ticket: `${before.ticket.id} ${before.ticket.title}`,
     folder: before.folder,
@@ -115,6 +160,13 @@ export async function verifyRun(context: DriverContext, args: DriverTicketArgs, 
   if (result.ok && (await roundStateEnds(context.skill, folder, args.finish === true))) await rm(boardStateDir(folder, context.skill), { recursive: true, force: true }).catch(() => undefined)
   const ticket = await readTicketMd(folder)
   const runStatus: RunStatus = result.ok ? 'ready' : 'incomplete'
+  await note(context, folder, () => {
+    if (ticket === null) return null
+    const action = result.ok
+      ? nextAction({ kind: 'run', id: ticket.id, skill: context.skill, runStatus: 'ready', verified: true, liveStatus: ticket.status })
+      : { step: 'Fix the verify problem, then run --verify again', do: [], run: [], session: '' }
+    return { id: ticket.id, title: ticket.title, skill: context.skill, runId: NO_RUN_ID, runStatus, status: ticket.status, expectedStatus: null, outputs: [], completed: [], decisions: [], openIssues: result.problem === null ? [] : [result.problem], nextAction: action }
+  })
   return {
     verified: result.ok,
     ticket: ticket === null ? argument.ref : `${ticket.id} ${ticket.title}`,
@@ -153,19 +205,56 @@ export class KnowledgePrerequisiteError extends Error {
 }
 
 /** What handleRunError reports: the status and exit code a driver's caller prints, and the one reason sentence (F9). */
-export type RunErrorResult = { status: 'refused' | 'blocked' | 'incomplete'; reason: string; exitCode: number }
+export type RunErrorResult = { status: 'refused' | 'blocked' | 'incomplete'; reason: string; /** Same text as `reason`, for a caller that reads an error-shaped `.message`. */ message?: string; exitCode: number }
+
+/** The folder a thrown error's own ticket argument resolves to, or null when none can be resolved at all (no positional, no known folder). Never throws. */
+async function folderForError(context: DriverContext, args: DriverTicketArgs): Promise<string | null> {
+  try {
+    const argument = await resolveArgument(context, args)
+    return argument.kind === 'path' ? null : (argument.folder ?? null)
+  } catch {
+    return null
+  }
+}
 
 /**
  * Turns an error thrown by beforeRun/afterRun/verifyRun (or the agent's own pipeline) into the
  * run's final status and exit code (F9): FlowRefused and TicketArgumentError are refused (a board
  * gate or argument problem, REFUSED_EXIT); a KnowledgePrerequisiteError is blocked; a UsageError is
  * incomplete at USAGE_EXIT; anything else is incomplete with the error's own message as the reason.
- * Updating progress.md for this is the caller's job (ticket-cli.ts's `note`/`finish` commands and
- * each agent's scripts/local.ts), once progress-note.ts exists to write it.
+ *
+ * When a ticket folder can be resolved: a refusal appends a dated Open issues line to an existing,
+ * finished note and keeps its Next action (appendRefusal); nothing is written when no finished note
+ * exists yet. Any other status replaces the note outright with status incomplete, the reason under
+ * Open issues, and Next action "rerun the step". No ticket folder at all writes nothing either way.
  */
-export async function handleRunError(_context: DriverContext, error: unknown, _args: DriverTicketArgs): Promise<RunErrorResult> {
-  if (error instanceof FlowRefused || error instanceof TicketArgumentError) return { status: 'refused', reason: error.message, exitCode: REFUSED_EXIT }
-  if (error instanceof KnowledgePrerequisiteError) return { status: 'blocked', reason: error.message, exitCode: 1 }
-  if (error instanceof UsageError) return { status: 'incomplete', reason: error.message, exitCode: USAGE_EXIT }
-  return { status: 'incomplete', reason: error instanceof Error ? error.message : String(error), exitCode: 1 }
+export async function handleRunError(context: DriverContext, error: unknown, args: DriverTicketArgs): Promise<RunErrorResult> {
+  const reason = error instanceof FlowRefused || error instanceof TicketArgumentError || error instanceof KnowledgePrerequisiteError || error instanceof UsageError || error instanceof Error ? error.message : String(error)
+  const result: RunErrorResult =
+    error instanceof FlowRefused || error instanceof TicketArgumentError
+      ? { status: 'refused', reason, message: reason, exitCode: REFUSED_EXIT }
+      : error instanceof KnowledgePrerequisiteError
+        ? { status: 'blocked', reason, message: reason, exitCode: 1 }
+        : error instanceof UsageError
+          ? { status: 'incomplete', reason, message: reason, exitCode: USAGE_EXIT }
+          : { status: 'incomplete', reason, message: reason, exitCode: 1 }
+  const folder = await folderForError(context, args)
+  if (folder === null) return result
+  const file = join(folder, PROGRESS_NOTE_FILE)
+  const redacted = await redact(result.reason, context.repo, { extra: context.env?.NOTION_TOKEN === undefined ? [] : [context.env.NOTION_TOKEN] }).catch(() => result.reason)
+  if (result.status === 'refused' || result.status === 'blocked') {
+    const existing = await readFile(file, 'utf8').catch(() => undefined)
+    if (existing !== undefined) await writeFile(file, appendRefusal(existing, redacted)).catch(() => undefined)
+    return result
+  }
+  const ticket = await readTicketMd(folder).catch(() => null)
+  if (ticket === null) return result
+  const command = `.claude/skills/aspira-${context.skill}/scripts/${context.skill}.sh local ${ticket.id}`
+  await writeProgressNote({
+    folder,
+    repo: context.repo,
+    notionToken: context.env?.NOTION_TOKEN,
+    note: { id: ticket.id, title: ticket.title, skill: context.skill, runId: NO_RUN_ID, runStatus: 'incomplete', status: ticket.status, expectedStatus: null, outputs: [], completed: [], decisions: [], openIssues: [redacted], nextAction: { step: 'The run ended incomplete: rerun the step', do: [], run: [command], session: command } },
+  }).catch(() => undefined)
+  return result
 }

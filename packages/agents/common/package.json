@@ -15,6 +15,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aspiralabs/kit": "workspace:*",
     "@modelcontextprotocol/sdk": "1.30.0",
     "ai": "^7.0.105",
     "eve": "^0.63.0",

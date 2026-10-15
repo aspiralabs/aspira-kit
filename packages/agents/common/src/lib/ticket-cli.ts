@@ -7,9 +7,10 @@
 import { readFile } from 'node:fs/promises'
 import { parseArgs } from 'node:util'
 import { board as makeBoard, type Board } from './board.ts'
+import { nextAction, writeProgressNote } from './progress-note.ts'
 import { exitCodeFor, readRunStatus, REFUSED_EXIT, USAGE_EXIT } from './run-status.ts'
 import { GATES, SKILLS, reportHeader, type Skill } from './ticket.ts'
-import { FlowRefused, finishFlow, inputFileFor, readAspira, startFlow } from './ticket-flow.ts'
+import { FlowRefused, finishFlow, inputFileFor, readAspira, readTicketMd, startFlow } from './ticket-flow.ts'
 import { noBoardMessage, resolveArgument, UsageError } from './ticket-driver.ts'
 
 export { REFUSED_EXIT }
@@ -37,7 +38,7 @@ export async function ticketCli(
     const { values, positionals } = parseArgs({
       args: argv,
       allowPositionals: true,
-      options: { repo: { type: 'string' }, folder: { type: 'string' }, 'force-pull': { type: 'boolean' }, 'force-run': { type: 'boolean' }, dev: { type: 'string' }, ok: { type: 'boolean' }, failed: { type: 'boolean' }, 'run-status': { type: 'string' }, 'pr-url': { type: 'string' }, export: { type: 'string' }, file: { type: 'string' }, skill: { type: 'string' } },
+      options: { repo: { type: 'string' }, folder: { type: 'string' }, 'force-pull': { type: 'boolean' }, 'force-run': { type: 'boolean' }, dev: { type: 'string' }, ok: { type: 'boolean' }, failed: { type: 'boolean' }, 'run-status': { type: 'string' }, 'pr-url': { type: 'string' }, export: { type: 'string' }, file: { type: 'string' }, skill: { type: 'string' }, run: { type: 'string' } },
     })
     const [command, positional, ...extra] = positionals
     if (command === undefined || extra.length > 0 || values.repo === undefined) throw new UsageError(usage(skill))
@@ -53,6 +54,19 @@ export async function ticketCli(
       io.out(line('reason', read === null ? `${values.file}${text === undefined ? ' is missing' : word === undefined ? ' has no status' : `'s status is "${word}", which is not a known run status`}` : ''))
       io.out(line('reasonCode', read?.reasonCode ?? ''))
       return exitCodeFor(status)
+    }
+    if (command === 'note') {
+      if (values.folder === undefined || values.run === undefined) throw new UsageError(usage(skill))
+      const ticket = await readTicketMd(values.folder)
+      if (ticket === null) throw new UsageError(`${values.folder}/ticket.md is missing; the start step writes it`)
+      const wait = `${skill}.sh wait ${values.run}`
+      await writeProgressNote({
+        folder: values.folder,
+        repo,
+        notionToken: env.NOTION_TOKEN,
+        note: { id: ticket.id, title: ticket.title, skill, runId: values.run, runStatus: 'needs-author', status: ticket.status, expectedStatus: null, outputs: [], completed: [], decisions: [], openIssues: [], nextAction: { step: `${skill} is running: wait for it to finish`, do: [], run: [wait], session: wait } },
+      })
+      return 0
     }
     const config = await readAspira(repo)
     if (config === null) {
@@ -93,6 +107,19 @@ export async function ticketCli(
       for (const notice of finished.notices) io.out(notice)
       if (finished.remaining !== null) io.out(finished.remaining)
       io.out(`Board trace: ${finished.traceFile}`)
+      const ticketAfter = await readTicketMd(values.folder).catch(() => null)
+      if (ticketAfter !== null) {
+        const action =
+          finished.runStatus === 'ready'
+            ? nextAction({ kind: 'run', id: ticketAfter.id, skill, runStatus: 'ready', verified: true, liveStatus: ticketAfter.status })
+            : nextAction({ kind: 'run', id: ticketAfter.id, skill, runStatus: finished.runStatus, reason: finished.pushFailures[0] ?? finished.notices[0] })
+        await writeProgressNote({
+          folder: values.folder,
+          repo,
+          notionToken: env.NOTION_TOKEN,
+          note: { id: ticketAfter.id, title: ticketAfter.title, skill, runId: values.run ?? '-', runStatus: finished.runStatus, status: ticketAfter.status, expectedStatus: null, outputs: [], completed: finished.notices, decisions: [], openIssues: finished.pushFailures, nextAction: action },
+        }).catch(() => undefined)
+      }
       return exitCodeFor(finished.runStatus)
     }
     throw new UsageError(usage(skill))

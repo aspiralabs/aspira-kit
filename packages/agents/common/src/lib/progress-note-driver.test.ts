@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Board } from './board'
 import { parseNextAction, parseProgressNote } from './progress-note'
-import { renderTicketMd, type TicketRecord } from './ticket'
+import { GATES, renderTicketMd, type TicketRecord } from './ticket'
 import { ticketCli } from './ticket-cli'
 import { afterRun, beforeRun, handleRunError, verifyRun, type BeforeRun, type DriverContext } from './ticket-driver'
 import { writeBoardTrace } from './ticket-flow'
@@ -61,12 +61,20 @@ async function writeTicket(record: TicketRecord) {
 /** Play the session's side of the board stage until the ticket is claimed and ready (ticket-flow.ts:864-970). */
 async function driveToReady(initial: TicketRecord): Promise<BeforeRun & { kind: 'ticket' }> {
   let current = initial
+  // The real flow pulls this from the ticket's own child page; stubbed here since no board is involved.
+  const input = GATES[context.skill].input
+  if (input !== undefined) {
+    const file = join(folder, Array.isArray(input) ? input[0]! : input)
+    await mkdir(join(file, '..'), { recursive: true })
+    await writeFile(file, '## Plan\n\n- [ ] F1: a step.\n')
+  }
   for (let i = 0; i < 8; i += 1) {
     const result = await beforeRun(context, { positional: 'KIT-2' })
     if (result.kind !== 'stage') return result as BeforeRun & { kind: 'ticket' }
     for (const action of result.stage.actions) {
       if (action.action === 'set' && action.name === 'Dev') current = { ...current, dev: action.value }
       if (action.action === 'move') current = { ...current, status: action.to }
+      if (action.action === 'pull') await writeFile(action.file, `# ${action.title}\n\nStub content.\n`).catch(() => undefined)
     }
     await writeTicket(current)
   }
