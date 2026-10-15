@@ -111,7 +111,6 @@ describe('the implementor --local gate on a recovered plan', () => {
     await writeReview(review, { repoCommit: ancestor })
 
     const result = pending(await runLocal({ source: review }, { packageDir: pkg, env }))
-    if (result.stage === 'knowledge') throw new Error('expected a model stage, got knowledge')
     expect(result.stage).toBe('parallelize')
     const prompt = await readFile(result.tasks[0]!.prompt, 'utf8')
     // The recovered-from-Notion notice the gate records: the Plan page's own URL verbatim, and the

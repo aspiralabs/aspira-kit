@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 import { openDecisions } from '@aspiralabs/agent-common/lib/decisions'
 import { writeArtifacts } from './artifacts.ts'
-import { knowledgeConfig, loadKnowledge, snapshotKnowledge, type Env, type Knowledge, type KnowledgePlan, type KnowledgeRequired } from './local-knowledge.ts'
+import { knowledgeConfig, knowledgeSource, loadKnowledge, snapshotKnowledge, type Env, type Knowledge } from './local-knowledge.ts'
 import { SPECIALIST_MAX_STEPS } from './models.ts'
 import { runPipeline, type Call } from './pipeline.ts'
 import { lenses, reviewSchema, synthesisSchema, systemPrompt } from './review.ts'
@@ -21,11 +21,11 @@ import { applySnapshotGaps, prepareReview, reportDirFor, reviewContext, reviewFi
 // review.ts's systemPrompt and pipeline.ts's task prompt as this process loaded them; the notes
 // only say how this environment differs from the agent's (tools, files, output contract).
 
-/** One --local step: a snapshot (`guidelinesPath`) or, when omitted, the session-built knowledge folder. */
+/** One --local step: a load-knowledge snapshot (`guidelinesPath`) or, when omitted, the knowledge folder the run fetches itself. */
 export type LocalInput = Omit<RunInput, 'guidelinesPath'> & { guidelinesPath?: string; finish?: boolean }
 
-/** Seams for tests: the agent package whose files and env are read. */
-export type LocalDeps = { agentDir?: string; env?: Env }
+/** Seams for tests: the agent package whose files and env are read, and the knowledge walk's own fetch/API base (never set outside tests). */
+export type LocalDeps = { agentDir?: string; env?: Env; fetch?: (url: string, init?: RequestInit) => Promise<Response>; api?: string }
 
 /** A phase for the session to run: prompt and output are file paths. */
 export type LocalTask = { phase: string; prompt: string; output: string; error?: string }
@@ -45,13 +45,8 @@ export const workDirFor = (reportDir: string) => `${reportDir}.local`
 /** The agent's routing instructions: what the session, standing in for the agent's router, reads in full. */
 export const orchestratorFile = (agentDir: string = PACKAGE_DIR) => join(agentDir, 'agent', 'instructions.md')
 
-/** Where the session puts the Notion pages when no --guidelines snapshot is given. */
+/** Where the run loads the Notion pages when no --guidelines snapshot is given. */
 export const knowledgeDirFor = (reportDir: string) => join(workDirFor(reportDir), 'knowledge')
-
-/** The first stage of a run without guidelines: the pages to fetch, printed instead of starting. */
-export function knowledgeStage(error: KnowledgeRequired, agentDir: string = PACKAGE_DIR): { pending: true; status: 'pending'; stage: 'knowledge'; orchestrator: string; knowledge: KnowledgePlan; message: string } {
-  return { pending: true, status: 'pending', stage: 'knowledge', orchestrator: orchestratorFile(agentDir), knowledge: error.plan, message: error.message }
-}
 
 const readOnly = (repo: string) => `Read-only tools only: Read, Grep, Glob and non-mutating git commands, in the repository at ${repo}.`
 const phaseNotes: Record<string, (repo: string) => string> = {
@@ -61,15 +56,15 @@ const phaseNotes: Record<string, (repo: string) => string> = {
 }
 const specialistNote = (repo: string) => `${readOnly(repo)} The agent gives this phase ${SPECIALIST_MAX_STEPS} tool rounds; be as efficient: batch reads and searches.`
 
-/** Tool phases with only a --guidelines snapshot read the topic pages it routes to through the Notion MCP, as the agent's Notion connection allows. */
-export const notionNote = 'Engineering guidelines: the required snapshot in the task routes to topic pages (its "Which pages to read" table). Read the linked pages that apply with the Notion MCP (notion-fetch, read-only); they stand in for the agent\'s read-only guideline tools (list_guidelines, read_guideline). Never create, edit, move or comment on anything in Notion. If the Notion MCP is not available in this session, record each unread page as a gap.'
+/** Tool phases with a --guidelines snapshot read the topic pages from the folder load-knowledge wrote it in, never from Notion (F49). */
+export const snapshotNote = (file: string) => `Engineering guidelines: the REQUIRED GUIDELINES in the task are ${file}, a load-knowledge snapshot. The topic pages they route to are the files beside it in ${dirname(file)}, indexed by ${join(dirname(file), 'INDEX.md')}; they stand in for the agent's read-only guideline tools (list_guidelines, read_guideline). Open the pages that apply with Read; record a page that is not there as a gap. Do not edit them.`
 
 /** Tool phases with a knowledge folder read the topic pages from it: the files stand in for the agent's read-only guideline tools. */
 export const folderNote = (dir: string) => `Engineering guidelines: the REQUIRED GUIDELINES in the task are ${join(dir, 'REQUIRED.md')}. The topic pages they route to are files in ${dir}, indexed by ${join(dir, 'INDEX.md')}, one file per page; they stand in for the agent's read-only guideline tools (list_guidelines, read_guideline). Open the pages that apply to this spec with Read. Do not edit them.`
 
 /** The file a phase subagent reads: the agent's system prompt and task prompt verbatim, then the output contract. */
 export function renderPhasePrompt(phase: string, prompt: string, output: string, repo: string, schema: z.ZodType, knowledge?: Pick<Knowledge, 'source' | 'path'>): string {
-  const guidelines = knowledge?.source === 'folder' ? folderNote(knowledge.path) : notionNote
+  const guidelines = knowledge?.source === 'snapshot' ? snapshotNote(knowledge.path) : folderNote(knowledge?.path ?? 'the knowledge folder')
   return [
     `# Aspira spec review: ${phase} (--local)`, '',
     `You are the \`${phase}\` phase of the Aspira spec review, running as a subagent of a Claude Code session instead of inside spec-reviewer. The System and Task sections below are the exact prompt the agent sends. Follow them.`, '',
@@ -98,18 +93,22 @@ async function resolveKnowledge(input: LocalInput, saved: State | null, reportDi
     throw new Error(`--guidelines ${given} differs from the ${started.source === 'snapshot' ? started.path : `knowledge folder ${started.path}`} this review started with. Drop it, or delete ${workDirFor(reportDir)} to start over.`)
   }
   const snapshot = given ?? (started?.source === 'snapshot' ? started.path : undefined)
-  if (snapshot !== undefined) return snapshotKnowledge(snapshot)
-  const config = await knowledgeConfig(deps.agentDir ?? PACKAGE_DIR, deps.env ?? process.env)
-  return loadKnowledge(knowledgeDirFor(reportDir), config)
+  const env = deps.env ?? process.env
+  const config = await knowledgeConfig(deps.agentDir ?? PACKAGE_DIR, env)
+  if (snapshot !== undefined) return snapshotKnowledge(snapshot, config)
+  const source = await knowledgeSource(input.repoPath, env)
+  return loadKnowledge(knowledgeDirFor(reportDir), config, { ...source, ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.api ? { api: deps.api } : {}) })
 }
 
-/** One step of a --local review: the next stage's tasks, or the exported report. Throws KnowledgeRequired, before anything starts, when there are no guidelines. */
+/** One step of a --local review: the next stage's tasks, or the exported report. Throws KnowledgeBlocked, before anything starts, when the guidelines cannot be loaded (F52). */
 export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   const orchestrator = orchestratorFile(deps.agentDir)
   const reportDir = reportDirFor(input)
   const work = workDirFor(reportDir)
   const stateFile = join(work, 'state.json')
   const saved = await readFile(stateFile, 'utf8').then((text) => stateSchema.parse(JSON.parse(text)), () => null)
+  // No folder and nothing to fetch it with throws KnowledgeBlocked (pending false, status blocked):
+  // a blocked run end that handleRunError reports, never a pending stage for the session (F52).
   const knowledge = await resolveKnowledge(input, saved, reportDir, deps)
 
   const prepared = await prepareReview({ ...input, guidelinesPath: knowledge.requiredFile }, new AbortController().signal)

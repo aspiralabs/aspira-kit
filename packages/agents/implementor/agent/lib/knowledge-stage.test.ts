@@ -77,12 +77,13 @@ describe('the implementor --local knowledge stage (T63)', () => {
 
     const first: LocalResult = await runLocal(ws.input, deps)
     expect(notion.requests.length).toBeGreaterThan(0)
-    if (!first.pending || first.stage === 'knowledge') throw new Error(`expected a model stage, got ${JSON.stringify(first)}`)
+    // `as string`: there is no knowledge stage in the type any more; the guard still catches one at runtime.
+    if (!first.pending || (first.stage as string) === 'knowledge') throw new Error(`expected a model stage, got ${JSON.stringify(first)}`)
     for (const task of first.tasks) expect(await readFile(task.prompt, 'utf8')).not.toMatch(/Notion MCP/i)
 
     const afterFirst = notion.requests.length
     const second: LocalResult = await runLocal(ws.input, deps)
-    if (!second.pending || second.stage === 'knowledge') throw new Error(`expected a model stage, got ${JSON.stringify(second)}`)
+    if (!second.pending || (second.stage as string) === 'knowledge') throw new Error(`expected a model stage, got ${JSON.stringify(second)}`)
     expect(notion.requests.length).toBe(afterFirst)
   })
 

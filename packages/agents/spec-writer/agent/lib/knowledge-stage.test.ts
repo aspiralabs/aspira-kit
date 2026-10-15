@@ -70,7 +70,10 @@ describe('the spec writer --local knowledge stage (T60)', () => {
 
   it('loads the folder itself once per run before any prompt is written', async () => {
     const ws = await workspace()
-    await writeFile(join(ws.agentDir, '.env.local'), `KNOWLEDGE_PAGE=${ROOT}\nNOTION_TOKEN=${TOKEN}\n`)
+    // KNOWLEDGE_PAGE is the agent's own config; NOTION_TOKEN comes from the project's .env.local,
+    // never the agent package's (F52).
+    await writeFile(join(ws.agentDir, '.env.local'), `KNOWLEDGE_PAGE=${ROOT}\n`)
+    await writeFile(join(ws.repo, '.env.local'), `NOTION_TOKEN=${TOKEN}\n`)
     const deps: FutureDeps = { agentDir: ws.agentDir, fetch, api: notion.api }
 
     const first = await runLocal(ws.input, deps)

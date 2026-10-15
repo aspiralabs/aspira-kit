@@ -2,10 +2,10 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
-import { exitCodeFor, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
+import { USAGE_EXIT, exitCodeFor, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
 import { afterRun, beforeRun, handleRunError, UsageError, verifyRun, type DriverContext, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { readTicketMd, writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
-import { KnowledgeRequired, knowledgeStage, runLocal } from '../agent/lib/local.ts'
+import { runLocal } from '../agent/lib/local.ts'
 
 // At a passing --verify, the Spec Reviewed page's last-edited time (as ticket.md's Pages table
 // shows it) is folded into the export's own trace/review.json, so the planner can tell a pulled
@@ -23,21 +23,30 @@ async function recordSpecReviewedEditedAt(folder: string, exportDir: string): Pr
 
 // One step of a --local review. The ticket comes first: the `board` stage (resolve, pull) is printed
 // before anything else, and the driver refuses, before any model stage, when ticket.md does not show
-// the Status the reviewer needs. Then the knowledge stage (the Notion pages to fetch) until the
-// guidelines are there, then the pending phases (prompt and output file per phase) or, once every
+// the Status the reviewer needs. Then the run loads the guidelines itself (load-knowledge, once per
+// run; blocked, exit 1, without a NOTION_TOKEN), then the pending phases (prompt and output file per phase) or, once every
 // phase output is present, the finished report with the end-of-run board actions. --verify is the
 // last step: ticket.md must show what the end stage expected. --finish exports what exists as
 // incomplete. Every step names the agent package that ran (`agent`), and an export records it in its trace.
 const usage = 'Usage: pnpm run review:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <absolute-spec>) [--guidelines FILE] [--output DIR] [--force-pull] [--verify] [--finish]'
 
+/** parseArgs, with an unknown or malformed option reported as a usage error naming it, not a crash. */
+function parseUsage<T>(parse: () => T): T {
+  try {
+    return parse()
+  } catch (error) {
+    throw new UsageError(`${error instanceof Error ? error.message : String(error)}\n${usage}`)
+  }
+}
+
 const agent = await agentVersion(new URL('..', import.meta.url))
 let context: DriverContext = { skill: 'spec-reviewer', repo: '' }
 let driverArgs: DriverTicketArgs = {}
 try {
-  const { values, positionals } = parseArgs({
+  const { values, positionals } = parseUsage(() => parseArgs({
     allowPositionals: true,
     options: { repo: { type: 'string' }, ticket: { type: 'string' }, 'no-ticket': { type: 'string' }, guidelines: { type: 'string' }, output: { type: 'string' }, 'force-pull': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' } },
-  })
+  }))
   if (values.repo === undefined || positionals.length > 0 || (values.ticket !== undefined && values['no-ticket'] !== undefined)) throw new UsageError(usage)
   const repo = values.repo
   context = { skill: 'spec-reviewer', repo }
@@ -76,8 +85,11 @@ try {
     }
   }
 } catch (error) {
-  if (error instanceof KnowledgeRequired) console.log(JSON.stringify({ ...knowledgeStage(error), agent }, null, 2))
-  else {
+  if (error instanceof UsageError) {
+    // A malformed invocation runs nothing and prints no board action: the usage on stderr, exit 2 (F5, F24).
+    console.error(`spec-reviewer local: ${error.message}`)
+    process.exitCode = USAGE_EXIT
+  } else {
     const result = await handleRunError(context, error, driverArgs)
     console.log(JSON.stringify({ pending: false, agent, ...result }, null, 2))
     console.error(`spec-reviewer local: ${result.status}: ${result.message ?? result.reason}`)

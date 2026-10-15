@@ -3,6 +3,7 @@
 // launcher runs its --local driver from node_modules with no ASPIRA_KIT set. Needs pnpm and git;
 // the agents' own dependencies are resolved online and their tarballs come from the pnpm store.
 import { execFileSync, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -105,25 +106,32 @@ describe('an installed project', () => {
     writeFileSync(join(app, 'src.ts'), 'export const save = () => {}\n')
     run('git', ['add', '.'], app)
     run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init'], app)
-    const env: NodeJS.ProcessEnv = { ...process.env, KNOWLEDGE_PAGE: 'https://app.notion.com/p/11111111111111111111111111111111' }
-    for (const name of ['ASPIRA_KIT', 'PLANNER_AGENT_DIR', 'SPEC_TO_PLAN_AGENT_DIR']) delete env[name]
+    const ROOT = 'https://app.notion.com/p/11111111111111111111111111111111'
+    const env: NodeJS.ProcessEnv = { ...process.env, KNOWLEDGE_PAGE: ROOT }
+    for (const name of ['ASPIRA_KIT', 'PLANNER_AGENT_DIR', 'SPEC_TO_PLAN_AGENT_DIR', 'NOTION_TOKEN', 'NOTION_API_KEY']) delete env[name]
     const out = join(scratch, 'plan.review')
-    // Without a snapshot, the first stage is knowledge: the pages the agent's configuration loads.
+    // Without a snapshot or a NOTION_TOKEN the knowledge stage cannot load the guidelines itself:
+    // the run ends blocked naming the token (F52), and the installed package is the one that ran.
     const first = spawnSync('bash', [launcher, 'local', spec, '--no-ticket', '--output', out], { cwd: app, env, encoding: 'utf8' })
-    expect(first.status, first.stderr).toBe(0)
+    expect(first.status, first.stderr).toBe(1)
     expect(first.stderr).not.toContain('kit source')
-    const knowledge = JSON.parse(first.stdout) as { stage: string; agent: { name: string; path: string; installed: boolean }; instructions: string }
-    expect(knowledge.stage).toBe('knowledge')
-    expect(knowledge.agent).toMatchObject({ name: '@aspiralabs/planner', installed: true })
-    expect(knowledge.agent.path).toContain(`${app}/node_modules/`)
-    expect(knowledge.instructions).toContain('/node_modules/')
-    // With a snapshot the knowledge is satisfied and the next stage is research: the whole runtime loaded from node_modules.
+    const blocked = JSON.parse(first.stdout) as { pending: boolean; status: string; reason: string; agent: { name: string; path: string; installed: boolean } }
+    expect(blocked).toMatchObject({ pending: false, status: 'blocked' })
+    expect(blocked.reason).toContain('NOTION_TOKEN')
+    expect(blocked.agent).toMatchObject({ name: '@aspiralabs/planner', installed: true })
+    expect(blocked.agent.path).toContain(`${app}/node_modules/`)
+    // With a load-knowledge snapshot (F50) the knowledge is satisfied and the next stage is research: the whole runtime loaded from node_modules.
     const guidelines = join(scratch, 'REQUIRED.md')
-    writeFileSync(guidelines, 'REV-001 Inspect source evidence\n')
+    const sha = (text: string) => createHash('sha256').update(text).digest('hex')
+    const ID = '11111111-1111-1111-1111-111111111111'
+    const section = `# Agent Instructions\n\n<!-- ${ROOT} -->\n\nREV-001 Inspect source evidence\n`
+    const header = { fetchedAt: '2026-10-15T00:00:00.000Z', rootUrl: ROOT, rootId: ID, path: guidelines, bodyHash: sha(section), pages: [{ id: ID, url: ROOT, title: 'Agent Instructions', file: 'INDEX.md', markdownHash: sha('REV-001 Inspect source evidence'), sectionHash: sha(section) }] }
+    writeFileSync(guidelines, `<!-- knowledge-snapshot\n${JSON.stringify(header, null, 2)}\n-->\n\nEvery agent reads this file in full before its first finding.\n\n---\n\n${section}`)
     const second = spawnSync('bash', [launcher, 'local', spec, '--no-ticket', '--output', out, '--guidelines', guidelines], { cwd: app, env, encoding: 'utf8' })
     expect(second.status, second.stderr).toBe(0)
-    const research = JSON.parse(second.stdout) as { stage: string; tasks: { prompt: string }[] }
+    const research = JSON.parse(second.stdout) as { stage: string; tasks: { prompt: string }[]; instructions: string }
     expect(research.stage).toBe('research')
+    expect(research.instructions).toContain('/node_modules/')
     expect(readFileSync(research.tasks[0]!.prompt, 'utf8')).toContain('REV-001')
     // The launcher runs from the installed package, not a checkout, even with a stale ASPIRA_KIT exported.
     const stale = spawnSync('bash', [launcher, 'local', spec, '--no-ticket', '--output', out, '--guidelines', guidelines], { cwd: app, env: { ...env, ASPIRA_KIT: join(scratch, 'nowhere') }, encoding: 'utf8' })

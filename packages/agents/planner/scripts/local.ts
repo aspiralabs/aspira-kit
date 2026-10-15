@@ -2,16 +2,17 @@ import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
 import { exitCodeFor, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
-import { afterRun, beforeRun, handleRunError, UsageError, verifyRun, type DriverContext, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
+import { afterRun, beforeRun, handleRunError, KnowledgePrerequisiteError, UsageError, verifyRun, type DriverContext, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { runLocal } from '../agent/lib/local.ts'
 
 // One step of a --local plan. The ticket comes first: the `board` stage (resolve, pull, claim) is
 // printed before anything else, and the driver refuses, before any model stage, when ticket.md does
-// not show the Status the planner needs. Then the knowledge stage, the next phase's task (prompt and
-// output file), or, once both phases are done, the exported plan with the end-of-run board actions.
-// --verify is the last step: ticket.md must show the Status the end stage expected. --finish exports
-// what exists as incomplete. Every step names the agent package that ran (`agent`).
+// not show the Status the planner needs. Then the run loads the knowledge itself (load-knowledge,
+// once per run; blocked, exit 1, without a NOTION_TOKEN), then the next phase's task (prompt and
+// output file) or, once both phases are done, the exported plan with the end-of-run board actions.
+// --verify is the last step: ticket.md must show the Status the end stage expected. --finish
+// exports what exists as incomplete. Every step names the agent package that ran (`agent`).
 const usage = 'Usage: pnpm run plan:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <absolute-spec>) [--output DIR] [--guidelines REQUIRED.md] [--force-pull] [--verify] [--finish]'
 
 const agent = await agentVersion(new URL('..', import.meta.url))
@@ -45,6 +46,8 @@ try {
         ...(values.guidelines === undefined ? {} : { guidelinesPath: values.guidelines }),
         finish: values.finish === true, takeRecommended: values['take-recommended'] === true,
       })
+      // The knowledge could not be loaded: blocked, reported and noted by handleRunError (F52).
+      if (!result.pending && result.status === 'blocked') throw new KnowledgePrerequisiteError(result.reason)
       if (!result.pending) await recordAgentVersion(result.dir, agent)
       if (!result.pending && before.kind === 'ticket') {
         const status = result.status as RunStatus

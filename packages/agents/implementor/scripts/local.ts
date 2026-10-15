@@ -4,10 +4,10 @@ import { join } from 'node:path'
 import { parseArgs, promisify } from 'node:util'
 import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
 import { prStep, type PrStepResult } from '@aspiralabs/agent-common/lib/pr-step'
-import { exitCodeFor } from '@aspiralabs/agent-common/lib/run-status'
-import { TicketArgumentError, type TicketRecord } from '@aspiralabs/agent-common/lib/ticket'
+import { USAGE_EXIT, exitCodeFor } from '@aspiralabs/agent-common/lib/run-status'
+import { type TicketRecord } from '@aspiralabs/agent-common/lib/ticket'
 import { ticketBranch } from '@aspiralabs/agent-common/lib/ticket-branch'
-import { afterRun, beforeRun, verifyRun } from '@aspiralabs/agent-common/lib/ticket-driver'
+import { afterRun, beforeRun, handleRunError, UsageError, verifyRun, type DriverContext, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { FlowRefused, readTicketMd, writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { exportDirOf, runLocal } from '../agent/lib/local.ts'
 
@@ -17,15 +17,15 @@ const exec = promisify(execFile)
 // printed before anything else, and the driver refuses, before any model stage, when ticket.md does
 // not show the Status the implementor needs. The board-stage gate also refuses, before the claim,
 // when the checkout is not the ticket's own branch (GIT-001): building on the wrong branch is a
-// mistake no amount of work afterward fixes. Then the knowledge stage, the next stage's tasks (a
-// prompt and an output file per task), or the finished run with the end-of-run board actions.
+// mistake no amount of work afterward fixes. Then the run loads the Notion rules itself
+// (load-knowledge, once per run; blocked, exit 1, without a NOTION_TOKEN), then the next stage's
+// tasks (a prompt and an output file per task), or the finished run with the end-of-run board actions.
 // --verify is the last step: ticket.md must show the Status the end stage expected; --pr-url (only
 // with --verify) runs the shared PR check and the set-then-move board step (F24-F26) for Step 8,
 // printing the set or move action the session performs next; without it, Step 8 is reported still
 // open. --finish exports what exists as incomplete. Every step names the agent package that ran (`agent`).
 const usage =
   'Usage: pnpm run implement:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <plan.review | plan.reviewed.md | spec.md>) [--guidelines FILE] [--max-parallel N] [--serial] [--work DIR] [--force-pull] [--verify [--pr-url URL [--replace-pending]]] [--finish]'
-const REFUSED = 3
 
 async function git(repo: string, ...args: string[]): Promise<string> {
   return (await exec('git', ['-C', repo, ...args])).stdout.trim()
@@ -80,8 +80,19 @@ async function step8PrAction(repo: string, branch: string, folder: string, url: 
   return { open: true, problem: decision.message }
 }
 
+/** parseArgs, with an unknown or malformed option reported as a usage error naming it, not a crash. */
+function parseUsage<T>(parse: () => T): T {
+  try {
+    return parse()
+  } catch (error) {
+    throw new UsageError(`${error instanceof Error ? error.message : String(error)}\n${usage}`)
+  }
+}
+
+let context: DriverContext = { skill: 'implementor', repo: '' }
+let driverArgs: DriverTicketArgs = {}
 try {
-  const { values, positionals } = parseArgs({
+  const { values, positionals } = parseUsage(() => parseArgs({
     allowPositionals: true,
     options: {
       repo: { type: 'string' },
@@ -97,13 +108,14 @@ try {
       'pr-url': { type: 'string' },
       'replace-pending': { type: 'boolean' },
     },
-  })
-  if (values.repo === undefined || positionals.length > 0 || (values.ticket !== undefined && values['no-ticket'] !== undefined)) throw new Error(usage)
-  if ((values['pr-url'] !== undefined || values['replace-pending'] === true) && values.verify !== true) throw new Error(usage)
+  }))
+  if (values.repo === undefined || positionals.length > 0 || (values.ticket !== undefined && values['no-ticket'] !== undefined)) throw new UsageError(usage)
+  if ((values['pr-url'] !== undefined || values['replace-pending'] === true) && values.verify !== true) throw new UsageError(usage)
   const repo = values.repo
   const parallel = values['max-parallel']
   const agent = await agentVersion(new URL('..', import.meta.url))
-  const context = { skill: 'implementor' as const, repo, beforeClaim: beforeClaim(repo) }
+  context = { skill: 'implementor', repo, beforeClaim: beforeClaim(repo) }
+  driverArgs = { positional: values['no-ticket'] ?? values.ticket, noTicket: values['no-ticket'] !== undefined, forcePull: values['force-pull'] }
   const outputFor = (folder: string) => join(folder, 'plan.review')
   if (values.verify === true) {
     const verified = await verifyRun(context, { positional: values.ticket }, outputFor)
@@ -118,7 +130,7 @@ try {
     console.log(JSON.stringify({ pending: false, stage: 'board-verify', ...verified, agent, ...(step8 === null ? {} : { step8 }) }, null, 2))
     if (!verified.verified || (step8 !== null && 'problem' in step8)) process.exitCode = 1
   } else {
-    const before = await beforeRun(context, { positional: values['no-ticket'] ?? values.ticket, noTicket: values['no-ticket'] !== undefined, forcePull: values['force-pull'] })
+    const before = await beforeRun(context, driverArgs)
     if (before.kind === 'stage') {
       console.log(JSON.stringify({ ...before.stage, agent }, null, 2))
     } else {
@@ -146,12 +158,16 @@ try {
     }
   }
 } catch (error) {
-  if (error instanceof FlowRefused || error instanceof TicketArgumentError) {
-    console.log(JSON.stringify({ pending: false, status: 'refused', stage: 'board', reason: error.message }, null, 2))
-    console.error(`implementor local: refused: ${error.message}`)
-    process.exitCode = REFUSED
+  if (error instanceof UsageError) {
+    // A malformed invocation runs nothing and prints no board action: the usage on stderr, exit 2 (F5).
+    console.error(`implementor local: ${error.message}`)
+    process.exitCode = USAGE_EXIT
   } else {
-    console.error(`implementor local: ${error instanceof Error ? error.message : String(error)}`)
-    process.exitCode = 2
+    // A refusal (refused, exit 3), a missing prerequisite (blocked, exit 1) or a crash (incomplete,
+    // exit 1, F9), with the progress note written or appended by the shared handler (F15).
+    const result = await handleRunError(context, error, driverArgs)
+    console.log(JSON.stringify({ pending: false, ...(error instanceof FlowRefused ? { stage: 'board' } : {}), ...result }, null, 2))
+    console.error(`implementor local: ${result.status}: ${result.reason}`)
+    process.exitCode = result.exitCode
   }
 }

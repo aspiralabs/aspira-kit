@@ -28,6 +28,7 @@ import { writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
 
 vi.mock('./repository.ts', () => ({ repository: async () => ({ instructions: '', packet: () => 'source.ts:1: evidence', gaps: [], files: new Map(), commit: 'fixture-commit-sha', dirty: false, tools: {} }) }))
 import { runLocal } from './local.ts'
+import { writeSnapshot } from './snapshot.test-helper.ts'
 
 const exec = promisify(execFile)
 const PACKAGE = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -62,7 +63,7 @@ async function ticketProject(): Promise<{ root: string; folder: string; reportDi
   const folder = join(root, '.work', workFolderName({ id: TICKET_ID, title: 'Pagination' }))
   await writeText(join(folder, 'ticket.md'), ticketMd({}))
   await writeText(join(folder, 'spec.md'), '# Original')
-  await writeText(join(folder, 'rules.md'), 'REV-001 Check the spec')
+  await writeSnapshot(join(folder, 'rules.md'))
   return { root, folder, reportDir: join(folder, 'spec.reviewed') }
 }
 

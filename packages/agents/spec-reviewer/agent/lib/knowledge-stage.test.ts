@@ -19,6 +19,7 @@ import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { KnowledgeRequired } from './local-knowledge.ts'
 import { runLocal, type LocalDeps } from './local.ts'
+import { writeSnapshot } from './snapshot.test-helper.ts'
 
 const exec = promisify(execFile)
 type FutureDeps = LocalDeps & { fetch?: typeof fetch; api?: string }
@@ -27,7 +28,6 @@ const TOKEN = 'test-notion-token'
 const ROOT_ID = '11111111111111111111111111111111'
 const REVIEW_ID = '22222222222222222222222222222222'
 const ROOT = `https://www.notion.so/Agent-Instructions-${ROOT_ID}`
-const REQUIRED_MD = '# Agent Instructions\n\nREV-001 Read the rules.\n\n---\n\n# Review Verification\n\nREV-002 Verify.\n'
 
 async function mockNotion(): Promise<{ api: string; requests: string[]; close: () => Promise<void> }> {
   const requests: string[] = []
@@ -72,7 +72,10 @@ describe('the spec reviewer --local knowledge stage (T61)', () => {
 
   it('without --guidelines, loads the folder itself once before any prompt is written', async () => {
     const ws = await workspace()
-    await writeFile(join(ws.agentDir, '.env.local'), `KNOWLEDGE_PAGE=${ROOT}\nNOTION_TOKEN=${TOKEN}\n`)
+    // KNOWLEDGE_PAGE is the agent's own config; NOTION_TOKEN comes from the project's .env.local,
+    // never the agent package's (F52).
+    await writeFile(join(ws.agentDir, '.env.local'), `KNOWLEDGE_PAGE=${ROOT}\n`)
+    await writeFile(join(ws.repo, '.env.local'), `NOTION_TOKEN=${TOKEN}\n`)
     const deps: FutureDeps = { agentDir: ws.agentDir, fetch, api: notion.api }
     const first = await runLocal(ws.input, deps)
     expect(notion.requests.length).toBeGreaterThan(0)
@@ -82,8 +85,9 @@ describe('the spec reviewer --local knowledge stage (T61)', () => {
 
   it('with a verified --guidelines snapshot, makes no Notion request', async () => {
     const ws = await workspace()
+    // A REQUIRED.md load-knowledge wrote, verified by its provenance header where it was written (F50).
     const snapshot = join(ws.dir, 'rules.md')
-    await writeFile(snapshot, REQUIRED_MD)
+    await writeSnapshot(snapshot)
     const deps: FutureDeps = { agentDir: ws.agentDir, fetch, api: notion.api }
     await runLocal({ ...ws.input, guidelinesPath: snapshot }, deps)
     expect(notion.requests.length).toBe(0)
@@ -93,7 +97,8 @@ describe('the spec reviewer --local knowledge stage (T61)', () => {
     const ws = await workspace()
     const exported = join(ws.dir, 'earlier-review', 'trace', 'guidelines.md')
     await mkdir(join(ws.dir, 'earlier-review', 'trace'), { recursive: true })
-    await writeFile(exported, REQUIRED_MD)
+    // A real snapshot, copied under trace/: refused for where it sits, not for a missing header.
+    await writeSnapshot(exported)
     const deps: FutureDeps = { agentDir: ws.agentDir, fetch, api: notion.api }
     const error = await runLocal({ ...ws.input, guidelinesPath: exported }, deps).then(() => null, (cause: unknown) => cause)
     expect(error).toBeInstanceOf(Error)
