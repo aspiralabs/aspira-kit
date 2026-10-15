@@ -22,7 +22,9 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { doctor, type UrlCheckResult, type UrlChecker } from './doctor.js'
+import { readApp } from './aspira.js'
+import { doctor, hookCommand, mcpServer, type UrlCheckResult, type UrlChecker } from './doctor.js'
+import { AGENTS, VERSION_FILE } from './skills.js'
 
 const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6'
 const RELEASES = 'https://www.notion.so/3f13e59b22588106ab5dc457a42b0e1c'
@@ -33,13 +35,36 @@ type CheckResult = UrlCheckResult
 
 let root: string
 
-/** A minimal project doctor can run against: just enough that it reaches the Notion and token
- * checks (a package.json so it does not exit at the "no package.json" gate). Everything else
- * about the project is deliberately left un-set-up; these tests only assert the Notion/token lines. */
+const KIT_VERSION = '0.9.0'
+
+/** A project kit init has fully set up, so every one of doctor's other checks passes and its exit
+ * code turns on the Notion and token checks alone: the four kit packages declared and
+ * @aspiralabs/agents installed, the kit's eslint, tsconfig, tokens, AGENTS.md block, .mcp.json,
+ * hooks and .gitignore entries, and every /aspira-* skill pinned to the installed version. */
 function project(config: Record<string, unknown>) {
   root = mkdtempSync(join(tmpdir(), 'kit-doctor-notion-'))
-  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'app' }))
+  const kit = Object.fromEntries(['@aspiralabs/ui', '@aspiralabs/config', '@aspiralabs/kit', '@aspiralabs/agents'].map((name) => [name, KIT_VERSION]))
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'app', devDependencies: kit }))
   writeFileSync(join(root, 'aspira.json'), JSON.stringify(config))
+  const app = readApp(root)
+  mkdirSync(join(root, 'node_modules', '@aspiralabs', 'agents'), { recursive: true })
+  writeFileSync(join(root, 'node_modules', '@aspiralabs', 'agents', 'package.json'), JSON.stringify({ name: '@aspiralabs/agents', version: KIT_VERSION }))
+  writeFileSync(join(root, 'eslint.config.mjs'), "export { default } from '@aspiralabs/config/eslint'\n")
+  writeFileSync(join(root, 'tsconfig.json'), JSON.stringify({ extends: '@aspiralabs/config/tsconfig' }))
+  mkdirSync(join(root, 'app'), { recursive: true })
+  writeFileSync(join(root, 'app', 'globals.css'), '@import "@aspiralabs/ui/tokens.css";\n')
+  writeFileSync(join(root, 'AGENTS.md'), '<!-- aspiralabs:begin -->\n<!-- aspiralabs:end -->\n')
+  writeFileSync(join(root, '.mcp.json'), JSON.stringify({ mcpServers: { 'aspiralabs-ui': app ? mcpServer(app) : { command: 'npx', args: ['--no', 'aspiralabs-ui-mcp'] } } }))
+  mkdirSync(join(root, '.claude'), { recursive: true })
+  writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify({ hooks: { SessionStart: [{ matcher: '', hooks: [{ command: hookCommand(app, 'session-start.sh') }] }] } }))
+  writeFileSync(join(root, '.gitignore'), '.work/\n.aspira/\n')
+  for (const agent of AGENTS) {
+    const dir = join(root, '.claude', 'skills', `aspira-${agent}`)
+    mkdirSync(join(dir, 'scripts'), { recursive: true })
+    writeFileSync(join(dir, 'SKILL.md'), `---\nname: aspira-${agent}\n---\n`)
+    writeFileSync(join(dir, 'scripts', `${agent}.sh`), '#!/bin/bash\n')
+    writeFileSync(join(dir, VERSION_FILE), `${KIT_VERSION}\n`)
+  }
   return root
 }
 
@@ -71,8 +96,11 @@ describe('kit doctor checks aspira.json\'s Notion URLs (T42, F38)', () => {
 
   it('fails the 404 key, naming it, its URL and the status', () => {
     const { lines, log } = logs()
-    doctor(root, log, undefined, { check: stub })
+    const code = doctor(root, log, undefined, { check: stub })
     expect(lines.some((line) => line.startsWith('FAIL') && line.includes('releases') && line.includes(RELEASES) && line.includes('404'))).toBe(true)
+    // The project is otherwise healthy, so that 404 is the one problem doctor fails on.
+    expect(lines.filter((line) => line.startsWith('FAIL'))).toHaveLength(1)
+    expect(code).toBe(1)
   })
 
   it('reports a rate limit or a network error as "not checked: Notion unreachable (...)" without failing doctor', () => {
