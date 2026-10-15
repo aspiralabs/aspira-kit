@@ -50,7 +50,7 @@ configured_app() {
 # walking up from the working directory, then from this script's location), then this script's own package. $ASPIRA_KIT is never consulted.
 # Sets AGENT, AGENT_SOURCE (env | installed | package), AGENT_VERSION and PROJECT.
 resolve_agent() {
-  local here dir app_dir own
+  local here dir app_dir own skill_kit_version agents_version
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   AGENT="" AGENT_SOURCE="" PROJECT=""
   for dir in "${PR_REVIEWER_AGENT_DIR:-}"; do
@@ -87,6 +87,21 @@ resolve_agent() {
     *:*/node_modules/*) ;;
     *) echo "$NAME: running kit source at $AGENT, not the installed $PKG" >&2 ;;
   esac
+  # kit init pins the installed skill to the @aspiralabs/agents version it was copied from
+  # (.kit-version, packages/kit/src/skills.ts). An installed launcher whose pin no longer matches
+  # what is installed is blocked before anything starts; running from source (env or package) only
+  # warns, since kit development deliberately runs ahead of (or without) an installed pin (F8).
+  if [ -f "$here/../.kit-version" ]; then
+    skill_kit_version=$(tr -d '[:space:]' < "$here/../.kit-version")
+    agents_version=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$PROJECT/node_modules/@aspiralabs/agents/package.json" 2>/dev/null | head -n 1)
+    if [ -n "$agents_version" ] && [ "$skill_kit_version" != "$agents_version" ]; then
+      if [ "$AGENT_SOURCE" = installed ]; then
+        die "blocked: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; run kit init to update the skill"
+      else
+        echo "$NAME: mismatch: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; continuing from $AGENT_SOURCE" >&2
+      fi
+    fi
+  fi
 }
 agent_line() { printf 'agent: %s@%s (%s, %s)\n' "$PKG" "$AGENT_VERSION" "$AGENT_SOURCE" "$AGENT"; }
 json_string() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -123,6 +138,26 @@ agent_node() {  # agent_node SCRIPT ARG...: run an agent script with node, from 
   (cd "$AGENT" && exec node "${NODE_ARGS[@]}" "$AGENT/$script" "$@")
 }
 eve_bin() { find_up_module "$AGENT" eve/bin/eve.js || die "eve is not installed beside $AGENT; reinstall @aspiralabs/agents"; }
+# Prints "Run status: <status>" and, when the record carries one, its reason line, for the run
+# record at RECORD_FILE (RUN's saved repo and agent.json/node-args give ticket.ts record what it
+# needs): scripts/ticket.ts record maps the record's status word (old or new alike) onto one of the
+# five run statuses and this prints the record's own reason text first (F5, F7). Sets REPORT_EXIT
+# to the status's exit code (run-status.ts's exitCodeFor), which the caller reports as its own.
+report_record() {
+  local record_file=$1 out status reason rc=0
+  resolve_agent
+  node_args
+  out=$( (cd "$AGENT" && node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" record --repo "$PROJECT" --file "$record_file") ) || rc=$?
+  status=$(printf '%s
+' "$out" | sed -n 's/^status=//p' | head -n 1)
+  [ -n "$status" ] || status=incomplete
+  reason=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).reason || '' } catch { '' }" "$record_file" 2>/dev/null)
+  printf 'Run status: %s
+' "$status"
+  [ -z "$reason" ] || printf '%s
+' "$reason"
+  REPORT_EXIT=$rc
+}
 # A directory is a local repository and is made absolute (the agent runs from its own package
 # directory); anything else is passed on as a GitHub PR reference.
 absolute_source() {
@@ -246,6 +281,8 @@ cmd_start() {
   [ -n "$YES" ] && [ -z "$MAX_COST" ] || print_estimate
   run=$(mktemp -d "${TMPDIR:-/tmp}/pr-reviewer.XXXXXX")
   printf '%s\n' "$SOURCE" > "$run/source"
+  printf '%s\n' "$OUT" > "$run/output"
+  printf '%s\n' "$REPO" > "$run/repo"
   printf '%s\n' "${NODE_ARGS[@]}" > "$run/node-args"
   agent_json > "$run/agent.json"
   agent_line > "$run/agent"
@@ -258,10 +295,13 @@ cd "$AGENT" || exit 1
 node "${NODE_ARGS[@]}" "$EVE" invoke "$PROMPT" > "$RUN/log" 2>&1
 code=$?
 printf '%s\n' "$code" > "$RUN/exit"
-# The board step after the run: push review.md to the ticket as PR Review. The reviewer makes no move.
+# The board step after the run: push review.md to the ticket as PR Review. The reviewer makes no
+# move. export-record.ts writes trace/review.json from the eve exit code and whatever review.md and
+# findings.md the sandboxed run left, when the agent did not already leave a record of its own.
 if [ -n "$FOLDER" ]; then
-  if [ "$code" = 0 ] && [ -f "$OUTPUT/review.md" ]; then outcome=--ok; status=complete; else outcome=--failed; status=incomplete; fi
-  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" "$outcome" --run-status "$status" --export "$OUTPUT" >> "$RUN/log" 2>&1
+  node "${NODE_ARGS[@]}" "$AGENT/scripts/export-record.ts" --output "$OUTPUT" --exit-code "$code" >> "$RUN/log" 2>&1 || true
+  status=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).status ?? 'incomplete' } catch { 'incomplete' }" "$OUTPUT/trace/review.json" 2>/dev/null || echo incomplete)
+  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" --run-status "$status" --export "$OUTPUT" >> "$RUN/log" 2>&1
 fi
 RUNNER
   chmod +x "$run/run.sh"
@@ -293,17 +333,37 @@ cmd_local() {
   agent_node scripts/local.ts "${args[@]}"
 }
 cmd_status() {
-  local run=${1:?usage: pr-reviewer.sh status RUN} elapsed
+  local run=${1:?usage: pr-reviewer.sh status RUN} elapsed output
   [ -f "$run/started" ] || die "not a run directory: $run"
   elapsed=$(( $(date +%s) - $(cat "$run/started") ))
   if [ ! -f "$run/exit" ]; then
     printf 'running (%ss)\nlog: %s/log\n' "$elapsed" "$run"
     [ ! -f "$run/log" ] || tail -n 3 "$run/log"
-    return
+    exit 75
   fi
+  output=$(cat "$run/output" 2>/dev/null)
+  report_record "$output/trace/review.json"
   printf 'finished (%ss), exit %s\nsource: %s\nlog: %s/log\n' "$elapsed" "$(cat "$run/exit")" "$(cat "$run/source")" "$run"
   [ ! -f "$run/agent" ] || cat "$run/agent"
-  tail -n 60 "$run/log"
+  [ ! -f "$run/log" ] || tail -n 60 "$run/log"
+  exit "$REPORT_EXIT"
+}
+cmd_load_knowledge() {
+  local out=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --out) [ $# -ge 2 ] || die "--out needs a directory"; out=$2; shift 2 ;;
+      -*) die "unknown option: $1" ;;
+      *) die "unknown argument: $1" ;;
+    esac
+  done
+  [ -n "$out" ] || die "usage: pr-reviewer.sh load-knowledge --out DIR"
+  resolve_agent
+  node_args
+  command -v node >/dev/null || die "node is not installed"
+  local common
+  common=$(find_up_module "$AGENT" @aspiralabs/agent-common) || die "agent-common is not installed beside $AGENT; reinstall @aspiralabs/agents"
+  node "${NODE_ARGS[@]}" "$common/scripts/load-knowledge.ts" --out "$out"
 }
 cmd_wait() {
   local run=${1:?usage: pr-reviewer.sh wait RUN [--max SECONDS]} max=30 deadline
@@ -319,5 +379,6 @@ case ${1:-} in
   local) shift; cmd_local "$@" ;;
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
-  *) die "usage: pr-reviewer.sh start [TICKET | SOURCE --no-ticket] [--force-pull] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--yes] | status RUN | wait RUN [--max SECONDS] | local [TICKET | SOURCE --no-ticket] [--force-pull] [--verify] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--knowledge DIR] [--finish]" ;;
+  load-knowledge) shift; cmd_load_knowledge "$@" ;;
+  *) die "usage: pr-reviewer.sh start [TICKET | SOURCE --no-ticket] [--force-pull] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--yes] | status RUN | wait RUN [--max SECONDS] | local [TICKET | SOURCE --no-ticket] [--force-pull] [--verify] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--knowledge DIR] [--finish] | load-knowledge --out DIR" ;;
 esac

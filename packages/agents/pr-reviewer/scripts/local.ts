@@ -5,15 +5,17 @@ import { exitCodeFor } from '@aspiralabs/agent-common/lib/run-status'
 import { TicketArgumentError } from '@aspiralabs/agent-common/lib/ticket'
 import { afterRun, beforeRun, handleRunError, verifyRun, UsageError, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { FlowRefused, writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
-import { KnowledgeRequired, runLocal } from '../agent/lib/local.ts'
+import { runLocal } from '../agent/lib/local.ts'
 
 // One step of a --local review. The ticket comes first: the `board` stage (resolve, pull) is printed
 // before anything else, and the driver refuses, before any model stage, when ticket.md does not show
 // In Review: Implementation with the PR set. Then the next stage's tasks (prompt and output file per
 // task) or, once every stage is done, the exported review with the end-of-run board actions (the
 // push of review.md as the PR Review page; the reviewer makes no move). --verify is the last step.
-// --finish exports what exists as incomplete. Without the engineering guidelines folder it refuses
-// (exit 3) and prints the pages to fetch. Every step names the agent package that ran (`agent`).
+// --finish exports what exists as incomplete. The knowledge folder is now this run's own job: it
+// fetches the pages itself through the shared walk when none were given, and a missing
+// NOTION_TOKEN/KNOWLEDGE_PAGE or a --knowledge DIR that does not verify is reported blocked
+// (exit 1), not the old refused/3. Every step names the agent package that ran (`agent`).
 const usage = 'Usage: pnpm review:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <github-pr | absolute-repo-path>) [--branch B] [--base main] [--max-rounds N] [--output DIR] [--knowledge DIR] [--since DIR] [--max-cost USD] [--no-comment] [--force-pull] [--verify] [--finish]'
 const REFUSED = 3
 
@@ -82,11 +84,7 @@ try {
     }
   }
 } catch (error) {
-  if (error instanceof KnowledgeRequired) {
-    console.log(JSON.stringify({ pending: false, status: 'refused', stage: 'knowledge', reason: error.message, knowledge: error.plan, agent }, null, 2))
-    console.error(`pr-reviewer local: ${error.message}`)
-    process.exitCode = REFUSED
-  } else if (error instanceof FlowRefused || error instanceof TicketArgumentError) {
+  if (error instanceof FlowRefused || error instanceof TicketArgumentError) {
     console.log(JSON.stringify({ pending: false, status: 'refused', stage: 'board', reason: error.message, agent }, null, 2))
     console.error(`pr-reviewer local: refused: ${error.message}`)
     process.exitCode = REFUSED

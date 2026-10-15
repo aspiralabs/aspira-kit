@@ -51,7 +51,7 @@ configured_app() {
 # walking up from the working directory, then from this script's location), then this script's own package. $ASPIRA_KIT is never consulted.
 # Sets AGENT, AGENT_SOURCE (env | installed | package), AGENT_VERSION and PROJECT.
 resolve_agent() {
-  local here dir app_dir own
+  local here dir app_dir own skill_kit_version agents_version
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   AGENT="" AGENT_SOURCE="" PROJECT=""
   for dir in "${IMPLEMENTOR_AGENT_DIR:-}"; do
@@ -88,6 +88,21 @@ resolve_agent() {
     *:*/node_modules/*) ;;
     *) echo "$NAME: running kit source at $AGENT, not the installed $PKG" >&2 ;;
   esac
+  # kit init pins the installed skill to the @aspiralabs/agents version it was copied from
+  # (.kit-version, packages/kit/src/skills.ts). An installed launcher whose pin no longer matches
+  # what is installed is blocked before anything starts; running from source (env or package) only
+  # warns, since kit development deliberately runs ahead of (or without) an installed pin (F8).
+  if [ -f "$here/../.kit-version" ]; then
+    skill_kit_version=$(tr -d '[:space:]' < "$here/../.kit-version")
+    agents_version=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$PROJECT/node_modules/@aspiralabs/agents/package.json" 2>/dev/null | head -n 1)
+    if [ -n "$agents_version" ] && [ "$skill_kit_version" != "$agents_version" ]; then
+      if [ "$AGENT_SOURCE" = installed ]; then
+        die "blocked: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; run kit init to update the skill"
+      else
+        echo "$NAME: mismatch: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; continuing from $AGENT_SOURCE" >&2
+      fi
+    fi
+  fi
 }
 agent_line() { printf 'agent: %s@%s (%s, %s)\n' "$PKG" "$AGENT_VERSION" "$AGENT_SOURCE" "$AGENT"; }
 json_string() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -124,6 +139,26 @@ agent_node() {  # agent_node SCRIPT ARG...: run an agent script with node, from 
   (cd "$AGENT" && exec node "${NODE_ARGS[@]}" "$AGENT/$script" "$@")
 }
 eve_bin() { find_up_module "$AGENT" eve/bin/eve.js || die "eve is not installed beside $AGENT; reinstall @aspiralabs/agents"; }
+# Prints "Run status: <status>" and, when the record carries one, its reason line, for the run
+# record at RECORD_FILE (RUN's saved repo and agent.json/node-args give ticket.ts record what it
+# needs): scripts/ticket.ts record maps the record's status word (old or new alike) onto one of the
+# five run statuses and this prints the record's own reason text first (F5, F7). Sets REPORT_EXIT
+# to the status's exit code (run-status.ts's exitCodeFor), which the caller reports as its own.
+report_record() {
+  local record_file=$1 out status reason rc=0
+  resolve_agent
+  node_args
+  out=$( (cd "$AGENT" && node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" record --repo "$PROJECT" --file "$record_file") ) || rc=$?
+  status=$(printf '%s
+' "$out" | sed -n 's/^status=//p' | head -n 1)
+  [ -n "$status" ] || status=incomplete
+  reason=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).reason || '' } catch { '' }" "$record_file" 2>/dev/null)
+  printf 'Run status: %s
+' "$status"
+  [ -z "$reason" ] || printf '%s
+' "$reason"
+  REPORT_EXIT=$rc
+}
 absolute_path() {
   if [[ $1 = /* ]]; then printf '%s\n' "$1"; else printf '%s/%s\n' "$PWD" "$1"; fi
 }
@@ -250,6 +285,7 @@ cmd_start() {
   [ -z "$folder" ] || board_note=" The ticket's board moves and pushes are made by the launcher around this run; do not call board yourself."
   prompt="Implement $source in the GitHub repository $repo${ref:+, starting from branch $ref}. Follow the aspira-implementor skill. $([ "$PR" = 1 ] && echo 'Push the branch and open a draft pull request.' || echo 'Push the branch; do not open a pull request.')$board_note Report status, branch, commits, the feature table, deviations, blockers and the pull request link if any."
   printf '%s\n' "$repo" > "$run/repo"
+  printf '%s\n' "$export_dir" > "$run/output"
   printf '%s\n' "${NODE_ARGS[@]}" > "$run/node-args"
   agent_json > "$run/agent.json"
   agent_line > "$run/agent"
@@ -263,12 +299,15 @@ node "${NODE_ARGS[@]}" "$EVE" invoke "$PROMPT" > "$RUN/log" 2>&1
 code=$?
 printf '%s\n' "$code" > "$RUN/exit"
 # The board step after the run: push the implementation report; set the PR and move the card only
-# when the agent opened the PR, else the card stays In Progress: Implementation.
+# when the agent opened the PR, else the card stays In Progress: Implementation. export-record.ts
+# reads the agent's own reported status out of the log (the same idea the old grep had, done
+# properly) and writes trace/implementation-local.json, so finish always has a run record to read.
 if [ -n "$FOLDER" ]; then
-  if grep -qiE '^status:? *complete|"status": *"complete"' "$RUN/log"; then outcome=--ok; status=complete; else outcome=--failed; status=incomplete; fi
+  node "${NODE_ARGS[@]}" "$AGENT/scripts/export-record.ts" --log "$RUN/log" --export "$EXPORT" >> "$RUN/log" 2>&1 || true
+  status=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).status ?? 'incomplete' } catch { 'incomplete' }" "$EXPORT/trace/implementation-local.json" 2>/dev/null || echo incomplete)
   pr_url=""
   [ "$PR" != 1 ] || pr_url=$(grep -oE 'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+' "$RUN/log" | head -n 1 || true)
-  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO_TOP" --folder "$FOLDER" "$outcome" --run-status "$status" ${pr_url:+--pr-url "$pr_url"} --export "$EXPORT" >> "$RUN/log" 2>&1
+  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO_TOP" --folder "$FOLDER" --run-status "$status" ${pr_url:+--pr-url "$pr_url"} --export "$EXPORT" >> "$RUN/log" 2>&1
 fi
 RUNNER
   chmod +x "$run/run.sh"
@@ -299,17 +338,37 @@ local_step() {
   agent_node scripts/local.ts "${args[@]}"
 }
 cmd_status() {
-  local run=${1:?usage: implementor.sh status RUN} elapsed
+  local run=${1:?usage: implementor.sh status RUN} elapsed output
   [ -f "$run/started" ] || die "not a run directory: $run"
   elapsed=$(( $(date +%s) - $(cat "$run/started") ))
   if [ ! -f "$run/exit" ]; then
     printf 'running (%ss)\nlog: %s/log\n' "$elapsed" "$run"
     [ ! -f "$run/log" ] || tail -n 3 "$run/log"
-    return
+    exit 75
   fi
+  output=$(cat "$run/output" 2>/dev/null)
+  report_record "$output/trace/implementation-local.json"
   printf 'finished (%ss), exit %s\nrepo: %s\n' "$elapsed" "$(cat "$run/exit")" "$(cat "$run/repo")"
   [ ! -f "$run/agent" ] || cat "$run/agent"
-  tail -n 60 "$run/log"
+  [ ! -f "$run/log" ] || tail -n 60 "$run/log"
+  exit "$REPORT_EXIT"
+}
+cmd_load_knowledge() {
+  local out=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --out) [ $# -ge 2 ] || die "--out needs a directory"; out=$2; shift 2 ;;
+      -*) die "unknown option: $1" ;;
+      *) die "unknown argument: $1" ;;
+    esac
+  done
+  [ -n "$out" ] || die "usage: implementor.sh load-knowledge --out DIR"
+  resolve_agent
+  node_args
+  command -v node >/dev/null || die "node is not installed"
+  local common
+  common=$(find_up_module "$AGENT" @aspiralabs/agent-common) || die "agent-common is not installed beside $AGENT; reinstall @aspiralabs/agents"
+  node "${NODE_ARGS[@]}" "$common/scripts/load-knowledge.ts" --out "$out"
 }
 cmd_wait() {
   local run=${1:?usage: implementor.sh wait RUN [--max SECONDS]} max=30 deadline
@@ -325,5 +384,6 @@ case ${1:-} in
   local) shift; parse "$@"; local_step ;;
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
-  *) die "usage: implementor.sh start [TICKET | <path-in-repo> --no-ticket] [--repo owner/name | --repo DIR] [--ref BRANCH] [--pr] [--force-pull] | status RUN | wait RUN [--max SECONDS] | local [TICKET | <source> --no-ticket] [--repo DIR] [--guidelines FILE] [--max-parallel N] [--serial] [--work DIR] [--force-pull] [--verify] [--finish]" ;;
+  load-knowledge) shift; cmd_load_knowledge "$@" ;;
+  *) die "usage: implementor.sh start [TICKET | <path-in-repo> --no-ticket] [--repo owner/name | --repo DIR] [--ref BRANCH] [--pr] [--force-pull] | status RUN | wait RUN [--max SECONDS] | local [TICKET | <source> --no-ticket] [--repo DIR] [--guidelines FILE] [--max-parallel N] [--serial] [--work DIR] [--force-pull] [--verify] [--finish] | load-knowledge --out DIR" ;;
 esac

@@ -1,10 +1,25 @@
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
 import { exitCodeFor, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
 import { afterRun, beforeRun, handleRunError, UsageError, verifyRun, type DriverContext, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
-import { writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
+import { readTicketMd, writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { KnowledgeRequired, knowledgeStage, runLocal } from '../agent/lib/local.ts'
+
+// At a passing --verify, the Spec Reviewed page's last-edited time (as ticket.md's Pages table
+// shows it) is folded into the export's own trace/review.json, so the planner can tell a pulled
+// spec whose bytes changed in the Notion round-trip from one whose content actually changed (F33).
+async function recordSpecReviewedEditedAt(folder: string, exportDir: string): Promise<void> {
+  const ticket = await readTicketMd(folder)
+  const editedAt = ticket?.pages['Spec Reviewed']?.lastEditedAt
+  if (editedAt === undefined) return
+  const reviewFile = join(exportDir, 'trace', 'review.json')
+  const raw = await readFile(reviewFile, 'utf8').catch(() => null)
+  if (raw === null) return
+  const report = JSON.parse(raw) as Record<string, unknown>
+  await writeFile(reviewFile, JSON.stringify({ ...report, specReviewedEditedAt: editedAt }, null, 2))
+}
 
 // One step of a --local review. The ticket comes first: the `board` stage (resolve, pull) is printed
 // before anything else, and the driver refuses, before any model stage, when ticket.md does not show
@@ -30,6 +45,7 @@ try {
   const outputFor = (folder: string) => values.output ?? join(folder, 'spec.reviewed')
   if (values.verify === true) {
     const verified = await verifyRun(context, { positional: values.ticket }, outputFor)
+    if (verified.verified) await recordSpecReviewedEditedAt(verified.folder, outputFor(verified.folder))
     console.log(JSON.stringify({ pending: false, stage: 'board-verify', ...verified, agent }, null, 2))
     process.exitCode = verified.exitCode
   } else {

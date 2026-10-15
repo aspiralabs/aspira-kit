@@ -16,7 +16,8 @@ import type { DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
 import { z } from 'zod'
 import { fingerprintKnowledge, inspectKnowledge, knowledgeConfig, knowledgeFiles, knowledgeFormats, REQUIRED_NAME, type KnowledgeConfig, type KnowledgeFile, type KnowledgePage } from './local-knowledge.ts'
 import { planSchema, readAnswers, researchSchema, type Plan, type Research } from './plan.ts'
-import { assertPlannableSpec, assessPlan, type GuidelinePage, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, uncoveredRules, type PreparedPlan } from './runner.ts'
+import { assertPlannableSpec, assessPlan, type GuidelinePage, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, ticketFolderFor, uncoveredRules, type PreparedPlan } from './runner.ts'
+import { renderFactsBlock, reviewFacts, type ReviewFactsResult } from './review-facts.ts'
 
 /** The phases of a --local run, in order. */
 export type Stage = 'knowledge' | 'research' | 'planning'
@@ -163,6 +164,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   await withoutWorkDir(prepared, input.repoPath, work)
   const prompts = await loadPrompts(packageDir)
   const context = planContext(prepared)
+  // The spec reviewer's own facts, reused in the session's research prompt when they still describe this spec and commit (F33-F35).
+  const facts = await reviewFacts({ folder: ticketFolderFor(input.specPath), repoPath: input.repoPath, repo: { commit: prepared.repo.commit, dirty: prepared.repo.dirty } })
   const fingerprint = createHash('sha256').update(JSON.stringify([prepared.spec, context, prepared.uiRequired])).digest('hex')
 
   await mkdir(join(work, 'outputs'), { recursive: true })
@@ -214,7 +217,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     const missing = uncoveredRules(prepared.guidelines, value.checks)
     return missing.length ? `Checks must name every required rule ID. Add a check for each of these, with how it applies or evidence that it does not: ${missing.join(', ')}` : undefined
   }
-  const researched = await resolvePhase('research', researchPrompt(context, prompts.researchInstructions), researchSchema, coversRules)
+  const researched = await resolvePhase('research', researchPrompt(context, prompts.researchInstructions, renderFactsBlock(facts)), researchSchema, coversRules)
   if (researched.task !== undefined) return { ...base, stage: 'research', tasks: [researched.task] }
   const research: Research | null = researched.value ?? null
   let plan: Plan | null = null
@@ -235,7 +238,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       plan = repaired.value
     }
   }
-  return exportPlan({ input, prepared, prompts, knowledge, state, calls, research, plan, work })
+  return exportPlan({ input, prepared, prompts, knowledge, state, calls, research, plan, work, facts })
 }
 
 /** The work directory is this run's scratch space, not repository evidence the agent would have seen. */
@@ -247,8 +250,8 @@ async function withoutWorkDir(prepared: PreparedPlan, repoPath: string, work: st
   for (const path of [...prepared.repo.tracked]) if (path.startsWith(prefix)) prepared.repo.tracked.delete(path)
 }
 
-async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; prompts: AgentPrompts; knowledge: KnowledgeRecord; state: State; calls: Call[]; research: Research | null; plan: Plan | null; work: string }): Promise<LocalDone> {
-  const { input, prepared, prompts, knowledge, state, calls, research, plan, work } = args
+async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; prompts: AgentPrompts; knowledge: KnowledgeRecord; state: State; calls: Call[]; research: Research | null; plan: Plan | null; work: string; facts: ReviewFactsResult }): Promise<LocalDone> {
+  const { input, prepared, prompts, knowledge, state, calls, research, plan, work, facts } = args
   const readsText = await readFile(join(work, 'outputs', 'research.reads.json'), 'utf8').catch(() => '[]')
   const parsedReads = readsSchema.safeParse(safeJson(readsText))
   const reads = parsedReads.success ? parsedReads.data : []
@@ -277,7 +280,7 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
     'trace/knowledge.json': JSON.stringify({ ...knowledge, pages: knowledge.files.filter((file) => file.url !== null).map((file) => ({ file: file.name, title: file.title, url: file.url })).concat(knowledge.source === 'notion' ? requiredUrls(knowledgeContents.get(REQUIRED_NAME) ?? '') : []) }, null, 2),
     ...Object.fromEntries([...knowledgeContents].map(([name, text]) => [`trace/knowledge/${name}`, text])),
     'run-analysis.md': analysis,
-    'trace/review.json': JSON.stringify({ mode: 'local', status, problems, decisions, input, repoCommit: prepared.repo.commit, repoDirty: prepared.repo.dirty, models: { all: 'Claude Code session subagents' }, phases: calls.map((call) => ({ phase: call.phase, error: call.error ?? null })), mcpReads: reads, knowledge: { source: knowledge.source, fingerprint: knowledge.fingerprint }, startedAt: state.startedAt, totalMs }, null, 2),
+    'trace/review.json': JSON.stringify({ mode: 'local', status, problems, decisions, input, repoCommit: prepared.repo.commit, repoDirty: prepared.repo.dirty, reviewFacts: { included: facts.included, reason: facts.reason }, models: { all: 'Claude Code session subagents' }, phases: calls.map((call) => ({ phase: call.phase, error: call.error ?? null })), mcpReads: reads, knowledge: { source: knowledge.source, fingerprint: knowledge.fingerprint }, startedAt: state.startedAt, totalMs }, null, 2),
   }
   await writeArtifacts(prepared.dir, files)
   // Every prompt and output is now in trace/calls.json, and the knowledge in trace/knowledge/.

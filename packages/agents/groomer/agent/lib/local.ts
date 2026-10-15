@@ -9,7 +9,7 @@ import { allowedPath } from '@aspiralabs/agent-common/lib/repository'
 import { type ReasonCode } from '@aspiralabs/agent-common/lib/run-status'
 import { readTicketMd } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { GROOM_PAGE, groomPaths, type GroomPaths as Paths } from './paths.ts'
-import { knowledgeConfig, loadKnowledge, snapshotKnowledge, type Env, type Knowledge, type KnowledgePlan, type KnowledgeRequired } from './local-knowledge.ts'
+import { KnowledgeBlocked, knowledgeConfig, loadKnowledge, snapshotKnowledge, type Env, type Knowledge, type KnowledgePlan, type KnowledgeRequired } from './local-knowledge.ts'
 import { allBranchesVisited, applyRound, EXIT_CRITERIA, frontier, nextQuestionId, roundSchema, roundZeroReport, seedBranches, type Round } from './rounds.ts'
 
 // --local: the groomer's procedure with the Claude Code session as the model. Each call is one step
@@ -37,8 +37,8 @@ export const orchestratorFile = (agentDir: string = PACKAGE_DIR) => join(agentDi
 
 export type LocalInput = { folder: string; repoPath: string; guidelinesPath?: string; finish?: boolean; takeRecommended?: boolean }
 
-/** Seams for tests: the agent package whose files and env are read. */
-export type LocalDeps = { agentDir?: string; env?: Env }
+/** Seams for tests: the agent package whose files and env are read, and the knowledge walk's own fetch/API base. */
+export type LocalDeps = { agentDir?: string; env?: Env; fetch?: (url: string, init?: RequestInit) => Promise<Response>; api?: string }
 
 export type LocalTask = { prompt: string; output: string; error?: string }
 
@@ -207,10 +207,13 @@ function applyTakeRecommended(record: GroomRecord, take: boolean): GroomRecord {
 }
 
 const readExclusions = 'Never read .env* files, secrets or credentials files, private keys (*.pem, *.key, *.p12, *.pfx, id_rsa, id_ed25519), .npmrc, .netrc, .git, node_modules or .work/; the agent\'s repository tools cannot read them either.'
+// Every knowledge source is now a folder this run fetched itself (loadKnowledge) or a --guidelines
+// snapshot (snapshotKnowledge); either way the round prompt points at a local file, never the
+// Notion MCP (F49/F27: the session never fetches guidelines on this driver's behalf).
 const knowledgeNote = (knowledge: Pick<Knowledge, 'source' | 'path' | 'requiredFile'>) =>
   knowledge.source === 'folder'
     ? `Engineering guidelines: read ${knowledge.requiredFile} in full first. The topic pages it routes to are files in ${knowledge.path}, indexed by ${join(knowledge.path, 'INDEX.md')}. Do not edit them.`
-    : `Engineering guidelines: read ${knowledge.requiredFile} in full first. Read the topic pages it routes to with the Notion MCP (notion-fetch, read-only); never create, edit, move or comment on anything in Notion.`
+    : `Engineering guidelines: read ${knowledge.requiredFile} in full first. Do not edit it.`
 
 /** The round task's prompt file: the instructions are the authority, the files are the input, the schema is the output contract. */
 export function renderRoundPrompt(args: { n: number; output: string; agentDir: string; repo: string; paths: Paths; knowledge: Knowledge; record: GroomRecord; titleOnly: boolean }): string {
@@ -309,7 +312,18 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   const folder = resolve(input.folder)
   const repo = resolve(input.repoPath)
   const paths = groomPaths(folder)
-  const knowledge = input.guidelinesPath === undefined ? await loadKnowledge(paths.knowledge, await knowledgeConfig(agentDir, deps.env ?? process.env)) : await snapshotKnowledge(input.guidelinesPath)
+  let knowledge: Knowledge
+  try {
+    knowledge = input.guidelinesPath === undefined
+      ? await loadKnowledge(paths.knowledge, await knowledgeConfig(agentDir, deps.env ?? process.env), { fetch: deps.fetch, api: deps.api })
+      : await snapshotKnowledge(input.guidelinesPath)
+  } catch (error) {
+    // No token and no folder already there: blocked, not the old pending session stage. `stage`
+    // is kept (rather than dropped) so every other caller that narrows on it (scripts/local.ts,
+    // this package's own tests) still type-checks against this new result shape.
+    if (error instanceof KnowledgeBlocked) return { pending: false as const, status: 'blocked' as const, stage: 'knowledge' as const, reason: error.message }
+    throw error
+  }
   const idea = (await readText(paths.idea)) ?? ''
   const { round: n, ended } = await currentRound(paths, await readGroomRecord(folder).catch(() => undefined))
   const pending = (): Pending => ({ pending: true, status: 'pending', round: n, orchestrator })

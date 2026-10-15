@@ -173,9 +173,12 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     : result.status === 'needs-author' ? `${openCount} decision${openCount === 1 ? '' : 's'} open: ${join(dir, 'trace', 'decisions.md')}`
       : (result.problems[0] ?? null)
   const reasonCode = null
-  const report = { ...result, candidate: undefined, mode: 'local', input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, models: { all: 'Claude Code session subagents' }, knowledge, startedAt: state.startedAt, totalMs, dir, reason, reasonCode }
+  const files = reviewFiles(result, prepared)
+  // The export's own hash of spec.reviewed.md, so a later run can tell whether it still describes this review (F33).
+  const specSha256 = files['spec.reviewed.md'] === undefined ? undefined : createHash('sha256').update(files['spec.reviewed.md']).digest('hex')
+  const report = { ...result, candidate: undefined, mode: 'local', input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, specSha256, models: { all: 'Claude Code session subagents' }, knowledge, startedAt: state.startedAt, totalMs, dir, reason, reasonCode }
   await writeArtifacts(dir, {
-    ...reviewFiles(result, prepared),
+    ...files,
     'trace/calls.json': JSON.stringify({ mode: 'local', system: systemPrompt, knowledge, calls }, null, 2),
     'run-analysis.md': analysis,
     'trace/review.json': JSON.stringify(report, null, 2),

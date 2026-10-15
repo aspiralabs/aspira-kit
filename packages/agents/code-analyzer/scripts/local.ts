@@ -5,7 +5,7 @@ import { exitCodeFor } from '@aspiralabs/agent-common/lib/run-status'
 import { TicketArgumentError } from '@aspiralabs/agent-common/lib/ticket'
 import { afterRun, beforeRun, handleRunError, verifyRun, UsageError, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { FlowRefused, writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
-import { KnowledgeRequired, runLocal } from '../agent/lib/local.ts'
+import { runLocal } from '../agent/lib/local.ts'
 
 // One step of a --local run. The ticket comes first: the `board` stage (resolve, pull) is printed
 // before anything else, and the driver refuses, before any model stage, when ticket.md does not show
@@ -79,10 +79,7 @@ try {
     }
   }
 } catch (error) {
-  if (error instanceof KnowledgeRequired) {
-    // Not a failure: the stage the session runs before the first step.
-    console.log(JSON.stringify({ pending: true, refused: error.message, ...error.plan, agent }, null, 2))
-  } else if (error instanceof FlowRefused || error instanceof TicketArgumentError) {
+  if (error instanceof FlowRefused || error instanceof TicketArgumentError) {
     console.log(JSON.stringify({ pending: false, status: 'refused', stage: 'board', reason: error.message }, null, 2))
     console.error(`code-analyzer local: refused: ${error.message}`)
     process.exitCode = REFUSED

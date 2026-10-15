@@ -10,13 +10,18 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { KNOWLEDGE_ENV, pageIdFrom } from '@aspiralabs/agent-common/lib/knowledge'
+import { parseProvenance, verifyKnowledgeDir, verifySnapshot } from '@aspiralabs/agent-common/lib/knowledge-snapshot'
+import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
+import { notionToken } from '@aspiralabs/agent-common/lib/notion-token'
 import { REASON_CODES, readRunStatus, type ReasonCode } from '@aspiralabs/agent-common/lib/run-status'
+import { KnowledgePrerequisiteError } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { z } from 'zod'
 import { detect, type Analyzer, type Detection } from './analyzers.ts'
 import { batch as batchOf, sameSet, type Batch, type Diagnostic } from './diagnostics.ts'
 import { hostExecutor, type Executor } from './executor.ts'
 import type { Knowledge } from './fixer.ts'
-import { checkGuidelinesFile, checkKnowledgeDir, fixKnowledge, knowledgeConfig, type LoadedKnowledge } from './knowledge.ts'
+import { checkGuidelinesFile, checkKnowledgeDir, fixKnowledge, knowledgeConfig, KnowledgeRequired, type KnowledgeConfig, type KnowledgePlan, type LoadedKnowledge } from './knowledge.ts'
 import { changeRejection, type Rejection } from './guards.ts'
 import { finalStatus, runAnalyzers, runAutofix, STOP, targetsOf, type LoopResult, type Round, type Status } from './loop.ts'
 import { renderReport } from './report.ts'
@@ -30,6 +35,74 @@ const sha256 = (text: string): string => createHash('sha256').update(text).diges
 
 /** Re-exported for the CLI and tests: the guidelines module is shared with the default path. */
 export { KnowledgeRequired, knowledgeConfig, type KnowledgeConfig, type KnowledgePlan } from './knowledge.ts'
+
+type Fetch = (url: string, init?: RequestInit) => Promise<Response>
+
+/**
+ * Thrown when a run has no --knowledge, no --guidelines, and no NOTION_TOKEN to fetch with:
+ * handleRunError (agent-common/lib/ticket-driver) reports this as blocked, exit 1 -- never the
+ * pending session knowledge stage KnowledgeRequired used to print. Carries its own `pending`/
+ * `status`, so a caller that reads the raw thrown error (rather than going through
+ * handleRunError) still sees the same shape a resolved blocked result would have.
+ */
+export class KnowledgeBlocked extends KnowledgePrerequisiteError {
+  readonly pending = false as const
+  readonly status = 'blocked' as const
+}
+
+/** `./knowledge.ts`'s own planFor, kept private there; duplicated for the fresh-knowledge paths below. */
+const planFor = (config: KnowledgeConfig, dir: string): KnowledgePlan => ({ stage: 'knowledge', ...config, dir, files: { required: join(dir, 'REQUIRED.md'), index: join(dir, 'INDEX.md') } })
+
+/** The provenance header's own rootId, when a file carries one; '' when it does not (verify then fails on the header itself, not the root check). */
+async function headerRootId(path: string): Promise<string> {
+  const text = await readFile(path, 'utf8').catch(() => '')
+  return parseProvenance(text)?.rootId ?? ''
+}
+
+/** The root a verify call is held to: the agent's configured KNOWLEDGE_PAGE when there is one, else the file's own header (a no-op root check; the integrity/location/trace checks still apply). */
+async function expectedRootFor(config: KnowledgeConfig, requiredPath: string): Promise<string> {
+  const configured = config.page === null ? undefined : pageIdFrom(config.page)
+  return configured ?? (await headerRootId(requiredPath))
+}
+
+/**
+ * The guidelines for a run that has none saved yet (the first call): a given --knowledge/--guidelines
+ * is checked against its provenance header (verifyKnowledgeDir/verifySnapshot) before the existing
+ * structural checks run, refusing (KnowledgeRequired, naming the load-knowledge command) a tampered
+ * or header-less (pre-shared-walk) copy; with neither given, this run fetches the pages itself
+ * through the one shared walk (knowledge-walk.ts) straight into <work>/knowledge, needing a
+ * NOTION_TOKEN and KNOWLEDGE_PAGE -- missing either throws KnowledgeBlocked, not a pending stage.
+ */
+async function resolveFreshKnowledge(input: LocalInput, config: KnowledgeConfig, work: string, agentDir: string, deps: LocalDeps): Promise<LoadedKnowledge> {
+  const hint = `fetch the pages in the knowledge stage into ${join(work, 'knowledge')}, or pass --knowledge DIR (a load-knowledge folder) or --guidelines FILE (a REQUIRED.md snapshot).`
+  if (input.knowledge !== undefined) {
+    const dir = resolve(input.knowledge)
+    const requiredPath = join(dir, 'REQUIRED.md')
+    const verified = await verifyKnowledgeDir(dir, { expectedRootId: await expectedRootFor(config, requiredPath) })
+    if (!verified.ok) throw new KnowledgeRequired(`${verified.reason} ${verified.hint}`, planFor(config, dir))
+    return checkKnowledgeDir(dir, config, hint)
+  }
+  if (input.guidelines !== undefined) {
+    const file = resolve(input.guidelines)
+    const verified = await verifySnapshot(file, { expectedRootId: await expectedRootFor(config, file) })
+    if (!verified.ok) throw new KnowledgeRequired(`${verified.reason} ${verified.hint}`, planFor(config, dirname(file)))
+    return checkGuidelinesFile(file, config)
+  }
+  // Neither given: the default <work>/knowledge. Already there (a run that pre-populated it some
+  // other way) is trusted structurally, same as before P27 -- the provenance check above is only
+  // for a folder the caller explicitly named. Missing is this run's own job to fetch.
+  const dir = join(work, 'knowledge')
+  const already = (await readFile(join(dir, 'REQUIRED.md'), 'utf8').catch(() => null)) !== null
+  if (already) return checkKnowledgeDir(dir, config, hint)
+  const resolved = await notionToken({ env: deps.env ?? process.env, projectRoot: join(agentDir, '..'), appDir: agentDir })
+  if (resolved?.token === undefined || config.page === null) {
+    const missing = [resolved?.token === undefined && KNOWLEDGE_ENV.token, config.page === null && KNOWLEDGE_ENV.page].filter(Boolean).join(' and ')
+    throw new KnowledgeBlocked(`The engineering guidelines are required and none were given: ${missing} not set. Set them in the agent's env (../.env.local, .env.local or .env.development.local next to its package), or ${hint}`)
+  }
+  const walk = await walkKnowledge({ token: resolved.token, page: config.page, required: config.required, ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.api ? { api: deps.api } : {}) })
+  await writeKnowledgeFolder(dir, walk)
+  return { ...(await checkKnowledgeDir(dir, config, hint)), source: 'notion' }
+}
 
 // ---------------------------------------------------------------------------------------------
 // The fixer, loaded from the agent's own files on every call.
@@ -136,8 +209,8 @@ export type LocalInput = {
   finish?: boolean
 }
 
-/** Seams for tests: the agent package the prompts and config are read from, and the env on top of its env files. */
-export type LocalDeps = { agentDir?: string; env?: NodeJS.ProcessEnv; progress?: (message: string) => void }
+/** Seams for tests: the agent package the prompts and config are read from, the env on top of its env files, and the knowledge walk's own fetch/API base (never read outside tests). */
+export type LocalDeps = { agentDir?: string; env?: NodeJS.ProcessEnv; progress?: (message: string) => void; fetch?: Fetch; api?: string }
 
 /** One batch for the session: run the prompt file as a subagent, which writes its JSON to `output`. */
 export type LocalTask = { id: string; prompt: string; output: string; files: string[]; diagnostics: number; error?: string; retry?: boolean }
@@ -220,7 +293,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   const hint = `fetch the pages in the knowledge stage into ${join(work, 'knowledge')}, or pass --knowledge DIR (a load-knowledge folder) or --guidelines FILE (a REQUIRED.md snapshot).`
   const knowledge = saved !== null
     ? saved.knowledge.source === 'guidelines' ? await checkGuidelinesFile(saved.knowledge.requiredFile, config) : await checkKnowledgeDir(saved.knowledge.dir ?? join(work, 'knowledge'), config, hint)
-    : input.guidelines !== undefined ? await checkGuidelinesFile(resolve(input.guidelines), config) : await checkKnowledgeDir(resolve(input.knowledge ?? join(work, 'knowledge')), config, hint)
+    : await resolveFreshKnowledge(input, config, work, agentDir, deps)
   if (saved !== null && knowledge.fingerprint !== saved.knowledge.fingerprint) throw new Error(`The engineering guidelines in ${knowledge.dir ?? knowledge.requiredFile} changed since this run started. Restore them, or delete ${work} to start over.`)
 
   const fixer = await loadFixer(agentDir)
