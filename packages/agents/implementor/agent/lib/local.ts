@@ -17,6 +17,7 @@ import { promisify } from 'node:util'
 import { z } from 'zod'
 import { changedApps } from '@aspiralabs/agent-common/lib/changed-apps'
 import { readRunStatus, type ReasonCode } from '@aspiralabs/agent-common/lib/run-status'
+import { parseTicketMd, TICKET_FILE } from '@aspiralabs/agent-common/lib/ticket'
 import { dependenciesAdded, renderDependencies, type DependencyReport } from './dependencies.ts'
 import {
   agentEnv,
@@ -153,7 +154,15 @@ const stateSchema = z.object({
   // Read through readRunStatus so a state saved before the five-status rename (an old word like
   // "complete") still resumes instead of failing the schema (F7).
   gate: z
-    .object({ status: z.string().transform((word) => readRunStatus(word)?.status ?? word), repoCommit: z.string().nullable(), head: z.string(), decisions: z.array(z.unknown()) })
+    .object({
+      status: z.string().transform((word) => readRunStatus(word)?.status ?? word),
+      repoCommit: z.string().nullable(),
+      head: z.string(),
+      decisions: z.array(z.unknown()),
+      // The Plan page's own URL when this gate's review.json was rebuilt from the Plan page's fenced
+      // block rather than produced by this machine's own planner run (F36); absent for an ordinary run.
+      recoveredFrom: z.string().nullable().optional(),
+    })
     .nullable(),
   // Pre-upgrade states carry the old boolean flag; read as "not yet accepted" (its only effect is a
   // redundant target recheck, never incorrect behavior) so the schema does not reject the state.
@@ -169,6 +178,14 @@ const sha256 = (text: string) => createHash('sha256').update(text).digest('hex')
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 async function git(repo: string, ...args: string[]): Promise<string> {
   return (await run('git', ['-C', repo, ...args])).stdout.trim()
+}
+
+/** Whether `commit` is an ancestor of (or equal to) `head` in `repo`: a recovered plan's gate needs its repoCommit to still be in this branch's history. */
+async function isAncestor(repo: string, commit: string, head: string): Promise<boolean> {
+  return run('git', ['-C', repo, 'merge-base', '--is-ancestor', commit, head]).then(
+    () => true,
+    () => false,
+  )
 }
 
 /** The worker brief template in the procedure: the fenced block after "Use this template:". */
@@ -480,7 +497,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   // The gate, for a reviewed plan: once, before anything is written.
   if (source.kind === 'plan' && state.gate === null) {
     const review = await readFile(source.reviewFile ?? '', 'utf8').then(
-      (text) => z.looseObject({ status: z.string(), problems: z.array(z.unknown()).default([]), decisions: z.array(z.unknown()).default([]), repoCommit: z.string().optional() }).parse(JSON.parse(text)),
+      (text) => z.looseObject({ status: z.string(), problems: z.array(z.unknown()).default([]), decisions: z.array(z.unknown()).default([]), repoCommit: z.string().optional(), recoveredFrom: z.string().optional() }).parse(JSON.parse(text)),
       () => null,
     )
     if (review === null || !['ready', 'needs-author'].includes(review.status)) {
@@ -490,6 +507,27 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
         problems: (review?.problems ?? []).map(String),
       })
     }
+    // A review.json rebuilt from the Plan page's fenced block (F36) was not produced by this
+    // machine's own planner run: it needs a stronger check than an ordinary reviewed plan before the
+    // gate trusts it. The ticket's live Status (not whatever an attacker's recovered copy claims)
+    // must still be "Ready: Plan", and the recorded repoCommit must still be in this branch's history.
+    if (review.recoveredFrom !== undefined) {
+      const ticket = await readFile(join(dirname(source.workDir), TICKET_FILE), 'utf8').then(parseTicketMd, () => null)
+      if (ticket === null || ticket.status !== 'Ready: Plan') {
+        return refuse('refused', {
+          reason: `This plan was recovered from Notion (${review.recoveredFrom}); recovery only runs while the ticket is "Ready: Plan". ${TICKET_FILE} shows "${ticket?.status ?? 'an unreadable Status'}".`,
+          reasonCode: null,
+          problems: [],
+        })
+      }
+      if (review.repoCommit === undefined || !(await isAncestor(source.repo, review.repoCommit, head))) {
+        return refuse('refused', {
+          reason: `This plan was recovered from Notion (${review.recoveredFrom}); its repoCommit (${review.repoCommit ?? 'missing'}) is not an ancestor of HEAD (${head}), so it no longer matches this branch's history. Run the planner again (/aspira-planner --local).`,
+          reasonCode: null,
+          problems: [],
+        })
+      }
+    }
     if (review.repoCommit !== undefined && review.repoCommit !== head) {
       const plan = planOf(await readFile(source.planFile, 'utf8'))
       const drift = plan === null ? [`${source.planFile} is not a readable plan.`] : targetProblems(plan, (path) => existsSync(join(source.repo, path)))
@@ -497,7 +535,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
         return refuse('refused', { reason: `The plan was made at ${review.repoCommit} and HEAD is ${head}; its targets no longer match. Run the planner again (/aspira-planner --local).`, reasonCode: 'plan-drift', problems: drift })
       }
     }
-    state.gate = { status: review.status, repoCommit: review.repoCommit ?? null, head, decisions: review.decisions }
+    state.gate = { status: review.status, repoCommit: review.repoCommit ?? null, head, decisions: review.decisions, recoveredFrom: review.recoveredFrom ?? null }
   }
 
   const files = await agentFiles(deps)

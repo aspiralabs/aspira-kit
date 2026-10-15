@@ -6,6 +6,7 @@ import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
 import { openDecisions } from '@aspiralabs/agent-common/lib/decisions'
 import { connectReadTools } from '@aspiralabs/agent-common/lib/mcp'
 import { modelTrace } from '@aspiralabs/agent-common/lib/model-trace'
+import { renderPlanBlock } from '@aspiralabs/agent-common/lib/plan-block'
 import { repository } from '@aspiralabs/agent-common/lib/repository'
 import { runAnalysis } from '@aspiralabs/agent-common/lib/run-analysis'
 import { type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
@@ -191,8 +192,16 @@ export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<
   return { status, problems, decisions }
 }
 
-/** The report files that do not depend on how the models were called. */
-export function planReportFiles(args: { prepared: PreparedPlan; specPath: string; research: Research | null; plan: Plan | null; status: string; problems: string[]; decisions: DecisionRecord[] }): Record<string, string> {
+/** `problems` with any occurrence of `repoPath` (absolute) made repository-relative: the Plan page's
+ * block never carries a host's own filesystem layout (F36). */
+function repositoryRelative(problems: readonly string[], repoPath: string): string[] {
+  const root = `${resolve(repoPath).replace(/\/+$/, '')}/`
+  return problems.map((problem) => problem.split(root).join(''))
+}
+
+/** The report files that do not depend on how the models were called. `repoPath` is the repository
+ * root: used only to redact it out of `problems` before they reach the Plan page's block. */
+export function planReportFiles(args: { prepared: PreparedPlan; specPath: string; repoPath: string; research: Research | null; plan: Plan | null; status: string; problems: string[]; decisions: DecisionRecord[] }): Record<string, string> {
   const { prepared, research, plan, status, problems, decisions } = args
   const files: Record<string, string> = {
     'trace/spec.original.md': prepared.spec, 'trace/guidelines.md': prepared.guidelines,
@@ -200,7 +209,18 @@ export function planReportFiles(args: { prepared: PreparedPlan; specPath: string
     'trace/checks.md': renderChecks(status, problems),
     'trace/decisions.md': renderDecisionsFile(status, decisions),
   }
-  if (plan) files['plan.reviewed.md'] = renderPlan(plan, status, { specPath: args.specPath, commit: prepared.repo.commit, dirty: prepared.repo.dirty }, problems, decisions)
+  if (plan) {
+    const rendered = renderPlan(plan, status, { specPath: args.specPath, commit: prepared.repo.commit, dirty: prepared.repo.dirty }, problems, decisions)
+    // The Plan page's block carries plan.json and the gate fields so a fresh pull can rebuild them
+    // (F36): pageTextSha256 is unknown until the pushed page is read back once (ticket-flow.ts's
+    // planner verify step fills it in with a second, final push).
+    files['plan.reviewed.md'] = renderPlanBlock({
+      pageMarkdown: rendered,
+      plan,
+      review: { status, decisions, repoCommit: prepared.repo.commit, problems: repositoryRelative(problems, args.repoPath) },
+      pageTextSha256: null,
+    })
+  }
   return files
 }
 
@@ -294,7 +314,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
     const reviewMs = Date.now() - started - prepareMs
     const exportStarted = Date.now()
     const files: Record<string, string> = {
-      ...planReportFiles({ prepared, specPath: input.specPath, research, plan, status, problems, decisions }),
+      ...planReportFiles({ prepared, specPath: input.specPath, repoPath: input.repoPath, research, plan, status, problems, decisions }),
       'trace/calls.json': JSON.stringify({ system: { research: researchSystem, planning: system }, models, calls: trace.calls }, null, 2),
       'trace/usage.json': JSON.stringify({ scope: 'Direct planner calls only; excludes eve routing and guideline loading before entry.', turns: trace.turns }, null, 2),
     }

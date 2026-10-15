@@ -350,7 +350,7 @@ it('quotes procedure headings verbatim, on one line', async () => {
 describe('where a finished run writes its board trace', () => {
   it('is the run\'s work folder, not the exported trace file inside it', () => {
     const workDir = '/repo/.work/kit-8-x/plan.review'
-    expect(exportDirOf({ pending: false, status: 'complete', workDir, export: `${workDir}/trace/implementation-local.json`, missing: [] })).toBe(workDir)
+    expect(exportDirOf({ pending: false, status: 'ready', workDir, export: `${workDir}/trace/implementation-local.json`, missing: [] })).toBe(workDir)
   })
 
   it('is nothing for a run that exported nothing', () => {

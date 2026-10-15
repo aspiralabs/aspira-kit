@@ -8,7 +8,7 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { BoardError, board as makeBoard, type Board, type Ticket, type TicketPage } from './board.ts'
+import { BoardError, board as makeBoard, type Board, type BoardWithPageMarkdown, type Ticket, type TicketPage } from './board.ts'
 import {
   GROOM_LINE_PATTERNS,
   RECOMMENDED_SUFFIX,
@@ -25,6 +25,7 @@ import {
   type GroomTicks,
 } from './decisions.ts'
 import { GROOM_BRANCHES, readGroomRecord, rebuildGroomRecord, validateIdeaSummary, writeGroomRecord, type GroomRecord } from './groom-record.ts'
+import { PLAN_BLOCK_FILES, recoverPlan } from './plan-block.ts'
 import type { ReasonCode } from './run-status.ts'
 import {
   DEFAULT_DEV,
@@ -232,6 +233,20 @@ export async function startFlow(options: FlowOptions): Promise<FlowStart> {
     await writeInto(item.file, page.markdown)
     pulled.push(item.file)
     trace.actions.push(entry('pull', `${item.title} -> ${item.file} (${item.reason})`, ticket.status, ticket.status))
+    // A fresh machine's implementor pull has the pushed Plan page but not the planner's own
+    // trace/plan.json and trace/review.json (never pushed to git): rebuild them from the page's
+    // fenced block (F36) instead of asking the session to retype the plan. `pageMarkdown` (raw, no
+    // notionToMarkdown conversion) is preferred so the block's hashes still verify; a client without
+    // it (an older mock) falls back to the already-pulled, converted copy.
+    if (options.skill === 'implementor' && item.title === 'Plan' && !existsSync(join(folder, PLAN_BLOCK_FILES[0]))) {
+      const raw = 'pageMarkdown' in client ? await (client as BoardWithPageMarkdown).pageMarkdown(page.id) : { markdown: page.markdown, truncated: false }
+      const recovered = await recoverPlan({ pageMarkdown: raw.markdown, truncated: raw.truncated, folder, pageUrl: page.url })
+      trace.actions.push(
+        recovered.recovered
+          ? entry('pull', `Plan block -> ${recovered.files.join(', ')} (recovered from the Plan page)`, ticket.status, ticket.status)
+          : entry('pull', `Plan block not recovered: ${recovered.reason}`, ticket.status, ticket.status, false, recovered.reason),
+      )
+    }
   }
   const row = GATES[options.skill]
   const groomPull = row.pulls?.[0]

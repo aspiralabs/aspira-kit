@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseArgs, promisify } from 'node:util'
 import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
+import { prStep, type PrStepResult } from '@aspiralabs/agent-common/lib/pr-step'
 import { exitCodeFor } from '@aspiralabs/agent-common/lib/run-status'
 import { TicketArgumentError, type TicketRecord } from '@aspiralabs/agent-common/lib/ticket'
 import { ticketBranch } from '@aspiralabs/agent-common/lib/ticket-branch'
@@ -18,9 +19,12 @@ const exec = promisify(execFile)
 // when the checkout is not the ticket's own branch (GIT-001): building on the wrong branch is a
 // mistake no amount of work afterward fixes. Then the knowledge stage, the next stage's tasks (a
 // prompt and an output file per task), or the finished run with the end-of-run board actions.
-// --verify is the last step: ticket.md must show the Status the end stage expected. --finish exports
-// what exists as incomplete. Every step names the agent package that ran (`agent`).
-const usage = 'Usage: pnpm run implement:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <plan.review | plan.reviewed.md | spec.md>) [--guidelines FILE] [--max-parallel N] [--serial] [--work DIR] [--force-pull] [--verify] [--finish]'
+// --verify is the last step: ticket.md must show the Status the end stage expected; --pr-url (only
+// with --verify) runs the shared PR check and the set-then-move board step (F24-F26) for Step 8,
+// printing the set or move action the session performs next; without it, Step 8 is reported still
+// open. --finish exports what exists as incomplete. Every step names the agent package that ran (`agent`).
+const usage =
+  'Usage: pnpm run implement:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <plan.review | plan.reviewed.md | spec.md>) [--guidelines FILE] [--max-parallel N] [--serial] [--work DIR] [--force-pull] [--verify [--pr-url URL [--replace-pending]]] [--finish]'
 const REFUSED = 3
 
 async function git(repo: string, ...args: string[]): Promise<string> {
@@ -48,7 +52,7 @@ function beforeClaim(repo: string): (ticket: TicketRecord) => Promise<void> {
  * Type, which may have changed on the board since the build ran. Null when the build never
  * reached ready, or recorded no branch (an older export).
  */
-async function step8For(outputFor: (folder: string) => string, folder: string): Promise<{ push: string; note?: string } | null> {
+async function step8For(outputFor: (folder: string) => string, folder: string): Promise<{ push: string; branch: string; note?: string } | null> {
   const record = await readFile(join(outputFor(folder), 'trace/implementation-local.json'), 'utf8')
     .then((text) => JSON.parse(text) as { status?: unknown; branch?: unknown })
     .catch(() => null)
@@ -57,8 +61,23 @@ async function step8For(outputFor: (folder: string) => string, folder: string): 
   if (ticket === null) return null
   const live = ticketBranch(ticket.id, ticket.title, ticket.type)
   const push = `git push -u origin ${record.branch}`
-  if (live === record.branch) return { push }
-  return { push, note: `the card's title or Type changed since the build: the branch stays ${record.branch}` }
+  if (live === record.branch) return { push, branch: record.branch }
+  return { push, branch: record.branch, note: `the card's title or Type changed since the build: the branch stays ${record.branch}` }
+}
+
+/**
+ * Step 8's PR action for a `--verify --pr-url` report (F24-F26): the shared PR check, then the
+ * set-then-move board step, against the branch `step8For` recorded (never the ticket's live title
+ * or Type). `open` is false only once the board already shows the move; a check or step problem
+ * (a bad PR, gh missing, a conflicting pending URL) is reported, naming nothing as set or moved.
+ */
+async function step8PrAction(repo: string, branch: string, folder: string, url: string, replacePending: boolean): Promise<{ open: boolean; action?: 'set' | 'move'; url?: string; from?: string; to?: string; problem?: string }> {
+  const ticket = await readTicketMd(folder)
+  const decision: PrStepResult = await prStep({ url, repo, branch, folder, ticket: { id: ticket?.id ?? '', status: ticket?.status ?? '', pr: ticket?.pr ?? null }, env: process.env, replacePending })
+  if (decision.kind === 'set') return { open: true, action: 'set', url: decision.url }
+  if (decision.kind === 'move') return { open: true, action: 'move', from: decision.from, to: decision.to }
+  if (decision.kind === 'ready') return { open: false }
+  return { open: true, problem: decision.message }
 }
 
 try {
@@ -75,9 +94,12 @@ try {
       'force-pull': { type: 'boolean' },
       verify: { type: 'boolean' },
       finish: { type: 'boolean' },
+      'pr-url': { type: 'string' },
+      'replace-pending': { type: 'boolean' },
     },
   })
   if (values.repo === undefined || positionals.length > 0 || (values.ticket !== undefined && values['no-ticket'] !== undefined)) throw new Error(usage)
+  if ((values['pr-url'] !== undefined || values['replace-pending'] === true) && values.verify !== true) throw new Error(usage)
   const repo = values.repo
   const parallel = values['max-parallel']
   const agent = await agentVersion(new URL('..', import.meta.url))
@@ -85,9 +107,16 @@ try {
   const outputFor = (folder: string) => join(folder, 'plan.review')
   if (values.verify === true) {
     const verified = await verifyRun(context, { positional: values.ticket }, outputFor)
-    const step8 = await step8For(outputFor, verified.folder)
+    const record = await step8For(outputFor, verified.folder)
+    const prUrl = values['pr-url']
+    const step8 =
+      record === null
+        ? null
+        : prUrl === undefined
+          ? { ...record, open: true }
+          : { ...record, ...(await step8PrAction(repo, record.branch, verified.folder, prUrl, values['replace-pending'] === true)) }
     console.log(JSON.stringify({ pending: false, stage: 'board-verify', ...verified, agent, ...(step8 === null ? {} : { step8 }) }, null, 2))
-    if (!verified.verified) process.exitCode = 1
+    if (!verified.verified || (step8 !== null && 'problem' in step8)) process.exitCode = 1
   } else {
     const before = await beforeRun(context, { positional: values['no-ticket'] ?? values.ticket, noTicket: values['no-ticket'] !== undefined, forcePull: values['force-pull'] })
     if (before.kind === 'stage') {

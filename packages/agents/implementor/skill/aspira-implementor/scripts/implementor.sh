@@ -165,7 +165,7 @@ absolute_path() {
 is_github() {
   [[ $1 =~ ^(https?://(www\.)?github\.com/|git@github\.com:)?[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+(\.git)?/?$ ]] && [ ! -d "$1" ]
 }
-SOURCE="" REPO="" REF="" PR="" LOCAL="" GUIDELINES="" PARALLEL="" SERIAL="" WORK="" FINISH="" NO_TICKET="" FORCE_PULL="" VERIFY=""
+SOURCE="" REPO="" REF="" PR="" LOCAL="" GUIDELINES="" PARALLEL="" SERIAL="" WORK="" FINISH="" NO_TICKET="" FORCE_PULL="" VERIFY="" PR_URL="" REPLACE_PENDING=""
 # The first positional is the Feature Board ticket (an ID such as NOM-4, or a Notion page URL), or
 # nothing (the one folder under .work/ with a ticket.md), or, with --no-ticket, the source path as before.
 parse() {
@@ -178,6 +178,8 @@ parse() {
       --no-ticket) NO_TICKET=1; shift ;;
       --force-pull) FORCE_PULL=1; shift ;;
       --verify) VERIFY=1; shift ;;
+      --pr-url) [ $# -ge 2 ] || die "--pr-url needs a GitHub pull request URL"; PR_URL=$2; shift 2 ;;
+      --replace-pending) REPLACE_PENDING=1; shift ;;
       --guidelines) [ $# -ge 2 ] || die "--guidelines needs a file"; GUIDELINES=$(absolute_path "$2"); shift 2 ;;
       --max-parallel) [ $# -ge 2 ] || die "--max-parallel needs a number"; PARALLEL=$2; shift 2 ;;
       --serial) SERIAL=1; shift ;;
@@ -230,7 +232,7 @@ github_of() {
 cmd_start() {
   parse "$@"
   if [ -n "$LOCAL" ]; then local_step; return; fi
-  [ -z "$GUIDELINES$PARALLEL$SERIAL$WORK$FINISH$VERIFY" ] || die "--guidelines, --max-parallel, --serial, --work, --finish and --verify are for --local; the agent loads its rules from Notion"
+  [ -z "$GUIDELINES$PARALLEL$SERIAL$WORK$FINISH$VERIFY$PR_URL$REPLACE_PENDING" ] || die "--guidelines, --max-parallel, --serial, --work, --finish, --verify, --pr-url and --replace-pending are for --local; the agent loads its rules from Notion"
   local repo ref=$REF source=$SOURCE folder="" top="" export_dir=""
   resolve_agent
   node_args
@@ -321,6 +323,7 @@ RUNNER
 # --verify is the last step, once the session made the moves.
 local_step() {
   [ -z "$REF$PR" ] || die "--ref and --pr are for the agent; --local builds the checkout you are in and pushes nothing"
+  [ -n "$VERIFY" ] || [ -z "$PR_URL$REPLACE_PENDING" ] || die "--pr-url and --replace-pending are only for --verify"
   if [ -n "$REPO" ] && is_github "$REPO"; then die "--local builds a local checkout; $REPO is a GitHub repository. Drop --local to launch the agent on it"; fi
   local top args
   top=$(repo_top)
@@ -332,6 +335,8 @@ local_step() {
   [ -z "$WORK" ] || args+=(--work "$WORK")
   [ -z "$FORCE_PULL" ] || args+=(--force-pull)
   [ -z "$VERIFY" ] || args+=(--verify)
+  [ -z "$PR_URL" ] || args+=(--pr-url "$PR_URL")
+  [ -z "$REPLACE_PENDING" ] || args+=(--replace-pending)
   [ -z "$FINISH" ] || args+=(--finish)
   command -v node >/dev/null || die "node is not installed"
   resolve_agent
@@ -385,5 +390,5 @@ case ${1:-} in
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
   load-knowledge) shift; cmd_load_knowledge "$@" ;;
-  *) die "usage: implementor.sh start [TICKET | <path-in-repo> --no-ticket] [--repo owner/name | --repo DIR] [--ref BRANCH] [--pr] [--force-pull] | status RUN | wait RUN [--max SECONDS] | local [TICKET | <source> --no-ticket] [--repo DIR] [--guidelines FILE] [--max-parallel N] [--serial] [--work DIR] [--force-pull] [--verify] [--finish] | load-knowledge --out DIR" ;;
+  *) die "usage: implementor.sh start [TICKET | <path-in-repo> --no-ticket] [--repo owner/name | --repo DIR] [--ref BRANCH] [--pr] [--force-pull] | status RUN | wait RUN [--max SECONDS] | local [TICKET | <source> --no-ticket] [--repo DIR] [--guidelines FILE] [--max-parallel N] [--serial] [--work DIR] [--force-pull] [--verify [--pr-url URL] [--replace-pending]] [--finish] | load-knowledge --out DIR" ;;
 esac

@@ -274,7 +274,7 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
     ? (await fingerprintKnowledge(await knowledgeFiles(knowledge.dir))).contents
     : new Map([[REQUIRED_NAME, prepared.guidelines]])
   const files: Record<string, string> = {
-    ...planReportFiles({ prepared, specPath: input.specPath, research, plan, status, problems, decisions }),
+    ...planReportFiles({ prepared, specPath: input.specPath, repoPath: input.repoPath, research, plan, status, problems, decisions }),
     'trace/calls.json': JSON.stringify({ mode: 'local', system: { research: prompts.researchSystem, planning: prompts.system }, models: { all: 'Claude Code session subagents' }, rejections: state.rejections, calls }, null, 2),
     'trace/usage.json': JSON.stringify({ scope: '--local run: model work ran in a Claude Code session; no usage is itemized.', turns: [] }, null, 2),
     'trace/knowledge.json': JSON.stringify({ ...knowledge, pages: knowledge.files.filter((file) => file.url !== null).map((file) => ({ file: file.name, title: file.title, url: file.url })).concat(knowledge.source === 'notion' ? requiredUrls(knowledgeContents.get(REQUIRED_NAME) ?? '') : []) }, null, 2),
