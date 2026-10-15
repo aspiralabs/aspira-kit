@@ -7,7 +7,8 @@
 
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
+import { z } from 'zod'
 import { BoardError, board as makeBoard, type Board, type Ticket, type TicketPage } from './board.ts'
 import {
   GROOM_LINE_PATTERNS,
@@ -25,6 +26,8 @@ import {
   type GroomTicks,
 } from './decisions.ts'
 import { GROOM_BRANCHES, GROOM_RUN_STATUSES, readGroomRecord, rebuildGroomRecord, validateIdeaSummary, writeGroomRecord, type GroomRecord, type GroomRunStatus } from './groom-record.ts'
+import { pageIdFrom } from './knowledge.ts'
+import { listsTelemetry, readAttached, recordAttached, telemetryFile, telemetryNotice } from './telemetry.ts'
 import {
   DEFAULT_DEV,
   DEV_ENV,
@@ -45,6 +48,7 @@ import {
   type BoardAction,
   type BoardTrace,
   type BoardTraceEntry,
+  type BoardTraceTelemetry,
   type Gate,
   type RunStatus,
   type Skill,
@@ -655,10 +659,11 @@ async function finishGroom(options: FinishOptions, client: Board, ticket: Ticket
   ticket.status = status
   trace.statusAfter = status
   await writeInto(join(options.folder, TICKET_FILE), renderTicketMd(ticket))
+  const telemetryFailures = await attachToTrace(options, client, ticket, trace)
   const traceFile = await writeBoardTrace(options.exportDir ?? options.folder, trace)
   const groom: GroomFinish = { open, ...(url === undefined ? {} : { url }) }
   const remaining = remainingStep(options.skill, options.ok, status, false, final, groom)
-  return { trace, traceFile, header: reportHeader(trace), pushFailures, remaining, runStatus: final, notices, groom }
+  return { trace, traceFile, header: reportHeader(trace), pushFailures, telemetryFailures, remaining, runStatus: final, notices, groom }
 }
 
 export type FinishOptions = {
@@ -677,6 +682,8 @@ export type FinishOptions = {
   env?: Record<string, string | undefined>
   /** The trace the start left, continued here. */
   trace?: BoardTrace
+  /** A hand run's telemetry file, already written: attached to the ticket page under BOARD-003 (KIT-19). Absent: nothing is attached. */
+  telemetry?: { runId: string; file: string }
 }
 
 export type FlowFinish = {
@@ -684,6 +691,8 @@ export type FlowFinish = {
   traceFile: string
   header: string[]
   pushFailures: string[]
+  /** Every telemetry attach that did not happen, as its `Telemetry not attached: …` line. Never part of pushFailures and never the exit code (OBS-002). */
+  telemetryFailures: string[]
   remaining: string | null
   /** The status after the board step: the requested word, or what the groomer's finish recorded instead. */
   runStatus: RunStatus
@@ -747,9 +756,69 @@ export async function finishFlow(options: FinishOptions): Promise<FlowFinish> {
   ticket.status = status
   trace.statusAfter = status
   await writeInto(join(options.folder, TICKET_FILE), renderTicketMd(ticket))
+  const telemetryFailures = await attachToTrace(options, client, ticket, trace)
   const traceFile = await writeBoardTrace(options.exportDir ?? options.folder, trace)
   const remaining = remainingStep(options.skill, options.ok, status, prOpened, options.runStatus)
-  return { trace, traceFile, header: reportHeader(trace), pushFailures, remaining, runStatus: options.runStatus, notices: [] }
+  return { trace, traceFile, header: reportHeader(trace), pushFailures, telemetryFailures, remaining, runStatus: options.runStatus, notices: [] }
+}
+
+/** The finish's telemetry step: attach the run's file when there is one and record the result in the trace. Returns the failures. */
+async function attachToTrace(options: FinishOptions, client: Board, ticket: TicketRecord, trace: BoardTrace): Promise<string[]> {
+  if (options.telemetry === undefined) return []
+  const ticketPageId = pageIdFrom(ticket.url)
+  if (ticketPageId === undefined) {
+    trace.telemetry = { file: basename(options.telemetry.file), error: 'the ticket has no page id' }
+    return [telemetryNotice('the ticket has no page id', options.telemetry.file)]
+  }
+  const attached = await attachTelemetry({ client, ticketPageId, file: options.telemetry.file, runId: options.telemetry.runId, folder: options.folder })
+  trace.telemetry = attached.trace
+  return attached.failures
+}
+
+/**
+ * Attach a run's telemetry file to the end of the ticket page body as one file block (KIT-19, F14),
+ * for the separate-process finish of every row (finishFlow and finishGroom). Nothing is attached
+ * when this run's attach record exists (a block a human deleted is not re-created), when the board
+ * rules cannot be read or BOARD-003 does not list the run telemetry file block, or when the page
+ * already holds a block named `<run-id>.json`. Every failure is returned as its notice line and
+ * never thrown (OBS-002); an append that fails after its upload succeeded is reported once.
+ */
+export async function attachTelemetry(args: { client: Board; ticketPageId: string; file: string; runId: string; folder: string }): Promise<{ trace: BoardTraceTelemetry; failures: string[] }> {
+  const { client, ticketPageId, file, runId, folder } = args
+  const name = `${runId}.json`
+  const failed = (reason: string) => ({ trace: { file: name, error: reason }, failures: [telemetryNotice(reason, file)] })
+  const recorded = await readAttached(folder, runId)
+  if (recorded !== null) return { trace: { file: name, blockId: recorded.blockId }, failures: [] }
+  const rules = await client.rulesPage().catch(() => null)
+  if (rules === null) return failed('board rules unreadable')
+  if (!listsTelemetry(rules)) return failed('BOARD-003 does not list the run telemetry file block')
+  let names: string[]
+  try {
+    names = await client.fileBlockNames(ticketPageId)
+  } catch (error) {
+    return failed(`the ticket page's file blocks could not be listed: ${message(error)}`)
+  }
+  if (names.includes(name)) return { trace: { file: name }, failures: [] }
+  let content: string
+  let upload: { id: string }
+  try {
+    content = await readFile(file, 'utf8')
+    upload = await client.uploadFile(name, content)
+  } catch (error) {
+    return failed(`the upload failed: ${message(error)}`)
+  }
+  let blockId: string
+  try {
+    blockId = (await client.appendFileBlock(ticketPageId, upload.id)).id
+  } catch (error) {
+    return failed(`the file was uploaded but the append to the ticket page failed: ${message(error)}`)
+  }
+  try {
+    await recordAttached(folder, { runId, blockId })
+  } catch (error) {
+    return { trace: { file: name, blockId }, failures: [`Telemetry attached but not recorded: ${message(error)}; the next attach of this run may append a second block`] }
+  }
+  return { trace: { file: name, blockId }, failures: [] }
 }
 
 /**
@@ -807,7 +876,15 @@ export type LocalBoardState = {
   /** The groomer: the Grooming Decisions URL ticket.md showed when the push was asked for (a different one is a new page), and the round the verify last recorded a push for. */
   pushUrlBefore?: string
   verifiedRound?: number
+  /** A hand run's telemetry run id and start time, reserved when the board stage reached the ticket (KIT-19). The groomer clears them at the end of each round. */
+  runId?: string
+  runStartedAt?: string
+  /** The `--parent-run` value of a run inside build-feature: it writes and attaches no telemetry of its own. */
+  parentRun?: string
 }
+
+/** The telemetry fields of the local board state, the part afterRun reads (KIT-19). */
+export type LocalRun = Pick<LocalBoardState, 'runId' | 'runStartedAt' | 'parentRun'>
 
 export type LocalBoardOptions = {
   skill: Skill
@@ -828,9 +905,45 @@ export const localStateDir = (folder: string, skill: Skill): string => join(fold
 
 const stateFile = (dir: string) => join(dir, 'board.json')
 
+/** The telemetry fields of board.json, each checked on its own: a value that fails its schema is dropped. */
+const localRunSchema = z.object({
+  runId: z.string().regex(/^run-\d{8}T\d{6}Z(-\d+)?$/).optional().catch(undefined),
+  runStartedAt: z.iso.datetime().optional().catch(undefined),
+  parentRun: z.string().optional().catch(undefined),
+})
+
 async function readState(dir: string): Promise<LocalBoardState | null> {
   const text = await readFile(stateFile(dir), 'utf8').catch(() => null)
-  return text === null ? null : (JSON.parse(text) as LocalBoardState)
+  if (text === null) return null
+  const raw: unknown = JSON.parse(text)
+  const { runId: _runId, runStartedAt: _runStartedAt, parentRun: _parentRun, ...rest } = raw as LocalBoardState
+  const run = localRunSchema.safeParse(raw)
+  const fields = run.success ? run.data : {}
+  return {
+    ...rest,
+    ...(fields.runId === undefined ? {} : { runId: fields.runId }),
+    ...(fields.runStartedAt === undefined ? {} : { runStartedAt: fields.runStartedAt }),
+    ...(fields.parentRun === undefined ? {} : { parentRun: fields.parentRun }),
+  }
+}
+
+/** The telemetry fields of a skill's local board state, or null when there is no state. */
+export async function readLocalRun(stateDir: string): Promise<LocalRun | null> {
+  const state = await readState(stateDir)
+  if (state === null) return null
+  return {
+    ...(state.runId === undefined ? {} : { runId: state.runId }),
+    ...(state.runStartedAt === undefined ? {} : { runStartedAt: state.runStartedAt }),
+    ...(state.parentRun === undefined ? {} : { parentRun: state.parentRun }),
+  }
+}
+
+/** Replace the telemetry fields of a skill's local board state; an empty value clears them. Does nothing when there is no state. */
+export async function writeLocalRun(stateDir: string, run: LocalRun): Promise<void> {
+  const state = await readState(stateDir)
+  if (state === null) return
+  const { runId: _runId, runStartedAt: _runStartedAt, parentRun: _parentRun, ...rest } = state
+  await saveState(stateDir, { ...rest, ...run })
 }
 
 async function saveState(dir: string, state: LocalBoardState): Promise<void> {
@@ -990,6 +1103,39 @@ export type LocalBoardEndOptions = {
   round?: number
   /** The Feature Board, for the groomer's final Status re-read. */
   board?: string
+  /** A hand run's telemetry file, already written: the session reads the board rules and attaches it (KIT-19). */
+  telemetry?: { runId: string; file: string }
+}
+
+/** Where the --local session saves the board rules for the attach check: beside the export's board trace. */
+export const boardRulesFile = (exportDir: string): string => (existsSync(join(exportDir, 'trace')) ? join(exportDir, 'trace', 'board-rules.md') : join(exportDir, 'board-rules.md'))
+
+/** The two strings a BOARD-003 line must carry for a run to attach its telemetry file (telemetry.ts listsTelemetry). */
+const TELEMETRY_RULE = ['BOARD-003', 'run telemetry file']
+
+/**
+ * The --local telemetry actions (KIT-19, F14): read the board rules into the export, then attach the
+ * run's file to the end of the ticket page body when the rules allow it. Records the file name in
+ * the trace for the verify step; without a telemetry file there are no actions and no record.
+ */
+function telemetryActions(options: LocalBoardEndOptions, ticket: TicketRecord, trace: BoardTrace): BoardAction[] {
+  delete trace.telemetry
+  if (options.telemetry === undefined) return []
+  const name = `${options.telemetry.runId}.json`
+  const page = pageIdFrom(ticket.url) ?? ticket.url
+  const rules = boardRulesFile(options.exportDir)
+  trace.telemetry = { file: name }
+  return [
+    { action: 'read', target: 'board-rules', file: rules, note: 'Fetch the Feature Board rules page with the Notion MCP (notion-fetch, read-only; it is the "Feature Board" page under AI-DLC in Engineering Central) and write it to "file" as plain markdown, one rule per line. Write nothing to Notion.' },
+    {
+      action: 'attach',
+      page,
+      file: options.telemetry.file,
+      name,
+      onlyIf: TELEMETRY_RULE,
+      note: `Only when one line of the rules you saved contains every string of "onlyIf": attach "file", as "name", in one file block at the end of the ticket page body "page" (notion-create-attachment for a file of at most 200 KiB, else notion-create-file-upload, then notion-update-page). Attach no other file, to no other page, and never edit or delete another block. Pass the result to the verify step as {"blockId": "<the new block id>"}, or {"error": "<why>"} when the rules do not allow it or the attach failed.`,
+    },
+  ]
 }
 
 export type LocalBoardEnd = { stage: 'board-end'; actions: BoardAction[]; verify: { command: string; file: string; status: string } | null; traceFile: string; remaining: string | null }
@@ -1011,6 +1157,7 @@ export async function localBoardEnd(options: LocalBoardEndOptions): Promise<Loca
   }
   const move = endMove(options.skill, options.ok, ticket.status, false, options.runStatus)
   if (move !== null) actions.push({ action: 'move', page: ticket.url, from: move.from, to: move.to, then: `set Status to "${move.to}" in ${join(options.folder, TICKET_FILE)}` })
+  actions.push(...telemetryActions(options, ticket, trace))
   const expected = move?.to ?? ticket.status
   trace.expected = expected
   trace.pushing = actions.filter((action) => action.action === 'push').map((action) => (action as { title: string }).title)
@@ -1073,6 +1220,7 @@ async function localGroomEnd(options: LocalBoardEndOptions): Promise<LocalBoardE
     move = endMove(options.skill, true, ticket.status, false, final)
     if (move !== null) actions.push({ action: 'move', page: ticket.url, from: move.from, to: move.to, then: `set Status to "${move.to}" in ${ticketFile}` })
   }
+  actions.push(...telemetryActions(options, ticket, trace))
   const open = record === undefined ? 0 : openCount(record)
   if (record !== undefined) await writeGroomRecord(options.folder, { ...record, status: final, open })
   state.round = options.round ?? record?.round ?? (state.round ?? 0) + 1
@@ -1093,8 +1241,49 @@ async function localGroomEnd(options: LocalBoardEndOptions): Promise<LocalBoardE
 /** A time floored to its minute, or NaN: the board records page edits at minute precision. */
 const minuteOf = (iso: string): number => Math.floor(Date.parse(iso) / 60_000)
 
-/** The last local step: ticket.md must show the expected Status; the pushed pages are read from its Pages table; the trace is completed. */
-export async function localBoardVerify(options: { skill: Skill; folder: string; exportDir: string }): Promise<{ ok: boolean; header: string[]; trace: BoardTrace; traceFile: string; problem: string | null }> {
+/** What the --local session reports for its telemetry attach action: the new block's id, or why it attached nothing. */
+export type TelemetryAttachResult = { blockId: string } | { error: string }
+
+/**
+ * The verify step's telemetry part (KIT-19, F14, F16): record the session's attach result in the
+ * trace and the attach record, checking the saved board rules itself. A missing, failed or not
+ * allowed attach is returned as a notice; it never makes a problem. A run already recorded as
+ * attached keeps its record, so a second verify changes nothing.
+ */
+async function verifyTelemetry(options: { folder: string; exportDir: string; attach?: TelemetryAttachResult }, trace: BoardTrace): Promise<string[]> {
+  const current = trace.telemetry
+  if (current === undefined || current.blockId !== undefined) return []
+  const runId = current.file.replace(/\.json$/, '')
+  const path = telemetryFile(options.folder, runId)
+  const recorded = await readAttached(options.folder, runId)
+  if (recorded !== null) {
+    trace.telemetry = { file: current.file, blockId: recorded.blockId }
+    return []
+  }
+  const rules = await readFile(boardRulesFile(options.exportDir), 'utf8').catch(() => null)
+  const attach = options.attach
+  let reason: string
+  if (attach !== undefined && 'error' in attach) reason = attach.error
+  else if (rules === null) reason = 'board rules unreadable'
+  else if (!listsTelemetry(rules)) reason = 'BOARD-003 does not list the run telemetry file block'
+  else if (attach === undefined) reason = 'the session reported no attach result'
+  else {
+    try {
+      await recordAttached(options.folder, { runId, blockId: attach.blockId })
+    } catch (error) {
+      reason = `the attach record could not be written: ${message(error)}`
+      trace.telemetry = { file: current.file, blockId: attach.blockId }
+      return [`Telemetry attached but not recorded: ${reason}`]
+    }
+    trace.telemetry = { file: current.file, blockId: attach.blockId }
+    return []
+  }
+  trace.telemetry = { file: current.file, error: reason }
+  return [telemetryNotice(reason, path)]
+}
+
+/** The last local step: ticket.md must show the expected Status; the pushed pages are read from its Pages table; the trace is completed. `attach` is the session's telemetry attach result, reported as a notice only. */
+export async function localBoardVerify(options: { skill: Skill; folder: string; exportDir: string; attach?: TelemetryAttachResult }): Promise<{ ok: boolean; header: string[]; trace: BoardTrace; traceFile: string; problem: string | null; notices: string[] }> {
   const found = await readBoardTrace(options.exportDir)
   if (found === null) throw new Error(`No board trace under ${options.exportDir}; run the export step first`)
   const { trace } = found
@@ -1123,8 +1312,9 @@ export async function localBoardVerify(options: { skill: Skill; folder: string; 
     }
     trace.statusAfter = ticket.status
     trace.verified = problem === null
+    const notices = await verifyTelemetry(options, trace)
     const traceFile = await writeBoardTrace(options.exportDir, trace)
-    return { ok: problem === null, header: reportHeader(trace), trace, traceFile, problem }
+    return { ok: problem === null, header: reportHeader(trace), trace, traceFile, problem, notices }
   }
   // The groomer: re-entrant, one verify per round. The replaced page must be newer than the ask (or new), and the session's copy carries no marker.
   const rows: { title: string; url: string }[] = []
@@ -1159,8 +1349,9 @@ export async function localBoardVerify(options: { skill: Skill; folder: string; 
   }
   trace.statusAfter = ticket.status
   trace.verified = problem === null && (record?.status === 'confirmed' || record?.status === 'stopped')
+  const notices = await verifyTelemetry(options, trace)
   const traceFile = await writeBoardTrace(options.exportDir, trace)
-  return { ok: problem === null, header: reportHeader(trace), trace, traceFile, problem }
+  return { ok: problem === null, header: reportHeader(trace), trace, traceFile, problem, notices }
 }
 
 /** The ticket's input file for a skill, checked to exist, with a message naming the page that is missing. */

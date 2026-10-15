@@ -406,12 +406,31 @@ export type BoardAction =
   | { action: 'replace'; page: string; title: string; file: string; note: string; then: string }
   /** Write a file into the ticket page's body after a block. */
   | { action: 'write-idea'; page: string; afterBlockId: string; file: string; then: string }
+  /** Read the Feature Board rules page into a file, so the driver can check what BOARD-003 allows (KIT-19). */
+  | { action: 'read'; target: 'board-rules'; file: string; note: string }
+  /** Attach a run's telemetry file to the end of the ticket page body as one file block, only when the saved rules carry every string of `onlyIf` (KIT-19). */
+  | { action: 'attach'; page: string; file: string; name: string; onlyIf: string[]; note: string }
 
 /** One board action as recorded in the run's trace, with the Status before and after it. `check` records a gate check that made no board write. */
 export type BoardTraceEntry = { at: string; action: BoardAction['action'] | 'check'; detail: string; statusBefore: string; statusAfter: string; ok: boolean; error?: string }
 
+/** The attach of a run's telemetry file as the trace records it: the file name and the block id or the reason it was not attached, never an upload or download URL (KIT-19). */
+export type BoardTraceTelemetry = { file: string; blockId?: string; error?: string }
+
 /** The trace a run keeps of its board work: `trace/board.json`. */
-export type BoardTrace = { skill: Skill; ticket: { id: string; title: string; url: string } | null; folder: string | null; statusBefore: string | null; statusAfter: string | null; expected?: string | null; pushing?: string[]; pushed: { title: string; url: string }[]; actions: BoardTraceEntry[]; verified?: boolean }
+export type BoardTrace = {
+  skill: Skill
+  ticket: { id: string; title: string; url: string } | null
+  folder: string | null
+  statusBefore: string | null
+  statusAfter: string | null
+  expected?: string | null
+  pushing?: string[]
+  pushed: { title: string; url: string }[]
+  actions: BoardTraceEntry[]
+  verified?: boolean
+  telemetry?: BoardTraceTelemetry
+}
 
 /** The report's first lines (F10): the ticket, the moves, the pages pushed, the working folder. */
 export function reportHeader(trace: BoardTrace): string[] {
