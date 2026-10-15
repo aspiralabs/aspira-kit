@@ -54,7 +54,7 @@ const STUB_LOCAL_TS = "require('node:fs').writeFileSync('ran.marker', JSON.strin
  * node_modules/@aspiralabs/agents at AGENTS_VERSION, a stub node_modules/@aspiralabs/<agent> package
  * (whose scripts/local.ts records a run), amaro (so a non-blocked run can reach node) and the
  * launcher's skill folder copied in with .kit-version at SKILL_KIT_VERSION (F8's mismatch). */
-async function makeProject(launcher: Launcher): Promise<{ project: string; scriptPath: string; stubDir: string }> {
+async function makeProject(launcher: Launcher): Promise<{ project: string; scriptPath: string; stubDir: string; sourceDir: string }> {
   const project = await mkdtemp(join(tmpdir(), 'launcher-version-'))
   execFileSync('git', ['init', '-q'], { cwd: project })
 
@@ -67,6 +67,14 @@ async function makeProject(launcher: Launcher): Promise<{ project: string; scrip
   await writeFile(join(stubDir, 'package.json'), JSON.stringify({ name: `@aspiralabs/${launcher.name}`, version: SKILL_KIT_VERSION }, null, 2))
   await writeFile(join(stubDir, 'scripts', 'local.ts'), STUB_LOCAL_TS)
 
+  // The kit-development override points at a kit source checkout, never at node_modules: Node's
+  // built-in type stripping refuses any .ts under node_modules, and only the real amaro hook (a
+  // no-op stub here) lifts that, so an override aimed at the installed stub could never run it.
+  const sourceDir = join(project, 'aspira-kit', 'packages', 'agents', launcher.name)
+  await mkdir(join(sourceDir, 'scripts'), { recursive: true })
+  await writeFile(join(sourceDir, 'package.json'), JSON.stringify({ name: `@aspiralabs/${launcher.name}`, version: SKILL_KIT_VERSION }, null, 2))
+  await writeFile(join(sourceDir, 'scripts', 'local.ts'), STUB_LOCAL_TS)
+
   const amaroDir = join(project, 'node_modules', 'amaro', 'dist')
   await mkdir(amaroDir, { recursive: true })
   await writeFile(join(amaroDir, 'register-strip.mjs'), 'export {}\n')
@@ -77,7 +85,7 @@ async function makeProject(launcher: Launcher): Promise<{ project: string; scrip
   const scriptPath = join(skillTarget, 'scripts', `${launcher.name}.sh`)
   await chmod(scriptPath, 0o755)
 
-  return { project, scriptPath, stubDir }
+  return { project, scriptPath, stubDir, sourceDir }
 }
 
 function runLocal(project: string, scriptPath: string, args: string[], envVar: string, agentDir?: string): { stdout: string; status: number | null } {
@@ -119,8 +127,9 @@ describe.each(LAUNCHERS)('$name .kit-version vs. installed @aspiralabs/agents (T
   it('the AGENT_DIR kit-development override only warns about the mismatch, and the agent runs', async () => {
     const made = await makeProject(launcher)
     project = made.project
-    const result = runLocal(project, made.scriptPath, launcher.args, launcher.envVar, made.stubDir)
+    const result = runLocal(project, made.scriptPath, launcher.args, launcher.envVar, made.sourceDir)
     expect(result.stdout.toLowerCase()).toMatch(/mismatch/)
-    expect(await ran(made.stubDir)).toBe(true)
+    expect(await ran(made.sourceDir)).toBe(true)
+    expect(await ran(made.stubDir)).toBe(false)
   })
 })
