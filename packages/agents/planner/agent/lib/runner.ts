@@ -1,12 +1,14 @@
 import { readFile, realpath } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { generateText, Output, stepCountIs, tool, type ModelMessage, type ToolSet } from 'ai'
 import { gateway, streamStructured } from '@aspiralabs/agent-common/lib/gateway'
 import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
+import { openDecisions } from '@aspiralabs/agent-common/lib/decisions'
 import { connectReadTools } from '@aspiralabs/agent-common/lib/mcp'
 import { modelTrace } from '@aspiralabs/agent-common/lib/model-trace'
 import { repository } from '@aspiralabs/agent-common/lib/repository'
 import { runAnalysis } from '@aspiralabs/agent-common/lib/run-analysis'
+import { type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
 import { checkBusinessSpec } from '@aspiralabs/agent-common/lib/spec'
 import { pageIdFrom } from '@aspiralabs/agent-common/lib/knowledge'
 import type { Answer, DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
@@ -282,6 +284,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       }
     }
     const { status, problems, decisions } = assessPlan({ spec, guidelines, repo, research, plan, phaseErrors: trace.phases, uiRequired, reads: mcp.reads, cancelled: options.signal?.aborted === true, answers, takeRecommended: input.takeRecommended ?? false })
+    const runStatus: RunStatus = status
     const reviewMs = Date.now() - started - prepareMs
     const exportStarted = Date.now()
     const files: Record<string, string> = {
@@ -296,7 +299,15 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       const exportMs = Date.now() - exportStarted
       const analysis = runAnalysis(trace.turns, trace.phases, { prepareMs, reviewMs, exportMs, totalMs, status })
       reportedCostUsd = analysis.reportedCostUsd
-      return { 'run-analysis.md': analysis.markdown, 'trace/review.json': JSON.stringify({ status, problems, decisions, input, repoCommit: repo.commit, repoDirty: repo.dirty, models, phases: trace.phases, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, reviewMs, exportMs, totalMs, reportedCostUsd }, null, 2) }
+      // One sentence for a non-ready status: the open decision count and the decisions file for
+      // needs-author, the first problem otherwise (F4, F18); reasonCode is always null here, the
+      // planner has no sub-cases of its own.
+      const openCount = openDecisions(decisions).length
+      const reason = runStatus === 'ready' ? null
+        : runStatus === 'needs-author' ? `${openCount} decision${openCount === 1 ? '' : 's'} open: ${join(dir, 'trace', 'decisions.md')}`
+          : (problems[0] ?? null)
+      const reasonCode = null
+      return { 'run-analysis.md': analysis.markdown, 'trace/review.json': JSON.stringify({ status: runStatus, reason, reasonCode, problems, decisions, input, repoCommit: repo.commit, repoDirty: repo.dirty, models, phases: trace.phases, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, reviewMs, exportMs, totalMs, reportedCostUsd }, null, 2) }
     })
     return { status, dir, problems, decisions, prepareMs, reviewMs, totalMs, reportedCostUsd }
   } finally { await mcp.close() }

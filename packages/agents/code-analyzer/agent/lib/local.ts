@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { REASON_CODES, readRunStatus, type ReasonCode } from '@aspiralabs/agent-common/lib/run-status'
 import { z } from 'zod'
 import { detect, type Analyzer, type Detection } from './analyzers.ts'
 import { batch as batchOf, sameSet, type Batch, type Diagnostic } from './diagnostics.ts'
@@ -17,7 +18,7 @@ import { hostExecutor, type Executor } from './executor.ts'
 import type { Knowledge } from './fixer.ts'
 import { checkGuidelinesFile, checkKnowledgeDir, fixKnowledge, knowledgeConfig, type LoadedKnowledge } from './knowledge.ts'
 import { changeRejection, type Rejection } from './guards.ts'
-import { finalStatus, runAnalyzers, runAutofix, STOP, targetsOf, type LoopResult, type Round } from './loop.ts'
+import { finalStatus, runAnalyzers, runAutofix, STOP, targetsOf, type LoopResult, type Round, type Status } from './loop.ts'
 import { renderReport } from './report.ts'
 import { ignoreOutput, prepareToolchain, recordGuidelines, repositoryInstructions, runSetup, setting } from './runner.ts'
 import { parseSource } from './source.ts'
@@ -82,6 +83,8 @@ const stateSchema = z.object({
   outputDir: z.string(),
   ignoreOutput: z.boolean(),
   knowledge: z.object({ source: z.enum(['notion', 'knowledge', 'guidelines']), dir: z.string().nullable(), requiredFile: z.string(), fingerprint: z.string(), files: z.array(z.string()) }),
+  // Absent on a pre-upgrade state.json (F21): a run resumed from before this field existed has no ticket.
+  ticket: z.string().nullable().default(null),
   maxRounds: z.number(),
   fixWarnings: z.boolean(),
   noFix: z.boolean(),
@@ -101,7 +104,10 @@ const stateSchema = z.object({
   missing: z.array(z.object({ id: z.string(), reason: z.string() })),
   rejections: z.record(z.string(), z.array(z.string())),
   pending: z.object({ round: z.number(), tasks: z.array(taskSchema) }).nullable(),
-  stop: z.object({ status: z.enum(['clean', 'partial', 'nothing-detected', 'failed']), reason: z.string() }).nullable(),
+  // The status is a bare string, not the strict new-words enum, so a pre-upgrade state.json (the
+  // old 'clean' | 'partial' | 'nothing-detected' | 'failed') still parses (F7); readRunStatus maps
+  // it onto the shared status and reason code at export. reasonCode is absent on such a state.
+  stop: z.object({ status: z.string(), reason: z.string(), reasonCode: z.enum(REASON_CODES).nullable().optional() }).nullable(),
 })
 type State = z.infer<typeof stateSchema>
 
@@ -118,6 +124,8 @@ export type LocalInput = {
   knowledge?: string
   /** A REQUIRED.md snapshot instead of a knowledge folder. Fixed by the first call. */
   guidelines?: string
+  /** The ticket this run is for, recorded in the export (F21); null for a --no-ticket run. Fixed by the first call. */
+  ticket?: string | null
   /** Round cap. Default STATIC_ANALYSIS_MAX_ROUNDS, else 6, as the agent; fixed by the first call. */
   maxRounds?: number
   /** Also fix warning-severity diagnostics. Default STATIC_ANALYSIS_WARNINGS=fix, as the agent. */
@@ -153,6 +161,12 @@ export type LocalDone = {
   pending: false
   status: LoopResult['status']
   reason: string
+  /** Which sub-case of the status this is (F1); 'no-analyzers' for a repository with nothing to check. */
+  reasonCode: ReasonCode | null
+  /** The ticket this run was for, or null for a --no-ticket run. */
+  ticket: string | null
+  /** The commit the export was taken at, or null when it could not be read. */
+  head: string | null
   dir: string
   root: string
   analyzers: string[]
@@ -235,6 +249,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       outputDir,
       ignoreOutput: ignore,
       knowledge,
+      ticket: input.ticket ?? null,
       maxRounds: setting(input.maxRounds, 'STATIC_ANALYSIS_MAX_ROUNDS', 6),
       fixWarnings: input.fixWarnings ?? process.env.STATIC_ANALYSIS_WARNINGS === 'fix',
       noFix,
@@ -256,14 +271,14 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       pending: null,
       stop: null,
     }
-    if (!ready.some((a) => a.check)) state.stop = { status: 'nothing-detected', reason: STOP.none }
+    if (!ready.some((a) => a.check)) state.stop = { status: 'ready', reason: STOP.none, reasonCode: 'no-analyzers' }
     else {
       const initial = await runAnalyzers(executor, ready, options)
       state.problems.push(...initial.runs.flatMap((run) => (run.problem ? [run.problem] : [])))
-      if (initial.runs.length && initial.runs.every((run) => run.problem)) state.stop = { status: 'failed', reason: STOP.allFailed }
+      if (initial.runs.length && initial.runs.every((run) => run.problem)) state.stop = { status: 'incomplete', reason: STOP.allFailed, reasonCode: null }
       state.initial = initial.diagnostics
       state.current = initial.diagnostics
-      if (noFix && state.stop === null) state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), state.problems), reason: 'check only (--no-fix): no auto-fix or model fix ran' }
+      if (noFix && state.stop === null) state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), state.problems), reason: 'check only (--no-fix): no auto-fix or model fix ran', reasonCode: null }
     }
     state.prepareMs = Date.now() - started
     await mkdir(join(work, 'outputs'), { recursive: true })
@@ -285,14 +300,14 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       const final = await runAnalyzers(executor, analyzers, options)
       state.problems.push(...final.runs.flatMap((run) => (run.problem ? [run.problem] : [])))
       state.current = final.diagnostics
-      state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), unique(state.problems)), reason: input.finish === true ? 'finished early (--finish)' : STOP.roundCap(state.maxRounds) }
+      state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), unique(state.problems)), reason: input.finish === true ? 'finished early (--finish)' : STOP.roundCap(state.maxRounds), reasonCode: null }
     }
   }
 
   while (state.stop === null) {
     const round = state.rounds.length + 1
     if (input.finish === true) {
-      state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), unique(state.problems)), reason: 'finished early (--finish)' }
+      state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), unique(state.problems)), reason: 'finished early (--finish)', reasonCode: null }
       break
     }
     const roundStarted = Date.now()
@@ -307,8 +322,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     record.targets = targets.length
     record.ms = Date.now() - roundStarted
     const status = () => finalStatus(targets, unique(state.problems))
-    if (!targets.length) { state.stop = { status: status(), reason: STOP.clean }; break }
-    if (state.previous && sameSet(targets, state.previous)) { state.stop = { status: status(), reason: STOP.noProgress }; break }
+    if (!targets.length) { state.stop = { status: status(), reason: STOP.clean, reasonCode: null }; break }
+    if (state.previous && sameSet(targets, state.previous)) { state.stop = { status: status(), reason: STOP.noProgress, reasonCode: null }; break }
     state.previous = targets
     const batches = batchOf(targets)
     record.batches = batches.length
@@ -318,10 +333,22 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     return pendingResult(state, work, agentDir, tasks)
   }
 
-  return exportRun(state, work, agentDir, fixer, detection, analyzers)
+  const headResult = await executor.run('git rev-parse HEAD', { timeoutMs: 30_000 }).catch(() => null)
+  const head = headResult && headResult.exitCode === 0 ? headResult.stdout.trim() : null
+  return exportRun(state, work, agentDir, fixer, detection, analyzers, head)
 }
 
 const unique = (items: string[]) => [...new Set(items)]
+
+/** `state.stop`, read as the shared status and reason code: readRunStatus maps a pre-upgrade
+ * state's old word onto both; a reasonCode already recorded by this version wins over the map's
+ * (which is always null for the new words themselves, since readRunStatus matches those first). */
+function resolveStop(stop: State['stop']): { status: Status; reason: string; reasonCode: ReasonCode | null } {
+  const { status: word, reason, reasonCode } = stop ?? { status: 'incomplete', reason: 'stopped', reasonCode: null }
+  const mapped = readRunStatus(word)
+  const status: Status = mapped?.status === 'ready' ? 'ready' : 'incomplete'
+  return { status, reason, reasonCode: reasonCode !== undefined ? reasonCode : (mapped?.reasonCode ?? null) }
+}
 
 function pendingResult(state: State, work: string, agentDir: string, tasks: LocalTask[]): LocalPending {
   return {
@@ -497,12 +524,13 @@ async function collectFixStage(state: State, executor: Executor, work: string, f
   return []
 }
 
-async function exportRun(state: State, work: string, agentDir: string, fixer: FixerModule, detection: Detection, analyzers: Analyzer[]): Promise<LocalDone> {
-  const stop = state.stop ?? { status: 'partial' as const, reason: 'stopped' }
+async function exportRun(state: State, work: string, agentDir: string, fixer: FixerModule, detection: Detection, analyzers: Analyzer[], head: string | null): Promise<LocalDone> {
+  const stop = resolveStop(state.stop)
   const totalMs = Date.now() - Date.parse(state.startedAt)
   const result: LoopResult = {
     status: stop.status,
     reason: stop.reason,
+    reasonCode: stop.reasonCode,
     rounds: state.rounds,
     initial: state.initial,
     remaining: state.current,
@@ -525,8 +553,8 @@ async function exportRun(state: State, work: string, agentDir: string, fixer: Fi
   const knowledge = { path: state.knowledge.dir ?? state.knowledge.requiredFile, source: state.knowledge.source, files: state.knowledge.files, fingerprint: state.knowledge.fingerprint }
   const files: Record<string, string> = {
     'report.md': report,
-    'diagnostics.json': JSON.stringify({ status: result.status, remaining: result.remaining, initial: result.initial }, null, 2),
-    'rounds.json': JSON.stringify({ mode: 'local', status: result.status, reason: result.reason, rounds: result.rounds, problems: result.problems, rejected: result.rejected, editedFiles: result.editedFiles, missing: state.missing, detection: { ...shown, analyzers: analyzers.map(({ parse: _parse, ...a }) => a) }, unavailable: state.unavailable, timing, remote: null, knowledge }, null, 2),
+    'diagnostics.json': JSON.stringify({ status: result.status, reason: result.reason, reasonCode: result.reasonCode, ticket: state.ticket, head, remaining: result.remaining, initial: result.initial }, null, 2),
+    'rounds.json': JSON.stringify({ mode: 'local', status: result.status, reason: result.reason, reasonCode: result.reasonCode, ticket: state.ticket, head, rounds: result.rounds, problems: result.problems, rejected: result.rejected, editedFiles: result.editedFiles, missing: state.missing, detection: { ...shown, analyzers: analyzers.map(({ parse: _parse, ...a }) => a) }, unavailable: state.unavailable, timing, remote: null, knowledge }, null, 2),
     'usage.json': JSON.stringify({ scope: 'This run used --local: every fix ran as a subagent of a Claude Code session, on its model and usage. No model call went through the AI Gateway, so there are no turns to itemize.', model: 'Claude Code session (--local)', turns: [] }, null, 2),
     'calls.json': JSON.stringify({ mode: 'local', system: fixer.systemPrompt, model: 'Claude Code session (--local)', rejections: state.rejections, calls: state.calls }, null, 2),
   }
@@ -541,6 +569,9 @@ async function exportRun(state: State, work: string, agentDir: string, fixer: Fi
     pending: false,
     status: result.status,
     reason: result.reason,
+    reasonCode: result.reasonCode,
+    ticket: state.ticket,
+    head,
     dir,
     root: state.root,
     analyzers: analyzers.map((a) => a.id),

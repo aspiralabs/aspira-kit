@@ -70,7 +70,7 @@ async function workspace() {
   const previous = {
     decisions: [{ id: 'Q1', branch: 'problem', question: 'Which problem?', options: ['A', 'B'], recommended: 'A', reasoning: 'r', whyYours: 'w', facts: [], decidedBy: 'author' as const, answer: 'A' }],
     branches: [{ id: 'problem', state: 'visited' as const }],
-    round: 1, startedAt: '2026-10-11T09:00:00.000Z', open: 0, page: { id: 'gd', url: 'https://www.notion.so/gd' }, status: 'needs-author' as const,
+    round: 1, startedAt: '2026-10-11T09:00:00.000Z', open: 0, page: { id: 'gd', url: 'https://www.notion.so/gd' }, status: 'needs-author' as const, reasonCode: null, reason: null,
   }
   await writeGroomRecord(folder, previous)
   await writeJson(join(folder, '.local', 'groomer', 'board.json'), { round: 2 })

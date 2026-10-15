@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { applyAnswersById, classifyRenderings, normalizeQuestion, parseGroomPage, renderGroomPage, reviseAnswers, takenDecision, type Answer } from '@aspiralabs/agent-common/lib/decisions'
 import { GROOMER_MARKER_PREFIX, groomRecordSchema, readGroomRecord, rebuildGroomRecord, validateIdeaSummary, writeGroomRecord, type GroomDecision, type GroomRecord, type GroomRunStatus } from '@aspiralabs/agent-common/lib/groom-record'
 import { allowedPath } from '@aspiralabs/agent-common/lib/repository'
+import { type ReasonCode } from '@aspiralabs/agent-common/lib/run-status'
 import { readTicketMd } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { GROOM_PAGE, groomPaths, type GroomPaths as Paths } from './paths.ts'
 import { knowledgeConfig, loadKnowledge, snapshotKnowledge, type Env, type Knowledge, type KnowledgePlan, type KnowledgeRequired } from './local-knowledge.ts'
@@ -154,7 +155,7 @@ async function baseRecord(folder: string, paths: Paths, n: number): Promise<Groo
   if (record === undefined) {
     const pulled = await readText(paths.decisions)
     const classified = pulled === null ? null : classifyRenderings(pulled)
-    record = classified?.round == null ? { decisions: [], branches: seedBranches(), round: 0, startedAt: new Date().toISOString(), open: 0, page: {}, status: 'needs-author' } : rebuildGroomRecord(classified.kept).record
+    record = classified?.round == null ? { decisions: [], branches: seedBranches(), round: 0, startedAt: new Date().toISOString(), open: 0, page: {}, status: 'needs-author', reasonCode: null, reason: null } : rebuildGroomRecord(classified.kept).record
   }
   if (record.branches.length === 0) record = { ...record, branches: seedBranches() }
   if (record.page.url === undefined && page !== undefined) record = { ...record, page: { id: page.id, url: page.url } }
@@ -314,7 +315,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   const pending = (): Pending => ({ pending: true, status: 'pending', round: n, orchestrator })
   const files: RoundFiles = { ended, round: 'missing', answers: 'missing', control: null, summary: 'missing', page: 'missing' }
   /** --finish: what exists is exported as an incomplete round; the board stage then only removes the marker. */
-  const unfinished = (why: string) => ({ ...pending(), stage: 'board' as const, runStatus: 'incomplete' as GroomRunStatus, notes: [`round ${n} ended incomplete: ${why}`] })
+  const unfinished = (why: string) => ({ ...pending(), stage: 'board' as const, runStatus: 'incomplete' as GroomRunStatus, reasonCode: null as ReasonCode | null, notes: [`round ${n} ended incomplete: ${why}`] })
 
   if (nextStage(files) === 'verify') return { ...pending(), stage: 'verify' as const, note: `The board stage of round ${n} was printed; perform its actions, then run local --verify.` }
 
@@ -363,7 +364,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     const summary = await readText(paths.summary)
     if (summary !== null) {
       const problem = summaryHeadingProblem(summary)
-      const valid = problem === null ? validateIdeaSummary(summary, { ...answered, status: 'confirmed' }) : { ok: false as const, reason: problem }
+      const valid = problem === null ? validateIdeaSummary(summary, { ...answered, status: 'ready' }) : { ok: false as const, reason: problem }
       if (!valid.ok) throw new Error(`${paths.summary}: ${valid.reason}`)
       files.summary = 'valid'
     }
@@ -393,12 +394,16 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   const open = merged.decisions.filter((decision) => decision.decidedBy === 'open').length
   const notes = merged.notes
   let status: GroomRunStatus = 'needs-author'
-  if (control === 'STOP' || (merged.stopTicked && control !== 'CONFIRM')) status = 'stopped'
+  let reasonCode: ReasonCode | null = null
+  if (control === 'STOP' || (merged.stopTicked && control !== 'CONFIRM')) { status = 'needs-author'; reasonCode = 'paused' }
   else if (control === 'CONFIRM') {
-    if (open === 0 && allBranchesVisited(applied) && !merged.changedByPage) status = 'confirmed'
+    if (open === 0 && allBranchesVisited(applied) && !merged.changedByPage) status = 'ready'
     else notes.push(open > 0 ? `Confirm was ticked but ${open} question(s) are open; it is re-offered when they are answered` : 'a tick on Grooming Decisions changed a decision during this round; Confirm is re-offered')
   } else if (merged.confirmTicked) notes.push('Confirm is ticked on Grooming Decisions; in --local it is asked in chat, at the end of the next round')
-  const record: GroomRecord = { ...applied, decisions: merged.decisions, round: n, open, status }
+  const reason = status === 'ready' ? null
+    : reasonCode === 'paused' ? 'Stop grooming was ticked on the Grooming Decisions page'
+      : `${open} decision${open === 1 ? '' : 's'} still open on the Grooming Decisions page`
+  const record: GroomRecord = { ...applied, decisions: merged.decisions, round: n, open, status, reasonCode, reason }
   await writeGroomRecord(folder, record)
   await mkdir(dirname(paths.decisions), { recursive: true })
   await writeFile(paths.decisions, renderGroomPage(record, { date: today(), notes: merged.carried }))
@@ -406,11 +411,12 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     ...pending(),
     stage: 'board' as const,
     runStatus: status,
+    reasonCode,
     decisions: paths.decisions,
     record: paths.record,
     open,
     notes,
-    ...(status === 'confirmed' ? { summary: paths.summary } : {}),
+    ...(status === 'ready' ? { summary: paths.summary } : {}),
     note: `After the board actions, fetch Grooming Decisions again into ${pageFile} (it must carry no "Run:" line), then run local --verify.`,
   }
 }

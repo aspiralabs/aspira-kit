@@ -1,3 +1,4 @@
+import type { ReasonCode } from '@aspiralabs/agent-common/lib/run-status'
 import type { Analyzer } from './analyzers.ts'
 import { batch, errors, sameSet, type Batch, type Diagnostic } from './diagnostics.ts'
 import type { Executor } from './executor.ts'
@@ -5,8 +6,9 @@ import type { Rejection } from './guards.ts'
 
 export type AnalyzerRun = { id: string; exitCode: number; ms: number; diagnostics: number; problem: string | null }
 export type Round = { round: number; autofix: { id: string; exitCode: number; ms: number }[]; analyzers: AnalyzerRun[]; targets: number; batches: number; edits: number; rejected: number; unresolved: string[]; ms: number }
-export type Status = 'clean' | 'partial' | 'nothing-detected' | 'failed'
-export type LoopResult = { status: Status; reason: string; rounds: Round[]; initial: Diagnostic[]; remaining: Diagnostic[]; problems: string[]; editedFiles: string[]; rejected: Rejection[]; ms: number }
+/** One of the five shared run statuses (F1): code-analyzer only ever ends ready or incomplete. */
+export type Status = 'ready' | 'incomplete'
+export type LoopResult = { status: Status; reason: string; reasonCode: ReasonCode | null; rounds: Round[]; initial: Diagnostic[]; remaining: Diagnostic[]; problems: string[]; editedFiles: string[]; rejected: Rejection[]; ms: number }
 export type FixRequest = { batch: Batch; round: number; signal?: AbortSignal }
 export type FixResult = { edits: number; editedFiles: string[]; rejected: Rejection[]; unresolved: string[] }
 export type Fixer = (request: FixRequest) => Promise<FixResult>
@@ -58,7 +60,7 @@ export async function runAutofix(executor: Executor, analyzers: Analyzer[], opti
 
 /** The loop's stop reasons, shared with --local so both runs report the same words. */
 export const STOP = {
-  none: 'no analyzers detected',
+  none: 'no static analysis ran: no analyzers detected',
   allFailed: 'every analyzer failed to run',
   clean: 'analyzers clean',
   noProgress: 'no progress: diagnostics unchanged after a full round',
@@ -69,8 +71,8 @@ export const STOP = {
 /** What the loop tries to fix: errors only, or warnings too. */
 export const targetsOf = (all: Diagnostic[], fixWarnings: boolean): Diagnostic[] => (fixWarnings ? all : errors(all))
 
-/** clean only when nothing targeted remains and every analyzer ran: an analyzer that could not run leaves its verdict unknown. */
-export const finalStatus = (remainingTargets: Diagnostic[], problems: string[]): Status => (remainingTargets.length === 0 && !problems.length ? 'clean' : 'partial')
+/** ready only when nothing targeted remains and every analyzer ran: an analyzer that could not run leaves its verdict unknown. */
+export const finalStatus = (remainingTargets: Diagnostic[], problems: string[]): Status => (remainingTargets.length === 0 && !problems.length ? 'ready' : 'incomplete')
 
 async function mapConcurrent<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results: R[] = []
@@ -88,13 +90,13 @@ export async function runLoop(executor: Executor, analyzers: Analyzer[], fixer: 
   const problems: string[] = []
   const rejected: Rejection[] = []
   const editedFiles = new Set<string>()
-  const finish = (status: Status, reason: string, initial: Diagnostic[], remaining: Diagnostic[]): LoopResult =>
-    ({ status, reason, rounds, initial, remaining, problems: [...new Set(problems)], editedFiles: [...editedFiles].sort(), rejected, ms: Date.now() - started })
-  if (!analyzers.some((a) => a.check)) return finish('nothing-detected', STOP.none, [], [])
+  const finish = (status: Status, reason: string, initial: Diagnostic[], remaining: Diagnostic[], reasonCode: ReasonCode | null = null): LoopResult =>
+    ({ status, reason, reasonCode, rounds, initial, remaining, problems: [...new Set(problems)], editedFiles: [...editedFiles].sort(), rejected, ms: Date.now() - started })
+  if (!analyzers.some((a) => a.check)) return finish('ready', STOP.none, [], [], 'no-analyzers')
 
   const initialRun = await runAnalyzers(executor, analyzers, options)
   for (const run of initialRun.runs) if (run.problem) problems.push(run.problem)
-  if (initialRun.runs.length && initialRun.runs.every((r) => r.problem)) return finish('failed', STOP.allFailed, [], [])
+  if (initialRun.runs.length && initialRun.runs.every((r) => r.problem)) return finish('incomplete', STOP.allFailed, [], [])
   const targetsIn = (all: Diagnostic[]) => targetsOf(all, options.fixWarnings)
   let current = initialRun.diagnostics
   let previous: Diagnostic[] | null = null

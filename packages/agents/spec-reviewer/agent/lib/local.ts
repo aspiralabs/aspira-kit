@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
+import { openDecisions } from '@aspiralabs/agent-common/lib/decisions'
 import { writeArtifacts } from './artifacts.ts'
 import { knowledgeConfig, loadKnowledge, snapshotKnowledge, type Env, type Knowledge, type KnowledgePlan, type KnowledgeRequired } from './local-knowledge.ts'
 import { SPECIALIST_MAX_STEPS } from './models.ts'
@@ -164,7 +165,15 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     `Wall time from the first local preparation (${state.startedAt}) to export: **${(totalMs / 1000).toFixed(1)}s**. It includes any time the session spent between stages.`, '',
     '| Phase | Result |', '| --- | --- |', ...phaseRows, '',
   ].join('\n')
-  const report = { ...result, candidate: undefined, mode: 'local', input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, models: { all: 'Claude Code session subagents' }, knowledge, startedAt: state.startedAt, totalMs, dir }
+  // One sentence for a non-ready status: the open decision count and the decisions file for
+  // needs-author, the first problem otherwise (F4, F18); reasonCode is always null here, the
+  // spec reviewer has no sub-cases of its own.
+  const openCount = openDecisions(result.authorDecisions).length
+  const reason = result.status === 'ready' ? null
+    : result.status === 'needs-author' ? `${openCount} decision${openCount === 1 ? '' : 's'} open: ${join(dir, 'trace', 'decisions.md')}`
+      : (result.problems[0] ?? null)
+  const reasonCode = null
+  const report = { ...result, candidate: undefined, mode: 'local', input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, models: { all: 'Claude Code session subagents' }, knowledge, startedAt: state.startedAt, totalMs, dir, reason, reasonCode }
   await writeArtifacts(dir, {
     ...reviewFiles(result, prepared),
     'trace/calls.json': JSON.stringify({ mode: 'local', system: systemPrompt, knowledge, calls }, null, 2),
@@ -173,7 +182,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   })
   // Every prompt and output is now in trace/calls.json; the rules used are in trace/review.json.
   await rm(work, { recursive: true, force: true })
-  return { pending: false as const, status: result.status, dir, orchestrator, findings: result.findings.length, problems: result.problems, authorDecisions: result.authorDecisions, totalMs }
+  return { pending: false as const, status: result.status, dir, orchestrator, findings: result.findings.length, problems: result.problems, authorDecisions: result.authorDecisions, totalMs, reason, reasonCode }
 }
 
 export { KnowledgeRequired } from './local-knowledge.ts'

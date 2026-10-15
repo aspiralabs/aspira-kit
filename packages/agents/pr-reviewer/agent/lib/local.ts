@@ -120,7 +120,10 @@ export type LocalPending = {
 /** The exported review. */
 export type LocalDone = {
   pending: false
-  status: 'complete' | 'incomplete'
+  /** One of the five shared run statuses (F1): a --local review only ever ends ready or incomplete. */
+  status: 'ready' | 'incomplete'
+  /** pr-reviewer has no sub-case of either status: always null. */
+  reasonCode: null
   label: string
   branch: string
   target: ReviewTarget
@@ -613,6 +616,12 @@ async function exportReview(args: {
   // As export-review: the review lives in the repo it reviewed and git never sees it.
   const gitignore = loaded.repoDir === null || input.output !== undefined ? null : await ensureIgnored(loaded.repoDir)
 
+  // One of the five shared run statuses (F1, F4): a --local review only ever ends ready or
+  // incomplete. The reason is the first output pr-debator never produced, one sentence, never null
+  // for an incomplete review.
+  const status: LocalDone['status'] = plan.missing.length === 0 ? 'ready' : 'incomplete'
+  const reason = status === 'ready' ? null : (plan.missing[0]?.reason.split('\n')[0]?.trim() ?? 'the review did not finish')
+
   const written: string[] = []
   const missingFiles: string[] = []
   const texts = new Map<string, string>()
@@ -625,7 +634,9 @@ async function exportReview(args: {
     }
     // The two documents carry the shas the verdict applies to, whether or not the writers put them in,
     // and the fix list is in severity order with its totals equal to its entries, whatever Nova wrote.
-    const content = path === paths.files.findings ? stampReviewed(sortFindingsMarkdown(raw), state.target) : path === paths.files.review ? stampReviewed(raw, state.target) : raw
+    // The report (review.md) leads with the run status, not the writer's own heading (F4).
+    const content =
+      path === paths.files.findings ? stampReviewed(sortFindingsMarkdown(raw), state.target) : path === paths.files.review ? `${status}\n\n${stampReviewed(raw, state.target)}` : raw
     texts.set(path, content)
     await writeFile(join(dir, basename(path)), content, 'utf8')
     written.push(join(dir, basename(path)))
@@ -675,13 +686,17 @@ async function exportReview(args: {
   await writeFile(join(dir, 'trace', 'calls.json'), JSON.stringify(trace, null, 2), 'utf8')
   written.push(join(dir, 'trace', 'calls.json'))
 
-  const status = plan.missing.length === 0 ? 'complete' : 'incomplete'
+  // The run record every other skill's launcher and the kit board read (F6, F7, F21).
+  const record = { status, reason, reasonCode: null as null, verdict: plan.verdict, counts: plan.counts }
+  await writeFile(join(dir, 'trace', 'review.json'), JSON.stringify(record, null, 2), 'utf8')
+  written.push(join(dir, 'trace', 'review.json'))
+
   const comment =
     loaded.github === null
       ? null
       : await postComment(loaded.github, texts.get(paths.files.review) ?? null, texts.get(paths.files.findings) ?? null, state.target, {
           noComment: input.noComment === true,
-          complete: status === 'complete',
+          complete: status === 'ready',
           fetch: args.deps.fetch,
           token: args.deps.token,
         })
@@ -691,6 +706,7 @@ async function exportReview(args: {
   return {
     pending: false,
     status,
+    reasonCode: null,
     label: state.label,
     branch: loaded.meta.headRef,
     target: state.target,
