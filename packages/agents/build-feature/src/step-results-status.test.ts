@@ -81,7 +81,7 @@ describe('T28 F20: a pre-upgrade complete implementor still routes past itself',
     // facts-building in driver.ts's route() will have to compute it.
     const state: RunState = { ...emptyRunState(), steps: [{ step: 'implementor', runId: 'run-0', command: '/aspira-implementor KIT-2 --local', status: 'complete', startedAt: NOW, endedAt: NOW, usage: null }] }
     const implementor = state.steps.at(-1)?.status === 'complete' ? 'ready' : null
-    const facts: RouteFacts = { id: 'KIT-2', app: '.', specCovered: true, implementor, analyzerClean: true, mode: 'local' }
+    const facts: RouteFacts = { id: 'KIT-2', app: '.', specCovered: true, implementor, analyzerReady: true, mode: 'local' }
     expect(routeStatus('In Progress: Implementation', facts).kind).toBe('sequence')
   })
 })

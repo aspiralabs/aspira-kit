@@ -62,7 +62,7 @@ describe('buildRunStatus (T31, F5, F20)', () => {
       { kind: 'finish-before-pr' },
       { kind: 'unexpected-error' },
     ]
-    const words = every.map((stop) => buildRunStatus(stop).status)
+    const words: string[] = every.map((stop) => buildRunStatus(stop).status)
     expect(words.filter((word) => word === 'stopped' || word === 'finished')).toEqual([])
   })
 })

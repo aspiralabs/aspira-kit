@@ -53,6 +53,8 @@ const stepSchema = z.object({
   step: text,
   runId: text,
   command: text,
+  /** The command's launcher form (F44): the step's own script, so a resumed or re-read run can name it alongside the Playbook command. Optional: a run recorded before this field existed has none. */
+  launcher: z.array(z.string()).optional(),
   /** The status word read from the step's own export (or its report, for the pr-reviewer). */
   status: text,
   startedAt: text,

@@ -40,10 +40,10 @@ import { modelFor, parseModels, subagentModels, type Role } from '#src/models.ts
 import { BACKWARD_MOVES_SKILL_MAY_MAKE, decideOverrides, findOverrides, overridesStage, recordOverrides } from '#src/overrides.ts'
 import { renderPrBody } from '#src/pr-body.ts'
 import { acceptResolution, cardDifferences, resolveStage, resolveWithToken, type Resolution } from '#src/resolve.ts'
-import { assertNever, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, type EndRoute, type Mode, type PhaseName, type StepName } from '#src/route.ts'
+import { assertNever, launcherFor, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, type EndRoute, type Mode, type PhaseName, type StepName } from '#src/route.ts'
 import { reviewPhase } from '#src/review-loop.ts'
 import { readRunState, stateDirOf, writeRunState, type Card, type Failure, type Pending, type RunState } from '#src/run-state.ts'
-import { analyzerClean, readImplementorStatus, readSpecCoverage, readStepResult, stepReportSchema } from '#src/step-results.ts'
+import { analyzerReady, readImplementorStatus, readSpecCoverage, readStepResult, stepReportSchema } from '#src/step-results.ts'
 import { releaseRowPhase, step10Phase } from '#src/step10.ts'
 import { step8Phase } from '#src/step8.ts'
 import { renderBuildSummary } from '#src/summary.ts'
@@ -482,7 +482,7 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
     app: ctx.aspira?.app ?? '.',
     specCovered: await readSpecCoverage(ctx.folder, state),
     implementor: await readImplementorStatus(ctx.folder),
-    analyzerClean: analyzerClean(state),
+    analyzerReady: analyzerReady(state),
     mode: ctx.mode,
   }
   const next = routeStatus(card.status, facts)
@@ -518,14 +518,15 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
 // Steps and their results.
 // ---------------------------------------------------------------------------------------------
 
+/** The five statuses every skill ends in (F7): each entry names the one file the run reads it from. */
 const STATUS_WORDS: Readonly<Record<StepName, string>> = {
-  groomer: 'the groom status in groom/trace/groom.json (confirmed, needs-author, stopped or incomplete)',
-  'spec-writer': 'the status in spec.written/trace/review.json (ready, needs-author or incomplete)',
-  'spec-reviewer': 'the status in spec.reviewed/trace/review.json (ready, needs-author or incomplete)',
-  planner: 'the status in plan.review/trace/review.json (ready, needs-author or incomplete)',
-  implementor: 'the status in plan.review/trace/implementation-local.json (complete, incomplete, refused or blocked)',
-  'code-analyzer': 'the status the analyzer finished with (clean, or what it reported)',
-  'pr-reviewer': 'complete when the review finished and wrote pr-review/findings.md, else incomplete',
+  groomer: 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in groom/trace/groom.json',
+  'spec-writer': 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in spec.written/trace/review.json',
+  'spec-reviewer': 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in spec.reviewed/trace/review.json',
+  planner: 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in plan.review/trace/review.json',
+  implementor: 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in plan.review/trace/implementation-local.json',
+  'code-analyzer': 'the five-word run status (ready, needs-author, incomplete, refused or blocked) the analyzer finished with, in .static-analysis/rounds.json',
+  'pr-reviewer': 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in pr-review/trace/review.json',
 }
 
 /** The cloud implementor clones the repository from GitHub and refuses a ticket whose .work/ is gitignored (implementor SKILL.md). */
@@ -543,6 +544,8 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
   const model = modelFor(STEP_ROLE[step], ctx.aspira)
   const promptDir = join(ctx.dir, 'prompts')
   await mkdir(promptDir, { recursive: true })
+  const launcher = launcherFor(command, ctx.mode)
+  const skillMd = `.claude/skills/aspira-${step}/SKILL.md`
   const out = pend(
     ctx,
     state,
@@ -550,6 +553,7 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
     (output) => ({
       step,
       command,
+      launcher,
       mode: ctx.mode,
       cwd: ctx.input.repo,
       model,
@@ -557,7 +561,7 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
       notion: [{ op: 'read', target: 'ticket' }, ...STEP_NOTION[step]],
       report: { output, fields: ['nonce', 'step', 'status', 'resultLine', 'usage'] },
     }),
-    { data: { step, command } },
+    { data: { step, command, launcher } },
   )
   const { output, nonce, prompt } = out.stage as Stage & { prompt: string }
   const lines = [
@@ -565,15 +569,15 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
     '',
     `Work in ${ctx.input.repo} (the ticket's worktree): change into it first and run everything from there.`,
     '',
-    'Run this command, exactly as written, and follow the skill it loads to its end:',
+    `Read ${skillMd} first. Then run this, exactly as written, and follow the skill to its end:`,
     '',
     '```',
-    command,
+    ...launcher,
     '```',
     '',
     ...(ctx.mode === 'cloud'
       ? [
-          "This run is in cloud mode: the command is the step skill's default mode, which starts the step's cloud agent (`start`). Let the skill start it, then `wait` on that run, again and again, until it ends; waiting does not stop the agent. Do not stop after `start`, do not run the step yourself, and never retry a failed run. When it has ended, read its result exactly as for --local.",
+          "This run is in cloud mode: the first line above starts the step's cloud agent (`start`). Let it start, then run the second line (`wait`) again and again until it ends; waiting does not stop the agent. Do not stop after `start`, do not run the step yourself, and never retry a failed run. When it has ended, read its result exactly as for --local.",
           '',
         ]
       : []),
@@ -597,6 +601,7 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
 async function acceptStep(ctx: Ctx, state: RunState, pending: Pending, answer: unknown): Promise<Out> {
   const step = String(pending.data?.step) as StepName
   const command = String(pending.data?.command)
+  const launcher = Array.isArray(pending.data?.launcher) ? (pending.data.launcher as string[]) : launcherFor(command, ctx.mode)
   const parsed = stepReportSchema.safeParse(answer)
   if (!parsed.success || parsed.data.step !== step) {
     const message = `the ${step} step report at ${pending.output} is not a step report for ${step}${parsed.success ? ` (it names ${parsed.data.step})` : `: ${parsed.error.issues.map((issue) => issue.message).join('; ')}`}`
@@ -608,6 +613,7 @@ async function acceptStep(ctx: Ctx, state: RunState, pending: Pending, answer: u
     step,
     runId: ctx.runId,
     command,
+    launcher,
     status: result.status,
     startedAt: pending.startedAt,
     endedAt: ctx.input.now,

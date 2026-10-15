@@ -6,6 +6,8 @@
 // and exits 1. Time comes from BUILD_FEATURE_NOW when set (tests), else the clock.
 
 import { parseArgs } from 'node:util'
+import { exitCodeFor } from '@aspiralabs/agent-common/lib/run-status'
+import { buildRunStatus } from '#src/build-status.ts'
 import { nextStage, Refusal } from '#src/driver.ts'
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
@@ -34,6 +36,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     env: process.env,
   })
   process.stdout.write(`${JSON.stringify(stage, null, 2)}\n`)
+  // Every stage but 'end' is a pending ask the human or a subagent still answers: exit 0 so a
+  // caller's `&&` chain goes on to read it, never treating "there is a question" as a failure.
+  // 'end' is the run's own final word: `finished` (readyMoves/sequence/an EndRoute with reason
+  // 'finished', the only route that reaches the PR-reviewed-and-waiting state) reads ready (exit
+  // 0); any other end (`stopped: true`, covering every other EndRoute reason and every step or
+  // phase stop) reads incomplete (exit 1) here, the same conservative default F20 names for "an
+  // unexpected error": the finer BuildStop kinds (needs-author, refused, blocked) need the stop's
+  // own reason threaded onto the stage, which only driver.ts's 'end' stage, not this script, can
+  // do (see implementation.md's Deviations for KIT-2 P23).
+  if (stage.stage === 'end') return exitCodeFor(buildRunStatus({ kind: stage.stopped === false ? 'finished' : 'unexpected-error' }).status)
   return 0
 }
 
