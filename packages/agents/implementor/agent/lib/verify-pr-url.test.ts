@@ -30,6 +30,10 @@ async function withGh(root: string, head: string, url: string): Promise<{ PATH: 
 describe('T20 F24, F26: implementor --verify --pr-url', () => {
   it('without --pr-url reports no set or move action and Step 8 still open, and progress.md keeps Step 8 as Next action', async () => {
     const { root, folder, commit } = await buildReady()
+    // Step 7 already ran on the one app the build changed: its rounds.json names this ticket, ended
+    // ready and analyzed the build's own head (F21), so Step 8 is the next action, not Step 7.
+    await mkdir(join(root, 'packages/a/.static-analysis'), { recursive: true })
+    await writeFile(join(root, 'packages/a/.static-analysis/rounds.json'), JSON.stringify({ mode: 'local', status: 'ready', reason: null, reasonCode: null, ticket: ID, head: commit }))
     const progress = join(folder, 'progress.md')
     await writeFile(progress, '## Next action\n\nStep 8: commit, push, open the PR and verify.\n')
     const env = await withGh(root, commit, `https://github.com/aspiralabs/kit/pull/7`)

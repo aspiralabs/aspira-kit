@@ -11,7 +11,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { renderTicketMd, workFolderName, type TicketRecord } from '@aspiralabs/agent-common/lib/ticket'
+import { parseTicketMd, renderTicketMd, workFolderName, type TicketRecord } from '@aspiralabs/agent-common/lib/ticket'
+import { writeSnapshot } from './snapshot.test-helper.ts'
 
 const exec = promisify(execFile)
 
@@ -97,10 +98,10 @@ export async function writePlan(folder: string, options: { repoCommit?: string; 
   )
 }
 
-/** A --guidelines snapshot so the knowledge stage needs no live Notion pages. */
+/** A --guidelines snapshot load-knowledge wrote (F50), so the run needs no live Notion pages. */
 export async function writeGuidelines(root: string): Promise<string> {
   const file = join(root, 'guidelines.md')
-  await writeFile(file, '<!-- Required reading · 1 page · fetched 2026-10-14T00:00:00.000Z -->\n\n# Agent Instructions\n\nMUST read this in full.\n')
+  await writeSnapshot(file)
   return file
 }
 
@@ -171,5 +172,12 @@ export async function buildReady(options: { app?: string } = {}): Promise<{ root
   // The resolve round-trip's "session" rewrites ticket.md, making it current for the next call.
   await writeFile(join(folder, 'ticket.md'), await readTicketFile(folder))
   await runDriver(['--repo', root, '--ticket', ID, '--guidelines', guidelines], { cwd: root })
+  // The board-end "session": a ready build pushes plan.review/implementation.md as the ticket's
+  // Implementation page, then records its URL in ticket.md's Pages table, as SKILL.md's board-end
+  // step says. Without it --verify finds the push missing and never reports the run verified.
+  const ticket = parseTicketMd(await readTicketFile(folder))
+  if (ticket === null) throw new Error(`${folder}/ticket.md does not parse`)
+  const implementation = { id: 'impl-0000000000000000000000000002', title: 'Implementation', url: 'https://app.notion.com/p/impl-0000000000000000000000000002', lastEditedAt: new Date().toISOString() }
+  await writeFile(join(folder, 'ticket.md'), renderTicketMd({ ...ticket, pages: { ...ticket.pages, Implementation: implementation } }))
   return { root, folder, commit, guidelines }
 }
