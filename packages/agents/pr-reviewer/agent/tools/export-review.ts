@@ -40,7 +40,7 @@ export default defineTool({
     outputDir: z.string().optional().describe('Host directory, absolute or relative to the agent project. Overrides the default.'),
     settled: z.boolean().optional().describe('The `settled` pr-debator returned: the loop ended by the stopping rule, not at the cap.'),
     maxCostUsd: z.number().nullable().optional().describe('The `budget.maxCostUsd` pr-debator returned, for cost.md. Null or absent when there was no budget.'),
-    stoppedByBudget: z.boolean().optional().describe('true when pr-debator returned a `stopped` object: the budget ended the run and the export is incomplete.'),
+    stoppedByBudget: z.boolean().optional().describe('true when pr-debator returned its own budget-ended object: the budget ended the run and the export is incomplete.'),
   }),
   async execute({ rounds, label, repoDir: rawRepoDir, branch: rawBranch, outputDir, settled, maxCostUsd, stoppedByBudget }, ctx) {
     // load-pr returns null for these on a GitHub PR, and a model passes that back as "null".

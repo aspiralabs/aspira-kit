@@ -2,6 +2,7 @@
 name: aspira-spec-reviewer
 description: Review a feature spec against its repository and Aspira engineering guidelines with the official spec-review pipeline, then report findings, a reviewed spec and a run analysis. By default it runs spec-reviewer as a separate process and reports back; with --local the same pipeline runs inside this Claude Code session. Use for /aspira-spec-reviewer or requests to review a spec.
 argument-hint: [<ticket ID | Notion URL> | <spec.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended]
+disable-model-invocation: true
 ---
 
 # Spec review
@@ -60,4 +61,4 @@ A task that comes back with an `error` wrote an output that failed its schema: s
 
 ## Reporting
 
-Start the report with the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log). The completed report's layout and what to report from it are in `agent/instructions.md`. Read `trace/review.json` for the status even when the command exits successfully. If a run fails before exporting, show its log or error and do not present an earlier report as the new result. Say which mode produced the report: a `--local` review ran on this session's model, so it is not an independent review.
+A non-zero exit is a run status to relay: never retry or rerun it on needs-author, settle the open decisions the report names first. Start the report with the run status and the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log). The completed report's layout and what to report from it are in `agent/instructions.md`. If a run fails before exporting, show its log or error and do not present an earlier report as the new result. Say which mode produced the report: a `--local` review ran on this session's model, so it is not an independent review.

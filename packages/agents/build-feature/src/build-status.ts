@@ -3,8 +3,8 @@
 // result; needs-author when it stops for an approval or a human gate; refused for a Status with no
 // row, Dropped or nothing-to-do; blocked for a missing aspira.json, gh or worktree prerequisite;
 // incomplete for a failed move, a failed worktree command, --finish before a merge-ready PR, or an
-// unexpected error. The run-state words `stopped` and `finished` are internal (run()/stop()'s own
-// bookkeeping) and are never themselves reported as the run status.
+// unexpected error. run-state.ts's own two internal run-end words (its ended field: the run was cut
+// short, or it ran to completion) are never themselves reported as this module's run status.
 
 import type { RunStatus } from '@aspiralabs/agent-common/lib/run-status'
 

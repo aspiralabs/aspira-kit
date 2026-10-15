@@ -95,7 +95,7 @@ The ticket work directory is a local record; leave it out of commits unless the 
 
 **Every input.** Check the working tree. Leave uncommitted changes that are not yours alone: never stage, stash, revert or commit them, and note them in the log. If they touch a file the plan writes, that file is a blocker.
 
-**Every input: the branch.** Build on a branch dedicated to this feature, never on the default branch, and settle it before writing any file. The cloud run is already on its `implement/` branch; in a session:
+**Every input: the branch.** Build on a branch dedicated to this feature, never on the default branch, and settle it before writing any file. The cloud run is already on its `implement/` branch. For a ticket in a session, the driver already settled this before the claim (GIT-001's `ticketBranch`, switching or creating it, and refusing on any other branch): nothing here to do. For a spec or a plan in a session:
 1. Find the default branch: `git symbolic-ref --short refs/remotes/origin/HEAD` (strip `origin/`), else `git config init.defaultBranch`, else `main`.
 2. The dedicated branch is `feat/<feature-slug>`. The slug is the spec's or plan's directory name (`specs/han-14-workspace-ci/plan.review` gives `feat/han-14-workspace-ci`), or the ticket key plus its title in kebab case.
 3. On the default branch, or with a detached HEAD: switch to the dedicated branch if it already exists (`git switch feat/<slug>`), otherwise create it from the current commit (`git switch -c feat/<slug>`). Uncommitted changes travel with you; never stash them to switch. If the switch is refused because they conflict with the existing branch, that is a blocker.

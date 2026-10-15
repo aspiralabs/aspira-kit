@@ -2,6 +2,7 @@
 name: aspira-groomer
 description: Groom a Feature card's Idea in rounds before it reaches Ready: Idea, with the official groomer agent. It finds what the repository already has for the idea, asks the product decisions the Idea leaves open, records the answers on the card's Grooming Decisions page and, once the human confirms, writes the Decisions and Terms into the card's Idea and moves the card to Shortlist. By default it runs the groomer as a separate process; with --local the rounds run inside this Claude Code session, in chat. Use for /aspira-groomer or requests to groom an idea or a card.
 argument-hint: [<ticket ID | Notion URL>] [--local] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] [--take-recommended]
+disable-model-invocation: true
 ---
 
 # Groomer
@@ -49,7 +50,7 @@ Both print the agent package and version, the log tail, and from `groom/trace/gr
 Each call prints one JSON step and makes no model call. Do what the step says, then call `local` again with the same ticket. `--take-recommended` takes every open question whose branch is not an exit criterion (problem, who, done) as the agent's recommended option instead of waiting on the author; an exit-criterion question, and Confirm, are always asked in chat.
 
 1. **Board** (first). `stage: "board"` lists the board work for this session to perform with the Notion MCP, as data in `actions`: `resolve` (write `ticket.md` in the given `format`), `pull` (write the page to the named file as plain markdown), `mark` (append the run paragraph to Grooming Decisions, creating the page when the card has none) and `move`. Perform every action, update `ticket.md` as each `then` says, and call `local` again. Never move a card anywhere a stage does not list.
-2. **Knowledge.** The engineering guidelines are mandatory: without them the driver refuses to start and prints `stage: "knowledge"` with `knowledge.dir`, `knowledge.root`, `knowledge.required`, `maxDepth`, `maxPages` and any `problems`. Build that folder with the Notion MCP: `INDEX.md` (the `root` page), one file per linked page (kebab-case title, starting `<!-- <title> · <url> -->`), and `REQUIRED.md` (every `required` page in order, each as `# <page title>`, then `<!-- <url> -->`, then its full content, separated by `---`). If a page is truncated or cannot be fetched, stop and say so. With `--guidelines`, pass the same snapshot to every call.
+2. **Knowledge.** `local`'s own `load-knowledge` step already built the folder, or `blocked` names what to set; a rare `knowledge` stage names a folder problem to fix by hand. Run `local` again either way, or pass `--guidelines`.
 3. **Round.** `stage: "round"`, one task. Launch one `general-purpose` subagent with: `Read <prompt> in full and follow it exactly. Write your JSON result to <output>. Reply with one line.` A task that comes back with an `error` wrote a round the driver refused: send the error back once.
 4. **Answers.** `stage: "answers"`: print the `report` (round zero) and every question of `questions` in chat verbatim and in order, each with its options, the recommended one and why it is the human's to decide; ask the Confirm question last when `confirm` is true. Write the human's answers to the `answers` file exactly as the `note` says. The driver refuses an unknown id or an answer that is not one of the options, naming the file and the id; fix the file from the human's words, never by guessing.
 5. **Summary** (a confirm round). `stage: "summary"`, one task, launched the same way. The driver refuses a summary that does not match the record, naming the file and the reason.
@@ -60,4 +61,4 @@ The working files are `groom.local/` (knowledge, prompts, answers, fetched pages
 
 ## Reporting
 
-Start the report with the ticket ID and title, the Status before and after, the Grooming Decisions URL and the working folder. The rest of the report follows `agent/instructions.md`. Say which mode produced it.
+A non-zero exit is a run status to relay: never retry or rerun it on needs-author, answer the open questions the report names first. Start the report with the run status, the ticket ID and title, the Status before and after, the Grooming Decisions URL and the working folder. The rest of the report follows `agent/instructions.md`. Say which mode produced it.

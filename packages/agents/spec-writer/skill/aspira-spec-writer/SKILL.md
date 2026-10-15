@@ -2,6 +2,7 @@
 name: aspira-spec-writer
 description: Turn a feature idea (a file, a Notion card or inline text) into a reviewed spec with the official spec-writer pipeline. It explores the repository, writes an initial draft in the Aspira spec contract, then runs the official spec review on that draft, and reports the written spec, the draft, open author decisions and a run analysis. By default it runs spec-writer as a separate process on Claude and OpenAI models; with --local the same pipeline runs inside this Claude Code session. Use for /aspira-spec-writer or requests to write a spec from an idea.
 argument-hint: [<ticket ID | Notion URL> | <idea.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended]
+disable-model-invocation: true
 ---
 
 # Spec writer
@@ -71,4 +72,4 @@ A task that comes back with an `error` wrote an output that failed its schema: s
 
 ## Reporting
 
-Start the report with the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log). The output layout and what to report from it are in `agent/instructions.md`; hand `spec.md` to `/aspira-planner` only as it allows. Read `trace/review.json` for the status even when the command exits successfully. If a run fails before exporting, show its log or error and do not present an earlier report as the new result. Say which mode produced the report: a `--local` run used this session's model throughout, so its review is not independent of the writer.
+A non-zero exit is a run status to relay: never retry or rerun it on needs-author, settle the open decisions the report names first. Start the report with the run status and the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log). The output layout and what to report from it are in `agent/instructions.md`; hand `spec.md` to `/aspira-planner` only as it allows. If a run fails before exporting, show its log or error and do not present an earlier report as the new result. Say which mode produced the report: a `--local` run used this session's model throughout, so its review is not independent of the writer.

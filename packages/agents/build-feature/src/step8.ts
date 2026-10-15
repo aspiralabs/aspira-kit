@@ -1,4 +1,4 @@
-// Step 8 (F23-F26, F33), after a 'clean' code-analyzer result: commit the analyzer's changes on the
+// Step 8 (F23-F26, F33), after a ready code-analyzer result: commit the analyzer's changes on the
 // feature branch, push it through the guard, open a draft PR or reuse the open one, set the card's
 // PR property, and only then move the card to In Review: Implementation (BOARD-005 order).
 //

@@ -151,8 +151,8 @@ const stateSchema = z.object({
       config: z.object({ indexPage: z.string().nullable(), required: z.array(z.string()), from: z.array(z.string()) }).nullable(),
     })
     .nullable(),
-  // Read through readRunStatus so a state saved before the five-status rename (an old word like
-  // "complete") still resumes instead of failing the schema (F7).
+  // Read through readRunStatus so a state saved before the five-status rename (one of run-status.ts's
+  // old per-skill words) still resumes instead of failing the schema (F7).
   gate: z
     .object({
       status: z.string().transform((word) => readRunStatus(word)?.status ?? word),

@@ -2,6 +2,7 @@
 name: aspira-implementor
 description: Implement a feature test-first under the Aspira engineering rules in Notion, from a planner plan, a spec or a ticket, with the official implementor agent. By default it launches the implementor agent on the GitHub repository and reports back; with --local the agent's own procedure runs inside this Claude Code session on the local checkout, with subagents for the parallel lanes. Use for /aspira-implementor or requests to implement, build or execute a plan, spec or ticket.
 argument-hint: [<ticket ID | Notion URL> | <plan.review | plan.reviewed.md | spec.md> --no-ticket] [--local] [--force-pull] [--repo owner/name | --repo DIR] [--ref BRANCH] [--pr] [--max-parallel N] [--serial] [--guidelines FILE]
+disable-model-invocation: true
 ---
 
 # Aspira implementor
@@ -65,4 +66,4 @@ The run directory `<work dir>/implementation.local/` holds the knowledge, prompt
 
 ## Report
 
-Start the report with the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log), then relay the agent's report (default) or the final `verification` result and `implementation.md` (`--local`): status, branch, commits, the feature table, deviations with rule IDs, assumptions, blockers, the pull request link if any, and which mode produced it. With a ticket and no PR, opening the PR is the remaining step: say so. The next steps are `/aspira-code-analyzer`, then `/aspira-pr-reviewer`. A refused, blocked or incomplete run is not a finished build; say what stopped it.
+A non-zero exit is a run status to relay: never retry or rerun it on needs-author, settle the open decisions the report names first. Start the report with the run status, the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log), then relay the agent's report (default) or the final `verification` result and `implementation.md` (`--local`): status, branch, commits, the feature table, deviations with rule IDs, assumptions, blockers, the pull request link if any, and which mode produced it. With a ticket and no PR, opening the PR is the remaining step: say so. The next steps are `/aspira-code-analyzer`, then `/aspira-pr-reviewer`. A refused, blocked or incomplete run is not a finished build; say what stopped it.

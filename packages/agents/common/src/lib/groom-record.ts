@@ -105,7 +105,7 @@ const groomRecordShape = z.object({
 
 /**
  * `groomRecordShape` with `status` read through `readRunStatus` (F7): the five new words as
- * themselves, the old words (`confirmed`, `stopped`, …) mapped onto one, anything else failing the
+ * themselves, run-status.ts's old per-skill words mapped onto one, anything else failing the
  * parse. `reasonCode` defaults to the word's own mapped reason code when the record does not carry
  * one of its own (an old record read for the first time); an explicit `reasonCode` (a fresh write)
  * is kept as written. `reason` defaults to null.
@@ -169,8 +169,8 @@ export function rebuildGroomRecord(pageMarkdown: string): { record: GroomRecord;
   const branches = read.trailer?.branches ?? GROOM_BRANCHES.map((id) => ({ id, state: tagged.has(id) ? ('visited' as const) : ('open' as const) }))
   const top = Math.max(0, ...decisions.map((decision) => Number(decision.id.slice(1).split('.')[0])))
   const open = decisions.filter((decision) => decision.decidedBy === 'open').length
-  const confirmed = (read.confirm ?? []).some((todo) => todo.checked)
-  const stopped = (read.stop ?? []).some((todo) => todo.checked)
+  const isConfirmed = (read.confirm ?? []).some((todo) => todo.checked)
+  const isStopped = (read.stop ?? []).some((todo) => todo.checked)
   const record: GroomRecord = {
     decisions: decisions.sort((a, b) => compareIds(a.id, b.id)),
     branches,
@@ -178,9 +178,9 @@ export function rebuildGroomRecord(pageMarkdown: string): { record: GroomRecord;
     startedAt: read.trailer?.written ?? '',
     open,
     page: {},
-    status: confirmed ? 'ready' : 'needs-author',
-    reasonCode: confirmed ? null : stopped ? 'paused' : null,
-    reason: confirmed ? null : stopped ? 'Stop grooming was ticked on the Grooming Decisions page' : `${open} decision${open === 1 ? '' : 's'} still open on the Grooming Decisions page`,
+    status: isConfirmed ? 'ready' : 'needs-author',
+    reasonCode: isConfirmed ? null : isStopped ? 'paused' : null,
+    reason: isConfirmed ? null : isStopped ? 'Stop grooming was ticked on the Grooming Decisions page' : `${open} decision${open === 1 ? '' : 's'} still open on the Grooming Decisions page`,
   }
   return { record, nextId: `Q${top + 1}` }
 }

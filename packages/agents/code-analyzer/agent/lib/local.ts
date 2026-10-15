@@ -177,9 +177,9 @@ const stateSchema = z.object({
   missing: z.array(z.object({ id: z.string(), reason: z.string() })),
   rejections: z.record(z.string(), z.array(z.string())),
   pending: z.object({ round: z.number(), tasks: z.array(taskSchema) }).nullable(),
-  // The status is a bare string, not the strict new-words enum, so a pre-upgrade state.json (the
-  // old 'clean' | 'partial' | 'nothing-detected' | 'failed') still parses (F7); readRunStatus maps
-  // it onto the shared status and reason code at export. reasonCode is absent on such a state.
+  // The status is a bare string, not the strict new-words enum, so a pre-upgrade state.json (one of
+  // run-status.ts's old per-skill words) still parses (F7); readRunStatus maps it onto the shared
+  // status and reason code at export. reasonCode is absent on such a state.
   stop: z.object({ status: z.string(), reason: z.string(), reasonCode: z.enum(REASON_CODES).nullable().optional() }).nullable(),
 })
 type State = z.infer<typeof stateSchema>
@@ -417,7 +417,7 @@ const unique = (items: string[]) => [...new Set(items)]
  * state's old word onto both; a reasonCode already recorded by this version wins over the map's
  * (which is always null for the new words themselves, since readRunStatus matches those first). */
 function resolveStop(stop: State['stop']): { status: Status; reason: string; reasonCode: ReasonCode | null } {
-  const { status: word, reason, reasonCode } = stop ?? { status: 'incomplete', reason: 'stopped', reasonCode: null }
+  const { status: word, reason, reasonCode } = stop ?? { status: 'incomplete', reason: 'no stop reason recorded', reasonCode: null }
   const mapped = readRunStatus(word)
   const status: Status = mapped?.status === 'ready' ? 'ready' : 'incomplete'
   return { status, reason, reasonCode: reasonCode !== undefined ? reasonCode : (mapped?.reasonCode ?? null) }

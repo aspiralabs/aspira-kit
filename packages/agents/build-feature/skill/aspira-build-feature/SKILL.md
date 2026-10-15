@@ -3,6 +3,7 @@ name: aspira-build-feature
 description: Run the AI-DLC pipeline end to end for a Feature Board ticket, from wherever it is to a reviewed, merge-ready PR, by stepping the official build-feature driver and running each stage it prints as a subagent of this Claude Code session. It is the one /aspira-* skill that orchestrates other skills instead of launching an agent. Use for /aspira-build-feature or requests to build a feature, run the whole AI-DLC on a ticket, or take a ticket from idea to PR.
 argument-hint: <ticket ID | Notion URL> [--local] [--run RUNID] [--force-run] [--finish]
 model: fable
+disable-model-invocation: true
 ---
 
 # Aspira build-feature
@@ -30,4 +31,4 @@ Pass `--local` exactly when the human did. The run works the ticket in its own g
 
 ## Reporting
 
-Report the Build Summary path (`build-summary.md`, named in the `summary` stage) and, when the run stopped rather than finished, the resume command the `end` stage prints. Say which steps ran and their result lines; do not restate the driver's own rules.
+A non-zero exit is a run status to relay: never retry or rerun it on needs-author, answer the open decisions the report names first. Start the report with the run status. Report the Build Summary path (`build-summary.md`, named in the `summary` stage) and, when the run stopped rather than finished, the resume command the `end` stage prints. Say which steps ran and their result lines; do not restate the driver's own rules.

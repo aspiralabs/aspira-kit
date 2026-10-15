@@ -139,4 +139,8 @@ export const NOT_RUN_STATUS: readonly { file: string; symbol: string }[] = [
   { file: 'packages/agents/build-feature/src/review-loop.ts', symbol: 'the fix step' },
   { file: 'packages/agents/code-analyzer/agent/lib/ledger.ts', symbol: 'the round ledger' },
   { file: 'packages/agents/common/src/lib/model-trace.ts', symbol: 'turn statuses' },
+  { file: 'packages/agents/common/src/lib/run-analysis.ts', symbol: 'UsageEntry.status (a model turn, not a skill run)' },
+  { file: 'packages/agents/spec-reviewer/agent/lib/models.ts', symbol: "the research ledger's turn.status (UsageEntry)" },
+  { file: 'packages/agents/build-feature/src/driver.test-helper.ts', symbol: 'SUCCESS / writeStepExport (deliberate pre-upgrade word fixtures)' },
+  { file: 'packages/agents/build-feature/src/driver.ts', symbol: "run-state.ts's run.ended ('stopped' | 'finished'): the run's own lifecycle word, not a skill run status" },
 ]

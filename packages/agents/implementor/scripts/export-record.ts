@@ -4,10 +4,10 @@ import { parseArgs } from 'node:util'
 import { readRunStatus } from '@aspiralabs/agent-common/lib/run-status'
 
 // The separate-process implementor (implementor.sh's RUNNER) captures the whole invoke run into a
-// log file and greps it for a bare "status: complete" (implementor.sh:262-271). This is the same
-// idea done properly: read the agent's own reported status and branch out of that log, map the
-// status word through readRunStatus (so an old word like "complete" still reads as the new "ready"),
-// and write plan.review/trace/implementation-local.json in the same shape the --local driver's own
+// log file and greps it for a bare status line (implementor.sh:262-271). This is the same idea
+// done properly: read the agent's own reported status and branch out of that log, map the status
+// word through readRunStatus (so one of its old per-skill words still reads as the new ready), and
+// write plan.review/trace/implementation-local.json in the same shape the --local driver's own
 // export uses (`mode` tells them apart), so RUN_RECORDS.implementor's reader sees one format
 // regardless of which path produced the run (F21).
 

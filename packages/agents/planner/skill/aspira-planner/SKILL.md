@@ -2,6 +2,7 @@
 name: aspira-planner
 description: Turn a reviewed business spec into concrete implementation tasks and unit/integration test checklists by calling the Aspira planner agent. By default it runs the planner as a separate process; with --local the same pipeline runs inside this Claude Code session. Use for /aspira-planner or requests to generate an implementation plan with this agent.
 argument-hint: [<ticket ID | Notion URL> | <spec.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended]
+disable-model-invocation: true
 ---
 
 # Spec to plan
@@ -52,4 +53,4 @@ The output is `plan.review/` in the ticket's working folder (with `--no-ticket`:
 - `run-analysis.md`: reported cost and wall time per agent/turn, plus totals (`--local`: wall time only).
 - `trace/`: original spec, guidelines, research, structured plan, validation results, prompts, outputs, tool activity, the board actions, and prior reports under `history/`.
 
-Read `trace/review.json` to determine `ready`, `needs-author` or `incomplete`; eve process success alone is not plan approval. Start the report with the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log), then report as `agent/instructions.md` says, linking the plan and run analysis. If the run fails before export, show its log and do not present a previous report as current.
+A non-zero exit is a run status to relay: never retry or rerun it on needs-author, settle the open decisions the report names first. Start the report with the run status, the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log), then report as `agent/instructions.md` says, linking the plan and run analysis. If the run fails before export, show its log and do not present a previous report as current.
