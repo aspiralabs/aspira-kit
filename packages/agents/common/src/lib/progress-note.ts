@@ -30,7 +30,8 @@ export type NextAction = { step: string; do: string[]; run: string[]; session: s
 export type ProgressNote = {
   id: string
   title: string
-  skill: Skill
+  /** The skill that wrote the note: one of the agent skills, or build-feature, which drives them all. */
+  skill: Skill | 'build-feature'
   runId: string
   runStatus: RunStatus
   status: string

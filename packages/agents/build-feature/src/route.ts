@@ -49,7 +49,7 @@ export const STEP8_MOVE = { from: 'In Progress: Implementation', to: 'In Review:
 
 export type StepRoute = { kind: 'step'; step: StepName; command: string; launcher: string[] }
 export type SequenceItem = { kind: 'phase'; phase: PhaseName } | (StepRoute & { done: boolean })
-export type EndRoute = { kind: 'end'; reason: 'nothing-to-do' | 'dropped' | 'unknown' | 'finished'; message: string }
+export type EndRoute = { kind: 'end'; reason: 'nothing-to-do' | 'dropped' | 'unknown' | 'unsettled' | 'finished'; message: string }
 
 export type Route =
   | StepRoute
@@ -145,7 +145,7 @@ export function routeStatus(status: string, facts: RouteFacts): Route {
       return {
         kind: 'sequence',
         items: [{ kind: 'phase', phase: 'gate' }, { ...stepCommand(named, facts), done: facts.analyzerReady }, { kind: 'phase', phase: 'step8' }],
-        then: { kind: 'end', reason: 'unknown', message: `${facts.id} is still in In Progress: Implementation after Step 8; resolve it again` },
+        then: { kind: 'end', reason: 'unsettled', message: `${facts.id} is still in In Progress: Implementation after Step 8; resolve it again` },
       }
     }
     case 'In Review: Implementation':

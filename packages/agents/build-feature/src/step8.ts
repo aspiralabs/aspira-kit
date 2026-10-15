@@ -292,7 +292,8 @@ async function step8Next(context: PhaseContext, state: RunState, sys: System = s
       data: { url },
     }
   }
-  return stopWith(pr.value, { message: decision.message, failure: { action: 'pr-step', message: decision.message } })
+  // The shared PR check's own status (refused, blocked or incomplete) is the stop's (F20).
+  return { kind: 'stop', state: pr.value, message: decision.message, failure: { action: 'pr-step', message: decision.message }, reason: { kind: 'step', step: 'step8', status: decision.kind } }
 }
 
 const setPrAnswer = z.union([z.object({ nonce: z.string(), done: z.literal(true) }), z.object({ nonce: z.string(), error: z.string().min(1) })])

@@ -6,23 +6,42 @@
 // unexpected error. run-state.ts's own two internal run-end words (its ended field: the run was cut
 // short, or it ran to completion) are never themselves reported as this module's run status.
 
-import type { RunStatus } from '@aspiralabs/agent-common/lib/run-status'
+import { z } from 'zod'
+import { RUN_STATUSES, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
 
-/** Every reason the driver's run()/stop()/finalize() and EndRoute can end on. */
-export type BuildStop =
-  | { kind: 'finished' }
-  | { kind: 'step'; step: string; status: RunStatus }
-  | { kind: 'approval' }
-  | { kind: 'no-row' }
-  | { kind: 'dropped' }
-  | { kind: 'nothing-to-do' }
-  | { kind: 'aspira-json' }
-  | { kind: 'gh' }
-  | { kind: 'worktree-prerequisite' }
-  | { kind: 'move' }
-  | { kind: 'worktree-command' }
-  | { kind: 'finish-before-pr' }
-  | { kind: 'unexpected-error' }
+/** The stop kinds that need nothing but their name. */
+const BARE_STOPS = [
+  'finished',
+  // needs-author: the run-start approval, or a human gate (a backward move only a human makes).
+  'approval',
+  'human-gate',
+  // refused: the card's Status or the ticket itself.
+  'no-row',
+  'dropped',
+  'nothing-to-do',
+  'not-found',
+  // blocked: a prerequisite outside the ticket.
+  'aspira-json',
+  'gh',
+  'worktree-prerequisite',
+  'cloud-implementor',
+  // incomplete.
+  'move',
+  'worktree-command',
+  'finish-before-pr',
+  'unsettled',
+  'unexpected-error',
+] as const
+
+/**
+ * Every reason the driver's stop()/finalize() and EndRoute can end on. `step` is the stopping
+ * step's own status (an agent step, or Step 8's shared PR check).
+ */
+export type BuildStop = Bare<(typeof BARE_STOPS)[number]> | { kind: 'step'; step: string; status: RunStatus }
+type Bare<Kind> = Kind extends string ? { kind: Kind } : never
+
+/** BuildStop as the run state persists it (a run's end, the stop an ask queue ends on). */
+export const buildStopSchema = z.union([z.object({ kind: z.literal('step'), step: z.string(), status: z.enum(RUN_STATUSES) }), z.object({ kind: z.enum(BARE_STOPS) })])
 
 /** The end of an exhaustive switch over a union (TS-008). */
 function assertNever(value: never): never {
@@ -37,18 +56,22 @@ export function buildRunStatus(stop: BuildStop): { status: RunStatus } {
     case 'step':
       return { status: stop.status }
     case 'approval':
+    case 'human-gate':
       return { status: 'needs-author' }
     case 'no-row':
     case 'dropped':
     case 'nothing-to-do':
+    case 'not-found':
       return { status: 'refused' }
     case 'aspira-json':
     case 'gh':
     case 'worktree-prerequisite':
+    case 'cloud-implementor':
       return { status: 'blocked' }
     case 'move':
     case 'worktree-command':
     case 'finish-before-pr':
+    case 'unsettled':
     case 'unexpected-error':
       return { status: 'incomplete' }
     default:
