@@ -213,7 +213,8 @@ async function withImplementorDecisions(context: PhaseContext, state: RunState):
 export async function writePrBody(context: PhaseContext, state: RunState): Promise<string> {
   const file = join(context.dir, 'pr-body.md')
   await mkdir(context.dir, { recursive: true })
-  await writeFile(file, await renderPrBody({ ticket: { id: context.id, title: context.card.title, url: context.card.url }, state, repo: context.repo }))
+  const app = context.aspira.app
+  await writeFile(file, await renderPrBody({ ticket: { id: context.id, title: context.card.title, url: context.card.url }, state, repo: context.repo, folder: context.folder, ...(app === undefined ? {} : { app }) }))
   return file
 }
 

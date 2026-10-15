@@ -20,7 +20,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { PROGRESS_NOTE_FILE, nextAction, parseNextAction, parseProgressNote, writeProgressNote, type NextAction } from './progress-note'
+import { PROGRESS_NOTE_FILE, nextAction, parseNextAction, parseProgressNote, writeProgressNote, writeStep8PrBody, type NextAction } from './progress-note'
 
 let repo: string
 let folder: string
@@ -192,5 +192,31 @@ describe('nextAction: the Playbook template (T12)', () => {
     expect(action.session).toContain('.claude/skills/aspira-planner/scripts/planner.sh local KIT-2')
     expect(action.session).toMatch(/SKILL\.md/)
     expect(action.session.toLowerCase()).not.toContain('skill tool')
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
+// writeStep8PrBody (KIT-2, P22): renders pr-body.md from implementation.md and the branch diff.
+// ---------------------------------------------------------------------------------------------
+
+describe('writeStep8PrBody', () => {
+  const ticket = { id: 'KIT-2', title: 'Every skill writes a progress note', url: 'https://app.notion.com/p/kit-2-0000000000000000000000000002' }
+
+  it('writes a pr-body.md with Summary, Evidence and Merge Danger, even with no implementation.md yet', async () => {
+    const file = await writeStep8PrBody({ folder, repo, ticket })
+    const text = await readFile(file, 'utf8')
+    expect({ file, headings: ['## Summary', '## Evidence', '## Merge Danger'].every((heading) => text.includes(heading)), linksTicket: text.includes(ticket.url) }).toEqual({
+      file: join(folder, 'pr-body.md'),
+      headings: true,
+      linksTicket: true,
+    })
+  })
+
+  it('names a feature from implementation.md’s Tasks table under Evidence', async () => {
+    const implementationMd = ['# Implementation', '', '## Tasks', '', '| Task | Features | Lane/wave | Status | Commit | Red → green evidence |', '| --- | --- | --- | --- | --- | --- |', '| P1 | F1 | wave 1 | done | abc1111 | none |', ''].join('\n')
+    await writeFile(join(folder, 'plan.review', 'implementation.md'), implementationMd)
+    const file = await writeStep8PrBody({ folder, repo, ticket })
+    const text = await readFile(file, 'utf8')
+    expect(text).toContain('F1')
   })
 })

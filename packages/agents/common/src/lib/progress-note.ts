@@ -4,13 +4,18 @@
 // block, built only from validated parts (never a trace's free text, which could be an injection
 // attempt or a secret) and redacted before it ever reaches disk.
 
+import { execFile } from 'node:child_process'
 import { access, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { commandFor, nextStep, PLAYBOOK, type PlaybookRow } from '@aspiralabs/kit/playbook'
+import { renderPrBody, type PrBodyAnalyzer, type PrBodyTicket } from './pr-body.ts'
 import { redact } from './redact.ts'
 import { step8Commands } from './step-commands.ts'
 import type { ReasonCode, RunStatus } from './run-status.ts'
 import type { Skill } from './ticket.ts'
+
+const exec = promisify(execFile)
 
 /** The note's file name, inside the ticket's working folder. */
 export const PROGRESS_NOTE_FILE = 'progress.md'
@@ -205,6 +210,63 @@ async function buildFeatureActive(folder: string): Promise<BuildFeatureActive | 
   } catch {
     return null
   }
+}
+
+/** The repository's default branch: `git symbolic-ref --short refs/remotes/origin/HEAD` (stripped of `origin/`), else `git config init.defaultBranch`, else `main` (the implementor's own SKILL.md, section 1). Never throws. */
+async function defaultBranch(repo: string): Promise<string> {
+  const symbolic = await exec('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { cwd: repo })
+    .then((result) => result.stdout.trim().replace(/^origin\//, ''))
+    .catch(() => '')
+  if (symbolic !== '') return symbolic
+  const configured = await exec('git', ['config', 'init.defaultBranch'], { cwd: repo })
+    .then((result) => result.stdout.trim())
+    .catch(() => '')
+  return configured !== '' ? configured : 'main'
+}
+
+/** `git diff --name-only` from the default branch to HEAD; `[]` on any failure (no commits yet, no default branch). Never throws. */
+async function changedFilesOf(repo: string): Promise<string[]> {
+  const base = await defaultBranch(repo)
+  const merged = await exec('git', ['merge-base', base, 'HEAD'], { cwd: repo })
+    .then((result) => result.stdout.trim())
+    .catch(() => null)
+  if (merged === null) return []
+  const diff = await exec('git', ['diff', '--name-only', `${merged}...HEAD`], { cwd: repo })
+    .then((result) => result.stdout)
+    .catch(() => '')
+  return diff.split('\n').filter((line) => line.trim() !== '')
+}
+
+/** The one app's code-analyzer result, from its `.static-analysis/rounds.json`; `[]` when there is no app, no file, or it does not parse. */
+async function analyzerFor(repo: string, app: string | undefined): Promise<PrBodyAnalyzer[]> {
+  if (app === undefined) return []
+  const text = await readFile(join(repo, app, '.static-analysis', 'rounds.json'), 'utf8').catch(() => null)
+  if (text === null) return []
+  try {
+    const parsed = JSON.parse(text) as { status?: unknown; reasonCode?: unknown }
+    const status = typeof parsed.status === 'string' ? parsed.status : 'unknown'
+    const reasonCode = typeof parsed.reasonCode === 'string' ? parsed.reasonCode : null
+    return [{ app, status, reasonCode }]
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Render and write `<folder>/pr-body.md` for a Step 8 Next action (F3, F42, F43): implementation.md's
+ * Summary, Evidence and Merge Danger (from `<folder>/plan.review/implementation.md`, empty when the
+ * implementor has not pushed one yet) and the branch's changed files against the repository's
+ * default branch, scoped to `app`. The caller (the driver's afterRun, once it knows the ticket's
+ * branch and PR body file path) names the returned path in the `gh pr create --body-file` command
+ * nextAction's Step 8 template builds.
+ */
+export async function writeStep8PrBody(args: { folder: string; repo: string; app?: string; ticket: PrBodyTicket }): Promise<string> {
+  const file = join(args.folder, 'pr-body.md')
+  const implementationMd = await readFile(join(args.folder, 'plan.review', 'implementation.md'), 'utf8').catch(() => '')
+  const [changedFiles, analyzers] = await Promise.all([changedFilesOf(args.repo), analyzerFor(args.repo, args.app)])
+  const body = await renderPrBody({ ticket: args.ticket, implementationMd, changedFiles, analyzers, repo: args.repo, ...(args.app === undefined ? {} : { app: args.app }) })
+  await writeFile(file, body)
+  return file
 }
 
 /**
