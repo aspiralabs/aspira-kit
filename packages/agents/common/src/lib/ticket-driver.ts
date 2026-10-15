@@ -5,11 +5,14 @@
 // `.work/<id>-<slug>/progress.md` at every return to the session, so a crashed or resumed run
 // always has a Next action to read (F14-F21).
 
+import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
+import { promisify } from 'node:util'
+import { analyzedApps } from './changed-apps.ts'
 import { readGroomRecord } from './groom-record.ts'
-import { appendRefusal, nextAction, PROGRESS_NOTE_FILE, writeProgressNote, type ProgressNote } from './progress-note.ts'
+import { appendRefusal, nextAction, PROGRESS_NOTE_FILE, writeProgressNote, writeStep8PrBody, type NextAction, type ProgressNote } from './progress-note.ts'
 import { redact } from './redact.ts'
 import { REFUSED_EXIT, USAGE_EXIT, exitCodeFor, readRunStatus, type ReasonCode, type RunStatus } from './run-status.ts'
 import { TICKET_FILE, TicketArgumentError, WORK_DIR, ticketArgument, type BoardTrace, type Skill, type TicketArgument, type TicketRecord } from './ticket.ts'
@@ -59,6 +62,8 @@ export async function resolveArgument(context: DriverContext, args: DriverTicket
   }
   return argument
 }
+
+const exec = promisify(execFile)
 
 /** A note's fields this module does not yet have a real value for (no run has an id of its own here); every call site fills in what it knows. */
 const NO_RUN_ID = '-'
@@ -126,20 +131,24 @@ export async function afterRun(context: DriverContext, before: BeforeRun & { kin
     ...(run.round === undefined ? {} : { round: run.round }),
     ...(board === undefined ? {} : { board }),
   })
-  await note(context, before.folder, () => ({
-    id: before.ticket.id,
-    title: before.ticket.title,
-    skill: context.skill,
-    runId: NO_RUN_ID,
-    runStatus: run.status,
-    status: before.ticket.status,
-    expectedStatus: end.verify?.status ?? null,
-    outputs: [],
-    completed: [],
-    decisions: [],
-    openIssues: end.remaining === null ? [] : [end.remaining],
-    nextAction: end.verify === null ? null : { step: `Verify the board actions ${context.skill} asked for`, do: [], run: [end.verify.command], session: end.verify.command },
-  }))
+  await note(context, before.folder, async () => {
+    // Nothing for the session to verify on a ready build step: the note goes straight to Step 7 or 8 (F21).
+    const after = end.verify === null && run.status === 'ready' ? await stepAfterBuild(context, before.folder, before.ticket) : null
+    return {
+      id: before.ticket.id,
+      title: before.ticket.title,
+      skill: context.skill,
+      runId: NO_RUN_ID,
+      runStatus: run.status,
+      status: before.ticket.status,
+      expectedStatus: end.verify?.status ?? null,
+      outputs: after?.outputs ?? [],
+      completed: [],
+      decisions: [],
+      openIssues: [...(end.remaining === null ? [] : [end.remaining]), ...(after?.openIssues ?? [])],
+      nextAction: end.verify === null ? (after?.action ?? null) : { step: `Verify the board actions ${context.skill} asked for`, do: [], run: [end.verify.command], session: end.verify.command },
+    }
+  })
   return {
     ticket: `${before.ticket.id} ${before.ticket.title}`,
     folder: before.folder,
@@ -160,12 +169,14 @@ export async function verifyRun(context: DriverContext, args: DriverTicketArgs, 
   if (result.ok && (await roundStateEnds(context.skill, folder, args.finish === true))) await rm(boardStateDir(folder, context.skill), { recursive: true, force: true }).catch(() => undefined)
   const ticket = await readTicketMd(folder)
   const runStatus: RunStatus = result.ok ? 'ready' : 'incomplete'
-  await note(context, folder, () => {
+  await note(context, folder, async () => {
     if (ticket === null) return null
+    const after = result.ok ? await stepAfterBuild(context, folder, ticket) : null
     const action = result.ok
-      ? nextAction({ kind: 'run', id: ticket.id, skill: context.skill, runStatus: 'ready', verified: true, liveStatus: ticket.status })
+      ? (after?.action ?? nextAction({ kind: 'run', id: ticket.id, skill: context.skill, runStatus: 'ready', verified: true, liveStatus: ticket.status }))
       : { step: 'Fix the verify problem, then run --verify again', do: [], run: [], session: '' }
-    return { id: ticket.id, title: ticket.title, skill: context.skill, runId: NO_RUN_ID, runStatus, status: ticket.status, expectedStatus: null, outputs: [], completed: [], decisions: [], openIssues: result.problem === null ? [] : [result.problem], nextAction: action }
+    const openIssues = [...(result.problem === null ? [] : [result.problem]), ...(after?.openIssues ?? [])]
+    return { id: ticket.id, title: ticket.title, skill: context.skill, runId: NO_RUN_ID, runStatus, status: ticket.status, expectedStatus: null, outputs: after?.outputs ?? [], completed: [], decisions: [], openIssues, nextAction: action }
   })
   return {
     verified: result.ok,
@@ -179,6 +190,57 @@ export async function verifyRun(context: DriverContext, args: DriverTicketArgs, 
     exitCode: exitCodeFor(runStatus),
     ...(result.problem === null ? {} : { problem: result.problem }),
   }
+}
+
+/** What the implementor recorded about a ready --local build (F21, F22): the app directories it changed, its final commit and the branch it built on. */
+type BuildRecord = { apps: string[]; head: string | null; branch: string | null }
+
+async function buildRecordOf(folder: string): Promise<BuildRecord | null> {
+  const text = await readFile(join(folder, 'plan.review', 'trace', 'implementation-local.json'), 'utf8').catch(() => null)
+  if (text === null) return null
+  try {
+    const parsed = JSON.parse(text) as { status?: unknown; apps?: unknown; head?: unknown; branch?: unknown }
+    if (typeof parsed.status !== 'string' || readRunStatus(parsed.status)?.status !== 'ready') return null
+    const apps = Array.isArray(parsed.apps) ? parsed.apps.filter((app): app is string => typeof app === 'string') : []
+    return { apps, head: typeof parsed.head === 'string' ? parsed.head : null, branch: typeof parsed.branch === 'string' ? parsed.branch : null }
+  } catch {
+    return null
+  }
+}
+
+/** The checkout's uncommitted files (the analyzer's fixes), repository-relative, from `git status`; never the run's own `.work/` or `.static-analysis/` output. `[]` on any failure. */
+async function uncommittedPaths(repo: string): Promise<string[]> {
+  const output = await exec('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: repo }).then((result) => result.stdout, () => '')
+  const entries = output.split('\0')
+  const paths: string[] = []
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i]!
+    if (entry.length < 4) continue
+    paths.push(entry.slice(3))
+    // A rename or copy carries its source path as the next entry: skip it, the new path is what gets staged.
+    if (entry[0] === 'R' || entry[0] === 'C') i += 1
+  }
+  return paths.filter((path) => !path.startsWith(`${WORK_DIR}/`) && !path.split('/').includes('.static-analysis'))
+}
+
+/**
+ * The Next action after a ready implementor or code-analyzer run on a ticket (F21): Step 7 for the
+ * first changed app directory the code analyzer has not finished for this ticket and the build's
+ * head, or, once every one has, Step 8 as ordered commands with the PR body written to
+ * `<folder>/pr-body.md` first (F42). The branch is the one the implementor recorded (F22). Null
+ * for any other skill, or when there is no ready implementor record to read.
+ */
+async function stepAfterBuild(context: DriverContext, folder: string, ticket: { id: string; title: string; url: string }): Promise<{ action: NextAction; outputs: string[]; openIssues: string[] } | null> {
+  if (context.skill !== 'implementor' && context.skill !== 'code-analyzer') return null
+  const record = await buildRecordOf(folder)
+  if (record === null) return null
+  const done = record.head === null ? [] : await analyzedApps(context.repo, record.apps, { ticket: ticket.id, head: record.head })
+  const base = { kind: 'run' as const, id: ticket.id, skill: context.skill, runStatus: 'ready' as const, verified: true, apps: record.apps, analyzedApps: done }
+  if (record.apps.some((app) => !done.includes(app)) || record.branch === null) return { action: nextAction(base), outputs: [], openIssues: [] }
+  const body = await writeStep8PrBody({ folder, repo: context.repo, ...(record.apps.length === 1 ? { app: record.apps[0]! } : {}), ticket })
+  const paths = await uncommittedPaths(context.repo)
+  const action = nextAction({ ...base, title: ticket.title, branch: record.branch, prBodyFile: relative(context.repo, body), paths })
+  return { action, outputs: [body], openIssues: [] }
 }
 
 /** Whether a passing verify ends the --local state: always for a row without a record; for the groomer only once the run is ready or needs-author/paused, or on --finish. */
