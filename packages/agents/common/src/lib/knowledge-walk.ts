@@ -42,7 +42,13 @@ export type WalkResult = {
   required: WalkPage[]
   /** Pages the walk knows about (named from a parent's markdown) but did not reach: the page cap was hit before they were dequeued. */
   notLoaded: { title: string; url: string }[]
+  /** Links the tree makes to Notion databases (Approved Technologies, ADRs, …): not pages, so not fetched and not written, as the walk before this one did. */
+  skippedDatabases?: { title: string; url: string }[]
 }
+
+/** Notion's 400 for /pages/<id> when the id is a database: the one link the walk skips instead of failing on. */
+class NotionDatabaseError extends Error {}
+const DATABASE_NOT_PAGE = /is a database, not a page/i
 
 export type WalkArgs = {
   token: string
@@ -57,7 +63,8 @@ export type WalkArgs = {
 
 /**
  * The one breadth-first walk: depth MAX_DEPTH, MAX_PAGES pages. A fetch error, a 404/403, or a
- * truncated page makes the whole walk throw, naming the page. A required page that is never
+ * truncated page makes the whole walk throw, naming the page. A link to a database (Notion's 400
+ * "is a database, not a page") is skipped and listed in `skippedDatabases`. A required page that is never
  * reached (the cap or otherwise) makes it throw too, naming the page.
  */
 export async function walkKnowledge(args: WalkArgs): Promise<WalkResult> {
@@ -77,7 +84,9 @@ export async function walkKnowledge(args: WalkArgs): Promise<WalkResult> {
       return get<T>(path)
     }
     if (!res.ok) {
-      const detail = (await res.text()).slice(0, 300)
+      const text = await res.text()
+      const detail = text.slice(0, 300)
+      if (res.status === 400 && DATABASE_NOT_PAGE.test(text)) throw new NotionDatabaseError(`Notion ${res.status} on ${path}: ${detail}`)
       const hint = res.status === 404 || res.status === 403 ? ' (is the page shared with the integration?)' : ''
       throw new Error(`Notion ${res.status} on ${path}${hint}: ${detail}`)
     }
@@ -112,6 +121,7 @@ export async function walkKnowledge(args: WalkArgs): Promise<WalkResult> {
   const files = new Map<string, string>([[rootId, 'INDEX.md']])
   const titles = new Map<string, string>([[rootId, rootTitle]])
   const pages: WalkPage[] = []
+  const skippedDatabases: { title: string; url: string }[] = []
 
   while (queue.length > 0 && pages.length < MAX_PAGES) {
     const next = queue.shift()
@@ -120,6 +130,13 @@ export async function walkKnowledge(args: WalkArgs): Promise<WalkResult> {
     try {
       body = await markdownOf(next.id)
     } catch (error) {
+      if (error instanceof NotionDatabaseError) {
+        // A titled link to a database: drop the file name reserved for it, so links to it stay Notion URLs.
+        files.delete(next.id)
+        titles.delete(next.id)
+        skippedDatabases.push({ title: next.title, url: next.url })
+        continue
+      }
       throw new Error(`Failed to load "${next.title}" (${next.url}): ${error instanceof Error ? error.message : String(error)}`)
     }
     if (body.truncated) throw new Error(`"${next.title}" (${next.url}) was truncated by the Notion API; the knowledge walk cannot proceed with a partial page.`)
@@ -136,6 +153,10 @@ export async function walkKnowledge(args: WalkArgs): Promise<WalkResult> {
         try {
           title = await titleOf(child.id)
         } catch (error) {
+          if (error instanceof NotionDatabaseError) {
+            skippedDatabases.push({ title: '', url: child.url })
+            continue
+          }
           throw new Error(`Failed to load "${child.url}": ${error instanceof Error ? error.message : String(error)}`)
         }
       }
@@ -158,7 +179,7 @@ export async function walkKnowledge(args: WalkArgs): Promise<WalkResult> {
     )
   }
 
-  return { rootId, rootUrl: start, fetchedAt, pages, required: resolved.found as WalkPage[], notLoaded }
+  return { rootId, rootUrl: start, fetchedAt, pages, required: resolved.found as WalkPage[], notLoaded, skippedDatabases }
 }
 
 function basenameOf(path: string): string {
@@ -298,5 +319,7 @@ export async function loadKnowledgeCommand(argv: string[], deps: CommandDeps = {
   }
 
   const notLoadedNote = walk.notLoaded.length > 0 ? `; ${walk.notLoaded.length} not loaded` : ''
-  return { code: 0, message: `${walk.pages.length} file(s) written to ${resolve(out)}${notLoadedNote}` }
+  const databases = walk.skippedDatabases ?? []
+  const databaseNote = databases.length > 0 ? `; ${databases.length} database link(s) skipped` : ''
+  return { code: 0, message: `${walk.pages.length} file(s) written to ${resolve(out)}${notLoadedNote}${databaseNote}` }
 }

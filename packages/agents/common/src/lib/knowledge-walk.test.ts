@@ -47,7 +47,7 @@ function fakeId(n: number): string {
 }
 const urlFor = (id: string, title: string) => `https://www.notion.so/${title.replace(/[^a-zA-Z0-9]+/g, '-')}-${id.replace(/-/g, '')}`
 
-type PageDef = { title: string; markdown: string; truncated?: boolean; status?: number }
+type PageDef = { title: string; markdown: string; truncated?: boolean; status?: number; database?: boolean }
 
 /** A minimal Notion server: GET /v1/pages/{id} (title only) and GET /v1/pages/{id}/markdown, from `pages`. */
 async function notionServer(pages: Map<string, PageDef>): Promise<{ api: string; close: () => Promise<void> }> {
@@ -60,6 +60,8 @@ async function notionServer(pages: Map<string, PageDef>): Promise<{ api: string;
     const id = match?.[1]
     const def = id === undefined ? undefined : pages.get(id)
     if (def === undefined) return json(404, { object: 'error', status: 404, message: `no page ${id}` })
+    // What the real API answers when a page link or mention points at a database (the guidelines tree links several).
+    if (def.database === true) return json(400, { object: 'error', status: 400, code: 'validation_error', message: `Provided ID ${id} is a database, not a page. Use the retrieve database API instead, \`GET /databases/:database_id\`.` })
     if (def.status !== undefined && def.status !== 200) return json(def.status, { object: 'error', status: def.status, message: `page ${id} failed` })
     if (match?.[2] === '/markdown') return json(200, { markdown: def.markdown, truncated: def.truncated === true })
     return json(200, { properties: { title: { id: 'title', type: 'title', title: [{ plain_text: def.title }] } } })
@@ -226,6 +228,56 @@ describe('loadKnowledgeCommand on a page that fails to load', () => {
     const result = await loadKnowledgeCommand(['--out', out], { token: TOKEN, api, page: urlFor(ROOT, 'Engineering'), required: REQUIRED })
     expect(result.code).not.toBe(0)
     expect(result.message).toContain('Topic A')
+    expect(existsSync(join(out, 'INDEX.md'))).toBe(false)
+  })
+})
+
+describe('loadKnowledgeCommand on a tree that links databases', () => {
+  // The real guidelines tree links databases (Approved Technologies, Architecture Decision
+  // Records, AI Agent Slop Repo) by mention; Notion answers /pages/<id> for them with 400
+  // "is a database, not a page". The walk skips them, as the walk before it did, and still
+  // writes the folder.
+  const DATABASE = fakeId(40)
+  const mention = (id: string, title: string) => `<mention-page url="${urlFor(id, title)}"/>`
+
+  it('skips a database reached by a mention and writes the folder', async () => {
+    const pages = basicTree()
+    pages.set(TOPIC_A, { title: 'Topic A', markdown: `See ${mention(DATABASE, 'Approved Technologies')} for the list.` })
+    pages.set(DATABASE, { title: 'Approved Technologies', markdown: '', database: true })
+    const { api, close } = await notionServer(pages)
+    cleanups.push(close)
+    const repo = await tempDir('kw-db-mention-repo-')
+    const out = join(repo, 'knowledge')
+    const result = await loadKnowledgeCommand(['--out', out], { token: TOKEN, api, page: urlFor(ROOT, 'Engineering'), required: REQUIRED })
+    expect(result.message).not.toContain('is a database')
+    expect(result.code).toBe(0)
+    expect(result.message).toContain('1 database')
+    expect((await readdir(out)).sort()).toEqual(['INDEX.md', 'REQUIRED.md', 'agent-instructions.md', 'review-verification.md', 'topic-a.md'])
+  })
+
+  it('skips a database reached by a titled page link', async () => {
+    const pages = basicTree()
+    pages.set(TOPIC_A, { title: 'Topic A', markdown: tag(DATABASE, 'Architecture Decision Records') })
+    pages.set(DATABASE, { title: 'Architecture Decision Records', markdown: '', database: true })
+    const { api, close } = await notionServer(pages)
+    cleanups.push(close)
+    const repo = await tempDir('kw-db-page-repo-')
+    const out = join(repo, 'knowledge')
+    const result = await loadKnowledgeCommand(['--out', out], { token: TOKEN, api, page: urlFor(ROOT, 'Engineering'), required: REQUIRED })
+    expect(result.code).toBe(0)
+    expect(existsSync(join(out, 'architecture-decision-records.md'))).toBe(false)
+  })
+
+  it('still fails on a mentioned page that is missing or unshared', async () => {
+    const pages = basicTree()
+    pages.set(TOPIC_A, { title: 'Topic A', markdown: `See ${mention(DATABASE, 'Gone')}.` })
+    const { api, close } = await notionServer(pages)
+    cleanups.push(close)
+    const repo = await tempDir('kw-db-missing-repo-')
+    const out = join(repo, 'knowledge')
+    const result = await loadKnowledgeCommand(['--out', out], { token: TOKEN, api, page: urlFor(ROOT, 'Engineering'), required: REQUIRED })
+    expect(result.code).not.toBe(0)
+    expect(result.message).toContain('404')
     expect(existsSync(join(out, 'INDEX.md'))).toBe(false)
   })
 })
