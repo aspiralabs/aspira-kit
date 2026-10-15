@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
-import { NOTION_API, NOTION_VERSION } from './knowledge'
+import { NOTION_API, NOTION_VERSION } from './knowledge.ts'
 
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex')
 

@@ -24,8 +24,8 @@ import {
   resolveRequired,
   rewriteLinks,
   type LoadedPage,
-} from './knowledge'
-import { parseProvenance, renderProvenance, type ProvenancePage } from './knowledge-snapshot'
+} from './knowledge.ts'
+import { parseProvenance, renderProvenance, type ProvenancePage } from './knowledge-snapshot.ts'
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>
 
