@@ -12,7 +12,7 @@ This one file runs in two places. The steps are the same; only the tools differ:
 | | Claude Code session | `implementor` eve agent (cloud) |
 | --- | --- | --- |
 | Repository | a local checkout | `/workspace/repo`, cloned by `checkout-repo` |
-| Notion rules | Notion MCP, else the plan's `trace/guidelines.md` | `load-knowledge` → `/workspace/knowledge/` |
+| Notion rules | the driver's own `load-knowledge` step → the run's knowledge folder, or a verified `--guidelines` snapshot | `load-knowledge` → `/workspace/knowledge/` |
 | Subagents | the Agent tool, several calls in one message | the `agent` tool, one call per lane |
 | Publishing | the human pushes | `publish-branch` pushes the run's branch; a draft PR only when asked |
 
@@ -110,7 +110,7 @@ Read in this order. Do not skim: use full reads, never `head`.
 
 1. **Project instructions**: `AGENTS.md` and `CLAUDE.md` at the repository root and in any package you will touch, including their `## Gotchas` sections (REV-001). They hold the project's stack, commands and known traps.
 2. **Notion engineering rules**, the same source every Aspira agent uses:
-   - Session: fetch **Agent Instructions** (https://app.notion.com/p/3e73e59b2258813d9eece6ed89171bd3) with the Notion MCP. Then use its routing table to fetch only the topic pages for what the plan touches: any code change; dependencies; frontend/React/TypeScript; Python; APIs; schemas and migrations; infrastructure. If the Notion MCP is not connected, use `--guidelines`, else `plan.review/trace/guidelines.md` when building a plan (the exact snapshot the planner used), else the repository's `node_modules/@aspiralabs/config/agent/` guides, and say in the report that live Notion was not read.
+   - Session: the driver has loaded the folder (its own `load-knowledge` step, once per run, before any stage) and names it in every stage. Read its `REQUIRED.md` in full. Use its `INDEX.md` and the Agent Instructions routing table to find the topic pages for what the plan touches (any code change; dependencies; frontend/React/TypeScript; Python; APIs; schemas and migrations; infrastructure) and read those files there. Never fetch guidelines yourself. A `--guidelines` snapshot must be a `REQUIRED.md` that `load-knowledge` wrote; a copy such as the plan's `trace/guidelines.md` is refused. With a snapshot, say in the report that live Notion was not read.
    - Cloud: call `load-knowledge` once. Read `/workspace/knowledge/REQUIRED.md` in full. Use `INDEX.md` to find the topic pages for what the plan touches, and read those files under `/workspace/knowledge/`.
 3. **Org constraints**: `node_modules/@aspiralabs/config/agent/constraints.md` if the project has it. They repeat the rules lint cannot check.
 4. **UI**: if any task touches components, pages or styles, get the component docs before writing markup. Use the `aspiralabs-ui` MCP (`list_components`, then `get_component` for every component you will use, `get_tokens`, `get_pattern`), or read `node_modules/@aspiralabs/ui/docs/` when the MCP is not available.
@@ -256,7 +256,7 @@ In the cloud, pass a matching `outputSchema` so the report comes back structured
 ```
 # Implementation
 Source: <plan | spec | ticket> <path or key>  Status: done | partial | blocked   Branch: <name>   Started/finished: <times>
-Guidelines: Notion (live) | trace/guidelines.md snapshot | --guidelines file | /workspace/knowledge
+Guidelines: Notion (live, load-knowledge) | --guidelines snapshot | /workspace/knowledge
 Parallelization: <the table from section 4>
 ## Tasks
 | Task | Features | Lane/wave | Status | Commit | Red → green evidence |

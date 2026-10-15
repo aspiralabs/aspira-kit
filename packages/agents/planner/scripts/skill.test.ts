@@ -142,7 +142,8 @@ it('start with a ticket runs the board step first, plans the pulled spec, and fi
   expect(command(run!)[5]).toContain(spec)
   expect(command(run!)[5]).toContain('do not call board yourself')
   expect(status![0]).toBe('-p')
-  expect(command(finish!)).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--failed', '--run-status', '{}', '--export', join(folder, 'plan.review')])
+  // finish takes only the run status read from the trace: no --ok/--failed, the status alone decides the pushes and moves (F7, F53).
+  expect(command(finish!)).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--run-status', '{}', '--export', join(folder, 'plan.review')])
   // A refusal from the board step (exit 3) stops the launcher before anything is launched.
   await writeFile(join(dir, 'bin', 'node'), '#!/bin/bash\necho "planner: refused: NOM-4 is Grooming" >&2\nexit 3\n', { mode: 0o755 })
   await expect(exec('bash', [launcher, 'start', 'NOM-4'], { cwd: repo, env: ticketEnv })).rejects.toMatchObject({ code: 3, stderr: expect.stringContaining('refused') })
