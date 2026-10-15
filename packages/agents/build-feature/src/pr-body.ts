@@ -6,8 +6,8 @@
 // (a decision's question and answer) are redacted one at a time, the same way summary.ts does, so
 // the composed markdown itself is never redacted whole.
 
+import { redact } from '@aspiralabs/agent-common/lib/redact'
 import { orderedTaken } from '#src/decisions.ts'
-import { redact } from '#src/redact.ts'
 import type { RunState } from '#src/run-state.ts'
 
 export type PrBodyTicket = { id: string; title: string; url: string }

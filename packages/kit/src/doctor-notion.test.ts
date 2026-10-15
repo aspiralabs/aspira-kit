@@ -22,15 +22,14 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { doctor } from './doctor.js'
+import { doctor, type UrlCheckResult, type UrlChecker } from './doctor.js'
 
 const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6'
 const RELEASES = 'https://www.notion.so/3f13e59b22588106ab5dc457a42b0e1c'
 const TOKEN = 'ntn_secretvalue'
 
-type Check = { key: string; url: string; kind: 'database' | 'page' | 'data_source' }
-type CheckResult = { ok: true } | { ok: false; status?: number; unreachable?: boolean; reason: string }
-type UrlChecker = (checks: Check[]) => Promise<Record<string, CheckResult>>
+type Check = Parameters<UrlChecker>[0][number]
+type CheckResult = UrlCheckResult
 
 let root: string
 
@@ -52,7 +51,7 @@ function logs() {
 describe('kit doctor checks aspira.json\'s Notion URLs (T42, F38)', () => {
   let seen: Check[][]
   let round: number
-  const stub: UrlChecker = async (checks) => {
+  const stub: UrlChecker = (checks) => {
     seen.push(checks)
     round += 1
     const out: Record<string, CheckResult> = {}
@@ -107,7 +106,7 @@ describe('kit doctor only checks the keys aspira.json names (T43, F39)', () => {
   it('checks only board when releases, glossary and decisions are absent, and does not fail doctor for them', () => {
     project({ board: BOARD })
     const seen: Check[][] = []
-    const stub: UrlChecker = async (checks) => {
+    const stub: UrlChecker = (checks) => {
       seen.push(checks)
       return Object.fromEntries(checks.map(({ key }) => [key, { ok: true }]))
     }
@@ -120,7 +119,7 @@ describe('kit doctor only checks the keys aspira.json names (T43, F39)', () => {
 })
 
 describe('kit doctor checks NOTION_TOKEN, in order: process env, the app\'s .env.local, the root\'s (T44, F52)', () => {
-  const okChecker: UrlChecker = async (checks) => Object.fromEntries(checks.map(({ key }) => [key, { ok: false, unreachable: true, reason: 'no NOTION_TOKEN' }]))
+  const okChecker: UrlChecker = (checks) => Object.fromEntries(checks.map(({ key }) => [key, { ok: false, unreachable: true, reason: 'no NOTION_TOKEN' }]))
 
   function appProject() {
     project({ board: BOARD, app: 'apps/web' })
