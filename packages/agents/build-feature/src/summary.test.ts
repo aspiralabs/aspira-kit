@@ -185,3 +185,188 @@ describe('T39 F40 F41: cost and time, and a run with nothing finished', () => {
     expect({ status: ORDER[0]!.test(all[0]?.heading ?? ''), others }).toEqual({ status: true, others: [true, true, true, true, true, true] })
   }, 30_000)
 })
+
+// ---------------------------------------------------------------------------------------------
+// KIT-19 plan P7: T21, T22. The Run telemetry table (F15, F21) and the unchanged list-price lines
+// (F15, F22). The step records carry the widened usage P9 stores beside today's {tokens, wallMs}:
+// `phases` (a cloud step's reduced usage groups: phase, model, inputTokens, outputTokens,
+// totalTokens, toolCalls, costUsd, startedAt, endedAt) and `subagents` (a --local step's Agent-tool
+// numbers per subagent: label, startedAt, endedAt, totalTokens, toolUses, wallMs). `now` is the
+// time the summary stage renders at.
+// ---------------------------------------------------------------------------------------------
+
+const EARLIER = 'run-20261011T090000Z'
+const SUMMARY_NOW = '2026-10-12T09:30:00.000Z'
+const at = (time: string) => `2026-10-12T${time}.000Z`
+
+/** A current run (09:00, still in progress) after an earlier stopped one. */
+function telemetryState(steps: unknown[]) {
+  return runState({
+    runs: [
+      { runId: EARLIER, command: '/aspira-build-feature KIT-11', startedAt: '2026-10-11T09:00:00.000Z', endedAt: '2026-10-11T10:00:00.000Z', ended: 'stopped', mode: 'cloud' as const, end: { message: 'stopped', stopped: true } },
+      { runId: RUN, command: '/aspira-build-feature KIT-11', startedAt: at('09:00:00'), endedAt: null, ended: null, mode: 'cloud' as const },
+    ],
+    inProgress: { runId: RUN, startedAt: at('09:00:00') },
+    steps,
+  })
+}
+
+const TELEMETRY_STEPS = [
+  { step: 'groomer', runId: EARLIER, command: '/aspira-groomer KIT-11', status: 'confirmed', startedAt: '2026-10-11T09:00:00.000Z', endedAt: '2026-10-11T09:10:00.000Z', usage: { tokens: 700, wallMs: 600000 } },
+  {
+    step: 'spec-writer',
+    runId: RUN,
+    command: '/aspira-spec-writer KIT-11',
+    status: 'ready',
+    startedAt: at('09:00:00'),
+    endedAt: at('09:10:00'),
+    usage: {
+      tokens: 2000,
+      wallMs: 600000,
+      phases: [
+        { phase: 'explore', model: 'anthropic/claude-opus-5.5', inputTokens: 1000, outputTokens: 200, totalTokens: 1200, toolCalls: 2, costUsd: 0.05, startedAt: at('09:00:30'), endedAt: at('09:04:00') },
+        { phase: 'draft', model: 'anthropic/claude-sonnet-5', inputTokens: 500, outputTokens: 100, totalTokens: 600, toolCalls: 0, costUsd: null, startedAt: at('09:04:00'), endedAt: at('09:09:00') },
+      ],
+    },
+  },
+  { step: 'fix', runId: RUN, command: 'fix subagent for review 1', status: 'complete', startedAt: at('09:10:00'), endedAt: at('09:15:00'), usage: { tokens: 400, wallMs: 300000 } },
+  {
+    step: 'planner',
+    runId: RUN,
+    command: '/aspira-planner KIT-11 --local --take-recommended',
+    status: 'ready',
+    startedAt: at('09:15:00'),
+    endedAt: at('09:25:00'),
+    usage: {
+      tokens: 5000,
+      wallMs: 600000,
+      toolUses: 6,
+      subagents: [
+        { label: 'subagent-1', startedAt: at('09:16:00'), endedAt: at('09:20:00'), totalTokens: 3000, toolUses: 10, wallMs: 240000 },
+        { label: 'subagent-2', startedAt: at('09:20:00'), endedAt: at('09:24:00'), totalTokens: 1000, toolUses: 4, wallMs: 240000 },
+      ],
+    },
+  },
+]
+
+type TableRow = { label: string; indented: boolean; cells: Record<string, string> }
+
+// A cell's indentation: anything before the label beyond the one space a markdown cell starts with.
+const INDENT = /^(?:&nbsp;|&ensp;|&emsp;|[\s\u00a0\u2002\u2003\u21b3\u2514\u251c\u2500\u2022\u00b7>*_-])+/
+
+/** The rows of the Run telemetry table, each with its label, whether it is indented, and its cells by column header. */
+function telemetryTable(markdown: string): TableRow[] {
+  const lines = section(markdown, /run telemetry/i)
+    .split('\n')
+    .filter((line) => line.trim().startsWith('|'))
+  const cellsOf = (line: string) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|')
+  const [header, ...rest] = lines
+  if (header === undefined) return []
+  const columns = cellsOf(header).map((cell) => cell.trim())
+  return rest
+    .filter((line) => !/^\|?\s*:?-{3,}/.test(line.trim()))
+    .map((line) => {
+      const cells = cellsOf(line)
+      const raw = (cells[0] ?? '').replace(/^ /, '').trimEnd()
+      const label = raw.replace(INDENT, '').trim()
+      return { label, indented: label !== raw, cells: Object.fromEntries(columns.map((column, index) => [column, (cells[index] ?? '').trim()])) }
+    })
+}
+
+const firstWord = (label: string) => label.split(/\s+/)[0] ?? ''
+const rowNamed = (rows: readonly TableRow[], name: string) => rows.find((row) => firstWord(row.label) === name)
+
+/** A duration cell such as 10m0s, 1h2m3s or 45s, in milliseconds. */
+function durationMs(cell: string | undefined): number | null {
+  const match = /(?:(\d+)\s*h)?\s*(?:(\d+)\s*m(?!s))?\s*(?:(\d+(?:\.\d+)?)\s*s)?/.exec(cell ?? '')
+  if (match === null || match[0].trim() === '') return null
+  const [, hours = '0', minutes = '0', seconds = '0'] = match
+  return Number(hours) * 3_600_000 + Number(minutes) * 60_000 + Math.round(Number(seconds) * 1000)
+}
+
+/** The first number in a cell, without thousands separators or a dollar sign. */
+function numberIn(cell: string | undefined): number | null {
+  const match = /-?\d+(?:\.\d+)?/.exec((cell ?? '').replace(/[$,]/g, ''))
+  return match === null ? null : Number(match[0])
+}
+
+async function renderAt(steps: unknown[]) {
+  const input = { ticket: ticket(), state: telemetryState(steps), repo: await repo(), now: SUMMARY_NOW }
+  return renderBuildSummary(input)
+}
+
+describe('KIT-19 T21 F15 F21: the Run telemetry table', () => {
+  it('follows Cost and time and lists each step with its children indented, then Orchestration with the fix, then Total', async () => {
+    const summary = await renderAt(TELEMETRY_STEPS)
+    const headings = sections(summary).map((entry) => entry.heading)
+    const rows = telemetryTable(summary)
+    expect({
+      afterCost: headings.findIndex((heading) => /run telemetry/i.test(heading)) === headings.findIndex((heading) => /cost and time/i.test(heading)) + 1,
+      rows: rows.map((row) => firstWord(row.label)),
+      indented: rows.filter((row) => row.indented).map((row) => firstWord(row.label)),
+    }).toEqual({
+      afterCost: true,
+      rows: ['spec-writer', 'explore', 'draft', 'planner', 'subagent-1', 'subagent-2', 'Orchestration', 'fix', 'Total'],
+      indented: ['explore', 'draft', 'subagent-1', 'subagent-2', 'fix'],
+    })
+  }, 30_000)
+
+  it('shows the fix once, under Orchestration, and leaves out the earlier run’s step', async () => {
+    const rows = telemetryTable(await renderAt(TELEMETRY_STEPS))
+    const labels = rows.map((row) => firstWord(row.label))
+    expect({ fixes: labels.filter((label) => label === 'fix').length, underOrchestration: labels.indexOf('fix') === labels.indexOf('Orchestration') + 1, groomer: labels.includes('groomer') }).toEqual({
+      fixes: 1,
+      underOrchestration: true,
+      groomer: false,
+    })
+  }, 30_000)
+
+  it('totals the steps and Orchestration to the summary time, labelled to summary, and sums each span’s own tokens once', async () => {
+    const rows = telemetryTable(await renderAt(TELEMETRY_STEPS))
+    const total = rowNamed(rows, 'Total')
+    expect({
+      durations: ['spec-writer', 'planner', 'Orchestration', 'Total'].map((name) => durationMs(rowNamed(rows, name)?.cells.Duration)),
+      toSummary: /to summary/i.test(Object.values(total?.cells ?? {}).join(' ')),
+      totalTokens: numberIn(total?.cells['Total tokens']),
+    }).toEqual({ durations: [600000, 600000, 600000, 1800000], toSummary: true, totalTokens: 13200 })
+  }, 30_000)
+
+  it('marks a cost missing a child’s number as (partial) and a cost with no source as not measured', async () => {
+    const rows = telemetryTable(await renderAt(TELEMETRY_STEPS))
+    const specWriter = rowNamed(rows, 'spec-writer')?.cells['Reported cost'] ?? ''
+    expect({ partial: specWriter.includes('(partial)'), value: numberIn(specWriter), planner: rowNamed(rows, 'planner')?.cells['Reported cost'] }).toEqual({ partial: true, value: 0.05, planner: 'not measured' })
+  }, 30_000)
+
+  it('shows only Orchestration and Total when the run has no step records', async () => {
+    const rows = telemetryTable(await renderAt([]))
+    expect(rows.map((row) => firstWord(row.label))).toEqual(['Orchestration', 'Total'])
+  }, 30_000)
+})
+
+describe('KIT-19 T22 F15 F22: the list-price lines are unchanged for {tokens, wallMs} records', () => {
+  // The Cost and time section the renderer produced for these records before KIT-19, pinned byte for byte.
+  const PINNED =
+    '\n' +
+    '- planner (run-20261012T090000Z): 1,200 tokens, 1m0s (opus), ~$0.02\n' +
+    '- implementor (run-20261012T090000Z): 800 tokens, 30s (sonnet), ~$0.00\n' +
+    '- code-analyzer (run-20261012T090000Z): not reported\n' +
+    '- pr-reviewer (run-20261012T090000Z): 1,500 tokens, wall time not reported (sonnet), ~$0.01\n' +
+    '- fix (run-20261012T090000Z): 400 tokens, 55s (sonnet), ~$0.00\n' +
+    '\n' +
+    'Total: 3,900 tokens (partial, excludes code-analyzer); ~$0.03 — an estimate of session usage at list prices.\n' +
+    '\n'
+
+  it('renders Cost and time exactly as before', async () => {
+    const state = runState({
+      steps: [
+        step('planner', at('09:00:00'), at('09:01:00'), { tokens: 1200, wallMs: 60000 }),
+        step('implementor', at('09:02:00'), at('09:02:30'), { tokens: 800, wallMs: 30000 }),
+        step('code-analyzer', at('09:03:00'), at('09:04:00'), null),
+        step('pr-reviewer', at('09:05:00'), at('09:07:05'), { tokens: 1500, wallMs: null }),
+        step('fix', at('09:07:05'), at('09:08:00'), { tokens: 400, wallMs: 55000 }),
+      ],
+    })
+    const input = { ticket: ticket(), state, repo: await repo(), now: at('09:10:00') }
+    expect(section(await renderBuildSummary(input), /cost and time/i)).toBe(PINNED)
+  }, 30_000)
+})

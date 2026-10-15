@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import { BOARD, BRANCH, PR_URL, RELEASES, REPOSITORY, cleanup, ofKind, project, writeStepExport, type Project, type Result } from './driver.test-helper.ts'
 
 const exec = promisify(execFile)
@@ -152,5 +153,43 @@ describe('T33 F30 F31: Step 10 and the release row', () => {
       readyImplementation: h.stages.filter((stage) => stage.to === 'Ready: Implementation').length,
       merges: await ghRan(h, 'merge'),
     }).toEqual({ end: 'end', releaseRows: 0, skipped: true, readyImplementation: 0, merges: 0 })
+  }, SLOW)
+})
+
+// KIT-19 plan P7: T32. The fix report's usage in the shape written before KIT-19, the richer shape
+// (model, tool uses, start and end, one entry per subagent the fix launched), and a malformed one:
+// each is accepted, the next review runs, and the fix is recorded as before.
+describe('KIT-19 T32 F7 F22: fix report usage', () => {
+  const SHAPES: { name: string; usage: unknown }[] = [
+    { name: 'tokens and wallMs', usage: { tokens: 400, wallMs: 15000 } },
+    {
+      name: 'richer',
+      usage: { tokens: 400, wallMs: 15000, model: 'anthropic/claude-opus-5.5', toolUses: 9, startedAt: '2026-10-12T09:00:00.000Z', endedAt: '2026-10-12T09:00:15.000Z', subagents: [{ label: 'subagent-1', startedAt: '2026-10-12T09:00:01.000Z', endedAt: '2026-10-12T09:00:06.000Z', totalTokens: 300, toolUses: 4, wallMs: 5000 }] },
+    },
+    { name: 'malformed', usage: { tokens: 'lots', subagents: 'none' } },
+  ]
+  /** The numbers a recorded usage carries; null for each one it does not. */
+  const numbersOf = (usage: unknown) => {
+    const parsed = z.looseObject({ tokens: z.unknown(), wallMs: z.unknown() }).safeParse(usage)
+    return parsed.success ? { tokens: parsed.data.tokens ?? null, wallMs: parsed.data.wallMs ?? null } : { tokens: null, wallMs: null }
+  }
+
+  it('accepts every shape, runs the next review, and records the fix as complete with not-measured numbers for a malformed usage', async () => {
+    const outcomes = []
+    for (const shape of SHAPES) {
+      const { h, review } = await reviewing()
+      await h.report(review.stage, 'complete', { findings: high(1) })
+      const fixStage = await h.advance()
+      await h.write('src/a.ts', 'export const fixed = 1\n')
+      await h.answer(fixStage.stage, { decisions: [], usage: shape.usage })
+      const next = await h.advance()
+      const record = ((await h.state()).steps ?? []).find((step) => step.step === 'fix')
+      outcomes.push({ name: shape.name, next: next.stage?.stage === 'step' ? String(next.stage.step) : String(next.stage?.stage), step: record?.step, status: record?.status, ...numbersOf(record?.usage) })
+    }
+    expect(outcomes).toEqual([
+      { name: 'tokens and wallMs', next: 'pr-reviewer', step: 'fix', status: 'complete', tokens: 400, wallMs: 15000 },
+      { name: 'richer', next: 'pr-reviewer', step: 'fix', status: 'complete', tokens: 400, wallMs: 15000 },
+      { name: 'malformed', next: 'pr-reviewer', step: 'fix', status: 'complete', tokens: null, wallMs: null },
+    ])
   }, SLOW)
 })
