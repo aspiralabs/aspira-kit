@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
 import { KnowledgeRequired, runLocal, type LocalDeps } from './local.ts'
 
 const exec = promisify(execFile)
@@ -25,7 +26,6 @@ const TOKEN = 'test-notion-token'
 const ROOT_ID = '11111111111111111111111111111111'
 const REVIEW_ID = '22222222222222222222222222222222'
 const ROOT = `https://www.notion.so/Agent-Instructions-${ROOT_ID}`
-const header = (title: string, url: string) => `<!-- ${title} · ${url} · fetched 2026-10-14T00:00:00.000Z -->\n\n`
 
 async function mockNotion(): Promise<{ api: string; requests: string[]; close: () => Promise<void> }> {
   const requests: string[] = []
@@ -67,13 +67,14 @@ async function gitRepo() {
   return { dir, repo }
 }
 
-const REVIEW_URL = `https://www.notion.so/Review-Verification-${REVIEW_ID}`
-const requiredMd = (text = 'REV-001 Read the rules.\n') => `${header('Required reading', ROOT)}---\n\n# Agent Instructions\n\n<!-- ${ROOT} -->\n\n${text}\n---\n\n# Review Verification\n\n<!-- ${REVIEW_URL} -->\n\nREV-002 Verify.\n`
-
-async function verifiedKnowledge(dir: string) {
-  await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, 'INDEX.md'), header('Engineering', ROOT))
-  await writeFile(join(dir, 'REQUIRED.md'), requiredMd())
+/**
+ * A folder load-knowledge really wrote: the one shared walk (knowledge-walk.ts) over the mock Notion
+ * tree, written with its provenance block in REQUIRED.md. A hand-written folder with per-file
+ * comments only is not one verifyKnowledgeDir can accept (F50), so the test builds the real thing.
+ */
+async function verifiedKnowledge(dir: string, api: string) {
+  const walk = await walkKnowledge({ token: TOKEN, page: ROOT, required: ['Agent Instructions', 'Review Verification'], fetch, api })
+  await writeKnowledgeFolder(dir, walk)
 }
 
 describe('the pr-reviewer --local knowledge stage (T65)', () => {
@@ -119,7 +120,9 @@ describe('the pr-reviewer --local knowledge stage (T65)', () => {
   it('a verified --knowledge dir is accepted, with no Notion request', async () => {
     const { repo } = await gitRepo()
     const knowledge = join(repo, 'knowledge')
-    await verifiedKnowledge(knowledge)
+    await verifiedKnowledge(knowledge, notion.api)
+    // Building the folder is load-knowledge's own walk; only the run's requests count from here.
+    notion.requests.length = 0
     const result = await runLocal({ source: repo, knowledge, noComment: true }, {})
     expect(result).not.toBeInstanceOf(KnowledgeRequired)
     expect(notion.requests.length).toBe(0)

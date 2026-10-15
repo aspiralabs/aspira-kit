@@ -3,15 +3,15 @@ import { parseArgs } from 'node:util'
 import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
 import { readGroomRecord } from '@aspiralabs/agent-common/lib/groom-record'
 import { exitCodeFor } from '@aspiralabs/agent-common/lib/run-status'
-import { afterRun, beforeRun, handleRunError, UsageError, verifyRun, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
+import { afterRun, beforeRun, handleRunError, KnowledgePrerequisiteError, UsageError, verifyRun, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { FlowRefused } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { KnowledgeRequired, knowledgeStage, runLocal } from '../agent/lib/local.ts'
 import { groomPaths } from '../agent/lib/paths.ts'
 
 // One step of a --local run. The ticket comes first: the `board` stage (resolve, pull, mark, claim)
 // is printed before anything else, and the driver refuses, before any model stage, when ticket.md
-// does not show a Feature card in Idea, Grooming or Shortlist. Then the knowledge stage until the
-// guidelines are there, then each round: `round` (the round task), `answers` (the chat round),
+// does not show a Feature card in Idea, Grooming or Shortlist. Then the guidelines, which the run
+// fetches itself (blocked, exit 1, without a NOTION_TOKEN), then each round: `round` (the round task), `answers` (the chat round),
 // `summary` on a confirm, and `board` (fetch the page, then the rendered page with the end-of-round
 // board actions). `--verify` follows every board stage; the round state is kept until a confirmed
 // or stopped round verifies, or `--verify --finish`. `--finish` alone exports the round as
@@ -47,6 +47,9 @@ try {
     else if (before.kind === 'none') throw new FlowRefused('the groomer writes to the card; it needs a Feature Board ticket')
     else {
       const step = await runLocal({ folder: before.folder, repoPath: repo, ...(values.guidelines === undefined ? {} : { guidelinesPath: values.guidelines }), finish: values.finish === true, takeRecommended: values['take-recommended'] === true })
+      // No guidelines and no NOTION_TOKEN to fetch them with: the run ends blocked (exit 1, F52),
+      // through the same handler every driver's errors go through, so the note says what to set.
+      if (!step.pending && step.status === 'blocked') throw new KnowledgePrerequisiteError(step.reason)
       const ticket = `${before.ticket.id} ${before.ticket.title}`
       if (step.stage === 'board' && 'runStatus' in step && step.runStatus !== undefined) {
         const output = outputFor(before.folder)

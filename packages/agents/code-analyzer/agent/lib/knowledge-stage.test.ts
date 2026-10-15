@@ -12,12 +12,13 @@
 
 import { execFile } from 'node:child_process'
 import { createServer } from 'node:http'
-import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
 import { KnowledgeRequired, runLocal, type LocalDeps } from './local.ts'
 
 const exec = promisify(execFile)
@@ -27,7 +28,6 @@ const TOKEN = 'test-notion-token'
 const ROOT_ID = '11111111111111111111111111111111'
 const REVIEW_ID = '22222222222222222222222222222222'
 const ROOT = `https://www.notion.so/Agent-Instructions-${ROOT_ID}`
-const header = (title: string, url: string) => `<!-- ${title} · ${url} · fetched 2026-10-14T00:00:00.000Z -->\n\n`
 
 async function mockNotion(): Promise<{ api: string; requests: string[]; close: () => Promise<void> }> {
   const requests: string[] = []
@@ -59,16 +59,14 @@ async function repo() {
   return dir
 }
 
-const REVIEW_URL = `https://www.notion.so/Review-Verification-${REVIEW_ID}`
-const requiredMd = (agentInstructionsBody: string) =>
-  `${header('Required reading', ROOT)}---\n\n# Agent Instructions\n\n<!-- ${ROOT} -->\n\n${agentInstructionsBody}\n\n---\n\n# Review Verification\n\n<!-- ${REVIEW_URL} -->\n\nREV-001 Verify every claim.\n`
-
-/** A folder in load-knowledge's shape, every file carrying its provenance header. */
-async function verifiedKnowledge(dir: string) {
-  await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, 'INDEX.md'), header('Engineering', ROOT))
-  await writeFile(join(dir, 'REQUIRED.md'), requiredMd('AGT-001 Read this first.'))
-  await writeFile(join(dir, 'common-patterns.md'), `${header('Common Patterns', 'https://www.notion.so/Common-Patterns-33333333333333333333333333333333')}CP-001 Small functions.\n`)
+/**
+ * A folder load-knowledge really wrote: the one shared walk (knowledge-walk.ts) over the mock Notion
+ * tree, written with its provenance block in REQUIRED.md. A hand-written folder with per-file
+ * comments only is not one verifyKnowledgeDir can accept (F50), so the test builds the real thing.
+ */
+async function verifiedKnowledge(dir: string, api: string) {
+  const walk = await walkKnowledge({ token: TOKEN, page: ROOT, required: ['Agent Instructions', 'Review Verification'], fetch, api })
+  await writeKnowledgeFolder(dir, walk)
 }
 
 describe('the code-analyzer --local knowledge stage (T64)', () => {
@@ -89,7 +87,7 @@ describe('the code-analyzer --local knowledge stage (T64)', () => {
   it('accepts a verified --knowledge dir', async () => {
     const source = await repo()
     const knowledge = join(source, 'knowledge')
-    await verifiedKnowledge(knowledge)
+    await verifiedKnowledge(knowledge, notion.api)
     const result = await runLocal({ source, knowledge, noFix: true }, {})
     expect(result).not.toBeInstanceOf(KnowledgeRequired)
   })
@@ -97,9 +95,12 @@ describe('the code-analyzer --local knowledge stage (T64)', () => {
   it('refuses an edited --knowledge dir whose REQUIRED.md no longer matches its topic file, naming the load-knowledge command', async () => {
     const source = await repo()
     const knowledge = join(source, 'knowledge')
-    await verifiedKnowledge(knowledge)
-    // Hand-edited after load-knowledge wrote it: the heading text no longer matches its own provenance.
-    await writeFile(join(knowledge, 'REQUIRED.md'), requiredMd('Tampered text that was never fetched from Notion.'))
+    await verifiedKnowledge(knowledge, notion.api)
+    // Hand-edited after load-knowledge wrote it: the page text no longer matches its own provenance.
+    const required = join(knowledge, 'REQUIRED.md')
+    const written = await readFile(required, 'utf8')
+    expect(written).toContain('REV-001 Verify every claim.')
+    await writeFile(required, written.replace('REV-001 Verify every claim.', 'Tampered text that was never fetched from Notion.'))
     const error = await runLocal({ source, knowledge, noFix: true }, {}).then(() => null, (cause: unknown) => cause)
     expect(error).toBeInstanceOf(KnowledgeRequired)
     expect((error as Error).message).toMatch(/load-knowledge/i)

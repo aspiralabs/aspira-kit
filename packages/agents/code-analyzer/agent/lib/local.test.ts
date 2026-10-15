@@ -4,10 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { writeKnowledgeFolder, type WalkResult } from '@aspiralabs/agent-common/lib/knowledge-walk'
 import { batch as batches, type Batch } from './diagnostics.ts'
 import { hostExecutor } from './executor.ts'
 import { doneSchema, fileExcerpt, fixPrompt, knowledgeSection, systemPrompt } from './fixer.ts'
-import { KnowledgeRequired, knowledgeConfig, runLocal, workDirFor, type LocalDeps, type LocalDone, type LocalInput, type LocalPending, type LocalResult } from './local.ts'
+import { KnowledgeBlocked, KnowledgeRequired, knowledgeConfig, runLocal, workDirFor, type LocalDeps, type LocalDone, type LocalInput, type LocalPending, type LocalResult } from './local.ts'
 import { script } from './parsers.ts'
 import { repositoryInstructions } from './runner.ts'
 
@@ -21,6 +22,29 @@ async function seedKnowledge(dir: string, required = REQUIRED_MD) {
   await writeFile(join(dir, 'REQUIRED.md'), required)
   await writeFile(join(dir, 'INDEX.md'), '# Engineering\n\n- [TypeScript](typescript.md)\n')
   await writeFile(join(dir, 'typescript.md'), '# TypeScript\n\nTS-002 No any.\n')
+}
+
+// A folder load-knowledge wrote (F50): the shared writer, given the walk a Notion tree of two pages
+// would produce, so REQUIRED.md carries the provenance block a --knowledge/--guidelines run is held to.
+// Nothing here reaches Notion (TEST-003): the walk result is built in the test.
+const ROOT_URL = 'https://www.notion.so/Agent-Instructions-0123456789abcdef0123456789abcdef'
+const LOADED = [
+  { id: '0123456789abcdef0123456789abcdef', title: 'Agent Instructions', url: ROOT_URL, file: 'INDEX.md', markdown: 'AGT-001 Read the rules.' },
+  { id: 'fedcba9876543210fedcba9876543210', title: 'Review Verification', url: 'https://www.notion.so/Review-Verification-fedcba9876543210fedcba9876543210', file: 'review-verification.md', markdown: 'REV-001 Verify.' },
+]
+async function loadedKnowledge(dir: string, required = ['Agent Instructions', 'Review Verification']): Promise<string> {
+  const pages = LOADED.map((page) => ({ ...page, notionMarkdown: page.markdown, truncated: false }))
+  const walk: WalkResult = { rootId: LOADED[0]!.id, rootUrl: ROOT_URL, fetchedAt: '2026-10-15T00:00:00.000Z', pages, required: pages.filter((page) => required.includes(page.title)), notLoaded: [] }
+  await writeKnowledgeFolder(dir, walk)
+  return readFile(join(dir, 'REQUIRED.md'), 'utf8')
+}
+const blocked = async (promise: Promise<unknown>): Promise<KnowledgeBlocked> => {
+  const error = await promise.then(
+    () => null,
+    (cause: unknown) => cause,
+  )
+  if (!(error instanceof KnowledgeBlocked)) throw new Error(`expected a blocked knowledge stage, got ${String(error)}`)
+  return error
 }
 
 /** A copy of the agent with no env files, so the tests see load-knowledge's defaults, not this machine's config. */
@@ -89,15 +113,19 @@ const deps = (): LocalDeps => ({ agentDir, env: {} })
 describe('runLocal, engineering guidelines', () => {
   it('refuses to start without REQUIRED.md and INDEX.md, runs nothing and names the pages from the agent\'s config', async () => {
     const { web, knowledge } = await monorepo()
-    const missing = await refusal(runLocal({ source: web }, deps()))
-    expect(missing.message).toContain('REQUIRED.md')
-    expect(missing.plan).toMatchObject({ stage: 'knowledge', dir: knowledge, page: null, required: ['Agent Instructions', 'Review Verification'], maxDepth: 3, maxPages: 80 })
+    // No folder and no NOTION_TOKEN to build it with: blocked (F52), never a stage asking the session to fetch.
+    const missing = await blocked(runLocal({ source: web }, deps()))
+    expect(missing.message).toContain('NOTION_TOKEN')
+    expect(missing.message).toContain(join(web, '.env.local'))
     await expect(stat(join(workDirFor(join(web, '.static-analysis')), 'state.json'))).rejects.toThrow()
 
     await mkdir(knowledge, { recursive: true })
     await writeFile(join(knowledge, 'REQUIRED.md'), REQUIRED_MD)
     await writeFile(join(knowledge, 'INDEX.md'), '  \n')
-    expect((await refusal(runLocal({ source: web }, deps()))).message).toContain('INDEX.md')
+    const blank = await refusal(runLocal({ source: web }, deps()))
+    expect(blank.message).toContain('INDEX.md')
+    expect(blank.plan).toMatchObject({ stage: 'knowledge', dir: knowledge, page: null, required: ['Agent Instructions', 'Review Verification'], maxDepth: 3, maxPages: 80 })
+    await expect(stat(join(workDirFor(join(web, '.static-analysis')), 'state.json'))).rejects.toThrow()
     await writeFile(join(knowledge, 'INDEX.md'), '# Engineering\n')
     await writeFile(join(knowledge, 'REQUIRED.md'), '# Agent Instructions\n\nAGT-001\n')
     expect((await refusal(runLocal({ source: web }, deps()))).message).toContain('Review Verification')
@@ -118,11 +146,16 @@ describe('runLocal, engineering guidelines', () => {
     expect((await knowledgeConfig(agent, { KNOWLEDGE_REQUIRED: 'Only This' })).required).toEqual(['Only This'])
 
     const { web, knowledge } = await monorepo()
-    const error = await refusal(runLocal({ source: web }, { agentDir: agent, env: {} }))
-    expect(error.plan).toMatchObject({ page, required: ['Agent Instructions', 'TypeScript Rules'] })
-    expect(JSON.stringify(error.plan)).not.toContain('secret')
+    // The agent's env files configure the page list only: NOTION_TOKEN comes from the project (F52), so
+    // the token in the agent's ../.env.local is never used and the run without a folder is blocked.
+    const error = await blocked(runLocal({ source: web }, { agentDir: agent, env: {} }))
+    expect(error.message).toContain('NOTION_TOKEN')
+    expect(error.message).not.toContain('secret')
     await seedKnowledge(knowledge)
-    expect((await refusal(runLocal({ source: web }, { agentDir: agent, env: {} }))).message).toContain('TypeScript Rules')
+    const incomplete = await refusal(runLocal({ source: web }, { agentDir: agent, env: {} }))
+    expect(incomplete.plan).toMatchObject({ page, required: ['Agent Instructions', 'TypeScript Rules'] })
+    expect(JSON.stringify(incomplete.plan)).not.toContain('secret')
+    expect(incomplete.message).toContain('TypeScript Rules')
   })
 
   it('refuses a mid-run change to the guidelines and a different --guidelines folder', async () => {
@@ -134,7 +167,7 @@ describe('runLocal, engineering guidelines', () => {
 
     const other = await monorepo()
     const rules = join(dir, 'rules')
-    await seedKnowledge(rules)
+    await loadedKnowledge(rules)
     pending(await runLocal({ source: other.web, knowledge: rules }, deps()))
     // Later calls keep the folder the run started with.
     expect(pending(await runLocal({ source: other.web }, deps())).stage).toBe('fix')
@@ -145,19 +178,25 @@ describe('runLocal, engineering guidelines', () => {
 
   it('takes a REQUIRED.md snapshot with --guidelines FILE, as the other agents do', async () => {
     const { dir, web } = await monorepo()
-    const file = join(dir, 'REQUIRED.md')
-    await writeFile(file, '# Agent Instructions\n\nAGT-001\n')
-    expect((await refusal(runLocal({ source: web, guidelines: file }, deps()))).message).toContain('Review Verification')
+    // A snapshot load-knowledge wrote with only one of the two required pages, then one with both.
+    const partial = join(dir, 'partial')
+    await loadedKnowledge(partial, ['Agent Instructions'])
+    expect((await refusal(runLocal({ source: web, guidelines: join(partial, 'REQUIRED.md') }, deps()))).message).toContain('Review Verification')
     await expect(stat(join(workDirFor(join(web, '.static-analysis')), 'state.json'))).rejects.toThrow()
-    await writeFile(file, REQUIRED_MD)
+    // A header-less copy is not a snapshot at all (F50).
+    const copy = join(dir, 'REQUIRED.md')
+    await writeFile(copy, REQUIRED_MD)
+    expect((await refusal(runLocal({ source: web, guidelines: copy }, deps()))).message).toContain('load-knowledge')
+    const file = join(dir, 'rules', 'REQUIRED.md')
+    const snapshot = await loadedKnowledge(join(dir, 'rules'))
     const first = pending(await runLocal({ source: web, guidelines: file }, deps()))
     const text = await readFile(first.tasks[0]!.prompt, 'utf8')
-    expect(text).toContain(knowledgeSection({ path: null, requiredFile: file, required: REQUIRED_MD }))
+    expect(text).toContain(knowledgeSection({ path: null, requiredFile: file, required: snapshot }))
     await fixVars(web, first.tasks[0]!.files)
     await writeFile(first.tasks[0]!.output, done())
     const result = finished(await runLocal({ source: web }, deps()))
-    expect(result.status).toBe('clean')
-    expect(await readFile(join(web, '.static-analysis', 'guidelines', 'REQUIRED.md'), 'utf8')).toBe(REQUIRED_MD)
+    expect(result.status).toBe('ready')
+    expect(await readFile(join(web, '.static-analysis', 'guidelines', 'REQUIRED.md'), 'utf8')).toBe(snapshot)
   })
 })
 
@@ -198,17 +237,17 @@ describe('runLocal, the fix loop', () => {
     await writeFile(first.tasks[0]!.output, done())
     const result = finished(await runLocal({ source: web }, deps()))
     const out = join(web, '.static-analysis')
-    expect(result).toMatchObject({ status: 'clean', reason: 'analyzers clean', dir: out, root: web, rounds: 2, initial: 2, remaining: 0, editedFiles: ['src/a.js', 'src/b.js'], rejected: [] })
+    expect(result).toMatchObject({ status: 'ready', reasonCode: null, reason: 'analyzers clean', dir: out, root: web, rounds: 2, initial: 2, remaining: 0, editedFiles: ['src/a.js', 'src/b.js'], rejected: [] })
     expect((await readdir(out)).sort()).toEqual(['calls.json', 'diagnostics.json', 'guidelines', 'report.md', 'rounds.json', 'usage.json'])
     expect(await readFile(join(out, 'guidelines', 'REQUIRED.md'), 'utf8')).toBe(REQUIRED_MD)
     expect(await readFile(join(out, 'guidelines', 'typescript.md'), 'utf8')).toContain('TS-002')
     const rounds = JSON.parse(await readFile(join(out, 'rounds.json'), 'utf8'))
-    expect(rounds).toMatchObject({ mode: 'local', status: 'clean', knowledge: { path: knowledge, source: 'knowledge', files: ['INDEX.md', 'REQUIRED.md', 'typescript.md'] } })
+    expect(rounds).toMatchObject({ mode: 'local', status: 'ready', knowledge: { path: knowledge, source: 'knowledge', files: ['INDEX.md', 'REQUIRED.md', 'typescript.md'] } })
     const calls = JSON.parse(await readFile(join(out, 'calls.json'), 'utf8'))
     expect(calls.system).toBe(systemPrompt)
     expect(calls.calls[0]).toMatchObject({ round: 1, batch: 1, output: { summary: 'fixed', unresolved: [] } })
     expect(calls.calls[0].prompt).toContain('DIAGNOSTICS TO FIX (2)')
-    expect(await readFile(join(out, 'report.md'), 'utf8')).toContain('Status: **clean**')
+    expect(await readFile(join(out, 'report.md'), 'utf8')).toContain('Status: **ready**')
     expect(await readFile(join(out, 'report.md'), 'utf8')).toContain('--local')
     expect(await readFile(join(web, '.gitignore'), 'utf8')).toBe('.static-analysis/\n')
     expect(result.orchestrator.text).toBe(await readFile(join(agentDir, 'agent', 'instructions.md'), 'utf8'))
@@ -237,7 +276,7 @@ describe('runLocal, the fix loop', () => {
     expect(second.tasks[0]!.files).toEqual(['src/a.js'])
     await writeFile(second.tasks[0]!.output, done([{ file: 'src/a.js', line: 1, reason: 'still needs a decision' }]))
     const result = finished(await runLocal({ source: web }, deps()))
-    expect(result).toMatchObject({ status: 'partial', editedFiles: ['src/b.js'], remaining: 1 })
+    expect(result).toMatchObject({ status: 'incomplete', editedFiles: ['src/b.js'], remaining: 1 })
     expect(result.reason).toContain('no progress')
     expect(result.rejected.map((r) => [r.path, r.reason]).sort()).toEqual([
       ['package.json', expect.stringContaining('protected path')],
@@ -263,7 +302,7 @@ describe('runLocal, the fix loop', () => {
     expect(spent.tasks[0]!.error).toContain('JSON')
     await fixVars(web, ['src/a.js'])
     const result = finished(await runLocal({ source: web, finish: true }, deps()))
-    expect(result).toMatchObject({ status: 'partial', reason: 'finished early (--finish)', editedFiles: ['src/a.js'], remaining: 1 })
+    expect(result).toMatchObject({ status: 'incomplete', reason: 'finished early (--finish)', editedFiles: ['src/a.js'], remaining: 1 })
     expect(result.missing).toEqual([{ id: task.id, reason: expect.stringContaining('JSON') }])
   })
 
@@ -275,16 +314,16 @@ describe('runLocal, the fix loop', () => {
     await writeFile(first.tasks[0]!.output, done())
     await expect(runLocal({ source: web, maxRounds: 2 }, deps())).rejects.toThrow('--max-rounds')
     const result = finished(await runLocal({ source: web }, deps()))
-    expect(result).toMatchObject({ status: 'partial', reason: 'round cap (1) reached', rounds: 1, remaining: 1 })
+    expect(result).toMatchObject({ status: 'incomplete', reason: 'round cap (1) reached', rounds: 1, remaining: 1 })
   })
 
   it('with --no-fix only detects and analyzes: no auto-fix, no model stage, no write to the repository', async () => {
     const { dir, web } = await monorepo()
     const rules = join(dir, '..', `${dir.split('/').pop()}-rules`)
-    await seedKnowledge(rules)
+    await loadedKnowledge(rules)
     const out = await realpath(await mkdtemp(join(tmpdir(), 'sa-local-out-')))
     const result = finished(await runLocal({ source: web, output: join(out, 'web'), knowledge: rules, noFix: true }, deps()))
-    expect(result).toMatchObject({ status: 'partial', dir: join(out, 'web'), rounds: 0, initial: 2, remaining: 2, analyzers: ['script:lint'] })
+    expect(result).toMatchObject({ status: 'incomplete', dir: join(out, 'web'), rounds: 0, initial: 2, remaining: 2, analyzers: ['script:lint'] })
     expect(result.reason).toContain('--no-fix')
     expect((await exec('git', ['-C', dir, 'status', '--porcelain'])).stdout).toBe('')
     expect(await readFile(join(out, 'web', 'report.md'), 'utf8')).toContain('script:lint')

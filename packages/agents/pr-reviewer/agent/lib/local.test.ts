@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
+import { writeKnowledgeFolder, type WalkResult } from '@aspiralabs/agent-common/lib/knowledge-walk'
 import { REVIEW_COMMENT_MARKER } from './github-comment.ts'
-import { KnowledgeRequired, knowledgeConfig, planStep, runLocal, workDirFor, type LocalDeps, type LocalInput, type LocalResult, type LocalTask, type PendingPlan } from './local.ts'
+import { KnowledgeBlocked, KnowledgeRequired, knowledgeConfig, planStep, runLocal, workDirFor, type LocalDeps, type LocalInput, type LocalResult, type LocalTask, type PendingPlan } from './local.ts'
 import {
   SEATS,
   checkFindingsPrompt,
@@ -31,6 +32,19 @@ async function seedKnowledge(dir: string, required = REQUIRED_MD) {
   await writeFile(join(dir, 'REQUIRED.md'), required)
   await writeFile(join(dir, 'INDEX.md'), '# Engineering\n\n- [Testing](testing.md)\n')
   await writeFile(join(dir, 'testing.md'), '# Testing\n\nTST-001 Tests first.\n')
+}
+
+// A folder load-knowledge wrote (F50): the shared writer, given the walk a Notion tree of two pages
+// would produce, so REQUIRED.md carries the provenance block a --knowledge run is held to. Nothing
+// here reaches Notion (TEST-003): the walk result is built in the test.
+const ROOT_URL = 'https://www.notion.so/Agent-Instructions-0123456789abcdef0123456789abcdef'
+async function loadedKnowledge(dir: string): Promise<void> {
+  const pages = [
+    { id: '0123456789abcdef0123456789abcdef', title: 'Agent Instructions', url: ROOT_URL, file: 'INDEX.md', markdown: 'REV-001 Read the rules.' },
+    { id: 'fedcba9876543210fedcba9876543210', title: 'Review Verification', url: 'https://www.notion.so/Review-Verification-fedcba9876543210fedcba9876543210', file: 'review-verification.md', markdown: 'REV-002 Verify.' },
+  ].map((page) => ({ ...page, notionMarkdown: page.markdown, truncated: false }))
+  const walk: WalkResult = { rootId: pages[0]!.id, rootUrl: ROOT_URL, fetchedAt: '2026-10-15T00:00:00.000Z', pages, required: pages, notLoaded: [] }
+  await writeKnowledgeFolder(dir, walk)
 }
 
 const turn = (agreed: boolean, openPoints: string[] = [], over: { raised?: string[]; disputed?: string[] } = {}) => ({ agreed, raised: over.raised ?? [], disputed: over.disputed ?? [], openPoints, note: 'n' })
@@ -302,7 +316,7 @@ describe('runLocal, local repository', () => {
     const { repo } = await gitRepo()
     const done = finished(await complete({ source: repo }))
     const dir = join(repo, '.work', 'x', 'pr-review')
-    expect(done).toMatchObject({ status: 'complete', dir, verdict: 'block', counts: counts(1), agreed: true, settled: true, rounds: 1, comment: null })
+    expect(done).toMatchObject({ status: 'ready', dir, verdict: 'block', counts: counts(1), agreed: true, settled: true, rounds: 1, comment: null })
     expect((await readdir(dir)).sort()).toEqual(['changed_files.txt', 'conversation.md', 'cost.md', 'findings.md', 'pr.md', 'pr.patch', 'review.md', 'trace'])
     // Round one with no dispute and no new finding ends the review in one round: seats + Quinn + the two writers and two checks.
     const reviewed = `Reviewed: base \`${done.target.baseSha}\` → head \`${done.target.headSha}\``
@@ -353,11 +367,11 @@ describe('runLocal, local repository', () => {
     expect(await readFile(checks.tasks.find((t) => t.id === 'check-review')!.prompt, 'utf8')).toContain('Do not write')
     for (const task of checks.tasks) await answer(task, checks.workDir, { handBack: true })
     const done = finished(await runLocal({ source: repo }))
-    expect(done).toMatchObject({ status: 'complete', verdict: 'block', counts: counts(1) })
+    expect(done).toMatchObject({ status: 'ready', verdict: 'block', counts: counts(1) })
     // Nova's checked review wins over Dex's draft: each document is written once, in stage order,
-    // and the export stamps the shas under the title of both.
+    // and the export stamps the shas under the title of both; review.md leads with the run status (F4).
     const stamp = `Reviewed: base \`${done.target.baseSha}\` → head \`${done.target.headSha}\``
-    expect(await readFile(join(done.dir, 'review.md'), 'utf8')).toBe(CHECKED_REVIEW_MD.replace('# Review: test\n\n', `# Review: test\n\n${stamp}\n\n`))
+    expect(await readFile(join(done.dir, 'review.md'), 'utf8')).toBe(`ready\n\n${CHECKED_REVIEW_MD.replace('# Review: test\n\n', `# Review: test\n\n${stamp}\n\n`)}`)
     expect(await readFile(join(done.dir, 'findings.md'), 'utf8')).toBe(FINDINGS_MD.replace('# Findings: test\n\n', `# Findings: test\n\n${stamp}\n\n`))
     const trace = JSON.parse(await readFile(join(done.dir, 'trace', 'calls.json'), 'utf8'))
     expect(trace.calls.find((c: { id: string }) => c.id === 'check-review').output).not.toHaveProperty('document')
@@ -499,18 +513,30 @@ describe('runLocal, engineering guidelines', () => {
     if (!(error instanceof KnowledgeRequired)) throw new Error(`expected a KnowledgeRequired refusal, got ${String(error)}`)
     return error
   }
+  const blocked = async (promise: Promise<unknown>) => {
+    const error = await promise.then(
+      () => null,
+      (cause: unknown) => cause,
+    )
+    if (!(error instanceof KnowledgeBlocked)) throw new Error(`expected a blocked knowledge stage, got ${String(error)}`)
+    return error
+  }
 
   it('refuses to start without REQUIRED.md and INDEX.md, and starts nothing', async () => {
     const { repo, knowledge } = await gitRepo({ knowledge: false })
-    const missing = await refusal(runLocal({ source: repo }))
-    expect(missing.message).toContain('REQUIRED.md')
-    expect(missing.plan.dir).toBe(knowledge)
+    // No folder and no NOTION_TOKEN to build it with: blocked (F52), never a stage asking the session to fetch.
+    const missing = await blocked(runLocal({ source: repo }, { env: {} }))
+    expect(missing.message).toContain('NOTION_TOKEN')
+    expect(missing.message).toContain(join(repo, '.env.local'))
     await expect(stat(join(repo, '.work', 'x', 'pr-review.local', 'state.json'))).rejects.toThrow()
 
     await mkdir(knowledge, { recursive: true })
     await writeFile(join(knowledge, 'REQUIRED.md'), REQUIRED_MD)
     await writeFile(join(knowledge, 'INDEX.md'), '  \n')
-    expect((await refusal(runLocal({ source: repo }))).message).toContain('INDEX.md')
+    const blank = await refusal(runLocal({ source: repo }))
+    expect(blank.message).toContain('INDEX.md')
+    expect(blank.plan.dir).toBe(knowledge)
+    await expect(stat(join(repo, '.work', 'x', 'pr-review.local', 'state.json'))).rejects.toThrow()
 
     await writeFile(join(knowledge, 'INDEX.md'), '# Engineering\n')
     await writeFile(join(knowledge, 'REQUIRED.md'), '# Agent Instructions\n\nREV-001\n')
@@ -530,18 +556,23 @@ describe('runLocal, engineering guidelines', () => {
     expect((await knowledgeConfig(agentDir, { KNOWLEDGE_REQUIRED: 'Only This' })).required).toEqual(['Only This'])
 
     const { repo } = await gitRepo({ knowledge: false })
-    const error = await refusal(runLocal({ source: repo }, { agentDir, env: {} }))
-    expect(error.plan).toMatchObject({ root, required: ['Agent Instructions', 'Security Rules'], maxDepth: 3, maxPages: 80 })
-    expect(JSON.stringify(error.plan)).not.toContain('secret')
-    // A REQUIRED.md without a configured required page is refused too.
+    // The agent's env files configure the page list only: NOTION_TOKEN comes from the project (F52), so
+    // the token in the agent's .env.local is never used and the run without a folder is blocked.
+    const error = await blocked(runLocal({ source: repo }, { agentDir, env: {} }))
+    expect(error.message).toContain('NOTION_TOKEN')
+    expect(error.message).not.toContain('secret')
+    // A REQUIRED.md without a configured required page is refused, naming the configured pages.
     await seedKnowledge(join(repo, '.work', 'x', 'pr-review.local', 'knowledge'))
-    expect((await refusal(runLocal({ source: repo }, { agentDir, env: {} }))).message).toContain('Security Rules')
+    const incomplete = await refusal(runLocal({ source: repo }, { agentDir, env: {} }))
+    expect(incomplete.plan).toMatchObject({ root, required: ['Agent Instructions', 'Security Rules'], maxDepth: 3, maxPages: 80 })
+    expect(JSON.stringify(incomplete.plan)).not.toContain('secret')
+    expect(incomplete.message).toContain('Security Rules')
   })
 
   it('puts the knowledge section in every prompt, byte-equal to review.ts for a --knowledge folder', async () => {
     const { repo, dir } = await gitRepo({ knowledge: false })
     const folder = join(dir, 'rules')
-    await seedKnowledge(folder)
+    await loadedKnowledge(folder)
     const first = pending(await runLocal({ source: repo, knowledge: folder }))
     const work = first.workDir
     const pr: PrContext = { label: `${repo} @ feat/x vs main`, repoPath: repo, knowledgePath: folder, knowledgeRequiredFile: join(folder, 'REQUIRED.md'), paths: workspacePaths(work), packet: await readFile(join(work, 'packet.md'), 'utf8'), target: first.target, maxSeatCalls: 8 }

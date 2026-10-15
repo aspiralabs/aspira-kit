@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { INDEX_FILE, KNOWLEDGE_ENV, KNOWLEDGE_PATH, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED_FILE, pageIdFrom, parseRequired } from '@aspiralabs/agent-common/lib/knowledge'
 import { parseProvenance, verifyKnowledgeDir } from '@aspiralabs/agent-common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
+import { notionToken } from '@aspiralabs/agent-common/lib/notion-token'
 import { KnowledgePrerequisiteError } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { z } from 'zod'
 import { maxSeatCalls } from './call-cap.ts'
@@ -368,8 +369,12 @@ export class KnowledgeBlocked extends KnowledgePrerequisiteError {
 
 const ENV_FILES = ['.env.development.local', '.env.local', '../.env.local']
 
-/** load-knowledge's configuration, as eve gives it to the agent: the environment first, then the agent's env files in eve's priority order, including NOTION_TOKEN (needed now: a --local run fetches its own guidelines). */
-export async function knowledgeConfig(agentDir: string, env: Record<string, string | undefined>): Promise<{ root: string | null; required: string[]; token: string | undefined; configuredIn: string[] }> {
+/**
+ * load-knowledge's page configuration, as eve gives it to the agent: the environment first, then the
+ * agent's env files in eve's priority order. NOTION_TOKEN is not part of it: a --local run fetches
+ * with the project's token (F52), never one from the agent package's env files.
+ */
+export async function knowledgeConfig(agentDir: string, env: Record<string, string | undefined>): Promise<{ root: string | null; required: string[]; configuredIn: string[] }> {
   const files: { path: string; values: Map<string, string> }[] = []
   for (const name of ENV_FILES) {
     const path = resolve(agentDir, name)
@@ -378,7 +383,7 @@ export async function knowledgeConfig(agentDir: string, env: Record<string, stri
     const values = new Map<string, string>()
     for (const line of text.split('\n')) {
       const match = line.match(/^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/)
-      if (match?.[1] === undefined || (match[1] !== KNOWLEDGE_ENV.page && match[1] !== KNOWLEDGE_ENV.token && match[1] !== REQUIRED_ENV)) continue
+      if (match?.[1] === undefined || (match[1] !== KNOWLEDGE_ENV.page && match[1] !== REQUIRED_ENV)) continue
       values.set(match[1], (match[2] ?? '').replace(/^(['"])(.*)\1$/, '$2'))
     }
     files.push({ path, values })
@@ -394,8 +399,7 @@ export async function knowledgeConfig(agentDir: string, env: Record<string, stri
     return file?.values.get(key)
   }
   const root = lookup(KNOWLEDGE_ENV.page)?.trim()
-  const token = lookup(KNOWLEDGE_ENV.token)?.trim()
-  return { root: root === undefined || root === '' ? null : root, required: parseRequired(lookup(REQUIRED_ENV)), token: token === undefined || token === '' ? undefined : token, configuredIn }
+  return { root: root === undefined || root === '' ? null : root, required: parseRequired(lookup(REQUIRED_ENV)), configuredIn }
 }
 
 type KnowledgeConfig = Awaited<ReturnType<typeof knowledgeConfig>>
@@ -426,20 +430,21 @@ async function readFolder(dir: string): Promise<Map<string, string>> {
 /**
  * The guidelines are mandatory. When `given` is false (the default <work>/knowledge folder, never
  * one the caller named with --knowledge), an empty folder is fetched by this run itself through the
- * one shared walk (knowledge-walk.ts) -- needing a NOTION_TOKEN and KNOWLEDGE_PAGE, missing either
+ * one shared walk (knowledge-walk.ts) -- needing KNOWLEDGE_PAGE and the project's NOTION_TOKEN (the
+ * environment, then `project`'s .env.local; never the agent's env files, F52), missing either
  * throws KnowledgeBlocked rather than the old pending session stage. Either way the folder must
  * hold a non-empty INDEX.md and a REQUIRED.md with every configured required page under its own
  * heading, and -- new in P27 -- REQUIRED.md must carry a load-knowledge provenance header that
  * verifies (verifyKnowledgeDir): a --knowledge dir with an edited or missing header is refused,
  * naming the load-knowledge command, even if its headings still read right.
  */
-async function checkKnowledge(dir: string, agentDir: string, env: Record<string, string | undefined>, opts: { given: boolean; fetch?: Fetch; api?: string }): Promise<{ files: Map<string, string>; fingerprint: string }> {
+async function checkKnowledge(dir: string, agentDir: string, env: Record<string, string | undefined>, opts: { given: boolean; project: string; fetch?: Fetch; api?: string }): Promise<{ files: Map<string, string>; fingerprint: string }> {
   const indexName = basename(INDEX_FILE)
   const requiredName = basename(REQUIRED_FILE)
   const requiredPath = join(dir, requiredName)
   const config = await knowledgeConfig(agentDir, env)
   const refuse = (reason: string) =>
-    new KnowledgeRequired(`The engineering guidelines are required and ${dir} is not ready: ${reason} Build the folder from Notion as the knowledge plan says, then run local again.`, {
+    new KnowledgeRequired(`The engineering guidelines are required and ${dir} is not ready: ${reason} ${opts.given ? 'Rebuild it with the load-knowledge command' : 'Delete it so this run rebuilds it from Notion'}, then run local again.`, {
       dir,
       root: config.root,
       required: config.required,
@@ -454,11 +459,15 @@ async function checkKnowledge(dir: string, agentDir: string, env: Record<string,
     })
 
   if (!opts.given && (await readFile(requiredPath, 'utf8').catch(() => null)) === null) {
-    if (config.token === undefined || config.root === null) {
-      const missing = [config.token === undefined && KNOWLEDGE_ENV.token, config.root === null && KNOWLEDGE_ENV.page].filter(Boolean).join(' and ')
-      throw new KnowledgeBlocked(`The engineering guidelines are required and none were given: ${missing} not set. Set them in the agent's env (${ENV_FILES.join(', ')}), or pass --knowledge DIR (a load-knowledge folder).`)
+    const token = (await notionToken({ env, projectRoot: opts.project }))?.token
+    if (token === undefined || config.root === null) {
+      const where = [
+        token === undefined && `${KNOWLEDGE_ENV.token} is not set in the environment or ${join(opts.project, '.env.local')}`,
+        config.root === null && `${KNOWLEDGE_ENV.page} is not set in the agent's env (${ENV_FILES.join(', ')})`,
+      ].filter(Boolean).join('; ')
+      throw new KnowledgeBlocked(`The engineering guidelines are required and none were given: ${where}. Set them, or pass --knowledge DIR (a load-knowledge folder).`)
     }
-    const walk = await walkKnowledge({ token: config.token, page: config.root, required: config.required, ...(opts.fetch ? { fetch: opts.fetch } : {}), ...(opts.api ? { api: opts.api } : {}) })
+    const walk = await walkKnowledge({ token, page: config.root, required: config.required, ...(opts.fetch ? { fetch: opts.fetch } : {}), ...(opts.api ? { api: opts.api } : {}) })
     await writeKnowledgeFolder(dir, walk)
   }
 
@@ -531,7 +540,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   if (saved !== null && knowledgeDir !== saved.knowledge.path) {
     throw new Error(`--knowledge ${knowledgeDir} differs from the ${saved.knowledge.path} this review started with. Drop it, or delete ${work} to start over.`)
   }
-  const knowledge = await checkKnowledge(knowledgeDir, agentDir, env, { given: input.knowledge !== undefined, fetch: request, api: deps.api })
+  // The project the token comes from: the repository under review, or for a GitHub PR the checkout this runs in.
+  const knowledge = await checkKnowledge(knowledgeDir, agentDir, env, { given: input.knowledge !== undefined, project: loaded.repoDir ?? process.cwd(), fetch: request, api: deps.api })
   if (saved !== null && knowledge.fingerprint !== saved.knowledge.fingerprint) {
     throw new Error(`The engineering guidelines in ${knowledgeDir} changed since this local review started. Delete ${work} to start over.`)
   }

@@ -72,9 +72,11 @@ async function expectedRootFor(config: KnowledgeConfig, requiredPath: string): P
  * or header-less (pre-shared-walk) copy; with neither given, this run fetches the pages itself
  * through the one shared walk (knowledge-walk.ts) straight into <work>/knowledge, needing a
  * NOTION_TOKEN and KNOWLEDGE_PAGE -- missing either throws KnowledgeBlocked, not a pending stage.
+ * The token is the project's (F52): the environment, then the analyzed app's .env.local, then the
+ * repository root's; never the agent package's own env files, which only configure the page list.
  */
-async function resolveFreshKnowledge(input: LocalInput, config: KnowledgeConfig, work: string, agentDir: string, deps: LocalDeps): Promise<LoadedKnowledge> {
-  const hint = `fetch the pages in the knowledge stage into ${join(work, 'knowledge')}, or pass --knowledge DIR (a load-knowledge folder) or --guidelines FILE (a REQUIRED.md snapshot).`
+async function resolveFreshKnowledge(input: LocalInput, config: KnowledgeConfig, work: string, project: { root: string; app: string }, deps: LocalDeps): Promise<LoadedKnowledge> {
+  const hint = `delete ${join(work, 'knowledge')} so this run rebuilds it from Notion, or pass --knowledge DIR (a load-knowledge folder) or --guidelines FILE (a REQUIRED.md snapshot).`
   if (input.knowledge !== undefined) {
     const dir = resolve(input.knowledge)
     const requiredPath = join(dir, 'REQUIRED.md')
@@ -94,10 +96,13 @@ async function resolveFreshKnowledge(input: LocalInput, config: KnowledgeConfig,
   const dir = join(work, 'knowledge')
   const already = (await readFile(join(dir, 'REQUIRED.md'), 'utf8').catch(() => null)) !== null
   if (already) return checkKnowledgeDir(dir, config, hint)
-  const resolved = await notionToken({ env: deps.env ?? process.env, projectRoot: join(agentDir, '..'), appDir: agentDir })
+  const resolved = await notionToken({ env: deps.env ?? process.env, projectRoot: project.root, appDir: project.app })
   if (resolved?.token === undefined || config.page === null) {
-    const missing = [resolved?.token === undefined && KNOWLEDGE_ENV.token, config.page === null && KNOWLEDGE_ENV.page].filter(Boolean).join(' and ')
-    throw new KnowledgeBlocked(`The engineering guidelines are required and none were given: ${missing} not set. Set them in the agent's env (../.env.local, .env.local or .env.development.local next to its package), or ${hint}`)
+    const where = [
+      resolved?.token === undefined && `${KNOWLEDGE_ENV.token} is not set in the environment, ${join(project.app, '.env.local')} or ${join(project.root, '.env.local')}`,
+      config.page === null && `${KNOWLEDGE_ENV.page} is not set in the agent's env (../.env.local, .env.local or .env.development.local next to its package)`,
+    ].filter(Boolean).join('; ')
+    throw new KnowledgeBlocked(`The engineering guidelines are required and none were given: ${where}. Set them, or ${hint}`)
   }
   const walk = await walkKnowledge({ token: resolved.token, page: config.page, required: config.required, ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.api ? { api: deps.api } : {}) })
   await writeKnowledgeFolder(dir, walk)
@@ -290,10 +295,10 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
 
   // No step runs without the guidelines, and none runs under different ones than the first.
   const config = await knowledgeConfig(agentDir, deps.env ?? process.env)
-  const hint = `fetch the pages in the knowledge stage into ${join(work, 'knowledge')}, or pass --knowledge DIR (a load-knowledge folder) or --guidelines FILE (a REQUIRED.md snapshot).`
+  const hint = `delete ${join(work, 'knowledge')} so this run rebuilds it from Notion, or pass --knowledge DIR (a load-knowledge folder) or --guidelines FILE (a REQUIRED.md snapshot).`
   const knowledge = saved !== null
     ? saved.knowledge.source === 'guidelines' ? await checkGuidelinesFile(saved.knowledge.requiredFile, config) : await checkKnowledgeDir(saved.knowledge.dir ?? join(work, 'knowledge'), config, hint)
-    : await resolveFreshKnowledge(input, config, work, agentDir, deps)
+    : await resolveFreshKnowledge(input, config, work, { root: source.gitRoot, app: source.root }, deps)
   if (saved !== null && knowledge.fingerprint !== saved.knowledge.fingerprint) throw new Error(`The engineering guidelines in ${knowledge.dir ?? knowledge.requiredFile} changed since this run started. Restore them, or delete ${work} to start over.`)
 
   const fixer = await loadFixer(agentDir)

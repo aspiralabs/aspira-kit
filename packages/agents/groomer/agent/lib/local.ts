@@ -315,7 +315,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   let knowledge: Knowledge
   try {
     knowledge = input.guidelinesPath === undefined
-      ? await loadKnowledge(paths.knowledge, await knowledgeConfig(agentDir, deps.env ?? process.env), { fetch: deps.fetch, api: deps.api })
+      ? await loadKnowledge(paths.knowledge, await knowledgeConfig(agentDir, deps.env ?? process.env, repo), { fetch: deps.fetch, api: deps.api })
       : await snapshotKnowledge(input.guidelinesPath)
   } catch (error) {
     // No token and no folder already there: blocked, not the old pending session stage. `stage`
