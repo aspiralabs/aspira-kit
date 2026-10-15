@@ -131,6 +131,8 @@ describe('Grooming Decisions page', () => {
     open: 0,
     page: {},
     status: 'needs-author',
+    reasonCode: null,
+    reason: null,
     ...fields,
   })
 
@@ -204,7 +206,7 @@ describe('Grooming Decisions page', () => {
       const pulled = throughNotion(answered)
       const parsed = parseGroomPage(pulled, ['Q1', 'Q1.1', 'Q2', 'Q3', 'Q4'])
 
-      const confirmed = record({ decisions: [{ ...q1, decidedBy: 'author', answer: 'The member who made it' }, { ...q2, decidedBy: 'author', answer: 'Keep it private' }, q3, q4], status: 'confirmed' })
+      const confirmed = record({ decisions: [{ ...q1, decidedBy: 'author', answer: 'The member who made it' }, { ...q2, decidedBy: 'author', answer: 'Keep it private' }, q3, q4], status: 'ready' })
       const confirmedPulled = throughNotion(renderGroomPage(confirmed, { date: DATE, notes: [] }))
       return { open, rendered, answered, pulled, parsed, confirmedPulled }
     })
@@ -518,7 +520,7 @@ describe('Grooming Decisions page', () => {
     })
 
     it('shows the ticked box and its date after a confirmed run', () => {
-      const rendered = renderGroomPage(record({ decisions: [confirmedQ], status: 'confirmed' }), { date: DATE, notes: [] })
+      const rendered = renderGroomPage(record({ decisions: [confirmedQ], status: 'ready' }), { date: DATE, notes: [] })
       expect(rendered).toContain('## CONFIRM — Grooming is complete\n\n- [x] Confirm\n\nConfirmed 2026-10-11')
     })
 

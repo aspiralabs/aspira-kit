@@ -9,13 +9,13 @@ import { z } from 'zod'
 import { compareIds, normalizeQuestion, parseDecisionsList, readGroomPage, RECOMMENDED_SUFFIX } from './decisions.ts'
 import { LENSES } from './lenses.ts'
 import { allowedPath } from './repository.ts'
+import { readRunStatus, REASON_CODES, type ReasonCode, type RunStatus } from './run-status.ts'
 
 /** The line the Idea summary opens with, and the text a later run finds it by. */
 export const GROOMER_MARKER_PREFIX = 'Groomed with /aspira-groomer on '
 
-/** The groomer's run status words. */
-export const GROOM_RUN_STATUSES = ['needs-author', 'confirmed', 'stopped', 'incomplete'] as const
-export type GroomRunStatus = (typeof GROOM_RUN_STATUSES)[number]
+/** The groomer's run status: one of the five new words (ready, needs-author, incomplete, refused, blocked). Moved to `run-status.ts`; kept here as an alias since most of this file's own callers already import it from `./groom-record.ts`. */
+export type GroomRunStatus = RunStatus
 
 /** One branch per Grooming exit criterion, per spec template section and per spec-reviewer lens. */
 export const GROOM_BRANCHES = ['problem', 'who', 'done', 'intent', 'f-list', 'tests', 'constraints', 'out-of-scope', 'blast-radius', ...LENSES] as const
@@ -83,19 +83,45 @@ export type GroomDecision = z.infer<typeof groomDecisionSchema>
 
 const branchSchema = z.object({ id: z.string().min(1), state: z.enum(['open', 'visited', 'closed']), reason: z.string().optional() })
 
-export const groomRecordSchema = z.object({
+const groomRecordShape = z.object({
   decisions: z.array(groomDecisionSchema).refine((decisions) => new Set(decisions.map((decision) => decision.id)).size === decisions.length, 'each question id appears once'),
   branches: z.array(branchSchema),
   round: z.number().int().nonnegative(),
   startedAt: z.string(),
   open: z.number().int().nonnegative(),
   page: z.object({ id: z.string().optional(), url: z.string().optional() }),
-  status: z.enum(GROOM_RUN_STATUSES),
+  /** Any run status word, old or new (readRunStatus maps it); an unknown word fails the parse below. */
+  status: z.string(),
+  /** The one reason sentence a non-ready report shows; null when the status needs none, or an old record never recorded one. */
+  reason: z.string().nullable().optional(),
+  /** Which sub-case of the status this is (a groomer round paused by Stop); null when the status carries none. An old record derives it from its status word alone. Checked against REASON_CODES in the transform below, not here (module-load-time use of run-status.ts's values would deadlock the import cycle between the two files). */
+  reasonCode: z.string().nullable().optional(),
   reportedStatus: z.string().optional(),
   markerBlockId: z.string().optional(),
   ideaBlocks: z.array(z.string()).optional(),
   facts: z.array(factSchema).optional(),
   searched: z.array(z.string()).optional(),
+})
+
+/**
+ * `groomRecordShape` with `status` read through `readRunStatus` (F7): the five new words as
+ * themselves, the old words (`confirmed`, `stopped`, …) mapped onto one, anything else failing the
+ * parse. `reasonCode` defaults to the word's own mapped reason code when the record does not carry
+ * one of its own (an old record read for the first time); an explicit `reasonCode` (a fresh write)
+ * is kept as written. `reason` defaults to null.
+ */
+export const groomRecordSchema = groomRecordShape.transform((value, ctx) => {
+  const read = readRunStatus(value.status)
+  if (read === null) {
+    ctx.addIssue({ code: 'custom', path: ['status'], message: `"${value.status}" is not a known run status` })
+    return z.NEVER
+  }
+  const reasonCode = value.reasonCode ?? read.reasonCode
+  if (reasonCode !== null && !(REASON_CODES as readonly string[]).includes(reasonCode)) {
+    ctx.addIssue({ code: 'custom', path: ['reasonCode'], message: `"${reasonCode}" is not a known reason code` })
+    return z.NEVER
+  }
+  return { ...value, status: read.status, reasonCode: reasonCode as ReasonCode | null, reason: value.reason ?? null }
 })
 export type GroomRecord = z.infer<typeof groomRecordSchema>
 
@@ -142,14 +168,19 @@ export function rebuildGroomRecord(pageMarkdown: string): { record: GroomRecord;
   const tagged = new Set(decisions.map((decision) => decision.branch))
   const branches = read.trailer?.branches ?? GROOM_BRANCHES.map((id) => ({ id, state: tagged.has(id) ? ('visited' as const) : ('open' as const) }))
   const top = Math.max(0, ...decisions.map((decision) => Number(decision.id.slice(1).split('.')[0])))
+  const open = decisions.filter((decision) => decision.decidedBy === 'open').length
+  const confirmed = (read.confirm ?? []).some((todo) => todo.checked)
+  const stopped = (read.stop ?? []).some((todo) => todo.checked)
   const record: GroomRecord = {
     decisions: decisions.sort((a, b) => compareIds(a.id, b.id)),
     branches,
     round: read.trailer?.round ?? 0,
     startedAt: read.trailer?.written ?? '',
-    open: decisions.filter((decision) => decision.decidedBy === 'open').length,
+    open,
     page: {},
-    status: (read.confirm ?? []).some((todo) => todo.checked) ? 'confirmed' : 'needs-author',
+    status: confirmed ? 'ready' : 'needs-author',
+    reasonCode: confirmed ? null : stopped ? 'paused' : null,
+    reason: confirmed ? null : stopped ? 'Stop grooming was ticked on the Grooming Decisions page' : `${open} decision${open === 1 ? '' : 's'} still open on the Grooming Decisions page`,
   }
   return { record, nextId: `Q${top + 1}` }
 }

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import boardTool from '../tools/board'
+import { readRunStatus } from './run-status.ts'
 import {
   GATES,
   RUN_STATUSES,
@@ -94,13 +95,13 @@ describe('the gate table', () => {
   })
 
   it('makes the success move only from its own In Progress status, and the implementor only once the PR is open', () => {
-    expect(endMove('planner', true, 'In Progress: Plan')).toEqual({ from: 'In Progress: Plan', to: 'In Review: Plan' })
-    expect(endMove('planner', false, 'In Progress: Plan')).toBeNull()
-    expect(endMove('planner', true, 'Ready: Spec')).toBeNull()
-    expect(endMove('spec-reviewer', true, 'In Review: Spec')).toBeNull()
-    expect(endMove('implementor', true, 'In Progress: Implementation')).toBeNull()
-    expect(endMove('implementor', true, 'In Progress: Implementation', true)).toEqual({ from: 'In Progress: Implementation', to: 'In Review: Implementation' })
-    expect(endMove('pr-reviewer', true, 'In Review: Implementation')).toBeNull()
+    expect(endMove('planner', 'ready', 'In Progress: Plan')).toEqual({ from: 'In Progress: Plan', to: 'In Review: Plan' })
+    expect(endMove('planner', 'incomplete', 'In Progress: Plan')).toBeNull()
+    expect(endMove('planner', 'ready', 'Ready: Spec')).toBeNull()
+    expect(endMove('spec-reviewer', 'ready', 'In Review: Spec')).toBeNull()
+    expect(endMove('implementor', 'ready', 'In Progress: Implementation')).toBeNull()
+    expect(endMove('implementor', 'ready', 'In Progress: Implementation', true)).toEqual({ from: 'In Progress: Implementation', to: 'In Review: Implementation' })
+    expect(endMove('pr-reviewer', 'ready', 'In Review: Implementation')).toBeNull()
   })
 
   it('pushes the fixed titles, and the decisions page only for needs-author', () => {
@@ -108,9 +109,9 @@ describe('the gate table', () => {
     expect(pushesFor('spec-reviewer', 'ready').map((push) => push.title)).toEqual(['Spec Reviewed'])
     expect(pushesFor('spec-reviewer', 'needs-author').map((push) => [push.title, push.file])).toEqual([['Spec Reviewed', 'spec.reviewed/spec.reviewed.md'], ['Spec Review Decisions', 'spec.reviewed/trace/decisions.md']])
     expect(pushesFor('planner', 'ready').map((push) => [push.title, push.file])).toEqual([['Plan', 'plan.review/plan.reviewed.md']])
-    expect(pushesFor('implementor', 'complete').map((push) => [push.title, push.file])).toEqual([['Implementation', 'plan.review/implementation.md']])
-    expect(pushesFor('pr-reviewer', 'complete').map((push) => [push.title, push.file])).toEqual([['PR Review', 'pr-review/review.md']])
-    expect(pushesFor('code-analyzer', 'clean')).toEqual([])
+    expect(pushesFor('implementor', 'ready').map((push) => [push.title, push.file])).toEqual([['Implementation', 'plan.review/implementation.md']])
+    expect(pushesFor('pr-reviewer', 'ready').map((push) => [push.title, push.file])).toEqual([['PR Review', 'pr-review/review.md']])
+    expect(pushesFor('code-analyzer', 'ready')).toEqual([])
     for (const skill of SKILLS) for (const push of GATES[skill].pushes) expect(push.file).not.toMatch(/^trace\//)
   })
 })
@@ -303,16 +304,16 @@ describe('the gate table, Type gate', () => {
 })
 
 describe('the groomer end move', () => {
-  it('moves Grooming to Shortlist only when the run ended confirmed', () => {
-    expect(endMove('groomer', true, 'Grooming', false, 'confirmed')).toEqual({ from: 'Grooming', to: 'Shortlist' })
+  it('moves Grooming to Shortlist only when the run ended ready', () => {
+    expect(endMove('groomer', 'ready', 'Grooming')).toEqual({ from: 'Grooming', to: 'Shortlist' })
   })
 
-  it('makes no move for needs-author, stopped or no run status', () => {
-    expect([endMove('groomer', true, 'Grooming', false, 'needs-author'), endMove('groomer', true, 'Grooming', false, 'stopped'), endMove('groomer', true, 'Grooming')]).toEqual([null, null, null])
+  it('makes no move for needs-author or incomplete', () => {
+    expect([endMove('groomer', 'needs-author', 'Grooming'), endMove('groomer', 'incomplete', 'Grooming')]).toEqual([null, null])
   })
 
   it('leaves the implementor move as it is today', () => {
-    expect(endMove('implementor', true, 'In Progress: Implementation', true)).toEqual({ from: 'In Progress: Implementation', to: 'In Review: Implementation' })
+    expect(endMove('implementor', 'ready', 'In Progress: Implementation', true)).toEqual({ from: 'In Progress: Implementation', to: 'In Review: Implementation' })
   })
 })
 
@@ -445,15 +446,14 @@ describe('run status words', () => {
     return [...words].sort()
   }
 
-  it('every word a sibling launcher passes, partial included, is a run status', () => {
+  it('every word a sibling launcher passes, partial included, reads as one of the five new run statuses (F7, A1)', () => {
     const words = launcherWords()
     expect(words).toEqual(['clean', 'complete', 'incomplete', 'needs-author', 'partial', 'ready'])
-    const known = new Set<string>(RUN_STATUSES)
-    expect(words.filter((word) => !known.has(word))).toEqual([])
+    expect(words.filter((word) => readRunStatus(word) === null)).toEqual([])
   })
 
-  it('the run statuses are the six launcher words plus confirmed and stopped', () => {
-    expect([...RUN_STATUSES]).toEqual(['ready', 'needs-author', 'incomplete', 'complete', 'clean', 'partial', 'confirmed', 'stopped'])
+  it('the five new run statuses are ready, needs-author, incomplete, refused and blocked', () => {
+    expect([...RUN_STATUSES]).toEqual(['ready', 'needs-author', 'incomplete', 'refused', 'blocked'])
   })
 })
 
