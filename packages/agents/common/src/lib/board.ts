@@ -89,6 +89,9 @@ export type Board = {
   me(): Promise<{ id: string }>
 }
 
+/** The `code` of a BoardError that means the board answered and has no such ticket, as opposed to a board that could not answer. */
+export const NOT_FOUND = 'not_found'
+
 export class BoardError extends Error {
   readonly status: number | undefined
   readonly code: string | undefined
@@ -360,18 +363,18 @@ export function board(options: BoardOptions): BoardWithPageMarkdown {
   async function findPage(ref: TicketRef): Promise<PageObject> {
     if (ref.kind === 'url') {
       const page = await call<PageObject>(`/pages/${ref.pageId}`)
-      if (page.parent?.data_source_id === undefined || dashed(page.parent.data_source_id) !== source) throw new BoardError(`${page.url ?? ref.pageId} is not on this board`)
+      if (page.parent?.data_source_id === undefined || dashed(page.parent.data_source_id) !== source) throw new BoardError(`${page.url ?? ref.pageId} is not on this board`, undefined, NOT_FOUND)
       return page
     }
     const idProperty = Object.values((await loadSchema()).properties).find((candidate) => candidate.type === 'unique_id')
     if (idProperty === undefined) throw new BoardError('This board has no ID property to resolve a ticket by')
     const prefix = idProperty.unique_id?.prefix ?? undefined
     if (ref.prefix !== undefined && ref.prefix !== (prefix ?? '').toUpperCase()) {
-      throw new BoardError(`${ref.prefix}-${ref.number} is not on this board (its IDs are ${prefix ?? '<no prefix>'}-…)`)
+      throw new BoardError(`${ref.prefix}-${ref.number} is not on this board (its IDs are ${prefix ?? '<no prefix>'}-…)`, undefined, NOT_FOUND)
     }
     const found = await call<ListResponse<PageObject>>(`/data_sources/${await dataSource()}/query`, 'POST', { filter: { property: idProperty.name, unique_id: { equals: ref.number } }, page_size: 2 })
     const page = found.results[0]
-    if (page === undefined) throw new BoardError(`No ticket ${prefix ? `${prefix}-` : ''}${ref.number} on the board`)
+    if (page === undefined) throw new BoardError(`No ticket ${prefix ? `${prefix}-` : ''}${ref.number} on the board`, undefined, NOT_FOUND)
     return page
   }
 

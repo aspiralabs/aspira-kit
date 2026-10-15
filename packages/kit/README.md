@@ -27,9 +27,11 @@ Installing needs a GitHub Packages token in `~/.npmrc`; see the [repo README](..
 | `kit add auth` | Writes a base Better Auth setup the project then owns |
 | `kit doctor` | Prints the kit versions in use and checks the wiring, including `aspira.json` and the agent skills; `--app <dir>` (or `app` in `aspira.json`) names the app |
 | `kit next [<ticket>]` | Prints the ticket's Status and the Playbook step, command and owner that come next |
+| `kit cleanup [--yes] [--only <path>...]` | Lists every `.work/` folder and `.worktrees/<TYPE>-<ID>` ticket worktree with its card's live Status, and on confirmation deletes those whose card is Released or Dropped |
+| `kit worktree <ticket>` | Creates (or reuses) the ticket's worktree at `.worktrees/<TYPE>-<ID>` on its GIT-001 branch from `origin/main`, links `.env.local`, then installs and builds |
 | `kit playbook` | Prints the Playbook section of From Idea to Release as markdown, from the same table `kit next` reads |
 
-Every command takes `--cwd <path>` to run against another directory. `init` and `add` take `--dry-run`, which prints the plan and changes nothing. `init`, `doctor` and `next` take `--app <dir>`, the app that owns `package.json` and `node_modules` when it is not the root (see [`--app`](#--app-a-repository-whose-app-is-not-the-root)); `doctor` and `next` read it from `aspira.json` once `init` has recorded it.
+Every command takes `--cwd <path>` to run against another directory. `init` and `add` take `--dry-run`, which prints the plan and changes nothing. `init`, `doctor`, `next`, `cleanup` and `worktree` take `--app <dir>`, the app that owns `package.json` and `node_modules` when it is not the root (see [`--app`](#--app-a-repository-whose-app-is-not-the-root)); `doctor` and `next` read it from `aspira.json` once `init` has recorded it.
 
 Every command is safe to re-run. Each line of output starts with what happened to one thing:
 
@@ -66,7 +68,8 @@ Puts a Next.js project on the kit. `next` is the only stack so far. Without `--a
 | `.mcp.json` | Registers the `aspiralabs-ui` docs server (`npx --no aspiralabs-ui-mcp`; with `--app`, `node <app>/node_modules/@aspiralabs/ui/bin/mcp.js`), merged into your servers. The kit's entry is replaced on a re-run, yours are kept |
 | `.claude/settings.json` | Adds the session-start, deny-tier3 and audit-log hooks (`sh node_modules/@aspiralabs/kit/hooks/<name>.sh`; with `--app`, `sh <app>/node_modules/...`), merged into your settings. The kit's hook groups are replaced on a re-run, including entries pointing at the retired `@aspiralabs/config/agent/hooks/` path or at a previous app directory; yours are kept |
 | `.claude/skills/aspira-<agent>/` | One folder per agent (groomer, spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer): a copy of the installed package's `skill/aspira-<agent>/` (`SKILL.md` and `scripts/`) plus `.kit-version`, the installed `@aspiralabs/agents` version. Commit them. A re-run after a bump rewrites them |
-| `.gitignore` | Adds `.work/` (the per-ticket working folder) and `.aspira/` (the audit log the hooks write, `.aspira/audit.jsonl`), whichever is missing |
+| `.claude/skills/aspira-{cleanup,next,worktree}/` | The three kit-owned skills, copied from this package's `skills/` with `.kit-version` set to the installed `@aspiralabs/kit` version, written even when `@aspiralabs/agents` is not installed. Each is a launcher that runs the matching `kit` command and relays it: `/aspira-cleanup` lists, confirms in chat and reruns with `--yes --only`; `/aspira-next` offers to run the next command on a yes; `/aspira-worktree` moves the session into the new worktree |
+| `.gitignore` | Adds `.work/` (the per-ticket working folder) and `.aspira/` (the audit log the hooks write, `.aspira/audit.jsonl`), whichever is missing; `.worktrees/` (ticket worktrees) to the git repository root's `.gitignore`; and `.env.local` unless `git check-ignore` already reports it ignored (a `.env*.local` glob counts) |
 | `aspira.json` | With `--board`: the project's Feature Board URL and, with `--releases`, its Releases page. The `/aspira-*` skills and `kit next` read it. With `--app`: `"app": "<dir>"`, which `kit doctor`, `kit next` and the skill launchers read to find the installed packages. Without `--board` the board is left as it is, and a project without one has no board: every skill then needs `--no-ticket` |
 
 ### `--app`: a repository whose app is not the root
@@ -168,7 +171,7 @@ If you already have `lib/prisma.ts` or `lib/redis.ts`, they're kept. The command
 pnpm kit doctor [--app <dir>] [--cwd <path>]
 ```
 
-Prints the version of each kit package the project declares and has installed (`@aspiralabs/ui`, `config`, `kit` and `agents`), then checks each part of the `init` wiring: ESLint, `tsconfig.json`, the tokens import, the `AGENTS.md` block, the MCP server, the hooks, `.gitignore` (`.work/` and `.aspira/`), `aspira.json` (present, with a Notion URL as `board`, and an `app` directory that has a `package.json` when set), and each `.claude/skills/aspira-<agent>/` folder (present, complete, and its `.kit-version` equal to the installed `@aspiralabs/agents` version). It exits `1` if anything is missing and tells you to re-run `init`.
+Prints the version of each kit package the project declares and has installed (`@aspiralabs/ui`, `config`, `kit` and `agents`), then checks each part of the `init` wiring: ESLint, `tsconfig.json`, the tokens import, the `AGENTS.md` block, the MCP server, the hooks, `.gitignore` (`.work/` and `.aspira/`; `.worktrees/` at the git repository root; `.env.local` as `git check-ignore` sees it, both reported skipped outside a git repository), `aspira.json` (present, with a Notion URL as `board`, and an `app` directory that has a `package.json` when set), and each `.claude/skills/aspira-<agent>/` folder (present, complete, and its `.kit-version` equal to the installed `@aspiralabs/agents` version) and each kit-owned skill (`aspira-cleanup`, `aspira-next`, `aspira-worktree`, checked against the installed `@aspiralabs/kit` version). It exits `1` if anything is missing and tells you to re-run `init`.
 
 With an app (`--app <dir>`, or `app` in `aspira.json`), one run checks both places: the package-level items (`package.json`, `node_modules`, ESLint, `tsconfig.json`, `globals.css`) in the app, and the Claude-facing items at the root, where the hooks and the MCP server must point into `<app>/node_modules`. Run from inside the app with no `--cwd`, it works on the root whose `aspira.json` names that app.
 
@@ -182,6 +185,17 @@ pnpm kit playbook
 `kit next` answers "what is the next step" for a ticket. It reads the board (and the app) from `aspira.json`, resolves the ticket (an ID such as `NOM-4`, a Notion page URL, or, with no argument, the one folder under `.work/` that holds a `ticket.md`; two is an error naming them) through the agents installed under the app's `node_modules` with `NOTION_TOKEN` from `.env.local` (the root's, then the app's, which wins), and prints its Status, the Playbook step for that Status, the exact command to run with the ID filled in, and who acts. When the board does not answer, the Status as pulled into the working folder stands in and the output says so.
 
 The mapping is `src/playbook.ts`, the one source of the Status table. `kit playbook` renders it as the markdown of the "Playbook: what to run next" section of From Idea to Release in Notion; paste its output there when the table changes, so the page and the command stay in step.
+
+## `kit cleanup` and `kit worktree`
+
+```bash
+pnpm kit cleanup [--yes] [--only <path>...] [--app <dir>] [--cwd <path>]
+pnpm kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
+```
+
+`kit cleanup` lists every working folder under `.work/` (in the main checkout and in each ticket worktree) and every ticket worktree at `.worktrees/<TYPE>-<ID>` (TYPE `FEATURE`, `BUG` or `CHORE`) with the card's **live** Status, and marks for deletion only those whose card is Released or Dropped. On a terminal it asks `Delete N folders and remove M worktrees? [y/N]`; `--yes` skips the question, `--only <path>...` (with `--yes`) deletes only the listed paths that are still marked, and without a terminal and `--yes` it lists and deletes nothing. A worktree with uncommitted or unpushed work (commits not on any remote-tracking branch after `git fetch --prune`) is kept, even with `--yes`; worktrees are removed without `--force` and their local branch with `git branch -d`, never a remote branch. The main checkout, worktrees outside `.worktrees/` and folders it cannot match to a card are never touched, and every skip says why. It exits `0` when every marked item was deleted, `1` when there is no board or a deletion failed, `2` for a bad argument.
+
+`kit worktree <ticket>` resolves the card, refuses a Released or Dropped card or one without a Feature, Bug or Chore Type, and creates `.worktrees/<TYPE>-<ID>` at the repository root on `<feat|fix|chore>/<id>-<slug>` from `origin/main` (after a fetch), reusing the ticket's branch or worktree when one exists. It links the main checkout's `.env.local` files into the worktree, then runs the project's install and build there, naming each command. When it reuses a branch that exists only on `origin`, or one under a name other than the card's today, it prints the branch's last commit and skips install and build, because that branch's scripts have not been read on this machine: read it, then install yourself or rerun with `--install`. `/aspira-worktree` runs it and continues the Claude Code session in the new worktree.
 
 ## Working on the CLI
 

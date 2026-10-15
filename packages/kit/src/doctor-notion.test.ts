@@ -24,7 +24,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { readApp } from './aspira.js'
 import { doctor, hookCommand, mcpServer, type UrlCheckResult, type UrlChecker } from './doctor.js'
-import { AGENTS, VERSION_FILE } from './skills.js'
+import { AGENTS, KIT_SKILLS, VERSION_FILE } from './skills.js'
 
 const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6'
 const RELEASES = 'https://www.notion.so/3f13e59b22588106ab5dc457a42b0e1c'
@@ -40,7 +40,8 @@ const KIT_VERSION = '0.9.0'
 /** A project kit init has fully set up, so every one of doctor's other checks passes and its exit
  * code turns on the Notion and token checks alone: the four kit packages declared and
  * @aspiralabs/agents installed, the kit's eslint, tsconfig, tokens, AGENTS.md block, .mcp.json,
- * hooks and .gitignore entries, and every /aspira-* skill pinned to the installed version. */
+ * hooks and .gitignore entries, and every /aspira-* skill pinned to the installed version of the
+ * package that ships it (@aspiralabs/agents for the agent skills, @aspiralabs/kit for the kit's own). */
 function project(config: Record<string, unknown>) {
   root = mkdtempSync(join(tmpdir(), 'kit-doctor-notion-'))
   const kit = Object.fromEntries(['@aspiralabs/ui', '@aspiralabs/config', '@aspiralabs/kit', '@aspiralabs/agents'].map((name) => [name, KIT_VERSION]))
@@ -49,6 +50,8 @@ function project(config: Record<string, unknown>) {
   const app = readApp(root)
   mkdirSync(join(root, 'node_modules', '@aspiralabs', 'agents'), { recursive: true })
   writeFileSync(join(root, 'node_modules', '@aspiralabs', 'agents', 'package.json'), JSON.stringify({ name: '@aspiralabs/agents', version: KIT_VERSION }))
+  mkdirSync(join(root, 'node_modules', '@aspiralabs', 'kit'), { recursive: true })
+  writeFileSync(join(root, 'node_modules', '@aspiralabs', 'kit', 'package.json'), JSON.stringify({ name: '@aspiralabs/kit', version: KIT_VERSION }))
   writeFileSync(join(root, 'eslint.config.mjs'), "export { default } from '@aspiralabs/config/eslint'\n")
   writeFileSync(join(root, 'tsconfig.json'), JSON.stringify({ extends: '@aspiralabs/config/tsconfig' }))
   mkdirSync(join(root, 'app'), { recursive: true })
@@ -58,7 +61,7 @@ function project(config: Record<string, unknown>) {
   mkdirSync(join(root, '.claude'), { recursive: true })
   writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify({ hooks: { SessionStart: [{ matcher: '', hooks: [{ command: hookCommand(app, 'session-start.sh') }] }] } }))
   writeFileSync(join(root, '.gitignore'), '.work/\n.aspira/\n')
-  for (const agent of AGENTS) {
+  for (const agent of [...AGENTS, ...KIT_SKILLS]) {
     const dir = join(root, '.claude', 'skills', `aspira-${agent}`)
     mkdirSync(join(dir, 'scripts'), { recursive: true })
     writeFileSync(join(dir, 'SKILL.md'), `---\nname: aspira-${agent}\n---\n`)

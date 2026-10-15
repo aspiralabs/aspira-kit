@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { checkAspira, isNotionUrl, writeAspira } from './aspira.js'
 import { doctor } from './doctor.js'
 import { next, readWorkTicket, type Resolver } from './next.js'
-import { PLAYBOOK, PLAYBOOK_STEPS, commandFor, nextStep, renderPlaybook } from './playbook.js'
+import { PLAYBOOK, PLAYBOOK_INTRO, PLAYBOOK_STEPS, commandFor, nextStep, renderPlaybook } from './playbook.js'
 
 const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6?v=b4e393d4a4a646b8bbd13d6c0f45a01e'
 const STATUSES = ['Idea', 'Grooming', 'Shortlist', 'Ready: Idea', 'In Progress: Spec', 'In Review: Spec', 'Ready: Spec', 'In Progress: Plan', 'In Review: Plan', 'Ready: Plan', 'In Progress: Implementation', 'In Review: Implementation', 'Ready: Implementation', 'Released', 'Dropped']
@@ -45,6 +45,53 @@ describe('Step 1 of the Playbook', () => {
     const sentences = body.split(/(?<=[.;])\s+/)
     const move = sentences.find((sentence) => /Shortlist\s*(?:→|->|to)\s*Ready: Idea/.test(sentence)) ?? ''
     expect({ namesGroomer: body.includes('/aspira-groomer'), humanMoves: /\b(?:you|yours|human|by hand)\b/i.test(move) }).toEqual({ namesGroomer: true, humanMoves: true })
+  })
+})
+
+describe('Step 1, Step 12 and the intro name the kit-owned commands', () => {
+  const section = (title: string) => {
+    const markdown = renderPlaybook()
+    const start = markdown.indexOf(`### ${title}`)
+    const end = markdown.indexOf('\n### ', start + 1)
+    return start === -1 ? '' : markdown.slice(start, end === -1 ? undefined : end)
+  }
+
+  it('ends Step 12 with kit cleanup instead of deleting the working folder by hand', () => {
+    const step12 = section('Step 12: learn')
+    expect({ cleanup: step12.includes('`kit cleanup`'), skill: step12.includes('`/aspira-cleanup`'), byHand: step12.includes('Then delete `.work/<id>-<slug>/`') }).toEqual({ cleanup: true, skill: true, byHand: false })
+  })
+
+  it('starts a ticket worked alongside another with kit worktree in Step 1', () => {
+    const step1 = section('Step 1: groom the idea')
+    expect({ worktree: step1.includes('`kit worktree <ID>`'), skill: step1.includes('`/aspira-worktree <ID>`') }).toEqual({ worktree: true, skill: true })
+  })
+
+  it('names /aspira-next in the intro', () => {
+    expect(PLAYBOOK_INTRO).toContain('`/aspira-next <ID>`')
+    expect(renderPlaybook()).toContain(PLAYBOOK_INTRO)
+  })
+
+  it('keeps the Status table rows as they were before KIT-13', () => {
+    // Copied from playbook.ts:9-24 before this change: the statuses and command of every row (plus KIT-2's, merged after).
+    const before = [
+      { statuses: ['Idea', 'Grooming'], command: '/aspira-groomer <ID> --local' },
+      { statuses: ['Shortlist'], command: null },
+      { statuses: ['Ready: Idea'], command: '/aspira-spec-writer <ID> --local' },
+      { statuses: ['In Progress: Spec'], command: '/aspira-spec-writer <ID> --local' },
+      { statuses: ['In Review: Spec'], command: '/aspira-spec-reviewer <ID> --local' },
+      { statuses: ['Ready: Spec'], command: '/aspira-planner <ID> --local' },
+      { statuses: ['In Progress: Plan'], command: '/aspira-planner <ID> --local' },
+      { statuses: ['In Review: Plan'], command: null },
+      { statuses: ['Ready: Plan'], command: '/aspira-implementor <ID> --local' },
+      { statuses: ['In Progress: Implementation'], command: '/aspira-code-analyzer <ID> --app <app-dir> --local' },
+      // KIT-2's row (Step 8, after the code analyzer), which KIT-13 left as it was.
+      { statuses: ['In Progress: Implementation, after Step 7'], command: null },
+      { statuses: ['In Review: Implementation'], command: '/aspira-pr-reviewer <ID> --local' },
+      { statuses: ['Ready: Implementation'], command: null },
+      { statuses: ['Released'], command: null },
+      { statuses: ['Dropped'], command: null },
+    ]
+    expect(PLAYBOOK.map(({ statuses, command }) => ({ statuses, command }))).toEqual(before)
   })
 })
 

@@ -15,6 +15,7 @@ import { runAnalysis } from '@aspiralabs/agent-common/lib/run-analysis'
 import { type ReasonCode } from '@aspiralabs/agent-common/lib/run-status'
 import { readTicketMd } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { IDEA_SUMMARY_NAME, writeRound } from '../tools/write-round.ts'
+import { factFindingSchema, type FactFinding } from './fact-finding.ts'
 import { missingRequired } from './local-knowledge.ts'
 import { FACT_FINDER_MODEL, ROUND_MODEL } from './models.ts'
 import { groomPaths } from './paths.ts'
@@ -33,25 +34,6 @@ export type GroomInput = { folder: string; repoPath: string; guidelinesPath: str
 export function groomModels(env: NodeJS.ProcessEnv = process.env) {
   return { round: env.GROOMER_ROUND_MODEL || ROUND_MODEL, facts: FACT_FINDER_MODEL }
 }
-
-/** What round zero returns: the concepts searched, the facts found and the terms that collide with an existing name. */
-export const factFindingSchema = z.object({
-  searched: z.array(z.string().trim().min(1)).min(1),
-  facts: z.array(z.object({ path: z.string(), line: z.number().int(), quote: z.string().optional() })),
-  collisions: z.array(z.object({ term: z.string(), path: z.string(), line: z.number().int() })),
-})
-export type FactFinding = z.infer<typeof factFindingSchema>
-
-/** The same shape as JSON Schema, for the fact-finder subagent's `outputSchema`. */
-export const FACT_FINDING_JSON_SCHEMA = {
-  type: 'object',
-  properties: {
-    searched: { type: 'array', items: { type: 'string' }, description: 'Every domain concept searched, including those that found nothing.' },
-    facts: { type: 'array', items: { type: 'object', properties: { path: { type: 'string' }, line: { type: 'integer' }, quote: { type: 'string' } }, required: ['path', 'line'] } },
-    collisions: { type: 'array', items: { type: 'object', properties: { term: { type: 'string' }, path: { type: 'string' }, line: { type: 'integer' } }, required: ['term', 'path', 'line'] } },
-  },
-  required: ['searched', 'facts', 'collisions'],
-} as const
 
 const FACT_STEPS = 12
 const ROUND_STEPS = 12

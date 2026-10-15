@@ -113,7 +113,7 @@ Package scripts (`dev`, `info`, `typecheck`, `lint`) need no `exec`: `pnpm -C <d
 5. `cp .env.example .env.local` in the new package and put an AI Gateway key in it. Every package needs its own; `.env.local` is gitignored.
 6. Add its skill as **Skills** above describes: `skill/aspira-<name>/` with `SKILL.md` and `scripts/<name>.sh`, plus a `--local` driver and its tests.
 
-Root `typecheck`, `lint` and `test` (which packs every package) pick the package up for free. Root `build` filters on `./packages/*` and skips it.
+Root `typecheck`, `lint`, `build` and `test` (which packs every package) pick the package up for free. An eve agent's `build` is `eve build`, which bundles its workflow tools: a workflow body that reaches a Node.js builtin (`node:fs` and the like) fails there instead of at the first run. `eve info` alone does not catch that.
 
 A skill-only package (`@aspiralabs/build-feature` is the one so far) skips the `agent/` steps above: no `agent.ts`, no `instructions.md`, no eve agent to discover, no `.env.local` symlink. It still joins the `fixed` group, `meta/package.json`, and `packages/kit/src/skills.ts`, and still ships `skill/aspira-<name>/` with `SKILL.md` and `scripts/<name>.sh`.
 

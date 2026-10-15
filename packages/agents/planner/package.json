@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "eve dev",
-    "build": "eve info",
+    "build": "eve build",
     "info": "eve info",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
