@@ -188,7 +188,7 @@ describe('the answers of a chat round', () => {
     ])
     await writeText(pageFile(folder, 1), firstPage)
     const step = await runLocal(input, deps)
-    expect(step).toMatchObject({ stage: 'board', runStatus: 'stopped' })
+    expect(step).toMatchObject({ stage: 'board', runStatus: 'needs-author', reasonCode: 'paused' })
     expect(await readFile(decisionsFile(folder), 'utf8')).toContain('- [ ] Stop grooming')
   })
 })

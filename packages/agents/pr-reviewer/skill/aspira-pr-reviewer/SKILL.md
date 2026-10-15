@@ -31,11 +31,13 @@ Flags both modes take: `--max-rounds N` caps the rounds; `--max-cost USD` is the
 | Where the model work runs | `pr-reviewer`, a separate eve process | subagents of this Claude Code session |
 | Models | as configured in the agent's `agent.ts` files | this session's model, for every seat and Quinn |
 | Instructions | the agent's files | the same files, read from disk on every `local` call |
-| Guidelines | `load-knowledge` fetches them from Notion | this session fetches the same pages with the Notion MCP |
+| Guidelines | `load-knowledge` fetches them from Notion | `local` runs `load-knowledge` itself, once per review, before any seat |
 | Cost | Vercel AI Gateway, itemized in `cost.md`; `--max-cost` stops the run | this session's usage, not itemized; `--max-cost` is recorded, not enforced |
-| Needs | Node 24, pnpm, screen, the agent's `.env.local` | Node 24, pnpm, git, the Notion MCP; `GITHUB_TOKEN` or `gh` for a GitHub PR |
+| Needs | Node 24, pnpm, screen, the agent's `.env.local` | Node 24, pnpm, git, the Notion MCP for the board, `NOTION_TOKEN` in the environment or the project's `.env.local`; `GITHUB_TOKEN` or `gh` for a GitHub PR |
 
 The launcher resolves the package from `PR_REVIEWER_AGENT_DIR` (kit development only; the report says so), then the installed `@aspiralabs/pr-reviewer` under the project's `node_modules`, then its own location. A launcher that resolves to a kit checkout prints one line saying it is running kit source, not the installed version. Every `start`, `status` and `local` output names the agent package and version that ran (`agent:` line, or `agent` in the JSON), and an export records it in `trace/agent-version.json`. That package's files are the ones that run.
+
+The engineering guidelines are mandatory, local mode included: no seat runs without them and there is no flag to skip them. `load-knowledge` builds the folder from the pages the agent is configured with (`KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`); a truncated or missing page stops the run, naming it, and with no `NOTION_TOKEN` the run ends `blocked`.
 
 ## Default: launch the agent
 
