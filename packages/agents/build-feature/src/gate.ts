@@ -24,7 +24,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { z } from 'zod'
 import type { Phase, PhaseContext, PhaseResult } from '#src/driver.ts'
-import { tail } from '#src/redact.ts'
+import { tail } from '@aspiralabs/agent-common/lib/redact'
 import type { Pending, RunState } from '#src/run-state.ts'
 import { gitShowFile, gitStatus, packageManagerOf, parseStatus, shown } from '#src/system.ts'
 

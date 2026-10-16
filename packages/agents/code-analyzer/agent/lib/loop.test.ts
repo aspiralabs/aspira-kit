@@ -29,7 +29,8 @@ describe('runLoop', () => {
     const { executor } = scripted(state)
     const fixer: Fixer = async ({ batch }) => { state.errors = state.errors.filter((e) => !batch.files.includes(`src/${e}.ts`)); return { edits: batch.files.length, editedFiles: batch.files, rejected: [], unresolved: [] } }
     const result = await runLoop(executor, [analyzer('tsc', 'check')], fixer, options())
-    expect(result.status).toBe('clean')
+    expect(result.status).toBe('ready')
+    expect(result.reasonCode).toBeNull()
     expect(result.reason).toBe('analyzers clean')
     expect(result.rounds.map((r) => [r.targets, r.edits])).toEqual([[2, 2], [0, 0]])
     expect(result.editedFiles).toEqual(['src/a.ts', 'src/b.ts'])
@@ -43,7 +44,7 @@ describe('runLoop', () => {
     let called = 0
     const result = await runLoop(executor, [analyzer('tsc', 'check', 'fix')], async () => { called++; return { edits: 0, editedFiles: [], rejected: [], unresolved: [] } }, options())
     expect(called).toBe(0)
-    expect(result.status).toBe('clean')
+    expect(result.status).toBe('ready')
     expect(result.rounds[0]!.autofix).toEqual([expect.objectContaining({ id: 'tsc', exitCode: 0 })])
     expect(commands.filter((c) => c === 'check')).toHaveLength(2)
   })
@@ -51,7 +52,7 @@ describe('runLoop', () => {
     const stuck = { errors: ['x'] }
     const noop: Fixer = async () => ({ edits: 0, editedFiles: [], rejected: [{ path: 'src/x.ts', reason: 'protected path' }], unresolved: ['src/x.ts:1 needs a decision'] })
     const stalled = await runLoop(scripted(stuck).executor, [analyzer('tsc', 'check')], noop, options())
-    expect(stalled.status).toBe('partial')
+    expect(stalled.status).toBe('incomplete')
     expect(stalled.reason).toContain('no progress')
     expect(stalled.rounds).toHaveLength(2)
     expect(stalled.rejected).toHaveLength(1)
@@ -68,10 +69,15 @@ describe('runLoop', () => {
   it('records analyzer problems and never reports clean while one could not run', async () => {
     const { executor } = scripted({ errors: [] })
     const result = await runLoop(executor, [analyzer('tsc', 'check'), analyzer('broken', 'crash')], async () => ({ edits: 0, editedFiles: [], rejected: [], unresolved: [] }), options())
-    expect(result.status).toBe('partial')
+    expect(result.status).toBe('incomplete')
     expect(result.problems[0]).toContain('broken: exit 2 with no diagnostics')
     const dead = await runLoop(executor, [analyzer('broken', 'crash')], async () => ({ edits: 0, editedFiles: [], rejected: [], unresolved: [] }), options())
-    expect(dead.status).toBe('failed')
-    expect((await runLoop(executor, [], async () => ({ edits: 0, editedFiles: [], rejected: [], unresolved: [] }), options())).status).toBe('nothing-detected')
+    // Every analyzer erroring is a run that did not finish (Decision Q3.1: failed reads as incomplete).
+    expect(dead.status).toBe('incomplete')
+    expect(dead.reason).toBe('every analyzer failed to run')
+    // Nothing to analyze counts as done, with the former meaning kept in reasonCode (F3).
+    const none = await runLoop(executor, [], async () => ({ edits: 0, editedFiles: [], rejected: [], unresolved: [] }), options())
+    expect(none.status).toBe('ready')
+    expect(none.reasonCode).toBe('no-analyzers')
   })
 })

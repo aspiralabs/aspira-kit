@@ -102,6 +102,8 @@ const groomRecord = <D extends { decidedBy: 'open' | 'author' }>(round: number, 
   open: decisions.filter((decision) => decision.decidedBy === 'open').length,
   page: { id: 'gd', url: 'https://www.notion.so/gd' },
   status: 'needs-author' as const,
+  reasonCode: null,
+  reason: null,
 })
 
 /** The page a first run created: the title, the intro and this run's marker, nothing else yet. */
@@ -186,7 +188,7 @@ describe('the answers of a chat round', () => {
     ])
     await writeText(pageFile(folder, 1), firstPage)
     const step = await runLocal(input, deps)
-    expect(step).toMatchObject({ stage: 'board', runStatus: 'stopped' })
+    expect(step).toMatchObject({ stage: 'board', runStatus: 'needs-author', reasonCode: 'paused' })
     expect(await readFile(decisionsFile(folder), 'utf8')).toContain('- [ ] Stop grooming')
   })
 })

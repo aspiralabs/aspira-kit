@@ -9,7 +9,11 @@ import { createHash } from 'node:crypto'
 import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { INDEX_FILE, KNOWLEDGE_ENV, KNOWLEDGE_PATH, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED_FILE, parseRequired } from '@aspiralabs/agent-common/lib/knowledge'
+import { INDEX_FILE, KNOWLEDGE_ENV, KNOWLEDGE_PATH, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED_FILE, pageIdFrom, parseRequired } from '@aspiralabs/agent-common/lib/knowledge'
+import { parseProvenance, verifyKnowledgeDir } from '@aspiralabs/agent-common/lib/knowledge-snapshot'
+import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
+import { notionToken } from '@aspiralabs/agent-common/lib/notion-token'
+import { KnowledgePrerequisiteError } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { z } from 'zod'
 import { maxSeatCalls } from './call-cap.ts'
 import { sortFindingsMarkdown } from './findings.ts'
@@ -92,6 +96,8 @@ export type LocalDeps = {
   /** The process environment, for the knowledge configuration and the call cap. Default: process.env. */
   env?: Record<string, string | undefined>
   now?: () => Date
+  /** The knowledge walk's own API base (it reuses `fetch` above), for tests only; a real run hits Notion's API. */
+  api?: string
 }
 
 /** A task as printed for the session: the prompt and output are file paths. */
@@ -120,7 +126,10 @@ export type LocalPending = {
 /** The exported review. */
 export type LocalDone = {
   pending: false
-  status: 'complete' | 'incomplete'
+  /** One of the five shared run statuses (F1): a --local review only ever ends ready or incomplete. */
+  status: 'ready' | 'incomplete'
+  /** pr-reviewer has no sub-case of either status: always null. */
+  reasonCode: null
   label: string
   branch: string
   target: ReviewTarget
@@ -335,7 +344,7 @@ export type KnowledgePlan = {
   files: { index: string; required: string; pages: string }
 }
 
-/** A run that cannot start because the guidelines folder is missing or incomplete. */
+/** A run that cannot start because a --knowledge DIR it was given is missing or does not verify. */
 export class KnowledgeRequired extends Error {
   /** The pages to fetch and the folder to write them to. */
   readonly plan: KnowledgePlan
@@ -346,11 +355,24 @@ export class KnowledgeRequired extends Error {
   }
 }
 
+/**
+ * Thrown when the default knowledge folder is empty and there is no NOTION_TOKEN (or no
+ * KNOWLEDGE_PAGE) to fetch it with: handleRunError reports this as blocked, exit 1. Distinct from
+ * KnowledgeRequired (a --knowledge DIR the caller named but that does not verify), and carries its
+ * own `pending`/`status` so a caller reading the raw thrown error sees the same shape a resolved
+ * blocked result would have.
+ */
+export class KnowledgeBlocked extends KnowledgePrerequisiteError {
+  readonly pending = false as const
+  readonly status = 'blocked' as const
+}
+
 const ENV_FILES = ['.env.development.local', '.env.local', '../.env.local']
 
 /**
- * load-knowledge's configuration, as eve gives it to the agent: the environment first, then the
- * agent's env files in eve's priority order. Only the knowledge keys are read; the token never is.
+ * load-knowledge's page configuration, as eve gives it to the agent: the environment first, then the
+ * agent's env files in eve's priority order. NOTION_TOKEN is not part of it: a --local run fetches
+ * with the project's token (F52), never one from the agent package's env files.
  */
 export async function knowledgeConfig(agentDir: string, env: Record<string, string | undefined>): Promise<{ root: string | null; required: string[]; configuredIn: string[] }> {
   const files: { path: string; values: Map<string, string> }[] = []
@@ -380,6 +402,20 @@ export async function knowledgeConfig(agentDir: string, env: Record<string, stri
   return { root: root === undefined || root === '' ? null : root, required: parseRequired(lookup(REQUIRED_ENV)), configuredIn }
 }
 
+type KnowledgeConfig = Awaited<ReturnType<typeof knowledgeConfig>>
+
+/** The provenance header's own rootId, when a file carries one; '' when it does not (verify then fails on the header itself, not the root check). */
+async function headerRootId(path: string): Promise<string> {
+  const text = await readFile(path, 'utf8').catch(() => '')
+  return parseProvenance(text)?.rootId ?? ''
+}
+
+/** The root a verify call is held to: the agent's configured KNOWLEDGE_PAGE when there is one, else the file's own header (a no-op root check; the integrity/location/trace checks still apply). */
+async function expectedRootFor(config: KnowledgeConfig, requiredPath: string): Promise<string> {
+  const configured = config.root === null ? undefined : pageIdFrom(config.root)
+  return configured ?? (await headerRootId(requiredPath))
+}
+
 /** Every file under the folder, by path relative to it, sorted. */
 async function readFolder(dir: string): Promise<Map<string, string>> {
   const files = new Map<string, string>()
@@ -392,25 +428,23 @@ async function readFolder(dir: string): Promise<Map<string, string>> {
 }
 
 /**
- * The guidelines are mandatory: the folder must hold a non-empty INDEX.md and a REQUIRED.md with
- * every configured required page under its own heading, or the run does not start.
+ * The guidelines are mandatory. When `given` is false (the default <work>/knowledge folder, never
+ * one the caller named with --knowledge), an empty folder is fetched by this run itself through the
+ * one shared walk (knowledge-walk.ts) -- needing KNOWLEDGE_PAGE and the project's NOTION_TOKEN (the
+ * environment, then `project`'s .env.local; never the agent's env files, F52), missing either
+ * throws KnowledgeBlocked rather than the old pending session stage. Either way the folder must
+ * hold a non-empty INDEX.md and a REQUIRED.md with every configured required page under its own
+ * heading, and -- new in P27 -- REQUIRED.md must carry a load-knowledge provenance header that
+ * verifies (verifyKnowledgeDir): a --knowledge dir with an edited or missing header is refused,
+ * naming the load-knowledge command, even if its headings still read right.
  */
-async function checkKnowledge(dir: string, agentDir: string, env: Record<string, string | undefined>): Promise<{ files: Map<string, string>; fingerprint: string }> {
-  const files = await readFolder(dir)
+async function checkKnowledge(dir: string, agentDir: string, env: Record<string, string | undefined>, opts: { given: boolean; project: string; fetch?: Fetch; api?: string }): Promise<{ files: Map<string, string>; fingerprint: string }> {
   const indexName = basename(INDEX_FILE)
   const requiredName = basename(REQUIRED_FILE)
+  const requiredPath = join(dir, requiredName)
   const config = await knowledgeConfig(agentDir, env)
-  const problems: string[] = []
-  const required = files.get(requiredName)
-  if ((files.get(indexName) ?? '').trim() === '') problems.push(`${indexName} is missing or empty`)
-  if ((required ?? '').trim() === '') problems.push(`${requiredName} is missing or empty`)
-  else {
-    const headings = new Set((required ?? '').split('\n').flatMap((line) => (line.startsWith('# ') ? [line.slice(2).trim().toLowerCase()] : [])))
-    const absent = config.required.filter((title) => !headings.has(title.trim().toLowerCase()))
-    if (absent.length > 0) problems.push(`${requiredName} has no \`# <title>\` section for ${absent.join(', ')}`)
-  }
-  if (problems.length > 0) {
-    throw new KnowledgeRequired(`The engineering guidelines are required and ${dir} is not ready: ${problems.join('; ')}. Build the folder from Notion as the knowledge plan says, then run local again.`, {
+  const refuse = (reason: string) =>
+    new KnowledgeRequired(`The engineering guidelines are required and ${dir} is not ready: ${reason} ${opts.given ? 'Rebuild it with the load-knowledge command' : 'Delete it so this run rebuilds it from Notion'}, then run local again.`, {
       dir,
       root: config.root,
       required: config.required,
@@ -419,11 +453,44 @@ async function checkKnowledge(dir: string, agentDir: string, env: Record<string,
       configuredIn: config.configuredIn,
       files: {
         index: `${join(dir, indexName)}: the root page`,
-        required: `${join(dir, requiredName)}: the required pages in full, in order, each under # <page title>, separated by ---`,
+        required: `${requiredPath}: the required pages in full, in order, each under # <page title>, separated by ---`,
         pages: `${dir}/<name>.md for every other page: the title lowercased, each run of other characters replaced by -, trimmed of -, at most 60 characters; a second page with the same name gets -2`,
       },
     })
+
+  if (!opts.given && (await readFile(requiredPath, 'utf8').catch(() => null)) === null) {
+    const token = (await notionToken({ env, projectRoot: opts.project }))?.token
+    if (token === undefined || config.root === null) {
+      const where = [
+        token === undefined && `${KNOWLEDGE_ENV.token} is not set in the environment or ${join(opts.project, '.env.local')}`,
+        config.root === null && `${KNOWLEDGE_ENV.page} is not set in the agent's env (${ENV_FILES.join(', ')})`,
+      ].filter(Boolean).join('; ')
+      throw new KnowledgeBlocked(`The engineering guidelines are required and none were given: ${where}. Set them, or pass --knowledge DIR (a load-knowledge folder).`)
+    }
+    const walk = await walkKnowledge({ token, page: config.root, required: config.required, ...(opts.fetch ? { fetch: opts.fetch } : {}), ...(opts.api ? { api: opts.api } : {}) })
+    await writeKnowledgeFolder(dir, walk)
   }
+
+  const files = await readFolder(dir)
+  const problems: string[] = []
+  const required = files.get(requiredName)
+  if ((files.get(indexName) ?? '').trim() === '') problems.push(`${indexName} is missing or empty.`)
+  if ((required ?? '').trim() === '') problems.push(`${requiredName} is missing or empty.`)
+  else {
+    const headings = new Set((required ?? '').split('\n').flatMap((line) => (line.startsWith('# ') ? [line.slice(2).trim().toLowerCase()] : [])))
+    const absent = config.required.filter((title) => !headings.has(title.trim().toLowerCase()))
+    if (absent.length > 0) problems.push(`${requiredName} has no \`# <title>\` section for ${absent.join(', ')}.`)
+  }
+  if (problems.length > 0) throw refuse(problems.join(' '))
+
+  // The provenance check is only for a folder the caller explicitly named with --knowledge; the
+  // default <work>/knowledge is trusted structurally once it is there, same as before P27 -- this
+  // run wrote it itself (the self-fetch above) or a prior call already checked it.
+  if (opts.given) {
+    const verified = await verifyKnowledgeDir(dir, { expectedRootId: await expectedRootFor(config, requiredPath) })
+    if (!verified.ok) throw refuse(`${verified.reason} ${verified.hint}`)
+  }
+
   const fingerprint = createHash('sha256').update(JSON.stringify([dir, [...files]])).digest('hex')
   return { files, fingerprint }
 }
@@ -473,7 +540,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   if (saved !== null && knowledgeDir !== saved.knowledge.path) {
     throw new Error(`--knowledge ${knowledgeDir} differs from the ${saved.knowledge.path} this review started with. Drop it, or delete ${work} to start over.`)
   }
-  const knowledge = await checkKnowledge(knowledgeDir, agentDir, env)
+  // The project the token comes from: the repository under review, or for a GitHub PR the checkout this runs in.
+  const knowledge = await checkKnowledge(knowledgeDir, agentDir, env, { given: input.knowledge !== undefined, project: loaded.repoDir ?? process.cwd(), fetch: request, api: deps.api })
   if (saved !== null && knowledge.fingerprint !== saved.knowledge.fingerprint) {
     throw new Error(`The engineering guidelines in ${knowledgeDir} changed since this local review started. Delete ${work} to start over.`)
   }
@@ -613,6 +681,12 @@ async function exportReview(args: {
   // As export-review: the review lives in the repo it reviewed and git never sees it.
   const gitignore = loaded.repoDir === null || input.output !== undefined ? null : await ensureIgnored(loaded.repoDir)
 
+  // One of the five shared run statuses (F1, F4): a --local review only ever ends ready or
+  // incomplete. The reason is the first output pr-debator never produced, one sentence, never null
+  // for an incomplete review.
+  const status: LocalDone['status'] = plan.missing.length === 0 ? 'ready' : 'incomplete'
+  const reason = status === 'ready' ? null : (plan.missing[0]?.reason.split('\n')[0]?.trim() ?? 'the review did not finish')
+
   const written: string[] = []
   const missingFiles: string[] = []
   const texts = new Map<string, string>()
@@ -625,7 +699,9 @@ async function exportReview(args: {
     }
     // The two documents carry the shas the verdict applies to, whether or not the writers put them in,
     // and the fix list is in severity order with its totals equal to its entries, whatever Nova wrote.
-    const content = path === paths.files.findings ? stampReviewed(sortFindingsMarkdown(raw), state.target) : path === paths.files.review ? stampReviewed(raw, state.target) : raw
+    // The report (review.md) leads with the run status, not the writer's own heading (F4).
+    const content =
+      path === paths.files.findings ? stampReviewed(sortFindingsMarkdown(raw), state.target) : path === paths.files.review ? `${status}\n\n${stampReviewed(raw, state.target)}` : raw
     texts.set(path, content)
     await writeFile(join(dir, basename(path)), content, 'utf8')
     written.push(join(dir, basename(path)))
@@ -675,13 +751,17 @@ async function exportReview(args: {
   await writeFile(join(dir, 'trace', 'calls.json'), JSON.stringify(trace, null, 2), 'utf8')
   written.push(join(dir, 'trace', 'calls.json'))
 
-  const status = plan.missing.length === 0 ? 'complete' : 'incomplete'
+  // The run record every other skill's launcher and the kit board read (F6, F7, F21).
+  const record = { status, reason, reasonCode: null as null, verdict: plan.verdict, counts: plan.counts }
+  await writeFile(join(dir, 'trace', 'review.json'), JSON.stringify(record, null, 2), 'utf8')
+  written.push(join(dir, 'trace', 'review.json'))
+
   const comment =
     loaded.github === null
       ? null
       : await postComment(loaded.github, texts.get(paths.files.review) ?? null, texts.get(paths.files.findings) ?? null, state.target, {
           noComment: input.noComment === true,
-          complete: status === 'complete',
+          complete: status === 'ready',
           fetch: args.deps.fetch,
           token: args.deps.token,
         })
@@ -691,6 +771,7 @@ async function exportReview(args: {
   return {
     pending: false,
     status,
+    reasonCode: null,
     label: state.label,
     branch: loaded.meta.headRef,
     target: state.target,

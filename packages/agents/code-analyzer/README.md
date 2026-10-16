@@ -34,7 +34,7 @@ pnpm exec eve invoke "Run static analysis on /absolute/repository"
 pnpm exec eve invoke "Run static analysis on owner/name and open a pull request"
 ```
 
-Exit 0 means `clean`; anything else exits 1. `/aspira-code-analyzer <source> [--push]` (`skill/aspira-code-analyzer/`) launches the same package detached with `start` / `status` / `wait`.
+The CLI exits by run status: exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author. `/aspira-code-analyzer <source> [--push]` (`skill/aspira-code-analyzer/`) launches the same package detached with `start` / `status` / `wait`.
 
 ## `--local`
 

@@ -6,8 +6,10 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { DEFAULT_REQUIRED } from '@aspiralabs/agent-common/lib/knowledge'
 import { afterEach, describe, expect, it } from 'vitest'
+import { inspectKnowledge, knowledgeConfig } from './local-knowledge.ts'
 import { runLocal, workerBriefTemplate, type LocalResult, exportDirOf } from './local.ts'
 import { rewriteNotesFile } from './notes.ts'
+import { writeSnapshot } from './snapshot.test-helper.ts'
 
 const exec = promisify(execFile)
 const PACKAGE = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -72,9 +74,7 @@ function pending(result: LocalResult) {
   return result
 }
 function staged(result: LocalResult) {
-  const value = pending(result)
-  if (value.stage === 'knowledge') throw new Error('expected a model stage, got knowledge')
-  return value
+  return pending(result)
 }
 
 const plan = {
@@ -95,33 +95,40 @@ const plan = {
   gaps: [],
 }
 
-it('refuses to start without the Notion rules: the first step is the knowledge stage, with the pages from the agent config', async () => {
-  const { step, knowledge, work } = await fixture()
-  const first = pending(await step())
-  expect(first.stage).toBe('knowledge')
-  if (first.stage !== 'knowledge') return
-  expect(first.knowledgeDir).toBe(knowledge)
-  expect(first.pages.find((p) => p.role === 'index')).toMatchObject({ url: INDEX, file: 'INDEX.md', present: false })
-  expect(first.pages.filter((p) => p.role === 'required').map((p) => p.title)).toEqual(DEFAULT_REQUIRED)
+it('refuses to start without the Notion rules: with no folder and no NOTION_TOKEN the run ends blocked, naming the token and the project env file', async () => {
+  const { step, knowledge, work, repo } = await fixture()
+  const first = await step()
+  expect(first).toMatchObject({ pending: false, status: 'blocked', export: null })
+  const reason = first.pending ? '' : (first.reason ?? '')
+  expect(reason).toContain('NOTION_TOKEN')
+  expect(reason).toContain(join(repo, '.env.local'))
+  expect(reason).not.toMatch(/Notion MCP/i)
   // No prompt is written and no plan stage is offered until the rules are there.
   expect(await readdir(join(work, 'implementation.local')).catch(() => [])).not.toContain('prompts')
-  await expect(step({ finish: true })).rejects.toThrow(/knowledge/i)
+  await expect(readdir(knowledge)).rejects.toThrow()
+  expect(await step({ finish: true })).toMatchObject({ pending: false, status: 'blocked' })
+  // No KNOWLEDGE_PAGE either: both are named.
+  const none = await step({}, {})
+  expect(none.pending ? '' : none.reason).toMatch(/NOTION_TOKEN[\s\S]*KNOWLEDGE_PAGE/)
 })
 
 it('takes the required pages from KNOWLEDGE_REQUIRED, as load-knowledge does, and the topic pages from their routing tables', async () => {
   const { step, knowledge } = await fixture()
-  const custom = pending(await step({}, { KNOWLEDGE_PAGE: INDEX, KNOWLEDGE_REQUIRED: 'Agent Instructions, Security Rules' }))
-  if (custom.stage !== 'knowledge') throw new Error('expected knowledge')
-  expect(custom.pages.filter((p) => p.role === 'required').map((p) => p.title)).toEqual(['Agent Instructions', 'Security Rules'])
-  expect(custom.config.required).toEqual(['Agent Instructions', 'Security Rules'])
+  // A folder missing a configured required page is not the rules: the run stops, naming the page.
+  await writeKnowledge(knowledge)
+  await expect(step({}, { KNOWLEDGE_PAGE: INDEX, KNOWLEDGE_REQUIRED: 'Agent Instructions, Security Rules' })).rejects.toThrow('Security Rules')
+  expect(knowledgeConfig({ KNOWLEDGE_PAGE: INDEX, KNOWLEDGE_REQUIRED: 'Agent Instructions, Security Rules' }).required).toEqual(['Agent Instructions', 'Security Rules'])
+  expect(knowledgeConfig({ KNOWLEDGE_PAGE: INDEX }).required).toEqual(DEFAULT_REQUIRED)
 
-  await writeKnowledge(knowledge, { topics: false })
-  const topics = pending(await step())
-  if (topics.stage !== 'knowledge') throw new Error('expected knowledge')
-  const routed = topics.pages.filter((p) => p.role === 'topic')
-  // The two pages in the routing table; the Slop Repo link outside the table is not a topic page.
+  // A topic page the folder lacks is listed, not required (F47); the two pages in the routing
+  // table are the topics, the Slop Repo link outside the table is not.
+  const bare = await fixture()
+  await writeKnowledge(bare.knowledge, { topics: false })
+  const state = await inspectKnowledge(bare.knowledge, knowledgeConfig(bare.env))
+  const routed = state.pages.filter((p) => p.role === 'topic')
   expect(routed.map((p) => p.url)).toEqual([url(10), url(11)])
   expect(routed.every((p) => !p.present)).toBe(true)
+  expect(staged(await bare.step()).stage).toBe('plan')
 })
 
 it('builds REQUIRED.md like load-knowledge, then writes a plan prompt that embeds the live bytes of the agent files', async () => {
@@ -163,16 +170,19 @@ it('refuses a knowledge folder that changed after the run started', async () => 
   await expect(step()).rejects.toThrow(/knowledge.*changed/i)
 })
 
-it('accepts a --guidelines snapshot instead of live Notion', async () => {
+it('accepts a --guidelines snapshot load-knowledge wrote instead of live Notion, and refuses any other file (F50)', async () => {
   const { step, dir, knowledge } = await fixture()
+  const plain = join(dir, 'plain.md')
+  await writeFile(plain, '<!-- Required reading -->\n# Agent Instructions\nTS-001.\n')
+  await expect(step({ guidelines: plain }, {})).rejects.toThrow(/load-knowledge/)
   const snapshot = join(dir, 'REQUIRED.md')
-  await writeFile(snapshot, '<!-- Required reading -->\n# Agent Instructions\nTS-001.\n')
-  const result = staged(await step({ guidelines: snapshot }))
+  await writeSnapshot(snapshot)
+  const result = staged(await step({ guidelines: snapshot }, {}))
   expect(result.stage).toBe('plan')
   expect(await readFile(join(knowledge, 'REQUIRED.md'), 'utf8')).toBe(await readFile(snapshot, 'utf8'))
 })
 
-it('gates a reviewed plan: incomplete is refused, drift is blocked', async () => {
+it('gates a reviewed plan: incomplete is refused, drift is refused as plan-drift', async () => {
   const { repo, git, env, pkg } = await fixture()
   const review = join(repo, 'specs/cart/plan.review')
   await mkdir(join(review, 'trace'), { recursive: true })
@@ -187,9 +197,10 @@ it('gates a reviewed plan: incomplete is refused, drift is blocked', async () =>
 
   await writeFile(join(review, 'trace/review.json'), JSON.stringify({ status: 'ready', problems: [], repoCommit: 'f'.repeat(40) }))
   await writeFile(join(repo, 'src/badge.ts'), 'export const badge = 1\n')
-  const blocked = await runLocal({ source: join(review, 'plan.reviewed.md') }, { packageDir: pkg, env })
-  expect(blocked).toMatchObject({ pending: false, status: 'blocked' })
-  expect(JSON.stringify(blocked)).toContain('src/badge.ts')
+  // Plan drift is an input that failed its gate: refused with reasonCode plan-drift, not blocked (spec Run statuses).
+  const drifted = await runLocal({ source: join(review, 'plan.reviewed.md') }, { packageDir: pkg, env })
+  expect(drifted).toMatchObject({ pending: false, status: 'refused', reasonCode: 'plan-drift' })
+  expect(JSON.stringify(drifted)).toContain('src/badge.ts')
 })
 
 it('runs the plan in waves: worker briefs from the procedure, schema checks with one retry, commits, verification and an export that records the rules', async () => {
@@ -297,7 +308,7 @@ it('runs the plan in waves: worker briefs from the procedure, schema checks with
   await writeFile(verify.tasks[0]!.output, JSON.stringify({ ...claimed, dependenciesAdded, notesRewritten, assumptions: [assumption] }))
 
   const done = await step()
-  expect(done).toMatchObject({ pending: false, status: 'complete' })
+  expect(done).toMatchObject({ pending: false, status: 'ready' })
   if (done.pending) return
   expect(done.verification).toMatchObject({ dependenciesAdded, notesRewritten, slopEntries: [], slopJustification: 'None: no bugs were found and fixed', assumptions: [assumption] })
   // The assumption is a decision the human can reverse: taken, ticked, with the other option open.
@@ -324,7 +335,10 @@ it('refuses to build on the default branch', async () => {
   const par = staged(await step())
   await writeFile(par.tasks[0]!.output, JSON.stringify({ waves: [{ lanes: [{ id: 'A', tasks: ['P1', 'P2', 'P3', 'P4', 'P5'], worker: false, writeScope: ['src/price.test.ts', 'src/badge.test.ts', 'src/price.ts', 'src/badge.ts'] }] }] }))
   await git('switch', '-q', '-c', 'main')
-  await expect(step()).rejects.toThrow(/default branch/)
+  // The default branch is refused before any build stage, as a run status, not a crash (F22).
+  const refused = await step()
+  expect(refused).toMatchObject({ pending: false, status: 'refused', export: null })
+  expect(refused.pending ? '' : refused.reason).toMatch(/default branch main/)
 })
 
 it('--finish exports what exists as incomplete, with the missing stages listed', async () => {
@@ -350,7 +364,7 @@ it('quotes procedure headings verbatim, on one line', async () => {
 describe('where a finished run writes its board trace', () => {
   it('is the run\'s work folder, not the exported trace file inside it', () => {
     const workDir = '/repo/.work/kit-8-x/plan.review'
-    expect(exportDirOf({ pending: false, status: 'complete', workDir, export: `${workDir}/trace/implementation-local.json`, missing: [] })).toBe(workDir)
+    expect(exportDirOf({ pending: false, status: 'ready', workDir, export: `${workDir}/trace/implementation-local.json`, missing: [] })).toBe(workDir)
   })
 
   it('is nothing for a run that exported nothing', () => {

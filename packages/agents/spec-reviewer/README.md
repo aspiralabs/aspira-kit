@@ -24,7 +24,7 @@ pnpm review \
   /absolute/spec.md /absolute/repository /absolute/REQUIRED.md /absolute/output
 ```
 
-Omit the output argument to write directly in `spec.reviewed/` beside the source spec. A supplied output directory is used directly. Reruns archive the previous report in `<output-directory>/trace/history/run-*/` before publishing the new one. Existing directories without a review trace are not replaced. The source spec is never edited. Exit 0 means ready; exit 1 means incomplete or needs-author. Ctrl-C aborts review calls and preserves already completed findings where possible.
+Omit the output argument to write directly in `spec.reviewed/` beside the source spec. A supplied output directory is used directly. Reruns archive the previous report in `<output-directory>/trace/history/run-*/` before publishing the new one. Existing directories without a review trace are not replaced. The source spec is never edited. The CLI exits by run status: exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author. Ctrl-C aborts review calls and preserves already completed findings where possible.
 
 For the eve interface, use the shared agent shell helper or:
 

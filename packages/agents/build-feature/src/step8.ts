@@ -1,4 +1,4 @@
-// Step 8 (F23-F26, F33), after a 'clean' code-analyzer result: commit the analyzer's changes on the
+// Step 8 (F23-F26, F33), after a ready code-analyzer result: commit the analyzer's changes on the
 // feature branch, push it through the guard, open a draft PR or reuse the open one, set the card's
 // PR property, and only then move the card to In Review: Implementation (BOARD-005 order).
 //
@@ -23,15 +23,17 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
+import { checkPr, PR_URL, prStep } from '@aspiralabs/agent-common/lib/pr-step'
+export { PR_URL } from '@aspiralabs/agent-common/lib/pr-step'
+import { tail } from '@aspiralabs/agent-common/lib/redact'
+import { ticketBranch } from '@aspiralabs/agent-common/lib/ticket-branch'
 import { addTaken, collectTakenDecisions } from '#src/decisions.ts'
 import type { Phase, PhaseContext, PhaseResult } from '#src/driver.ts'
 import { gateRecordOf } from '#src/gate.ts'
 import { renderPrBody } from '#src/pr-body.ts'
-import { tail } from '#src/redact.ts'
 import { STEP8_MOVE } from '#src/route.ts'
-import { ticketBranch } from '#src/worktree.ts'
 import type { Failure, Pending, RunState } from '#src/run-state.ts'
-import { GH_ARGS, GIT_ARGS, parseStatus, shown, system, type CommandResult, type System, type SystemOptions } from '#src/system.ts'
+import { GH_ARGS, GIT_ARGS, parseStatus, prChecks, shown, system, type CommandResult, type System, type SystemOptions } from '#src/system.ts'
 
 /** The branch every PR targets. */
 export const BASE_BRANCH = 'main'
@@ -211,7 +213,8 @@ async function withImplementorDecisions(context: PhaseContext, state: RunState):
 export async function writePrBody(context: PhaseContext, state: RunState): Promise<string> {
   const file = join(context.dir, 'pr-body.md')
   await mkdir(context.dir, { recursive: true })
-  await writeFile(file, await renderPrBody({ ticket: { id: context.id, title: context.card.title, url: context.card.url }, state, repo: context.repo }))
+  const app = context.aspira.app
+  await writeFile(file, await renderPrBody({ ticket: { id: context.id, title: context.card.title, url: context.card.url }, state, repo: context.repo, folder: context.folder, ...(app === undefined ? {} : { app }) }))
   return file
 }
 
@@ -226,16 +229,20 @@ export async function rewritePrBody(context: PhaseContext, state: RunState, sys:
   return { ok: true, value: next }
 }
 
-const PR_URL = /^https:\/\/\S+\/pull\/\d+$/
-
-/** Reuse the open PR whose head is the branch, or open a draft PR with the rendered body. */
+/** Reuse the open PR whose head is the branch, but only once the shared PR check (agent-common's
+ * checkPr, F24) passes it: `gh pr list --head` filters by branch name only, so a PR opened from
+ * someone's fork, carrying the ticket's own branch name, is never reused. */
 export async function openOrReusePr(context: PhaseContext, state: RunState, sys: System = system): Promise<Outcome<RunState>> {
   const options = optionsOf(context)
   const branch = featureBranch(context.id, context.card.title, context.card.type)
   const listed = await sys.ghPrList(options, branch)
   if (listed.code !== 0) return failed('gh pr list', shown('gh', GH_ARGS.prList(branch)), listed, 'the run could not look up an open PR for the branch')
   const open = listed.stdout.trim().split('\n').at(-1)?.trim() ?? ''
-  if (PR_URL.test(open)) return { ok: true, value: { ...state, step8: { ...state.step8, prUrl: open } } }
+  if (PR_URL.test(open)) {
+    const checked = await checkPr({ url: open, repo: context.repo, branch, env: context.env, ...(context.aspira.repository === undefined ? {} : { aspira: context.aspira.repository }) }, prChecks)
+    if (checked.kind === 'ok') return { ok: true, value: { ...state, step8: { ...state.step8, prUrl: open } } }
+    return refused('gh pr list', `\`${shown('gh', GH_ARGS.prList(branch))}\` found ${open}, but the shared PR check refused it: ${checked.message}`)
+  }
   const next = await withImplementorDecisions(context, state)
   const bodyFile = await writePrBody(context, next)
   const input = { base: BASE_BRANCH, head: branch, title: `${context.id}: ${context.card.title}`, bodyFile }
@@ -266,18 +273,27 @@ async function step8Next(context: PhaseContext, state: RunState, sys: System = s
   const pr = await openOrReusePr(context, pushed.value, sys)
   if (!pr.ok) return stopWith(pushed.value, pr)
   const url = pr.value.step8.prUrl!
-  if (context.card.pr === url) return moveAfter(context, { ...pr.value, step8: { ...pr.value.step8, prPropertySet: true } }, url)
-  return {
-    kind: 'stage',
-    state: { ...pr.value, step8: { ...pr.value.step8, prPropertySet: false } },
-    stage: 'set-pr',
-    body: {
-      url,
-      notion: [{ op: 'write', target: 'ticket' }],
-      instructions: `Set ${context.id}'s PR property on the Feature Board to ${url} (the PR property only), then write {"nonce", "done": true}, or {"nonce", "error"} when it fails, to the output file.`,
-    },
-    data: { url },
+  const branch = featureBranch(context.id, context.card.title, context.card.type)
+  // The set-pr/move decision comes from the shared helper (F25, F26): the first call stages the
+  // set, the move is requested only once ticket.md reads the PR property back (BOARD-005 order).
+  const decision = await prStep({ url, repo: context.repo, branch, folder: context.folder, ticket: { id: context.id, status: context.card.status, pr: context.card.pr }, env: context.env, ...(context.aspira.repository === undefined ? {} : { aspira: context.aspira.repository }) }, prChecks)
+  if (decision.kind === 'move') return moveAfter(context, { ...pr.value, step8: { ...pr.value.step8, prPropertySet: true } }, url)
+  if (decision.kind === 'ready') return { kind: 'done', state: pr.value }
+  if (decision.kind === 'set') {
+    return {
+      kind: 'stage',
+      state: { ...pr.value, step8: { ...pr.value.step8, prPropertySet: false } },
+      stage: 'set-pr',
+      body: {
+        url,
+        notion: [{ op: 'write', target: 'ticket' }],
+        instructions: `Set ${context.id}'s PR property on the Feature Board to ${url} (the PR property only), then write {"nonce", "done": true}, or {"nonce", "error"} when it fails, to the output file.`,
+      },
+      data: { url },
+    }
   }
+  // The shared PR check's own status (refused, blocked or incomplete) is the stop's (F20).
+  return { kind: 'stop', state: pr.value, message: decision.message, failure: { action: 'pr-step', message: decision.message }, reason: { kind: 'step', step: 'step8', status: decision.kind } }
 }
 
 const setPrAnswer = z.union([z.object({ nonce: z.string(), done: z.literal(true) }), z.object({ nonce: z.string(), error: z.string().min(1) })])

@@ -50,7 +50,7 @@ configured_app() {
 # walking up from the working directory, then from this script's location), then this script's own package. $ASPIRA_KIT is never consulted.
 # Sets AGENT, AGENT_SOURCE (env | installed | package), AGENT_VERSION and PROJECT.
 resolve_agent() {
-  local here dir app_dir own
+  local here dir app_dir own skill_kit_version agents_version
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   AGENT="" AGENT_SOURCE="" PROJECT=""
   for dir in "${GROOMER_AGENT_DIR:-}"; do
@@ -87,6 +87,21 @@ resolve_agent() {
     *:*/node_modules/*) ;;
     *) echo "$NAME: running kit source at $AGENT, not the installed $PKG" >&2 ;;
   esac
+  # kit init pins the installed skill to the @aspiralabs/agents version it was copied from
+  # (.kit-version, packages/kit/src/skills.ts). An installed launcher whose pin no longer matches
+  # what is installed is blocked before anything starts; running from source (env or package) only
+  # warns, since kit development deliberately runs ahead of (or without) an installed pin (F8).
+  if [ -f "$here/../.kit-version" ]; then
+    skill_kit_version=$(tr -d '[:space:]' < "$here/../.kit-version")
+    agents_version=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$PROJECT/node_modules/@aspiralabs/agents/package.json" 2>/dev/null | head -n 1)
+    if [ -n "$agents_version" ] && [ "$skill_kit_version" != "$agents_version" ]; then
+      if [ "$AGENT_SOURCE" = installed ]; then
+        die "blocked: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; run kit init to update the skill"
+      else
+        echo "$NAME: mismatch: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; continuing from $AGENT_SOURCE" >&2
+      fi
+    fi
+  fi
 }
 agent_line() { printf 'agent: %s@%s (%s, %s)\n' "$PKG" "$AGENT_VERSION" "$AGENT_SOURCE" "$AGENT"; }
 json_string() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -123,6 +138,27 @@ agent_node() {  # agent_node SCRIPT ARG...: run an agent script with node, from 
   (cd "$AGENT" && exec node "${NODE_ARGS[@]}" "$AGENT/$script" "$@")
 }
 eve_bin() { find_up_module "$AGENT" eve/bin/eve.js || die "eve is not installed beside $AGENT; reinstall @aspiralabs/agents"; }
+# Prints "Run status: <status>" and, when the record carries one, its reason line, for the run
+# record at RECORD_FILE (RUN's saved repo and agent.json/node-args give ticket.ts record what it
+# needs): scripts/ticket.ts record maps the record's status word (old or new alike) onto one of the
+# five run statuses and this prints the record's own reason text first (F5, F7). Sets REPORT_EXIT
+# to the status's exit code (run-status.ts's exitCodeFor: 0 ready, 1 incomplete or blocked, 3 refused,
+# 5 needs-author), which the caller reports as its own.
+report_record() {
+  local record_file=$1 out status reason rc=0
+  resolve_agent
+  node_args
+  out=$( (cd "$AGENT" && node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" record --repo "$PROJECT" --file "$record_file") ) || rc=$?
+  status=$(printf '%s
+' "$out" | sed -n 's/^status=//p' | head -n 1)
+  [ -n "$status" ] || status=incomplete
+  reason=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).reason || '' } catch { '' }" "$record_file" 2>/dev/null)
+  printf 'Run status: %s
+' "$status"
+  [ -z "$reason" ] || printf '%s
+' "$reason"
+  REPORT_EXIT=$rc
+}
 absolute_file() {
   [ -f "$1" ] || die "no such file: $1"
   echo "$(cd "$(dirname "$1")" && pwd -P)/$(basename "$1")"
@@ -209,6 +245,7 @@ cmd_start() {
   run=$(mktemp -d "${TMPDIR:-/tmp}/groomer.XXXXXX")
   prompt="Groom the Feature Board ticket $T_ID in the working folder $folder for the local repository $REPO. Use load-knowledge for the required guidelines, then call groom once with the folder, the repository and the guidelines path. The ticket's board moves, the Grooming Decisions page and the Idea summary are written by the launcher around this run; do not move the card or write Notion yourself. Report the run status, the questions of the round, $OUT/trace/groom.json and $OUT/run-analysis.md."
   printf '%s\n' "$OUT" > "$run/output"
+  printf '%s\n' "$REPO" > "$run/repo"
   printf '%s\n' "$AGENT/agent/instructions.md" > "$run/instructions"
   printf '%s\n' "${NODE_ARGS[@]}" > "$run/node-args"
   agent_json > "$run/agent.json"
@@ -231,9 +268,10 @@ printf '%s\n' "$code" > "$RUN/exit"
 # The board step after the run: the ticks merged, Grooming Decisions replaced, on a confirm the Idea
 # summary and the Shortlist move. The run status is the one groom.json records; the finish step is the
 # one writer of the final word, which it prints first as run-status=<word>.
-status=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).status ?? 'incomplete' } catch { 'incomplete' }" "$OUTPUT/trace/groom.json" 2>/dev/null || echo incomplete)
-case $status in needs-author|confirmed|stopped) outcome=--ok ;; *) outcome=--failed ;; esac
-finish=$(node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" "$outcome" --run-status "$status" --export "$OUTPUT" 2>&1)
+record_out=$(node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" record --repo "$REPO" --file "$OUTPUT/trace/groom.json" 2>&1) || true
+status=$(printf '%s\n' "$record_out" | sed -n 's/^status=//p' | head -n 1)
+[ -n "$status" ] || status=incomplete
+finish=$(node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" --run-status "$status" --export "$OUTPUT" 2>&1)
 printf '%s\n' "$finish" >> "$RUN/log"
 recorded=$(printf '%s\n' "$finish" | sed -n 's/^run-status=//p' | head -n 1)
 printf '%s\n' "${recorded:-$status}" > "$RUN/status"
@@ -287,14 +325,33 @@ cmd_status() {
     printf 'running (%ss)\nlog: %s/log\n' "$elapsed" "$run"
     [ ! -f "$run/agent" ] || cat "$run/agent"
     [ ! -f "$run/log" ] || tail -n 3 "$run/log"
-  else
-    printf 'finished (%ss), exit %s\noutput: %s\n' "$elapsed" "$(cat "$run/exit")" "$output"
-    [ ! -f "$run/agent" ] || cat "$run/agent"
-    tail -n 40 "$run/log"
-    [ ! -f "$run/instructions" ] || printf 'Instructions: %s\n' "$(cat "$run/instructions")"
+    exit 75
   fi
+  report_record "$output/trace/groom.json"
+  printf 'finished (%ss), exit %s\noutput: %s\n' "$elapsed" "$(cat "$run/exit")" "$output"
+  [ ! -f "$run/agent" ] || cat "$run/agent"
+  [ ! -f "$run/log" ] || tail -n 40 "$run/log"
+  [ ! -f "$run/instructions" ] || printf 'Instructions: %s\n' "$(cat "$run/instructions")"
   groom_lines "$output"
   printf 'Decisions: %s/trace/decisions.md\nRun analysis: %s/run-analysis.md\n' "$output" "$output"
+  exit "$REPORT_EXIT"
+}
+cmd_load_knowledge() {
+  local out=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --out) [ $# -ge 2 ] || die "--out needs a directory"; out=$2; shift 2 ;;
+      -*) die "unknown option: $1" ;;
+      *) die "unknown argument: $1" ;;
+    esac
+  done
+  [ -n "$out" ] || die "usage: groomer.sh load-knowledge --out DIR"
+  resolve_agent
+  node_args
+  command -v node >/dev/null || die "node is not installed"
+  local common
+  common=$(find_up_module "$AGENT" @aspiralabs/agent-common) || die "agent-common is not installed beside $AGENT; reinstall @aspiralabs/agents"
+  node "${NODE_ARGS[@]}" "$common/scripts/load-knowledge.ts" --out "$out"
 }
 cmd_wait() {
   local run=${1:?usage: groomer.sh wait RUN [--max SECONDS]} max=30 deadline
@@ -310,5 +367,6 @@ case ${1:-} in
   local) shift; cmd_local "$@" ;;
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
-  *) die "usage: groomer.sh start [TICKET] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] | status RUN | wait RUN [--max SECONDS] | local [TICKET] [--force-pull] [--force-run] [--verify] [--guidelines FILE] [--repo DIR] [--finish] [--take-recommended]" ;;
+  load-knowledge) shift; cmd_load_knowledge "$@" ;;
+  *) die "usage: groomer.sh start [TICKET] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] | status RUN | wait RUN [--max SECONDS] | local [TICKET] [--force-pull] [--force-run] [--verify] [--guidelines FILE] [--repo DIR] [--finish] [--take-recommended] | load-knowledge --out DIR" ;;
 esac

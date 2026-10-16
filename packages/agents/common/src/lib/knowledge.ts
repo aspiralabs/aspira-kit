@@ -130,9 +130,14 @@ export function resolveRequired(required: string[], pages: LoadedPage[]): { foun
   return { found, missing }
 }
 
-/** REQUIRED.md: the required pages concatenated in order, each under its title with its source, so one `cat` is the whole required reading. */
-export function renderRequired(pages: LoadedPage[], fetchedAt: string): string {
-  const head = `<!-- Required reading · ${pages.length} page${pages.length === 1 ? '' : 's'} · fetched ${fetchedAt} -->
+/**
+ * REQUIRED.md: the required pages concatenated in order, each under its title with its source, so
+ * one `cat` is the whole required reading. `header`, when given (knowledge-snapshot.ts's
+ * renderProvenance output), replaces the default one-line comment: the provenance a verifier can
+ * later check this file against.
+ */
+export function renderRequired(pages: LoadedPage[], fetchedAt: string, header?: string): string {
+  const head = `${header ?? `<!-- Required reading · ${pages.length} page${pages.length === 1 ? '' : 's'} · fetched ${fetchedAt} -->`}
 
 Every agent reads this file in full before its first finding. It is the pages the org marks as required, in order. Rules keep their ids; cite them by id.
 `

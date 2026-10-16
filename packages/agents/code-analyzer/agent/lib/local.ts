@@ -10,14 +10,20 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { KNOWLEDGE_ENV, pageIdFrom } from '@aspiralabs/agent-common/lib/knowledge'
+import { parseProvenance, verifyKnowledgeDir, verifySnapshot } from '@aspiralabs/agent-common/lib/knowledge-snapshot'
+import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
+import { notionToken } from '@aspiralabs/agent-common/lib/notion-token'
+import { REASON_CODES, readRunStatus, type ReasonCode } from '@aspiralabs/agent-common/lib/run-status'
+import { KnowledgePrerequisiteError } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { z } from 'zod'
 import { detect, type Analyzer, type Detection } from './analyzers.ts'
 import { batch as batchOf, sameSet, type Batch, type Diagnostic } from './diagnostics.ts'
 import { hostExecutor, type Executor } from './executor.ts'
 import type { Knowledge } from './fixer.ts'
-import { checkGuidelinesFile, checkKnowledgeDir, fixKnowledge, knowledgeConfig, type LoadedKnowledge } from './knowledge.ts'
+import { checkGuidelinesFile, checkKnowledgeDir, fixKnowledge, knowledgeConfig, KnowledgeRequired, type KnowledgeConfig, type KnowledgePlan, type LoadedKnowledge } from './knowledge.ts'
 import { changeRejection, type Rejection } from './guards.ts'
-import { finalStatus, runAnalyzers, runAutofix, STOP, targetsOf, type LoopResult, type Round } from './loop.ts'
+import { finalStatus, runAnalyzers, runAutofix, STOP, targetsOf, type LoopResult, type Round, type Status } from './loop.ts'
 import { renderReport } from './report.ts'
 import { ignoreOutput, prepareToolchain, recordGuidelines, repositoryInstructions, runSetup, setting } from './runner.ts'
 import { parseSource } from './source.ts'
@@ -29,6 +35,79 @@ const sha256 = (text: string): string => createHash('sha256').update(text).diges
 
 /** Re-exported for the CLI and tests: the guidelines module is shared with the default path. */
 export { KnowledgeRequired, knowledgeConfig, type KnowledgeConfig, type KnowledgePlan } from './knowledge.ts'
+
+type Fetch = (url: string, init?: RequestInit) => Promise<Response>
+
+/**
+ * Thrown when a run has no --knowledge, no --guidelines, and no NOTION_TOKEN to fetch with:
+ * handleRunError (agent-common/lib/ticket-driver) reports this as blocked, exit 1 -- never the
+ * pending session knowledge stage KnowledgeRequired used to print. Carries its own `pending`/
+ * `status`, so a caller that reads the raw thrown error (rather than going through
+ * handleRunError) still sees the same shape a resolved blocked result would have.
+ */
+export class KnowledgeBlocked extends KnowledgePrerequisiteError {
+  readonly pending = false as const
+  readonly status = 'blocked' as const
+}
+
+/** `./knowledge.ts`'s own planFor, kept private there; duplicated for the fresh-knowledge paths below. */
+const planFor = (config: KnowledgeConfig, dir: string): KnowledgePlan => ({ stage: 'knowledge', ...config, dir, files: { required: join(dir, 'REQUIRED.md'), index: join(dir, 'INDEX.md') } })
+
+/** The provenance header's own rootId, when a file carries one; '' when it does not (verify then fails on the header itself, not the root check). */
+async function headerRootId(path: string): Promise<string> {
+  const text = await readFile(path, 'utf8').catch(() => '')
+  return parseProvenance(text)?.rootId ?? ''
+}
+
+/** The root a verify call is held to: the agent's configured KNOWLEDGE_PAGE when there is one, else the file's own header (a no-op root check; the integrity/location/trace checks still apply). */
+async function expectedRootFor(config: KnowledgeConfig, requiredPath: string): Promise<string> {
+  const configured = config.page === null ? undefined : pageIdFrom(config.page)
+  return configured ?? (await headerRootId(requiredPath))
+}
+
+/**
+ * The guidelines for a run that has none saved yet (the first call): a given --knowledge/--guidelines
+ * is checked against its provenance header (verifyKnowledgeDir/verifySnapshot) before the existing
+ * structural checks run, refusing (KnowledgeRequired, naming the load-knowledge command) a tampered
+ * or header-less (pre-shared-walk) copy; with neither given, this run fetches the pages itself
+ * through the one shared walk (knowledge-walk.ts) straight into <work>/knowledge, needing a
+ * NOTION_TOKEN and KNOWLEDGE_PAGE -- missing either throws KnowledgeBlocked, not a pending stage.
+ * The token is the project's (F52): the environment, then the analyzed app's .env.local, then the
+ * repository root's; never the agent package's own env files, which only configure the page list.
+ */
+async function resolveFreshKnowledge(input: LocalInput, config: KnowledgeConfig, work: string, project: { root: string; app: string }, deps: LocalDeps): Promise<LoadedKnowledge> {
+  const hint = `delete ${join(work, 'knowledge')} so this run rebuilds it from Notion, or pass --knowledge DIR (a load-knowledge folder) or --guidelines FILE (a REQUIRED.md snapshot).`
+  if (input.knowledge !== undefined) {
+    const dir = resolve(input.knowledge)
+    const requiredPath = join(dir, 'REQUIRED.md')
+    const verified = await verifyKnowledgeDir(dir, { expectedRootId: await expectedRootFor(config, requiredPath) })
+    if (!verified.ok) throw new KnowledgeRequired(`${verified.reason} ${verified.hint}`, planFor(config, dir))
+    return checkKnowledgeDir(dir, config, hint)
+  }
+  if (input.guidelines !== undefined) {
+    const file = resolve(input.guidelines)
+    const verified = await verifySnapshot(file, { expectedRootId: await expectedRootFor(config, file) })
+    if (!verified.ok) throw new KnowledgeRequired(`${verified.reason} ${verified.hint}`, planFor(config, dirname(file)))
+    return checkGuidelinesFile(file, config)
+  }
+  // Neither given: the default <work>/knowledge. Already there (a run that pre-populated it some
+  // other way) is trusted structurally, same as before P27 -- the provenance check above is only
+  // for a folder the caller explicitly named. Missing is this run's own job to fetch.
+  const dir = join(work, 'knowledge')
+  const already = (await readFile(join(dir, 'REQUIRED.md'), 'utf8').catch(() => null)) !== null
+  if (already) return checkKnowledgeDir(dir, config, hint)
+  const resolved = await notionToken({ env: deps.env ?? process.env, projectRoot: project.root, appDir: project.app })
+  if (resolved?.token === undefined || config.page === null) {
+    const where = [
+      resolved?.token === undefined && `${KNOWLEDGE_ENV.token} is not set in the environment, ${join(project.app, '.env.local')} or ${join(project.root, '.env.local')}`,
+      config.page === null && `${KNOWLEDGE_ENV.page} is not set in the agent's env (../.env.local, .env.local or .env.development.local next to its package)`,
+    ].filter(Boolean).join('; ')
+    throw new KnowledgeBlocked(`The engineering guidelines are required and none were given: ${where}. Set them, or ${hint}`)
+  }
+  const walk = await walkKnowledge({ token: resolved.token, page: config.page, required: config.required, ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.api ? { api: deps.api } : {}) })
+  await writeKnowledgeFolder(dir, walk)
+  return { ...(await checkKnowledgeDir(dir, config, hint)), source: 'notion' }
+}
 
 // ---------------------------------------------------------------------------------------------
 // The fixer, loaded from the agent's own files on every call.
@@ -82,6 +161,8 @@ const stateSchema = z.object({
   outputDir: z.string(),
   ignoreOutput: z.boolean(),
   knowledge: z.object({ source: z.enum(['notion', 'knowledge', 'guidelines']), dir: z.string().nullable(), requiredFile: z.string(), fingerprint: z.string(), files: z.array(z.string()) }),
+  // Absent on a pre-upgrade state.json (F21): a run resumed from before this field existed has no ticket.
+  ticket: z.string().nullable().default(null),
   maxRounds: z.number(),
   fixWarnings: z.boolean(),
   noFix: z.boolean(),
@@ -101,7 +182,10 @@ const stateSchema = z.object({
   missing: z.array(z.object({ id: z.string(), reason: z.string() })),
   rejections: z.record(z.string(), z.array(z.string())),
   pending: z.object({ round: z.number(), tasks: z.array(taskSchema) }).nullable(),
-  stop: z.object({ status: z.enum(['clean', 'partial', 'nothing-detected', 'failed']), reason: z.string() }).nullable(),
+  // The status is a bare string, not the strict new-words enum, so a pre-upgrade state.json (one of
+  // run-status.ts's old per-skill words) still parses (F7); readRunStatus maps it onto the shared
+  // status and reason code at export. reasonCode is absent on such a state.
+  stop: z.object({ status: z.string(), reason: z.string(), reasonCode: z.enum(REASON_CODES).nullable().optional() }).nullable(),
 })
 type State = z.infer<typeof stateSchema>
 
@@ -118,6 +202,8 @@ export type LocalInput = {
   knowledge?: string
   /** A REQUIRED.md snapshot instead of a knowledge folder. Fixed by the first call. */
   guidelines?: string
+  /** The ticket this run is for, recorded in the export (F21); null for a --no-ticket run. Fixed by the first call. */
+  ticket?: string | null
   /** Round cap. Default STATIC_ANALYSIS_MAX_ROUNDS, else 6, as the agent; fixed by the first call. */
   maxRounds?: number
   /** Also fix warning-severity diagnostics. Default STATIC_ANALYSIS_WARNINGS=fix, as the agent. */
@@ -128,8 +214,8 @@ export type LocalInput = {
   finish?: boolean
 }
 
-/** Seams for tests: the agent package the prompts and config are read from, and the env on top of its env files. */
-export type LocalDeps = { agentDir?: string; env?: NodeJS.ProcessEnv; progress?: (message: string) => void }
+/** Seams for tests: the agent package the prompts and config are read from, the env on top of its env files, and the knowledge walk's own fetch/API base (never read outside tests). */
+export type LocalDeps = { agentDir?: string; env?: NodeJS.ProcessEnv; progress?: (message: string) => void; fetch?: Fetch; api?: string }
 
 /** One batch for the session: run the prompt file as a subagent, which writes its JSON to `output`. */
 export type LocalTask = { id: string; prompt: string; output: string; files: string[]; diagnostics: number; error?: string; retry?: boolean }
@@ -153,6 +239,12 @@ export type LocalDone = {
   pending: false
   status: LoopResult['status']
   reason: string
+  /** Which sub-case of the status this is (F1); 'no-analyzers' for a repository with nothing to check. */
+  reasonCode: ReasonCode | null
+  /** The ticket this run was for, or null for a --no-ticket run. */
+  ticket: string | null
+  /** The commit the export was taken at, or null when it could not be read. */
+  head: string | null
   dir: string
   root: string
   analyzers: string[]
@@ -203,10 +295,10 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
 
   // No step runs without the guidelines, and none runs under different ones than the first.
   const config = await knowledgeConfig(agentDir, deps.env ?? process.env)
-  const hint = `fetch the pages in the knowledge stage into ${join(work, 'knowledge')}, or pass --knowledge DIR (a load-knowledge folder) or --guidelines FILE (a REQUIRED.md snapshot).`
+  const hint = `delete ${join(work, 'knowledge')} so this run rebuilds it from Notion, or pass --knowledge DIR (a load-knowledge folder) or --guidelines FILE (a REQUIRED.md snapshot).`
   const knowledge = saved !== null
     ? saved.knowledge.source === 'guidelines' ? await checkGuidelinesFile(saved.knowledge.requiredFile, config) : await checkKnowledgeDir(saved.knowledge.dir ?? join(work, 'knowledge'), config, hint)
-    : input.guidelines !== undefined ? await checkGuidelinesFile(resolve(input.guidelines), config) : await checkKnowledgeDir(resolve(input.knowledge ?? join(work, 'knowledge')), config, hint)
+    : await resolveFreshKnowledge(input, config, work, { root: source.gitRoot, app: source.root }, deps)
   if (saved !== null && knowledge.fingerprint !== saved.knowledge.fingerprint) throw new Error(`The engineering guidelines in ${knowledge.dir ?? knowledge.requiredFile} changed since this run started. Restore them, or delete ${work} to start over.`)
 
   const fixer = await loadFixer(agentDir)
@@ -235,6 +327,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       outputDir,
       ignoreOutput: ignore,
       knowledge,
+      ticket: input.ticket ?? null,
       maxRounds: setting(input.maxRounds, 'STATIC_ANALYSIS_MAX_ROUNDS', 6),
       fixWarnings: input.fixWarnings ?? process.env.STATIC_ANALYSIS_WARNINGS === 'fix',
       noFix,
@@ -256,14 +349,14 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       pending: null,
       stop: null,
     }
-    if (!ready.some((a) => a.check)) state.stop = { status: 'nothing-detected', reason: STOP.none }
+    if (!ready.some((a) => a.check)) state.stop = { status: 'ready', reason: STOP.none, reasonCode: 'no-analyzers' }
     else {
       const initial = await runAnalyzers(executor, ready, options)
       state.problems.push(...initial.runs.flatMap((run) => (run.problem ? [run.problem] : [])))
-      if (initial.runs.length && initial.runs.every((run) => run.problem)) state.stop = { status: 'failed', reason: STOP.allFailed }
+      if (initial.runs.length && initial.runs.every((run) => run.problem)) state.stop = { status: 'incomplete', reason: STOP.allFailed, reasonCode: null }
       state.initial = initial.diagnostics
       state.current = initial.diagnostics
-      if (noFix && state.stop === null) state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), state.problems), reason: 'check only (--no-fix): no auto-fix or model fix ran' }
+      if (noFix && state.stop === null) state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), state.problems), reason: 'check only (--no-fix): no auto-fix or model fix ran', reasonCode: null }
     }
     state.prepareMs = Date.now() - started
     await mkdir(join(work, 'outputs'), { recursive: true })
@@ -285,14 +378,14 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       const final = await runAnalyzers(executor, analyzers, options)
       state.problems.push(...final.runs.flatMap((run) => (run.problem ? [run.problem] : [])))
       state.current = final.diagnostics
-      state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), unique(state.problems)), reason: input.finish === true ? 'finished early (--finish)' : STOP.roundCap(state.maxRounds) }
+      state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), unique(state.problems)), reason: input.finish === true ? 'finished early (--finish)' : STOP.roundCap(state.maxRounds), reasonCode: null }
     }
   }
 
   while (state.stop === null) {
     const round = state.rounds.length + 1
     if (input.finish === true) {
-      state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), unique(state.problems)), reason: 'finished early (--finish)' }
+      state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), unique(state.problems)), reason: 'finished early (--finish)', reasonCode: null }
       break
     }
     const roundStarted = Date.now()
@@ -307,8 +400,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     record.targets = targets.length
     record.ms = Date.now() - roundStarted
     const status = () => finalStatus(targets, unique(state.problems))
-    if (!targets.length) { state.stop = { status: status(), reason: STOP.clean }; break }
-    if (state.previous && sameSet(targets, state.previous)) { state.stop = { status: status(), reason: STOP.noProgress }; break }
+    if (!targets.length) { state.stop = { status: status(), reason: STOP.clean, reasonCode: null }; break }
+    if (state.previous && sameSet(targets, state.previous)) { state.stop = { status: status(), reason: STOP.noProgress, reasonCode: null }; break }
     state.previous = targets
     const batches = batchOf(targets)
     record.batches = batches.length
@@ -318,10 +411,22 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     return pendingResult(state, work, agentDir, tasks)
   }
 
-  return exportRun(state, work, agentDir, fixer, detection, analyzers)
+  const headResult = await executor.run('git rev-parse HEAD', { timeoutMs: 30_000 }).catch(() => null)
+  const head = headResult && headResult.exitCode === 0 ? headResult.stdout.trim() : null
+  return exportRun(state, work, agentDir, fixer, detection, analyzers, head)
 }
 
 const unique = (items: string[]) => [...new Set(items)]
+
+/** `state.stop`, read as the shared status and reason code: readRunStatus maps a pre-upgrade
+ * state's old word onto both; a reasonCode already recorded by this version wins over the map's
+ * (which is always null for the new words themselves, since readRunStatus matches those first). */
+function resolveStop(stop: State['stop']): { status: Status; reason: string; reasonCode: ReasonCode | null } {
+  const { status: word, reason, reasonCode } = stop ?? { status: 'incomplete', reason: 'no stop reason recorded', reasonCode: null }
+  const mapped = readRunStatus(word)
+  const status: Status = mapped?.status === 'ready' ? 'ready' : 'incomplete'
+  return { status, reason, reasonCode: reasonCode !== undefined ? reasonCode : (mapped?.reasonCode ?? null) }
+}
 
 function pendingResult(state: State, work: string, agentDir: string, tasks: LocalTask[]): LocalPending {
   return {
@@ -497,12 +602,13 @@ async function collectFixStage(state: State, executor: Executor, work: string, f
   return []
 }
 
-async function exportRun(state: State, work: string, agentDir: string, fixer: FixerModule, detection: Detection, analyzers: Analyzer[]): Promise<LocalDone> {
-  const stop = state.stop ?? { status: 'partial' as const, reason: 'stopped' }
+async function exportRun(state: State, work: string, agentDir: string, fixer: FixerModule, detection: Detection, analyzers: Analyzer[], head: string | null): Promise<LocalDone> {
+  const stop = resolveStop(state.stop)
   const totalMs = Date.now() - Date.parse(state.startedAt)
   const result: LoopResult = {
     status: stop.status,
     reason: stop.reason,
+    reasonCode: stop.reasonCode,
     rounds: state.rounds,
     initial: state.initial,
     remaining: state.current,
@@ -525,8 +631,8 @@ async function exportRun(state: State, work: string, agentDir: string, fixer: Fi
   const knowledge = { path: state.knowledge.dir ?? state.knowledge.requiredFile, source: state.knowledge.source, files: state.knowledge.files, fingerprint: state.knowledge.fingerprint }
   const files: Record<string, string> = {
     'report.md': report,
-    'diagnostics.json': JSON.stringify({ status: result.status, remaining: result.remaining, initial: result.initial }, null, 2),
-    'rounds.json': JSON.stringify({ mode: 'local', status: result.status, reason: result.reason, rounds: result.rounds, problems: result.problems, rejected: result.rejected, editedFiles: result.editedFiles, missing: state.missing, detection: { ...shown, analyzers: analyzers.map(({ parse: _parse, ...a }) => a) }, unavailable: state.unavailable, timing, remote: null, knowledge }, null, 2),
+    'diagnostics.json': JSON.stringify({ status: result.status, reason: result.reason, reasonCode: result.reasonCode, ticket: state.ticket, head, remaining: result.remaining, initial: result.initial }, null, 2),
+    'rounds.json': JSON.stringify({ mode: 'local', status: result.status, reason: result.reason, reasonCode: result.reasonCode, ticket: state.ticket, head, rounds: result.rounds, problems: result.problems, rejected: result.rejected, editedFiles: result.editedFiles, missing: state.missing, detection: { ...shown, analyzers: analyzers.map(({ parse: _parse, ...a }) => a) }, unavailable: state.unavailable, timing, remote: null, knowledge }, null, 2),
     'usage.json': JSON.stringify({ scope: 'This run used --local: every fix ran as a subagent of a Claude Code session, on its model and usage. No model call went through the AI Gateway, so there are no turns to itemize.', model: 'Claude Code session (--local)', turns: [] }, null, 2),
     'calls.json': JSON.stringify({ mode: 'local', system: fixer.systemPrompt, model: 'Claude Code session (--local)', rejections: state.rejections, calls: state.calls }, null, 2),
   }
@@ -541,6 +647,9 @@ async function exportRun(state: State, work: string, agentDir: string, fixer: Fi
     pending: false,
     status: result.status,
     reason: result.reason,
+    reasonCode: result.reasonCode,
+    ticket: state.ticket,
+    head,
     dir,
     root: state.root,
     analyzers: analyzers.map((a) => a.id),

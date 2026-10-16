@@ -2,6 +2,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
+import { writeSnapshot } from './snapshot.test-helper.ts'
 
 // --local copies nothing: every prompt file is assembled when the step runs, from the agent's own
 // prompt and schema modules (writer.ts, and spec-reviewer's review.ts for the review half).
@@ -18,7 +19,7 @@ async function firstPrompt(): Promise<{ text: string; writerSystemPrompt: string
   const ideaPath = join(dir, 'idea.md')
   const guidelinesPath = join(dir, 'rules.md')
   await writeFile(ideaPath, 'Let people save items.')
-  await writeFile(guidelinesPath, 'REV-001 Check the spec')
+  await writeSnapshot(guidelinesPath)
   const { runLocal } = await import('./local.ts')
   const { writerSystemPrompt, explorePrompt } = await import('./writer.ts')
   const result = await runLocal({ ideaPath, guidelinesPath, repoPath: dir, uiRequired: false })

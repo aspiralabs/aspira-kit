@@ -85,7 +85,9 @@ describe('a groomer decision the agent took to keep going (T5)', () => {
     startedAt: '2026-10-11T09:00:00.000Z',
     open: 0,
     page: {},
-    status: 'confirmed',
+    status: 'ready',
+    reasonCode: null,
+    reason: null,
   }
   const summary = [
     'Groomed with /aspira-groomer on 2026-10-11',

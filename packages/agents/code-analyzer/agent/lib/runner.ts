@@ -23,6 +23,8 @@ export type RunInput = {
   knowledge?: string
   /** A REQUIRED.md snapshot instead of loading from Notion. */
   guidelines?: string
+  /** The ticket this run was for, recorded in rounds.json (F21). Null (the default) for a run with no ticket. */
+  ticket?: string
 }
 export type RunDeps = {
   getSandbox?: () => Promise<SandboxSession>
@@ -153,6 +155,10 @@ export async function runStaticAnalysis(input: RunInput, deps: RunDeps = {}) {
     if (remote.commit) patch = (await executor.run(`git format-patch --stdout HEAD~1`, { timeoutMs: 60_000 })).stdout
   }
   const timing = { prepareMs, loopMs, publishMs: 0, totalMs: 0 }
+  // The ticket this run was for, and the commit the export was taken at (null when HEAD cannot be read, e.g. no git repository).
+  const ticket = input.ticket ?? null
+  const headResult = await executor.run('git rev-parse HEAD', { timeoutMs: 30_000 }).catch(() => null)
+  const head = headResult && headResult.exitCode === 0 ? headResult.stdout.trim() : null
   const write = async () => {
     timing.publishMs = Date.now() - publishStarted
     timing.totalMs = Date.now() - started
@@ -161,7 +167,7 @@ export async function runStaticAnalysis(input: RunInput, deps: RunDeps = {}) {
     const files: Record<string, string> = {
       'report.md': report,
       'diagnostics.json': JSON.stringify({ status: result.status, remaining: result.remaining, initial: result.initial }, null, 2),
-      'rounds.json': JSON.stringify({ status: result.status, reason: result.reason, rounds: result.rounds, problems: result.problems, rejected: result.rejected, editedFiles: result.editedFiles, detection: { ...detection, analyzers: detection.analyzers.map(({ parse: _p, ...a }) => a) }, unavailable: toolchain.unavailable, timing, remote, knowledge }, null, 2),
+      'rounds.json': JSON.stringify({ status: result.status, reason: result.reason, reasonCode: result.reasonCode, ticket, head, rounds: result.rounds, problems: result.problems, rejected: result.rejected, editedFiles: result.editedFiles, detection: { ...detection, analyzers: detection.analyzers.map(({ parse: _p, ...a }) => a) }, unavailable: toolchain.unavailable, timing, remote, knowledge }, null, 2),
       'usage.json': JSON.stringify({ scope: 'Model turns of the fix loop only. Aborted turns may have unreported provider usage.', model, turns: ledger.turns }, null, 2),
       'calls.json': JSON.stringify({ system: 'see fixer.ts systemPrompt', model, calls: calls.map((c) => ({ ...c, output: c.output && redactOutput(c.output) })) }, null, 2),
     }
@@ -173,7 +179,7 @@ export async function runStaticAnalysis(input: RunInput, deps: RunDeps = {}) {
   // A Notion walk is the run's own temp folder; guidelines/ in the output keeps the copy.
   if (knowledge.source === 'notion' && knowledge.dir !== null) await rm(knowledge.dir, { recursive: true, force: true })
   if (source.kind === 'local') await ignoreOutput(source.root)
-  return { status: result.status, reason: result.reason, dir: outputDir, label, rounds: result.rounds.length, initial: result.initial.length, remaining: result.remaining.length, editedFiles: result.editedFiles, rejected: result.rejected.length, problems: result.problems.map((p) => p.split('\n')[0]!), unavailable: toolchain.unavailable, reportedCostUsd: ledger.costUsd(), totalMs: Date.now() - started, remote }
+  return { status: result.status, reason: result.reason, reasonCode: result.reasonCode, ticket, head, dir: outputDir, label, rounds: result.rounds.length, initial: result.initial.length, remaining: result.remaining.length, editedFiles: result.editedFiles, rejected: result.rejected.length, problems: result.problems.map((p) => p.split('\n')[0]!), unavailable: toolchain.unavailable, reportedCostUsd: ledger.costUsd(), totalMs: Date.now() - started, remote }
 }
 
 /** The export records the rules the run was held to, in `guidelines/`. */

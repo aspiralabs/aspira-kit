@@ -260,18 +260,21 @@ describe('kit init and kit doctor: the .worktrees/ and .env.local ignore lines',
     expect(git(root, 'init', '-q').status).toBe(0)
     await init(root, { app: 'apps/web', board: BOARD })
     writeFileSync(join(root, '.gitignore'), 'node_modules\n.work/\n.aspira/\n')
+    // A token and a Notion check that passes, so the ignore lines are the only FAIL lines: KIT-2's
+    // NOTION_TOKEN line names the .env.local files too, and must not depend on the machine's env.
+    const notion = { env: { NOTION_TOKEN: 'ntn_test' }, check: (checks: { key: string }[]) => Object.fromEntries(checks.map(({ key }) => [key, { ok: true as const }])) }
     const before = logs()
-    const beforeCode = doctor(root, before.log)
+    const beforeCode = doctor(root, before.log, undefined, notion)
     const problems = before.lines.filter((line) => line.startsWith('FAIL'))
     expect({ code: beforeCode, count: problems.length, worktrees: problems.filter((line) => line.includes('.worktrees/')).length, envLocal: problems.filter((line) => line.includes('.env.local')).length }).toEqual({ code: 1, count: 2, worktrees: 1, envLocal: 1 })
     await init(root, { app: 'apps/web', board: BOARD })
-    expect(doctor(root, () => {})).toBe(0)
+    expect(doctor(root, () => {}, undefined, notion)).toBe(0)
     // The same project outside any git repository: both checks say skipped and count as no problem.
     const { root: plain } = repository()
     await init(plain, { app: 'apps/web', board: BOARD })
     writeFileSync(join(plain, '.gitignore'), 'node_modules\n.work/\n.aspira/\n')
     const outside = logs()
-    const outsideCode = doctor(plain, outside.log)
+    const outsideCode = doctor(plain, outside.log, undefined, notion)
     const ignoreLines = outside.lines.filter((line) => line.includes('.worktrees/') || line.includes('.env.local'))
     expect({
       code: outsideCode,

@@ -58,7 +58,10 @@ export const PINNED_SKILL_RULES: PinnedRule[] = [
   { reason: 'the implementor moves to In Review: Implementation only with the PR open and set (BOARD-005)', file: 'skill/aspira-implementor/SKILL.md', phrase: 'only when it opened the PR' },
   { reason: 'a local build pushes nothing, so the PR is the human\'s remaining step and the report must say so', file: 'skill/aspira-implementor/SKILL.md', phrase: 'opening the PR is the remaining step' },
   { reason: 'a push failure is reported with the local path and the move is still made', file: 'skill/aspira-implementor/SKILL.md', phrase: 'say so with the local path of the implementation report and still make the move' },
-  { reason: 'the report starts with the ticket, the moves, the pages pushed and the working folder', file: 'skill/aspira-implementor/SKILL.md', phrase: 'Start the report with the ticket ID and title' },
+  { reason: 'the report starts with the run status (F4), then the ticket, the moves, the pages pushed and the working folder', file: 'skill/aspira-implementor/SKILL.md', phrase: 'Start the report with the run status, the ticket ID and title' },
+  { reason: 'the exit code is the run status (F5): non-zero is a status to relay, never a crash to retry', file: 'skill/aspira-implementor/SKILL.md', phrase: 'A non-zero exit is a run status to relay' },
+  { reason: 'local mode loads the rules itself with load-knowledge; the session never fetches them (F49)', file: 'skill/aspira-implementor/SKILL.md', phrase: 'This session never fetches guidelines' },
+  { reason: 'only a load-knowledge snapshot stands in for the rules; a copied or edited file is refused (F50)', file: 'skill/aspira-implementor/SKILL.md', phrase: '`--guidelines` takes only a `REQUIRED.md` that `load-knowledge` wrote' },
   // The report rules of specs/agents-human-lists.md F5 live in the agent, where every mode reads them.
   { reason: 'an assumption the human cannot see as a choice is a choice made for them', file: INSTRUCTIONS, phrase: 'Present every assumption as a decision with its recommended answer already taken' },
   { reason: 'a human reads the worst blocker first; an unsorted list buries it', file: INSTRUCTIONS, phrase: 'in severity order (critical, high, medium, low, info)' },

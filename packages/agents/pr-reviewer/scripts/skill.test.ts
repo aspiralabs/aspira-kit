@@ -29,6 +29,8 @@ async function stubs(withScreen: boolean) {
     join(bin, 'node'),
     [
       '#!/bin/bash',
+      // The launcher reads a run record's status with `node -p`: that one goes to the real node, unrecorded.
+      `case " $* " in *" -p "*) exec '${process.execPath}' "$@" ;; esac`,
       'printf \'%s\\x1f\' "$@" >> "$CAPTURE"',
       'printf \'\\n\' >> "$CAPTURE"',
       'case " $* " in',
@@ -137,8 +139,11 @@ it('start with a ticket runs the board step first, reviews the PR from the ticke
   const folder = join(repo, '.work', 'nom-4-explore-pagination')
   await mkdir(folder, { recursive: true })
   const ticketEnv = { ...env, TICKET_FOLDER: folder, TICKET_PR: 'https://github.com/acme/app/pull/7' }
+  // The run record export-record leaves (stubbed here): finish passes its status on, never one the launcher derives (F5).
+  await mkdir(join(folder, 'pr-review', 'trace'), { recursive: true })
+  await writeFile(join(folder, 'pr-review', 'trace', 'review.json'), JSON.stringify({ status: 'needs-author', reason: '1 high finding to settle' }))
   const out = await exec('bash', [launcher, 'start', 'NOM-4', '--force-pull', '--yes'], { cwd: repo, env: ticketEnv })
-  const [board, run, finish] = await calls()
+  const [board, run, record, finish] = await calls()
   expect(board).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/ticket.ts'), 'start', 'NOM-4', '--repo', repo, '--force-pull'])
   expect(out.stdout).toContain('ticket: NOM-4 Explore pagination (https://www.notion.so/nom-4)')
   expect(out.stdout).toContain('status: In Review: Implementation -> In Review: Implementation')
@@ -148,7 +153,9 @@ it('start with a ticket runs the board step first, reviews the PR from the ticke
   expect(run![5]).toContain('Review https://github.com/acme/app/pull/7.')
   expect(run![5]).toContain(`Write the review to ${join(folder, 'pr-review')}.`)
   expect(run![5]).toContain('do not call board yourself')
-  expect(finish).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--failed', '--run-status', 'incomplete', '--export', join(folder, 'pr-review')])
+  expect(record).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/export-record.ts'), '--output', join(folder, 'pr-review'), '--exit-code', '0'])
+  // finish takes only the run status (F7: --ok/--failed are gone); the board derives pushes and moves from it.
+  expect(finish).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--run-status', 'needs-author', '--export', join(folder, 'pr-review')])
   // Without --yes the estimate runs between the ticket step and the invoke, on the PR from the ticket.
   await exec('bash', [launcher, 'start', 'NOM-4'], { cwd: repo, env: ticketEnv })
   const [, estimate] = await calls()
