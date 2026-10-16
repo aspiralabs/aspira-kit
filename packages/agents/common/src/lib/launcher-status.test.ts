@@ -91,7 +91,7 @@ describe.each(LAUNCHERS)('$name status/wait read the run record and exit by it (
     expect(wait.status).toBe(RUNNING_EXIT)
   })
 
-  it('a needs-author record prints the status and its reason first, and exits 1 although eve exited 0', async () => {
+  it('a needs-author record prints the status and its reason first, and exits 5 (its own code, Decision Q4) although eve exited 0', async () => {
     ;({ run, output } = await makeRun())
     await writeFile(join(run, 'exit'), '0\n')
     await writeRecord(output, launcher.recordPath, { status: 'needs-author', reason: 'open decisions remain', reasonCode: null })
@@ -100,7 +100,7 @@ describe.each(LAUNCHERS)('$name status/wait read the run record and exit by it (
     const lines = result.stdout.trim().split('\n')
     expect(lines[0]).toBe('Run status: needs-author')
     expect(lines[1]).toContain('open decisions remain')
-    expect(result.status).toBe(1)
+    expect(result.status).toBe(5)
   })
 
   it('a ready record exits 0; a missing record exits 1 with status incomplete', async () => {

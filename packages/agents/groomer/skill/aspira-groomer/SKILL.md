@@ -61,4 +61,4 @@ The working files are `groom.local/` (knowledge, prompts, answers, fetched pages
 
 ## Reporting
 
-A non-zero exit is a run status to relay: never retry or rerun it on needs-author, answer the open questions the report names first. Start the report with the run status, the ticket ID and title, the Status before and after, the Grooming Decisions URL and the working folder. The rest of the report follows `agent/instructions.md`. Say which mode produced it.
+A non-zero exit is a run status to relay (exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author): never retry or rerun it on needs-author, answer the open questions the report names first. Start the report with the run status, the ticket ID and title, the Status before and after, the Grooming Decisions URL and the working folder. The rest of the report follows `agent/instructions.md`. Say which mode produced it.

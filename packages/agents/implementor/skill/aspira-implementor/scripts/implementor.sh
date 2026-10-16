@@ -143,7 +143,8 @@ eve_bin() { find_up_module "$AGENT" eve/bin/eve.js || die "eve is not installed 
 # record at RECORD_FILE (RUN's saved repo and agent.json/node-args give ticket.ts record what it
 # needs): scripts/ticket.ts record maps the record's status word (old or new alike) onto one of the
 # five run statuses and this prints the record's own reason text first (F5, F7). Sets REPORT_EXIT
-# to the status's exit code (run-status.ts's exitCodeFor), which the caller reports as its own.
+# to the status's exit code (run-status.ts's exitCodeFor: 0 ready, 1 incomplete or blocked, 3 refused,
+# 5 needs-author), which the caller reports as its own.
 report_record() {
   local record_file=$1 out status reason rc=0
   resolve_agent

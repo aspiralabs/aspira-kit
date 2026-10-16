@@ -1,0 +1,126 @@
+{
+  "rows": [
+    {
+      "statuses": [
+        "Idea",
+        "Grooming"
+      ],
+      "step": "Step 1: groom the idea with the groomer, then move the card to Ready: Idea",
+      "command": "/aspira-groomer <ID> --local",
+      "who": "you, with an agent"
+    },
+    {
+      "statuses": [
+        "Shortlist"
+      ],
+      "step": "Approve the groomed idea: move the card to Ready: Idea",
+      "command": null,
+      "who": "you"
+    },
+    {
+      "statuses": [
+        "Ready: Idea"
+      ],
+      "step": "Step 2: write the spec",
+      "command": "/aspira-spec-writer <ID> --local",
+      "who": "agent"
+    },
+    {
+      "statuses": [
+        "In Progress: Spec"
+      ],
+      "step": "Step 2 is running, or it stopped: rerun it",
+      "command": "/aspira-spec-writer <ID> --local",
+      "who": "agent, then you"
+    },
+    {
+      "statuses": [
+        "In Review: Spec"
+      ],
+      "step": "Step 3: debate the spec, answer its decisions, then Step 4: approve it",
+      "command": "/aspira-spec-reviewer <ID> --local",
+      "who": "agent, then you"
+    },
+    {
+      "statuses": [
+        "Ready: Spec"
+      ],
+      "step": "Step 5: plan",
+      "command": "/aspira-planner <ID> --local",
+      "who": "agent"
+    },
+    {
+      "statuses": [
+        "In Progress: Plan"
+      ],
+      "step": "Step 5 is running, or it stopped: rerun it",
+      "command": "/aspira-planner <ID> --local",
+      "who": "agent, then you"
+    },
+    {
+      "statuses": [
+        "In Review: Plan"
+      ],
+      "step": "Read the plan's status and open questions, then move the card to Ready: Plan",
+      "command": null,
+      "who": "you"
+    },
+    {
+      "statuses": [
+        "Ready: Plan"
+      ],
+      "step": "Step 6: build",
+      "command": "/aspira-implementor <ID> --local",
+      "who": "agent"
+    },
+    {
+      "statuses": [
+        "In Progress: Implementation"
+      ],
+      "step": "Step 6 is running or stopped, or Step 7 (static analysis) and Step 8 (open the PR) are still to do",
+      "command": "/aspira-code-analyzer <ID> --app <app-dir> --local",
+      "who": "agent, then you"
+    },
+    {
+      "statuses": [
+        "In Progress: Implementation, after Step 7"
+      ],
+      "step": "Step 8: commit the static analyzer's changes, push the branch, open the PR with gh pr create, set the PR property, then move the card to In Review: Implementation",
+      "command": null,
+      "manual": "by hand (the progress note gives the commands)",
+      "who": "you"
+    },
+    {
+      "statuses": [
+        "In Review: Implementation"
+      ],
+      "step": "Step 9: review the PR, fix, rerun; then Step 10: docs, release page, merge",
+      "command": "/aspira-pr-reviewer <ID> --local",
+      "who": "agent, then you"
+    },
+    {
+      "statuses": [
+        "Ready: Implementation"
+      ],
+      "step": "Step 11: release, when the release page is ready",
+      "command": null,
+      "who": "you"
+    },
+    {
+      "statuses": [
+        "Released"
+      ],
+      "step": "Step 12: learn",
+      "command": null,
+      "who": "you, with an agent"
+    },
+    {
+      "statuses": [
+        "Dropped"
+      ],
+      "step": "Nothing: the ticket is not being built",
+      "command": null,
+      "who": "nobody"
+    }
+  ]
+}

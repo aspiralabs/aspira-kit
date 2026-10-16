@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { GATES, SKILLS, type Skill } from './ticket.ts'
-import { MAX_COST_EXIT, RUNNING_EXIT, RUN_STATUSES, USAGE_EXIT, boardEffects, exitCodeFor, readRunStatus, reportHead } from './run-status.ts'
+import { MAX_COST_EXIT, NEEDS_AUTHOR_EXIT, RUNNING_EXIT, RUN_STATUSES, USAGE_EXIT, boardEffects, exitCodeFor, readRunStatus, reportHead } from './run-status.ts'
 
 describe('readRunStatus (T1, F1, F2, F3, F7, A1)', () => {
   it('RUN_STATUSES is exactly the five new words, in order', () => {
@@ -52,21 +52,27 @@ describe('exitCodeFor and the reserved exit codes (T2, F5, A2)', () => {
     for (const status of RUN_STATUSES) if (status !== 'ready') expect(exitCodeFor(status)).not.toBe(0)
   })
 
-  it('returns 1 for needs-author, incomplete and blocked', () => {
-    expect(exitCodeFor('needs-author')).toBe(1)
+  it('returns 1 for incomplete and blocked (a failure)', () => {
     expect(exitCodeFor('incomplete')).toBe(1)
     expect(exitCodeFor('blocked')).toBe(1)
+  })
+
+  it('returns 5 for needs-author: its own non-zero code, distinct from a failure (1), a usage error (2), a refusal (3), a max-cost stop (4) and running (75) (Decision Q4)', () => {
+    expect(exitCodeFor('needs-author')).toBe(5)
+    expect(NEEDS_AUTHOR_EXIT).toBe(5)
+    for (const other of ['incomplete', 'blocked', 'refused', 'ready'] as const) expect(exitCodeFor('needs-author')).not.toBe(exitCodeFor(other))
+    for (const reserved of [USAGE_EXIT, MAX_COST_EXIT, RUNNING_EXIT]) expect(exitCodeFor('needs-author')).not.toBe(reserved)
   })
 
   it('returns 3 for refused', () => {
     expect(exitCodeFor('refused')).toBe(3)
   })
 
-  it('RUNNING_EXIT is 75, USAGE_EXIT is 2 and MAX_COST_EXIT is 4, and 75 differs from every exitCodeFor value', () => {
+  it('RUNNING_EXIT is 75, USAGE_EXIT is 2 and MAX_COST_EXIT is 4, and none of them is any exitCodeFor value', () => {
     expect(RUNNING_EXIT).toBe(75)
     expect(USAGE_EXIT).toBe(2)
     expect(MAX_COST_EXIT).toBe(4)
-    for (const status of RUN_STATUSES) expect(exitCodeFor(status)).not.toBe(75)
+    for (const status of RUN_STATUSES) for (const reserved of [RUNNING_EXIT, USAGE_EXIT, MAX_COST_EXIT]) expect(exitCodeFor(status)).not.toBe(reserved)
   })
 })
 

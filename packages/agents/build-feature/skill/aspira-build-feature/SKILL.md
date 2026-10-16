@@ -31,4 +31,4 @@ Pass `--local` exactly when the human did. The run works the ticket in its own g
 
 ## Reporting
 
-A non-zero exit is a run status to relay: never retry or rerun it on needs-author, answer the open decisions the report names first. Start the report with the run status. Report the Build Summary path (`build-summary.md`, named in the `summary` stage) and, when the run stopped rather than finished, the resume command the `end` stage prints. Say which steps ran and their result lines; do not restate the driver's own rules.
+A non-zero exit is a run status to relay (exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author): never retry or rerun it on needs-author, answer the open decisions the report names first. Start the report with the run status. Report the Build Summary path (`build-summary.md`, named in the `summary` stage) and, when the run stopped rather than finished, the resume command the `end` stage prints. Say which steps ran and their result lines; do not restate the driver's own rules.

@@ -49,13 +49,20 @@ export const RUNNING_EXIT = 75
 export const USAGE_EXIT = 2
 export const MAX_COST_EXIT = 4
 export const REFUSED_EXIT = 3
+/** A run that stopped only on a human's open decisions (Decision Q4): its own code, so a script can tell it from a failure (1) or a refusal (3). */
+export const NEEDS_AUTHOR_EXIT = 5
 
-/** The exit code a CLI reports for a run status (Assumption A2): 0 only for ready. */
+/**
+ * The exit code a CLI reports for a run status (Assumption A2, Decision Q4): 0 only for ready, 1
+ * for a failure (incomplete, blocked), REFUSED_EXIT (3) for a refusal and NEEDS_AUTHOR_EXIT (5)
+ * for a run waiting on the author.
+ */
 export function exitCodeFor(status: RunStatus): number {
   switch (status) {
     case 'ready':
       return 0
     case 'needs-author':
+      return NEEDS_AUTHOR_EXIT
     case 'incomplete':
     case 'blocked':
       return 1

@@ -14,6 +14,7 @@ import { analyzedApps } from './changed-apps.ts'
 import { readGroomRecord } from './groom-record.ts'
 import { appendRefusal, nextAction, PROGRESS_NOTE_FILE, writeProgressNote, writeStep8PrBody, type NextAction, type ProgressNote } from './progress-note.ts'
 import { redact } from './redact.ts'
+import { isCommittable, isSecretsFile } from './step-commands.ts'
 import { REFUSED_EXIT, USAGE_EXIT, exitCodeFor, readRunStatus, type ReasonCode, type RunStatus } from './run-status.ts'
 import { TICKET_FILE, TicketArgumentError, WORK_DIR, ticketArgument, type BoardTrace, type Skill, type TicketArgument, type TicketRecord } from './ticket.ts'
 import { FlowRefused, findWorkFolders, inputFileFor, localBoardEnd, localBoardStep, localBoardVerify, localStateDir, noTicketTrace, readAspira, readTicketMd, type BoardStage } from './ticket-flow.ts'
@@ -240,7 +241,9 @@ async function stepAfterBuild(context: DriverContext, folder: string, ticket: { 
   const body = await writeStep8PrBody({ folder, repo: context.repo, ...(record.apps.length === 1 ? { app: record.apps[0]! } : {}), ticket })
   const paths = await uncommittedPaths(context.repo)
   const action = nextAction({ ...base, title: ticket.title, branch: record.branch, prBodyFile: relative(context.repo, body), paths })
-  return { action, outputs: [body], openIssues: [] }
+  // A path Step 8 will not stage (a `.env*` secrets file, say) is named here instead of silently vanishing (AVA1.1).
+  const openIssues = paths.filter((path) => !isCommittable(path)).map((path) => `Step 8 leaves ${path} out of the commit: ${isSecretsFile(path) ? 'a .env* file may hold secrets, so it is never staged' : 'it is outside what a PR may commit'}; commit it by hand only if it is meant to be in the PR.`)
+  return { action, outputs: [body], openIssues }
 }
 
 /** Whether a passing verify ends the --local state: always for a row without a record; for the groomer only once the run is ready or needs-author/paused, or on --finish. */

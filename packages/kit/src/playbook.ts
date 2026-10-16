@@ -1,36 +1,21 @@
-// The Playbook: which step comes next for a ticket, from its Feature Board Status. This module is
-// the one source of that table. `kit next` reads it to answer "what is the next step", and
-// `kit playbook` renders it as the markdown of the "Playbook: what to run next" section of
-// From Idea to Release in Notion, so the page and the command cannot drift apart.
+// The Playbook: which step comes next for a ticket, from its Feature Board Status. `kit next` reads
+// it to answer "what is the next step", and `kit playbook` renders it as the markdown of the
+// "Playbook: what to run next" section of From Idea to Release in Notion, so the page and the
+// command cannot drift apart. The Status table itself lives in @aspiralabs/agent-common
+// (`src/lib/playbook.json`), read here as plain JSON, never agent-common's TypeScript (PATTERN-012),
+// so the agents never depend on this CLI (NOVA1.1). The steps under the table are kit's own.
+import { z } from 'zod'
+import table from '@aspiralabs/agent-common/lib/playbook.json' with { type: 'json' }
 
 /** One row of the Status table. `command` has `<ID>` where the ticket ID goes; null when the step
  * is done by hand or has no single command (its `manual` text, when given, replaces "by hand" in
  * the Command cell). */
 export type PlaybookRow = { statuses: string[]; step: string; command: string | null; who: string; manual?: string }
 
-export const PLAYBOOK: PlaybookRow[] = [
-  { statuses: ['Idea', 'Grooming'], step: 'Step 1: groom the idea with the groomer, then move the card to Ready: Idea', command: '/aspira-groomer <ID> --local', who: 'you, with an agent' },
-  { statuses: ['Shortlist'], step: 'Approve the groomed idea: move the card to Ready: Idea', command: null, who: 'you' },
-  { statuses: ['Ready: Idea'], step: 'Step 2: write the spec', command: '/aspira-spec-writer <ID> --local', who: 'agent' },
-  { statuses: ['In Progress: Spec'], step: 'Step 2 is running, or it stopped: rerun it', command: '/aspira-spec-writer <ID> --local', who: 'agent, then you' },
-  { statuses: ['In Review: Spec'], step: 'Step 3: debate the spec, answer its decisions, then Step 4: approve it', command: '/aspira-spec-reviewer <ID> --local', who: 'agent, then you' },
-  { statuses: ['Ready: Spec'], step: 'Step 5: plan', command: '/aspira-planner <ID> --local', who: 'agent' },
-  { statuses: ['In Progress: Plan'], step: 'Step 5 is running, or it stopped: rerun it', command: '/aspira-planner <ID> --local', who: 'agent, then you' },
-  { statuses: ['In Review: Plan'], step: "Read the plan's status and open questions, then move the card to Ready: Plan", command: null, who: 'you' },
-  { statuses: ['Ready: Plan'], step: 'Step 6: build', command: '/aspira-implementor <ID> --local', who: 'agent' },
-  { statuses: ['In Progress: Implementation'], step: 'Step 6 is running or stopped, or Step 7 (static analysis) and Step 8 (open the PR) are still to do', command: '/aspira-code-analyzer <ID> --app <app-dir> --local', who: 'agent, then you' },
-  {
-    statuses: ['In Progress: Implementation, after Step 7'],
-    step: 'Step 8: commit the static analyzer\'s changes, push the branch, open the PR with gh pr create, set the PR property, then move the card to In Review: Implementation',
-    command: null,
-    manual: 'by hand (the progress note gives the commands)',
-    who: 'you',
-  },
-  { statuses: ['In Review: Implementation'], step: 'Step 9: review the PR, fix, rerun; then Step 10: docs, release page, merge', command: '/aspira-pr-reviewer <ID> --local', who: 'agent, then you' },
-  { statuses: ['Ready: Implementation'], step: 'Step 11: release, when the release page is ready', command: null, who: 'you' },
-  { statuses: ['Released'], step: 'Step 12: learn', command: null, who: 'you, with an agent' },
-  { statuses: ['Dropped'], step: 'Nothing: the ticket is not being built', command: null, who: 'nobody' },
-]
+const rowSchema = z.object({ statuses: z.array(z.string().min(1)).min(1), step: z.string().min(1), command: z.string().min(1).nullable(), who: z.string().min(1), manual: z.string().min(1).optional() })
+
+/** agent-common's rows, validated once at load: a malformed playbook.json fails loudly here. */
+export const PLAYBOOK: PlaybookRow[] = z.object({ rows: z.array(rowSchema).min(1) }).parse(table).rows
 
 /** The row for a Status, or null when the board has a Status this table does not know. */
 export function nextStep(status: string): PlaybookRow | null {
@@ -63,7 +48,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
       '```bash',
       '/aspira-spec-writer <ID> --local',
       '```',
-      'Needs Ready: Idea; the skill refuses any other Status before it runs a model, naming the Status it needs and who moves the card there. It sets Dev, moves the card to In Progress: Spec, pulls the ticket into `.work/<id>-<slug>/` (`ticket.md`, `idea.md`) and runs the spec writer on `idea.md`. Output: `spec.md` in the folder, plus `spec.written/` (the writer runs one review on its own draft). On success it puts `spec.md` on the ticket as the child page **Spec** (BOARD-003) and moves the card to In Review: Spec. If the run stops, the card stays In Progress: Spec and the same command reruns it without a second claim. The run reports its status in `.work/<id>-<slug>/progress.md` and exits 0 only when it ends ready; read the note before rerunning.',
+      'Needs Ready: Idea; the skill refuses any other Status before it runs a model, naming the Status it needs and who moves the card there. It sets Dev, moves the card to In Progress: Spec, pulls the ticket into `.work/<id>-<slug>/` (`ticket.md`, `idea.md`) and runs the spec writer on `idea.md`. Output: `spec.md` in the folder, plus `spec.written/` (the writer runs one review on its own draft). On success it puts `spec.md` on the ticket as the child page **Spec** (BOARD-003) and moves the card to In Review: Spec. If the run stops, the card stays In Progress: Spec and the same command reruns it without a second claim. The run reports its status in `.work/<id>-<slug>/progress.md` and exits by it: 0 only when it ends ready, 1 incomplete or blocked, 3 refused, 5 needs-author; read the note before rerunning.',
       'Skip this step when the ticket already has a Spec page (migrated tickets): move the card to In Review: Spec by hand and go to Step 3.',
     ].join('\n'),
   },

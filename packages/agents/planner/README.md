@@ -52,7 +52,7 @@ The plan contains exact create/modify/delete targets, named symbols, technical i
 
 `trace/` holds the original spec, guidelines, research, structured plan, checks, model prompts/outputs, tool activity, usage and source commit/dirty state. Reruns preserve the previous report under `trace/history/`. The source spec is unchanged.
 
-`ready` means structural/evidence checks passed, not that tests ran or a human approved the plan. Product decisions yield `needs-author`; missing evidence, invalid tasks, failed calls or missing UI documentation yield `incomplete`. A returned draft prominently shows that status. When no structured plan is produced, only analysis and trace are exported. CLI exit 0 means ready; exit 1 means incomplete/needs-author. Revalidate repository context before building; source quotes and structural checks do not prove semantic correctness.
+`ready` means structural/evidence checks passed, not that tests ran or a human approved the plan. Product decisions yield `needs-author`; missing evidence, invalid tasks, failed calls or missing UI documentation yield `incomplete`. A returned draft prominently shows that status. When no structured plan is produced, only analysis and trace are exported. The CLI exits by run status: exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author (its own code, so a script can tell a run waiting on the author from a failure). Revalidate repository context before building; source quotes and structural checks do not prove semantic correctness.
 
 ## Verification
 

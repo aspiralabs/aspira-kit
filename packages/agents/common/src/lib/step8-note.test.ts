@@ -133,6 +133,25 @@ describe('F21: a ready code-analyzer run picks Step 7 or Step 8 from the impleme
     expect(body).toContain('https://www.notion.so/kit-2')
   })
 
+  it('never stages an untracked .env* file in Step 8 (AVA1.1): the git add names only the safe path, and Open issues names each left-out secrets file', async () => {
+    const ctx = { ...context, repo }
+    await implementorRecord(['apps/api', 'apps/web'])
+    await analyzed('apps/api')
+    await analyzed('apps/web')
+    await writeFile(join(repo, 'apps/web', 'fixed.ts'), 'export const fixed = 1\n')
+    await writeFile(join(repo, '.env.local'), 'NOTION_TOKEN=ntn_not_a_real_token_value\n')
+    await writeFile(join(repo, 'apps/web', '.env'), 'SECRET=also_not_real\n')
+    const before = await ready(ctx)
+    await afterRun(ctx, before, { status: 'ready', exportDir: join(repo, 'apps/web', '.static-analysis'), verifyCommand: 'code-analyzer.sh local KIT-2 --verify' })
+    const next = await nextOf()
+    expect(next?.run[0]).toBe("git add -- 'apps/web/fixed.ts' && git commit -m 'KIT-2: static analysis'")
+    expect(next?.run.join('\n')).not.toContain('.env')
+    const note = await readFile(join(folder, 'progress.md'), 'utf8')
+    const openIssues = note.slice(note.indexOf('## Open issues'), note.indexOf('## Next action'))
+    expect(openIssues).toContain('.env.local')
+    expect(openIssues).toContain('apps/web/.env')
+  })
+
   it('a code-analyzer run that is not ready names neither Step 7 nor Step 8 (F27)', async () => {
     const ctx = { ...context, repo }
     await implementorRecord(['apps/api'])

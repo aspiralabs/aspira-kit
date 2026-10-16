@@ -144,10 +144,12 @@ export function loadNoteShapes(appDir: string): RegExp[] {
 
 type NoteMatch = { ok: true } | { ok: false; reason: string }
 
-/** Whether `note` is usable for `liveStatus` (F28): its Status (or, for a `--verify` Next action,
- * its Expected Status) must equal the live Status, and every Run line must match one of `shapes`. */
+/** Whether `note` is usable for `liveStatus` (F28): its Status (or, for a `--verify` Next action
+ * that names one, its Expected Status) must equal the live Status, and every Run line must match
+ * one of `shapes`. A note with no Expected Status (Step 8's, whose last Run line verifies the PR the
+ * earlier lines open) is compared on its Status: there is no later Status to expect (DEX2.1). */
 function noteMatches(note: ProgressNoteInfo, liveStatus: string, shapes: readonly RegExp[]): NoteMatch {
-  const verifying = note.run.some((line) => line.includes('--verify'))
+  const verifying = note.run.some((line) => line.includes('--verify')) && note.expectedStatus !== null
   const compareTo = verifying ? note.expectedStatus : note.status
   if (compareTo === null || compareTo.trim().toLowerCase() !== liveStatus.trim().toLowerCase()) {
     const label = verifying ? 'Expected Status' : 'Status'

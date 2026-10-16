@@ -1,6 +1,6 @@
 // KIT-2 P23 follow-ups (F20): the driver's printed `end` stage carries build-feature's own run
-// status for the reason it stopped, and the CLI exits by A2 on it (0 ready; 1 needs-author,
-// incomplete, blocked; 3 refused). While a run is in progress, build-feature marks the ticket with
+// status for the reason it stopped, and the CLI exits by A2 on it (0 ready; 1 incomplete, blocked;
+// 3 refused; 5 needs-author, its own code by Decision Q4). While a run is in progress, build-feature marks the ticket with
 // `.local/build-feature/active.json` (no `end`), so a step skill's progress note points back at
 // `/aspira-build-feature <ID>`; when the run stops, the marker is ended and build-feature writes the
 // note itself, its Next action the command that resumes the run.
@@ -40,10 +40,10 @@ describe('F20: the end stage carries build-feature\'s own run status, and the ex
     expect(endOf(await h.advance({}, await h.start()))).toEqual({ stage: 'end', status: 'blocked', code: 1 })
   }, SLOW)
 
-  it('a run-start approval that cannot be recorded ends needs-author (exit 1)', async () => {
+  it('a run-start approval that cannot be recorded ends needs-author (exit 5)', async () => {
     const h = await project({ status: 'Ready: Plan' })
     const end = await h.advance({ approval: async (stage) => h.answer(stage, { error: 'notion-get-self failed' }) }, await h.start())
-    expect(endOf(end)).toEqual({ stage: 'end', status: 'needs-author', code: 1 })
+    expect(endOf(end)).toEqual({ stage: 'end', status: 'needs-author', code: 5 })
   }, SLOW)
 
   it('a step that stops carries that step\'s own status: a blocked planner ends blocked (exit 1)', async () => {

@@ -14,11 +14,21 @@ export function shellQuote(text: string): string {
   return `'${text.replaceAll("'", "'\\''")}'`
 }
 
-/** A path step8Commands may `git add`: repo-relative, no `..` segment, and not under a folder nothing should ever commit. */
-function isCommittable(path: string): boolean {
+/**
+ * Whether `path` names a `.env*` file at any depth: the same files redact.ts reads as
+ * secret-bearing (every name starting with `.env`, `.env.example` included, since a project may
+ * keep a real value there). Step 8 never stages one, however it came to be changed (AVA1.1).
+ */
+export function isSecretsFile(path: string): boolean {
+  return (path.split('/').pop() ?? path).startsWith('.env')
+}
+
+/** A path step8Commands may `git add`: repo-relative, no `..` segment, not under a folder nothing should ever commit, and not a `.env*` secrets file. */
+export function isCommittable(path: string): boolean {
   if (path.startsWith('/')) return false
   if (path.split('/').includes('..')) return false
   if (path.startsWith('.work/') || path.startsWith('.static-analysis/')) return false
+  if (isSecretsFile(path)) return false
   return true
 }
 
@@ -29,8 +39,8 @@ export type Step8Commands = { ok: true; commands: string[]; excluded: string[] }
  * them: `git add` the safe paths and commit, push the branch, open the PR with `gh`, then verify
  * with the PR URL. `ticket.id` gates the whole call (F23): an id that is not a board id builds no
  * command at all, since every command below cites it. A path that is absolute, holds a `..`
- * segment, or sits under `.work/` or `.static-analysis/` is left out of the commit and named in
- * `excluded` for the caller's Open issues section.
+ * segment, sits under `.work/` or `.static-analysis/`, or is a `.env*` file is left out of the
+ * commit and named in `excluded` for the caller's Open issues section.
  */
 export function step8Commands(ticket: { id: string; title: string }, branch: string, paths: readonly string[], prBodyFile: string): Step8Commands {
   if (!isTicketId(ticket.id)) return { ok: false }

@@ -112,13 +112,13 @@ describe('ticketCli finish (T7, F5, F7, F12, F53)', () => {
     expect(client.calls).toContain('move In Progress: Plan -> In Review: Plan')
   })
 
-  it('needs-author for the planner pushes Plan and moves the card to In Review: Plan, and exits 1', async () => {
+  it('needs-author for the planner pushes Plan and moves the card to In Review: Plan, and exits 5 (Decision Q4)', async () => {
     const client = fakeBoard('In Progress: Plan')
     const folder = await freshFolder(repo, 'planner', 'In Progress: Plan')
     const code = await ticketCli('planner', ['finish', '--repo', repo, '--folder', folder, '--run-status', 'needs-author'], { out: () => {}, err: () => {} }, {}, client)
     expect(client.calls).toContain('push Plan')
     expect(client.calls).toContain('move In Progress: Plan -> In Review: Plan')
-    expect(code).toBe(1)
+    expect(code).toBe(5)
   })
 
   it('ready with the pushed file missing reports "Push failed", records incomplete, makes no move and exits 1', async () => {

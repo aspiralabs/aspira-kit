@@ -328,9 +328,6 @@ importers:
 
   packages/agents/common:
     dependencies:
-      '@aspiralabs/kit':
-        specifier: workspace:*
-        version: link:../../kit
       '@modelcontextprotocol/sdk':
         specifier: 1.30.0
         version: 1.30.0(patch_hash=d2fd74c9e0e90c7259edb90d1912a9accb806dc9603bbadf411d22771da99ee8)(supports-color@7.2.0)(zod@4.5.4)
@@ -639,6 +636,9 @@ importers:
 
   packages/kit:
     dependencies:
+      '@aspiralabs/agent-common':
+        specifier: workspace:*
+        version: link:../agents/common
       zod:
         specifier: 4.5.4
         version: 4.5.4

@@ -1116,14 +1116,14 @@ describe('the ticket CLI for the groomer', () => {
       'Open questions: 2',
     ])
     expect(finished.out).toContain(`Answer the 2 open question(s) on Grooming Decisions (${url}), then run groomer again; it reads the ticks.`)
-    // Only ready exits 0; needs-author is a run status, exit 1 (F5, A2).
-    expect(finished.code).toBe(1)
+    // Only ready exits 0; needs-author is a run status with its own code, exit 5 (F5, A2, Decision Q4).
+    expect(finished.code).toBe(5)
     expect(groomPageOf(client).blocks.map((block) => block.id)).not.toContain(marker)
     expect(groomPageOf(client).markdown).toBe(await readFile(decisionsPath(started.folder), 'utf8'))
     expect(await readGroomJson(started.folder)).toMatchObject({ status: 'needs-author', open: 2, page: { url } })
   })
 
-  it('the spec reviewer\'s finish output is today\'s, and needs-author exits 1 (F5, A2)', async () => {
+  it('the spec reviewer\'s finish output is today\'s, and needs-author exits 5 (F5, A2, Decision Q4)', async () => {
     const client = fakeBoard('In Review: Spec')
     const started = await startFlow({ skill: 'spec-reviewer', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
     await mkdir(join(started.folder, 'spec.reviewed/trace'), { recursive: true })
@@ -1137,7 +1137,7 @@ describe('the ticket CLI for the groomer', () => {
       `Working folder: ${started.folder}`,
       `Board trace: ${join(started.folder, 'board.json')}`,
     ])
-    expect(finished.code).toBe(1)
+    expect(finished.code).toBe(5)
   })
 
   it('without aspira.json the groomer is refused naming kit init and never offering --no-ticket, in the CLI and the driver alike', async () => {

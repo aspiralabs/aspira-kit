@@ -90,6 +90,24 @@ describe('Launcher SKILL.md says a non-zero exit is a run status to relay, never
   })
 })
 
+// Decision Q4 (REBA2.1): needs-author exits with its own code, 5, distinct from a failure (1:
+// incomplete, blocked) and a refusal (3). Every launcher SKILL.md and every agent README that names
+// the exit codes names them this way, never needs-author as exit 1 (copied from Q4, TEST-006).
+const EXIT_CODE_LINE = /exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author/
+const AGENT_READMES = ['planner', 'spec-reviewer', 'spec-writer', 'code-analyzer'].map((name) => `packages/agents/${name}/README.md`)
+
+describe('Launcher SKILL.md and agent READMEs name needs-author\'s own exit code, 5 (REBA2.1, Decision Q4)', () => {
+  it.each(LAUNCHER_SKILLS)('$name SKILL.md lists the run-status exit codes', ({ path }) => {
+    expect(readSkill(path)).toMatch(EXIT_CODE_LINE)
+  })
+
+  it.each(AGENT_READMES)('%s lists the run-status exit codes and never calls needs-author exit 1', (path) => {
+    const body = readSkill(path)
+    expect(body).toMatch(EXIT_CODE_LINE)
+    expect(body).not.toMatch(/exit 1 means[^.]*needs-author|1 means needs-author/i)
+  })
+})
+
 type KnowledgeStep = { name: string; path: string; anchor: RegExp }
 
 // Each launcher's knowledge-fetching step starts with its own distinct heading line (column 0, a

@@ -83,6 +83,24 @@ describe('step8Commands (T16)', () => {
     expect(result.excluded.sort()).toEqual(['../x.ts', '/etc/passwd'].sort())
   })
 
+  it('never stages a .env* file at any depth (the files redact.ts reads as secret-bearing), naming each one for Open issues', async () => {
+    const secrets = ['.env', '.env.local', '.env.example', 'apps/web/.env', 'apps/web/.env.production.local', '.envrc']
+    const kept = ['apps/web/env.ts', 'apps/web/.env-docs/y.ts', 'docs/dot.env.md']
+    const result = step8Commands({ id: 'KIT-2', title: 'a title' }, BRANCH, [...secrets, ...kept], PR_BODY_FILE)
+    if (!result.ok) throw new Error('expected step8Commands to build commands for a valid ticket id')
+    expect(result.excluded.sort()).toEqual([...secrets].sort())
+    for (const command of result.commands) await run(command)
+    const add = (await calls('git')).find((argv) => argv[0] === 'add')
+    expect(add?.slice((add?.indexOf('--') ?? -1) + 1)).toEqual(kept)
+  })
+
+  it('with only .env* files changed, builds no git add at all', () => {
+    const result = step8Commands({ id: 'KIT-2', title: 'a title' }, BRANCH, ['.env.local', 'apps/api/.env'], PR_BODY_FILE)
+    if (!result.ok) throw new Error('expected step8Commands to build commands for a valid ticket id')
+    expect(result.commands.some((command) => command.includes('git add'))).toBe(false)
+    expect(result.excluded.sort()).toEqual(['.env.local', 'apps/api/.env'])
+  })
+
   it('every command runs safely through sh -c: no file named pwned is ever created', async () => {
     const result = step8Commands({ id: 'KIT-2', title: TITLE }, BRANCH, PATHS, PR_BODY_FILE)
     if (!result.ok) throw new Error('expected step8Commands to build commands for a valid ticket id')
