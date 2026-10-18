@@ -4,8 +4,9 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('./repository.ts', () => ({ repository: async () => ({ instructions: '', packet: () => 'source.ts:1: evidence', gaps: [], files: new Map(), commit: 'abc', dirty: false, tools: {} }) }))
-import { KnowledgeRequired } from './local-knowledge.ts'
-import { knowledgeStage, runLocal } from './local.ts'
+import { KnowledgeBlocked } from './local-knowledge.ts'
+import { runLocal } from './local.ts'
+import { writeSnapshot } from './snapshot.test-helper.ts'
 
 const draft = '# Save items\n## Intent\nLet people save items.\n## Acceptance criteria\n### Features\n- [ ] F1: A saved item appears in the list.\n'
 const review = (findings: unknown[] = []) => ({ facts: [], findings, checks: [{ rule: 'REV-001', evidence: 'spec: Save items' }], uiEvidence: [], gaps: [] })
@@ -15,7 +16,7 @@ async function setup() {
   const ideaPath = join(dir, 'idea.md')
   const guidelinesPath = join(dir, 'rules.md')
   await writeFile(ideaPath, 'Let people save items.')
-  await writeFile(guidelinesPath, 'REV-001 Check the spec')
+  await writeSnapshot(guidelinesPath)
   return { dir, ideaPath, input: { ideaPath, guidelinesPath, repoPath: dir, uiRequired: false } }
 }
 
@@ -34,7 +35,7 @@ it('runs explore, draft and the review one stage at a time in the session, then 
   expect(explorePrompt).toContain('Explore the repository for this idea')
   expect(explorePrompt).toContain('Let people save items.')
   expect(explorePrompt).toContain('"questions"')
-  expect(explorePrompt).toContain('notion-fetch, read-only')
+  expect(explorePrompt).toContain('a load-knowledge snapshot. The topic pages they route to are the files beside it')
   await writeFile(explore.tasks[0]!.output, JSON.stringify({ facts: ['src/items.ts:4: newest first'], constraints: [], questions: [], uiEvidence: [], gaps: [] }))
 
   const drafting = await pending(input)
@@ -57,7 +58,7 @@ it('runs explore, draft and the review one stage at a time in the session, then 
 
   const specialists = await pending(input)
   expect(specialists.tasks.map((t) => t.phase)).toEqual(['security', 'architecture', 'data', 'behavior', 'ui', 'acceptance'])
-  for (const task of specialists.tasks) expect(await readFile(task.prompt, 'utf8')).toContain('notion-fetch, read-only')
+  for (const task of specialists.tasks) expect(await readFile(task.prompt, 'utf8')).toContain('a load-knowledge snapshot. The topic pages they route to are the files beside it')
   for (const task of specialists.tasks) await writeFile(task.output, JSON.stringify(review()))
 
   const synthesis = await pending(input)
@@ -106,13 +107,17 @@ async function folderSetup() {
 }
 
 describe('engineering guidelines in --local', () => {
-  it('refuses to start without the knowledge folder, names the pages from the agent config, and starts nothing', async () => {
+  it('ends blocked without the knowledge folder or a NOTION_TOKEN to load it, names the token and the project env files, and starts nothing', async () => {
     const { dir, knowledge, input, deps } = await folderSetup()
-    await writeFile(join(deps.agentDir, '.env.local'), 'KNOWLEDGE_PAGE=https://www.notion.so/Engineering-0123456789abcdef0123456789abcdef\nKNOWLEDGE_REQUIRED=Agent Instructions, Review Verification\n')
+    await writeFile(join(deps.agentDir, '.env.local'), 'KNOWLEDGE_PAGE=https://www.notion.so/Engineering-0123456789abcdef0123456789abcdef\nKNOWLEDGE_REQUIRED=Agent Instructions, Review Verification\nNOTION_TOKEN=agent-own-token\n')
     const error = await runLocal(input, deps).then(() => null, (cause: unknown) => cause)
-    if (!(error instanceof KnowledgeRequired)) throw new Error(`expected a refusal, got ${String(error)}`)
-    expect(error.plan).toMatchObject({ dir: knowledge, root: 'https://www.notion.so/Engineering-0123456789abcdef0123456789abcdef', required: ['Agent Instructions', 'Review Verification'] })
-    expect(knowledgeStage(error, deps.agentDir)).toMatchObject({ pending: true, stage: 'knowledge', orchestrator: join(deps.agentDir, 'agent', 'instructions.md'), knowledge: { dir: knowledge } })
+    // The agent package's own .env.local is never read for the token (F52): this run has none.
+    if (!(error instanceof KnowledgeBlocked)) throw new Error(`expected a blocked run, got ${String(error)}`)
+    expect(error).toMatchObject({ pending: false, status: 'blocked', stage: 'knowledge' })
+    expect(error.message).toContain('NOTION_TOKEN')
+    expect(error.message).toContain(join(dir, '.env.local'))
+    expect(error.message).not.toMatch(/Notion MCP|notion-fetch/i)
+    await expect(stat(knowledge)).rejects.toThrow()
     await expect(stat(join(dir, 'spec.written.local', 'state.json'))).rejects.toThrow()
   })
 

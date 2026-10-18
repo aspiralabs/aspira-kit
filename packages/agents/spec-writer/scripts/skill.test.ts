@@ -97,7 +97,8 @@ it('start with a ticket runs the board step first, writes from the pulled idea, 
   expect(command(run!)[5]).toContain(idea)
   expect(command(run!)[5]).toContain('do not call board yourself')
   expect(status![0]).toBe('-p')
-  expect(command(finish!)).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--failed', '--run-status', '{}', '--export', join(folder, 'spec.written')])
+  // finish takes only the run status read from the trace: no --ok/--failed, the status alone decides the pushes and moves (F7, F53).
+  expect(command(finish!)).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--run-status', '{}', '--export', join(folder, 'spec.written')])
   // A refusal from the board step (exit 3) stops the launcher before anything is launched.
   await writeFile(join(bin, 'node'), '#!/bin/bash\necho "spec-writer: refused: NOM-4 is Grooming" >&2\nexit 3\n', { mode: 0o755 })
   await expect(exec('bash', [launcher, 'start', 'NOM-4'], { cwd: repo, env: ticketEnv })).rejects.toMatchObject({ code: 3, stderr: expect.stringContaining('refused') })
@@ -165,7 +166,7 @@ it('resolves the agent in order: SPEC_WRITER_AGENT_DIR, the package installed un
   expect(override.stderr).toContain(`SPEC_WRITER_AGENT_DIR is set: running kit source at ${root}`)
 })
 
-it('prints the knowledge stage on the first real local call, before anything starts', async () => {
+it('ends blocked on the first real local call with no NOTION_TOKEN, naming the token and the project .env.local, before anything starts (F52)', async () => {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'spec-writer-local-real-')))
   const repo = join(dir, 'repo')
   await mkdir(repo)
@@ -173,13 +174,21 @@ it('prints the knowledge stage on the first real local call, before anything sta
   const idea = join(repo, 'idea.md')
   await writeFile(idea, 'Let people save items.')
   const output = join(dir, 'out')
-  const env = { ...process.env, SPEC_WRITER_AGENT_DIR: '', ASPIRA_KIT: '', KNOWLEDGE_REQUIRED: 'Agent Instructions, Review Verification' }
-  const { stdout } = await exec('bash', [launcher, 'local', idea, '--no-ticket', '--output', output], { cwd: repo, env })
-  const stage = JSON.parse(stdout) as { stage: string; orchestrator: string; knowledge: { dir: string; required: string[] }; agent: { name: string; installed: boolean } }
-  expect(stage.stage).toBe('knowledge')
-  expect(stage.orchestrator).toBe(join(root, 'agent', 'instructions.md'))
-  expect(stage.knowledge.dir).toBe(join(`${output}.local`, 'knowledge'))
-  expect(stage.knowledge.required).toEqual(['Agent Instructions', 'Review Verification'])
-  expect(stage.agent).toMatchObject({ name: '@aspiralabs/spec-writer', installed: false })
+  const { NOTION_TOKEN: _token, NOTION_API_KEY: _key, ...shell } = process.env
+  const env = { ...shell, KNOWLEDGE_PAGE: 'https://www.notion.so/Engineering-0123456789abcdef0123456789abcdef', SPEC_WRITER_AGENT_DIR: '', ASPIRA_KIT: '', KNOWLEDGE_REQUIRED: 'Agent Instructions, Review Verification' }
+  // Exit 1 for blocked (A2); the JSON still goes to stdout for the session to relay.
+  const outcome = await exec('bash', [launcher, 'local', idea, '--no-ticket', '--output', output], { cwd: repo, env }).then(
+    ({ stdout }) => ({ code: 0, stdout }),
+    (error: { code?: number; stdout?: string }) => ({ code: error.code ?? -1, stdout: error.stdout ?? '' }),
+  )
+  const result = JSON.parse(outcome.stdout) as { pending: boolean; status: string; reason: string; exitCode: number; agent: { name: string; version: string; installed: boolean } }
+  expect({ code: outcome.code, pending: result.pending, status: result.status, exitCode: result.exitCode }).toEqual({ code: 1, pending: false, status: 'blocked', exitCode: 1 })
+  expect(result.reason).toContain('NOTION_TOKEN')
+  expect(result.reason).toContain(join(repo, '.env.local'))
+  expect(result.reason).not.toMatch(/Notion MCP|notion-fetch/i)
+  // Every step says which agent package ran.
+  expect(result.agent).toMatchObject({ name: '@aspiralabs/spec-writer', installed: false })
+  expect(result.agent.version).toMatch(/^\d+\.\d+\.\d+/)
+  await expect(readFile(join(`${output}.local`, 'knowledge', 'REQUIRED.md'), 'utf8')).rejects.toThrow()
   await expect(readFile(join(`${output}.local`, 'state.json'), 'utf8')).rejects.toThrow()
 }, 30_000)

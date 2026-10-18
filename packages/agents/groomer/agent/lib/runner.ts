@@ -12,6 +12,7 @@ import { connectReadTools } from '@aspiralabs/agent-common/lib/mcp'
 import { modelTrace } from '@aspiralabs/agent-common/lib/model-trace'
 import { repository } from '@aspiralabs/agent-common/lib/repository'
 import { runAnalysis } from '@aspiralabs/agent-common/lib/run-analysis'
+import { type ReasonCode } from '@aspiralabs/agent-common/lib/run-status'
 import { readTicketMd } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { IDEA_SUMMARY_NAME, writeRound } from '../tools/write-round.ts'
 import { factFindingSchema, type FactFinding } from './fact-finding.ts'
@@ -72,7 +73,7 @@ export async function prepareGroom(input: GroomInput) {
 export type PreparedGroom = Awaited<ReturnType<typeof prepareGroom>>
 
 function emptyRecord(): GroomRecord {
-  return { decisions: [], branches: seedBranches(), round: 0, startedAt: new Date().toISOString(), open: 0, page: {}, status: 'needs-author' }
+  return { decisions: [], branches: seedBranches(), round: 0, startedAt: new Date().toISOString(), open: 0, page: {}, status: 'needs-author', reasonCode: null, reason: null }
 }
 
 /** Untrusted text, fenced so a reader can tell where it starts and ends. */
@@ -170,18 +171,19 @@ export async function runGroom(input: GroomInput, options: { finding?: FactFindi
   // rendering, so the record keeps the page's round; the round file is numbered as the next one.
   const n = (prepared.pageRound ?? 0) + 1
   let status: GroomRunStatus = 'needs-author'
+  let reasonCode: ReasonCode | null = null
   let next: GroomRecord = record
   let round: Round | null = null
   let summary: string | null = null
   let facts: Fact[] = record.facts ?? []
   let searched: string[] = record.searched ?? []
   try {
-    if (prepared.stopTicked) status = 'stopped'
+    if (prepared.stopTicked) { status = 'needs-author'; reasonCode = 'paused' }
     else if (prepared.confirmTicked && answered.decisions.every((decision) => decision.decidedBy !== 'open') && allBranchesVisited(answered)) {
       options.progress?.('summary')
       summary = await submitLoop(trace, { phase: 'summary', model: models.round, system: stepSystem(instructions, 'summary'), prompt: summaryPrompt(prepared), schema: z.object({ markdown: z.string().min(1) }), tools: {}, maxSteps: 2 }).then((value) => value?.markdown ?? null)
       if (summary === null) problems.push('the Idea summary was not composed')
-      else status = 'confirmed'
+      else status = 'ready'
     } else {
       if (prepared.needsFacts) {
         options.progress?.('facts')
@@ -212,8 +214,13 @@ export async function runGroom(input: GroomInput, options: { finding?: FactFindi
   } finally {
     await mcp.close()
   }
-  if (problems.length > 0 && round === null && summary === null && status !== 'stopped') status = 'incomplete'
-  const finalRecord = groomRecordSchema.parse({ ...next, status, open: next.decisions.filter((decision) => decision.decidedBy === 'open').length, facts, searched })
+  if (problems.length > 0 && round === null && summary === null && reasonCode !== 'paused') status = 'incomplete'
+  const openCount = next.decisions.filter((decision) => decision.decidedBy === 'open').length
+  const reason = status === 'ready' ? null
+    : reasonCode === 'paused' ? 'Stop grooming was ticked on the Grooming Decisions page'
+      : status === 'incomplete' ? (problems[0] ?? null)
+        : `${openCount} decision${openCount === 1 ? '' : 's'} still open on the Grooming Decisions page`
+  const finalRecord = groomRecordSchema.parse({ ...next, status, reasonCode, reason, open: openCount, facts, searched })
   const agent = await agentVersion(new URL('../..', import.meta.url))
   const reviewMs = Date.now() - started - prepareMs
   const exportStarted = Date.now()
@@ -244,5 +251,5 @@ export async function runGroom(input: GroomInput, options: { finding?: FactFindi
       problems.push(message(error))
     }
   }
-  return { status, dir: paths.output, round: round === null ? null : n, open: finalRecord.open, written, problems, reportedCostUsd, totalMs: Date.now() - started }
+  return { status, reasonCode, dir: paths.output, round: round === null ? null : n, open: finalRecord.open, written, problems, reportedCostUsd, totalMs: Date.now() - started }
 }

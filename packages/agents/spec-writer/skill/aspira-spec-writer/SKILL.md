@@ -2,6 +2,7 @@
 name: aspira-spec-writer
 description: Turn a feature idea (a file, a Notion card or inline text) into a reviewed spec with the official spec-writer pipeline. It explores the repository, writes an initial draft in the Aspira spec contract, then runs the official spec review on that draft, and reports the written spec, the draft, open author decisions and a run analysis. By default it runs spec-writer as a separate process on Claude and OpenAI models; with --local the same pipeline runs inside this Claude Code session. Use for /aspira-spec-writer or requests to write a spec from an idea.
 argument-hint: [<ticket ID | Notion URL> | <idea.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended]
+disable-model-invocation: true
 ---
 
 # Spec writer
@@ -29,7 +30,7 @@ The repository is the git root of the current directory unless `--repo` is given
 | Models | the agent's configured models (`agent/lib/runner.ts`, spec-reviewer's `models.ts`) | this session's model, for every phase |
 | Independence | the reviewers are a second vendor with no session context | fresh subagent contexts, same vendor and session |
 | Cost | Vercel AI Gateway, itemized in `run-analysis.md` | this session's usage, not itemized |
-| Needs | Node 24, pnpm, screen, the agents' `.env.local`; Docker when loading Notion guidelines | Node 24, pnpm, the Notion MCP (or `--guidelines`) |
+| Needs | Node 24, pnpm, screen, the agents' `.env.local`; Docker when loading Notion guidelines | Node 24, pnpm, the Notion MCP for the board, `NOTION_TOKEN` for the guidelines (or `--guidelines`) |
 
 Use the default when the spec should be reviewed by models independent of this session. Use `--local` to stay in this session.
 
@@ -53,13 +54,10 @@ The run is detached. Tell the user it started and where results will go, then us
 
 Each `local` call is one synchronous step. It makes no model calls: it prints JSON naming the next `stage` and its tasks, each with a `prompt` file assembled at that moment from the agent's own files and the `output` file to write, or the finished report. Every result carries `orchestrator`, the agent's `agent/instructions.md`: read the file named in `orchestrator` in full once, before the first phase. In this mode the `local` steps stand in for the agent's write tool, and you stand in for its router. Run the tasks as subagents and do not edit the prompt files: their content is exactly what the agent's phases get.
 
-1. **Board** (first, with a ticket). `stage: "board"` lists the board work for this session to perform with the Notion MCP, as data in `actions`. A `resolve` action names the ticket and the board: fetch the ticket and write `ticket.md` at `write` in exactly the `format` given. A `pull` action names a child page and the file to write it to as plain markdown. A `set` action and a `move` action name the property and the Status to set on the ticket page, and `then` says what to update in `ticket.md` afterwards. Perform every action, then call `local` again; the driver reads `ticket.md`, refuses when its Status is not the one the writer needs, and lists what is still missing until the folder is in sync. Never move a card anywhere the stage does not list.
-2. **Knowledge.** The engineering guidelines are mandatory; the driver refuses to start without them. With `--guidelines`, pass the same snapshot to every call. Otherwise the first call prints `stage: "knowledge"` with `knowledge.dir`, `knowledge.root` (the agent's `KNOWLEDGE_PAGE`), `knowledge.required` (the agent's `KNOWLEDGE_REQUIRED` pages, in order), `maxDepth`, `maxPages` and any `problems` with a folder already there. Build that folder with the Notion MCP the way the agent's `load-knowledge` does:
-   - `INDEX.md`: the `root` page in full. When `root` is null, search Notion for the required pages by title and use the page that links them.
-   - One file per page linked from the index, down to `maxDepth` levels and at most `maxPages` pages, named after the page title in kebab case, each starting `<!-- <title> · <url> -->`.
-   - `REQUIRED.md`: every `required` page in order, each as `# <page title>`, then `<!-- <url> -->`, then its full content, separated by `---`, text as fetched with rule IDs.
+The engineering guidelines are mandatory, local mode included: `local` runs `load-knowledge` itself, once per run, with `NOTION_TOKEN` from the environment, the app's `.env.local` or the project's `.env.local`, and never asks this session to fetch them. A truncated or missing guideline page stops the run, naming it; with no token the run ends `blocked`. `--guidelines` takes only a `REQUIRED.md` that `load-knowledge` wrote, still where it wrote it; any other file, a `trace/` copy included, is refused.
 
-   If a page is truncated or cannot be fetched, stop and say so. Run `local` again; it prints `problems` until the folder is complete.
+1. **Board** (first, with a ticket). `stage: "board"` lists the board work for this session to perform with the Notion MCP, as data in `actions`. A `resolve` action names the ticket and the board: fetch the ticket and write `ticket.md` at `write` in exactly the `format` given. A `pull` action names a child page and the file to write it to as plain markdown. A `set` action and a `move` action name the property and the Status to set on the ticket page, and `then` says what to update in `ticket.md` afterwards. Perform every action, then call `local` again; the driver reads `ticket.md`, refuses when its Status is not the one the writer needs, and lists what is still missing until the folder is in sync. Never move a card anywhere the stage does not list.
+2. **Knowledge.** `local`'s own `load-knowledge` step already built the folder, or `blocked` names what to set. Run `local` again once it is set, or pass the same `--guidelines` snapshot to every call.
 3. **Explore.** `stage: "explore"`, one task. Launch one `general-purpose` subagent with this message: `Read <prompt> in full and follow it exactly. Write your JSON result to <output>. Reply with one line.`
 4. **Draft.** `stage: "draft"`, one task, the same way.
 5. **Review research.** `stage: "research"`, one task, the same way.
@@ -71,4 +69,4 @@ A task that comes back with an `error` wrote an output that failed its schema: s
 
 ## Reporting
 
-Start the report with the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log). The output layout and what to report from it are in `agent/instructions.md`; hand `spec.md` to `/aspira-planner` only as it allows. Read `trace/review.json` for the status even when the command exits successfully. If a run fails before exporting, show its log or error and do not present an earlier report as the new result. Say which mode produced the report: a `--local` run used this session's model throughout, so its review is not independent of the writer.
+A non-zero exit is a run status to relay (exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author): never retry or rerun it on needs-author, settle the open decisions the report names first. Start the report with the run status and the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log). The output layout and what to report from it are in `agent/instructions.md`; hand `spec.md` to `/aspira-planner` only as it allows. If a run fails before exporting, show its log or error and do not present an earlier report as the new result. Say which mode produced the report: a `--local` run used this session's model throughout, so its review is not independent of the writer.

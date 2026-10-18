@@ -47,9 +47,9 @@ export const READY_MOVES: readonly { from: string; to: string }[] = [
 /** The one move Step 8 makes, after the PR property reads back (BOARD-005). */
 export const STEP8_MOVE = { from: 'In Progress: Implementation', to: 'In Review: Implementation' } as const
 
-export type StepRoute = { kind: 'step'; step: StepName; command: string }
+export type StepRoute = { kind: 'step'; step: StepName; command: string; launcher: string[] }
 export type SequenceItem = { kind: 'phase'; phase: PhaseName } | (StepRoute & { done: boolean })
-export type EndRoute = { kind: 'end'; reason: 'nothing-to-do' | 'dropped' | 'unknown' | 'finished'; message: string }
+export type EndRoute = { kind: 'end'; reason: 'nothing-to-do' | 'dropped' | 'unknown' | 'unsettled' | 'finished'; message: string }
 
 export type Route =
   | StepRoute
@@ -64,10 +64,10 @@ export type RouteFacts = {
   app: string
   /** In Review: Spec: a review (spec.written/ or a ready spec-reviewer run) covers the current spec.md (A6). */
   specCovered: boolean
-  /** The implementor's last exported status (implementation-local.json), or null. */
+  /** The implementor's last exported status (implementation-local.json), read through readRunStatus, or null. */
   implementor: string | null
-  /** The code-analyzer finished clean after the last build. */
-  analyzerClean: boolean
+  /** The code-analyzer finished ready after the last build. */
+  analyzerReady: boolean
   /** How each step runs. Default 'local'. */
   mode?: Mode
 }
@@ -83,6 +83,23 @@ const stepOf = (command: string): StepName => {
   return name
 }
 
+/** One launcher command line: the step's own script, the subcommand (`local`, `start`, `wait`) and its arguments. */
+const launcherLine = (step: StepName, sub: 'local' | 'start' | 'wait', args: string): string => `.claude/skills/aspira-${step}/scripts/${step}.sh ${sub} ${args}`.trim()
+
+/**
+ * `command`'s launcher form (F44): the step's own script instead of the slash command, so a
+ * subagent runs its launcher script directly instead of the Skill tool. Local: `.sh local <args>`,
+ * `--local` dropped (implied by `local`). Cloud: `.sh start <args>` then `.sh wait <RUN>`.
+ * Exported so a caller holding only a command string (the review loop's own re-review command,
+ * which stepCommand never builds) can still get its launcher form, with the same algorithm.
+ */
+export function launcherFor(command: string, mode: Mode): string[] {
+  const step = stepOf(command)
+  const args = command.split(' ').slice(1).filter((word) => word !== '--local').join(' ')
+  if (mode === 'cloud') return [launcherLine(step, 'start', args), launcherLine(step, 'wait', '<RUN>')]
+  return [launcherLine(step, 'local', args)]
+}
+
 /**
  * A row's command as the run invokes it: ID filled, <app-dir> filled; under --local the row's
  * --local and --take-recommended where it applies, in cloud mode the same command without --local.
@@ -93,8 +110,13 @@ export function stepCommand(status: string, facts: Pick<RouteFacts, 'id' | 'app'
   if (filled === null) throw new Error(`the Playbook row for ${status} has no command`)
   const command = filled.replaceAll('<app-dir>', facts.app)
   const step = stepOf(command)
-  if ((facts.mode ?? 'local') === 'cloud') return { kind: 'step', step, command: command.split(' ').filter((word) => word !== '--local').join(' ') }
-  return { kind: 'step', step, command: TAKE_RECOMMENDED.includes(step) ? `${command} --take-recommended` : command }
+  const mode = facts.mode ?? 'local'
+  if (mode === 'cloud') {
+    const cloudCommand = command.split(' ').filter((word) => word !== '--local').join(' ')
+    return { kind: 'step', step, command: cloudCommand, launcher: launcherFor(cloudCommand, mode) }
+  }
+  const localCommand = TAKE_RECOMMENDED.includes(step) ? `${command} --take-recommended` : command
+  return { kind: 'step', step, command: localCommand, launcher: launcherFor(localCommand, mode) }
 }
 
 /** What the run does for a live Status. */
@@ -119,11 +141,11 @@ export function routeStatus(status: string, facts: RouteFacts): Route {
     case 'In Review: Spec':
       return facts.specCovered ? { kind: 'readyMove', from: 'In Review: Spec', to: 'Ready: Spec' } : stepCommand(named, facts)
     case 'In Progress: Implementation': {
-      if (facts.implementor !== 'complete') return stepCommand('Ready: Plan', facts)
+      if (facts.implementor !== 'ready') return stepCommand('Ready: Plan', facts)
       return {
         kind: 'sequence',
-        items: [{ kind: 'phase', phase: 'gate' }, { ...stepCommand(named, facts), done: facts.analyzerClean }, { kind: 'phase', phase: 'step8' }],
-        then: { kind: 'end', reason: 'unknown', message: `${facts.id} is still in In Progress: Implementation after Step 8; resolve it again` },
+        items: [{ kind: 'phase', phase: 'gate' }, { ...stepCommand(named, facts), done: facts.analyzerReady }, { kind: 'phase', phase: 'step8' }],
+        then: { kind: 'end', reason: 'unsettled', message: `${facts.id} is still in In Progress: Implementation after Step 8; resolve it again` },
       }
     }
     case 'In Review: Implementation':

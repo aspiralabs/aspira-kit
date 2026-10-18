@@ -8,7 +8,7 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { BoardError, board as makeBoard, type Board, type Ticket, type TicketPage } from './board.ts'
+import { BoardError, board as makeBoard, type Board, type BoardWithPageMarkdown, type Ticket, type TicketPage } from './board.ts'
 import {
   GROOM_LINE_PATTERNS,
   RECOMMENDED_SUFFIX,
@@ -24,7 +24,9 @@ import {
   type GroomCarried,
   type GroomTicks,
 } from './decisions.ts'
-import { GROOM_BRANCHES, GROOM_RUN_STATUSES, readGroomRecord, rebuildGroomRecord, validateIdeaSummary, writeGroomRecord, type GroomRecord, type GroomRunStatus } from './groom-record.ts'
+import { GROOM_BRANCHES, readGroomRecord, rebuildGroomRecord, validateIdeaSummary, writeGroomRecord, type GroomRecord } from './groom-record.ts'
+import { PLAN_BLOCK_FILES, recoverPlan } from './plan-block.ts'
+import type { ReasonCode } from './run-status.ts'
 import {
   DEFAULT_DEV,
   DEV_ENV,
@@ -231,6 +233,20 @@ export async function startFlow(options: FlowOptions): Promise<FlowStart> {
     await writeInto(item.file, page.markdown)
     pulled.push(item.file)
     trace.actions.push(entry('pull', `${item.title} -> ${item.file} (${item.reason})`, ticket.status, ticket.status))
+    // A fresh machine's implementor pull has the pushed Plan page but not the planner's own
+    // trace/plan.json and trace/review.json (never pushed to git): rebuild them from the page's
+    // fenced block (F36) instead of asking the session to retype the plan. `pageMarkdown` (raw, no
+    // notionToMarkdown conversion) is preferred so the block's hashes still verify; a client without
+    // it (an older mock) falls back to the already-pulled, converted copy.
+    if (options.skill === 'implementor' && item.title === 'Plan' && !existsSync(join(folder, PLAN_BLOCK_FILES[0]))) {
+      const raw = 'pageMarkdown' in client ? await (client as BoardWithPageMarkdown).pageMarkdown(page.id) : { markdown: page.markdown, truncated: false }
+      const recovered = await recoverPlan({ pageMarkdown: raw.markdown, truncated: raw.truncated, folder, pageUrl: page.url })
+      trace.actions.push(
+        recovered.recovered
+          ? entry('pull', `Plan block -> ${recovered.files.join(', ')} (recovered from the Plan page)`, ticket.status, ticket.status)
+          : entry('pull', `Plan block not recovered: ${recovered.reason}`, ticket.status, ticket.status, false, recovered.reason),
+      )
+    }
   }
   const row = GATES[options.skill]
   const groomPull = row.pulls?.[0]
@@ -278,11 +294,8 @@ function runMarkers(markdown: string): { line: string; startedAt: string }[] {
 
 const today = () => new Date().toISOString().slice(0, 10)
 
-/** A run status word as the groom record keeps it: a word the groomer does not use is a failure. */
-const groomStatusOf = (word: string): GroomRunStatus => GROOM_RUN_STATUSES.find((status) => status === word) ?? 'incomplete'
-
 /** The record of a card no run has groomed yet: every branch open, round zero. */
-const emptyGroomRecord = (startedAt: string): GroomRecord => ({ decisions: [], branches: GROOM_BRANCHES.map((id) => ({ id, state: 'open' as const })), round: 0, startedAt, open: 0, page: {}, status: 'incomplete' })
+const emptyGroomRecord = (startedAt: string): GroomRecord => ({ decisions: [], branches: GROOM_BRANCHES.map((id) => ({ id, state: 'open' as const })), round: 0, startedAt, open: 0, page: {}, status: 'incomplete', reasonCode: null, reason: null })
 
 /** The first blocks of every rendering, the title and the intro, exactly as the renderer writes them: what a first run's new page holds before its marker. */
 function groomPageHead(): string {
@@ -499,13 +512,14 @@ async function finishGroom(options: FinishOptions, client: Board, ticket: Ticket
     }
   }
 
-  let final: GroomRunStatus = options.ok ? groomStatusOf(options.runStatus) : 'incomplete'
+  let final: RunStatus = options.runStatus
   let reported: string | undefined
   let url = record?.page.url
+  const boardWorthy = final === 'ready' || final === 'needs-author'
   if (record === undefined) {
-    if (options.ok) fail(`${join(options.folder, gate.record?.file ?? '')} is missing; the run left no record`)
+    if (boardWorthy) fail(`${join(options.folder, gate.record?.file ?? '')} is missing; the run left no record`)
     final = 'incomplete'
-  } else if (final !== 'incomplete') {
+  } else if (boardWorthy) {
     const outcome = await groomBoardStep()
     record = outcome
   }
@@ -562,13 +576,13 @@ async function finishGroom(options: FinishOptions, client: Board, ticket: Ticket
       notices.push(sentence)
       check(sentence)
     }
-    if (final === 'confirmed' && (open > 0 || !confirmTicked)) {
-      reported = 'confirmed'
+    if (final === 'ready' && (open > 0 || !confirmTicked)) {
+      reported = 'ready'
       final = 'needs-author'
       check(`confirmed reported, ${open} open on Grooming Decisions; recorded needs-author`)
     }
     working = { ...working, status: final, open }
-    const markdown = renderGroomPage(working, { date: today(), notes: carried, ...(confirmUnticked && open === 0 && final !== 'confirmed' ? { confirmUnticked: true } : {}) })
+    const markdown = renderGroomPage(working, { date: today(), notes: carried, ...(confirmUnticked && open === 0 && final !== 'ready' ? { confirmUnticked: true } : {}) })
     await writeInto(decisionsFile, markdown)
     try {
       const replaced = await client.replacePage(ticket.url, title, markdown)
@@ -584,7 +598,7 @@ async function finishGroom(options: FinishOptions, client: Board, ticket: Ticket
       return working
     }
     // (c) The Idea summary, checked against the record before anything is written to the card.
-    if (final === 'confirmed') {
+    if (final === 'ready') {
       const summaryFile = join(options.folder, GROOM_IDEA_SUMMARY_FILE)
       const summary = await readFile(summaryFile, 'utf8').catch(() => null)
       const valid = summary === null ? { ok: false as const, reason: `${summaryFile} is missing` } : validateIdeaSummary(summary, working)
@@ -608,16 +622,16 @@ async function finishGroom(options: FinishOptions, client: Board, ticket: Ticket
       return incomplete(`${title} could not be read after the replace: ${message(error)}`)
     }
     const state = groomPageState(after?.markdown ?? '')
-    if (final === 'confirmed' && (state.open > 0 || !state.confirmTicked)) {
-      reported = 'confirmed'
+    if (final === 'ready' && (state.open > 0 || !state.confirmTicked)) {
+      reported = 'ready'
       final = 'needs-author'
       check(`confirmed reported, ${state.open} open on Grooming Decisions; recorded needs-author`)
-    } else if (final !== 'confirmed' && state.confirmTicked && state.open === 0) {
+    } else if (final !== 'ready' && state.confirmTicked && state.open === 0) {
       const sentence = 'Confirm was ticked after this run wrote the page; rerun to complete grooming'
       notices.push(sentence)
       check(sentence)
     }
-    if (final !== 'confirmed') return working
+    if (final !== 'ready') return working
     // (e) The Status re-read: the end move keys on it, never on ticket.md.
     const wrong = (current: string) => incomplete(`${ticket.id} is in "${current}", not "${gate.inProgress}"; the Idea summary was written and stays`)
     let current: string
@@ -632,7 +646,7 @@ async function finishGroom(options: FinishOptions, client: Board, ticket: Ticket
       check(`already in ${gate.success}; no move`)
       return working
     }
-    const move = endMove(options.skill, true, current, false, final)
+    const move = endMove(options.skill, final, current, false)
     if (move === null) return wrong(current)
     try {
       const moved = await client.moveTicket(ticket.url, move.from, move.to)
@@ -657,17 +671,17 @@ async function finishGroom(options: FinishOptions, client: Board, ticket: Ticket
   await writeInto(join(options.folder, TICKET_FILE), renderTicketMd(ticket))
   const traceFile = await writeBoardTrace(options.exportDir ?? options.folder, trace)
   const groom: GroomFinish = { open, ...(url === undefined ? {} : { url }) }
-  const remaining = remainingStep(options.skill, options.ok, status, false, final, groom)
+  const remaining = remainingStep(options.skill, status, false, final, options.reasonCode ?? null, groom)
   return { trace, traceFile, header: reportHeader(trace), pushFailures, remaining, runStatus: final, notices, groom }
 }
 
 export type FinishOptions = {
   skill: Skill
   folder: string
-  /** Did the run succeed (the skill's own success status)? */
-  ok: boolean
-  /** The run's status word, for the pushes that depend on it (needs-author) and the groomer's end move (confirmed). */
+  /** The run's status word: pushes and the end move are derived from it alone (F53), no separate ok flag. */
   runStatus: RunStatus
+  /** Which sub-case of runStatus this is (the groomer's round paused by Stop); affects remainingStep's wording only. */
+  reasonCode?: ReasonCode | null
   /** The PR the implementor opened, when it did. */
   prUrl?: string
   /** The export directory the trace is written into; default: the working folder. */
@@ -703,28 +717,30 @@ export async function finishFlow(options: FinishOptions): Promise<FlowFinish> {
   if (GATES[options.skill].record !== undefined) return finishGroom(options, client, ticket, trace)
   const pushFailures: string[] = []
   let status = ticket.status
-  if (options.ok) {
-    for (const push of pushesFor(options.skill, options.runStatus)) {
-      const file = join(options.folder, push.file)
-      const markdown = await readFile(file, 'utf8').catch(() => null)
-      if (markdown === null) {
-        pushFailures.push(`${push.title}: ${file} does not exist`)
-        trace.actions.push(entry('push', `${push.title} from ${file}`, status, status, false, 'file missing'))
-        continue
-      }
-      try {
-        const result = await client.pushPage(ticket.url, push.title, markdown)
-        trace.pushed.push({ title: push.title, url: result.url })
-        ticket.pages[push.title] = { id: result.id, title: push.title, url: result.url, lastEditedAt: new Date().toISOString() }
-        trace.actions.push(entry('push', `${push.title} from ${file} (${result.created ? 'created' : 'replaced'})`, status, status))
-      } catch (error) {
-        pushFailures.push(`${push.title}: ${message(error)}; the output is at ${file}`)
-        trace.actions.push(entry('push', `${push.title} from ${file}`, status, status, false, message(error)))
-      }
+  let runStatus = options.runStatus
+  for (const push of pushesFor(options.skill, runStatus)) {
+    const file = join(options.folder, push.file)
+    const markdown = await readFile(file, 'utf8').catch(() => null)
+    if (markdown === null) {
+      pushFailures.push(`${push.title}: ${file} does not exist`)
+      trace.actions.push(entry('push', `${push.title} from ${file}`, status, status, false, 'file missing'))
+      continue
+    }
+    try {
+      const result = await client.pushPage(ticket.url, push.title, markdown)
+      trace.pushed.push({ title: push.title, url: result.url })
+      ticket.pages[push.title] = { id: result.id, title: push.title, url: result.url, lastEditedAt: new Date().toISOString() }
+      trace.actions.push(entry('push', `${push.title} from ${file} (${result.created ? 'created' : 'replaced'})`, status, status))
+    } catch (error) {
+      pushFailures.push(`${push.title}: ${message(error)}; the output is at ${file}`)
+      trace.actions.push(entry('push', `${push.title} from ${file}`, status, status, false, message(error)))
     }
   }
+  // A push whose file is missing (or that fails outright) means the run's output is not actually on
+  // the card: the status it reports from here on is incomplete, and no move follows (F6, F53).
+  if (pushFailures.length > 0) runStatus = 'incomplete'
   let prOpened = false
-  if (options.skill === 'implementor' && options.ok && options.prUrl !== undefined && options.prUrl !== '') {
+  if (options.skill === 'implementor' && runStatus === 'ready' && options.prUrl !== undefined && options.prUrl !== '') {
     try {
       await client.setProperty(ticket.url, 'PR', options.prUrl)
       ticket.pr = options.prUrl
@@ -734,7 +750,7 @@ export async function finishFlow(options: FinishOptions): Promise<FlowFinish> {
       trace.actions.push(entry('set', `PR = ${options.prUrl}`, status, status, false, message(error)))
     }
   }
-  const move = endMove(options.skill, options.ok, status, prOpened, options.runStatus)
+  const move = pushFailures.length > 0 ? null : endMove(options.skill, runStatus, status, prOpened)
   if (move !== null) {
     try {
       const moved = await client.moveTicket(ticket.url, move.from, move.to)
@@ -748,24 +764,24 @@ export async function finishFlow(options: FinishOptions): Promise<FlowFinish> {
   trace.statusAfter = status
   await writeInto(join(options.folder, TICKET_FILE), renderTicketMd(ticket))
   const traceFile = await writeBoardTrace(options.exportDir ?? options.folder, trace)
-  const remaining = remainingStep(options.skill, options.ok, status, prOpened, options.runStatus)
-  return { trace, traceFile, header: reportHeader(trace), pushFailures, remaining, runStatus: options.runStatus, notices: [] }
+  const remaining = remainingStep(options.skill, status, prOpened, runStatus, options.reasonCode ?? null)
+  return { trace, traceFile, header: reportHeader(trace), pushFailures, remaining, runStatus, notices: [] }
 }
 
 /**
  * What is left for a human after the run, when the skill's success move was not made. The groomer's
  * rows are selected by `runStatus` and read the open questions and the page from its record.
  */
-export function remainingStep(skill: Skill, ok: boolean, status: string, prOpened: boolean, runStatus?: RunStatus, groom?: GroomFinish): string | null {
+export function remainingStep(skill: Skill, status: string, prOpened: boolean, runStatus: RunStatus, reasonCode: ReasonCode | null = null, groom?: GroomFinish): string | null {
   const gate = GATES[skill]
-  if (gate.record !== undefined && runStatus !== undefined && runStatus !== 'incomplete') {
+  if (gate.record !== undefined && runStatus !== 'incomplete' && runStatus !== 'refused' && runStatus !== 'blocked') {
     const page = `${gate.pulls?.[0]?.title ?? 'the decisions page'} (${groom?.url ?? 'not created yet'})`
+    if (runStatus === 'needs-author' && reasonCode === 'paused') return `Grooming stopped at the human's request; run ${skill} again to resume from the page.`
     if (runStatus === 'needs-author') return (groom?.open ?? 0) > 0 ? `Answer the ${groom?.open ?? 0} open question(s) on ${page}, then run ${skill} again; it reads the ticks.` : `Tick Confirm on ${page} to complete grooming.`
-    if (runStatus === 'stopped') return `Grooming stopped at the human's request; run ${skill} again to resume from the page.`
-    if (runStatus === 'confirmed') return null
+    if (runStatus === 'ready') return null
   }
-  const failed = !ok || (gate.record !== undefined && runStatus === 'incomplete')
-  if (skill === 'implementor' && ok && !prOpened) return `The ticket stays in "${status}": opening the PR is the remaining step. Push the branch, open the PR, set the ticket's PR property and move it to "In Review: Implementation".`
+  const failed = runStatus !== 'ready'
+  if (skill === 'implementor' && runStatus === 'ready' && !prOpened) return `The ticket stays in "${status}": opening the PR is the remaining step. Push the branch, open the PR, set the ticket's PR property and move it to "In Review: Implementation".`
   if (failed && gate.inProgress !== undefined) return `The run did not succeed, so the ticket stays in "${status}". Fix what stopped it and run ${skill} again; a rerun from "${gate.inProgress}" makes no start move.`
   return null
 }
@@ -821,6 +837,8 @@ export type LocalBoardOptions = {
   forceRun?: boolean
   dev?: string
   env?: Record<string, string | undefined>
+  /** Runs after the resolve and before the claim (the Dev set and the start move) are printed; a check that refuses throws FlowRefused with its Next action (the implementor's branch gate, F22). */
+  beforeClaim?: (ticket: TicketRecord) => void | Promise<void>
 }
 
 /** Where the --local driver keeps its board state for a skill: inside the working folder. */
@@ -926,6 +944,7 @@ export async function localBoardStep(options: LocalBoardOptions): Promise<{ stag
     if (item.decision !== 'write') continue
     pulls.push({ action: 'pull', title: item.title, page: item.page, file: item.file, reason: item.reason, note: item.note ?? 'Fetch the child page with the Notion MCP and write its content as plain markdown (no Notion escapes; tables as pipe tables; callouts as block quotes).' })
   }
+  if (options.beforeClaim !== undefined) await options.beforeClaim(ticket)
   const claim: BoardAction[] = []
   if (gate.startMove !== null) {
     if (row.setsDev !== false) claim.push({ action: 'set', page: ticket.url, name: 'Dev', value: dev, then: `set Dev to "${dev}" in ${join(folder, TICKET_FILE)}` })
@@ -981,8 +1000,9 @@ function sameRef(folder: WorkFolder, ref: string): boolean {
 export type LocalBoardEndOptions = {
   skill: Skill
   folder: string
-  ok: boolean
   runStatus: RunStatus
+  /** Which sub-case of runStatus this is (the groomer's round paused by Stop); affects remainingStep's wording only. */
+  reasonCode?: ReasonCode | null
   exportDir: string
   stateDir: string
   verifyCommand: string
@@ -1002,14 +1022,21 @@ export async function localBoardEnd(options: LocalBoardEndOptions): Promise<Loca
   if (ticket === null) throw new Error(`${join(options.folder, TICKET_FILE)} is missing`)
   const trace: BoardTrace = state?.trace ?? { skill: options.skill, ticket: { id: ticket.id, title: ticket.title, url: ticket.url }, folder: options.folder, statusBefore: ticket.status, statusAfter: ticket.status, pushed: [], actions: [] }
   const actions: BoardAction[] = []
-  if (options.ok) {
-    for (const push of pushesFor(options.skill, options.runStatus)) {
-      const file = join(options.folder, push.file)
-      if (!existsSync(file)) continue
-      actions.push({ action: 'push', page: ticket.url, title: push.title, file, then: `add or update the "${push.title}" row of the Pages table in ${join(options.folder, TICKET_FILE)} with the page URL and its last-edited time` })
+  let runStatus = options.runStatus
+  let missing = false
+  for (const push of pushesFor(options.skill, runStatus)) {
+    const file = join(options.folder, push.file)
+    if (!existsSync(file)) {
+      missing = true
+      trace.actions.push(entry('check', `${push.title} from ${file}: the file is missing, nothing to push`, ticket.status, ticket.status, false, 'file missing'))
+      continue
     }
+    actions.push({ action: 'push', page: ticket.url, title: push.title, file, then: `add or update the "${push.title}" row of the Pages table in ${join(options.folder, TICKET_FILE)} with the page URL and its last-edited time` })
   }
-  const move = endMove(options.skill, options.ok, ticket.status, false, options.runStatus)
+  // A planned push whose file never materialized means the run's output is not actually ready to
+  // land on the card: the status is incomplete from here on, and no move action follows (F6, F53).
+  if (missing) runStatus = 'incomplete'
+  const move = missing ? null : endMove(options.skill, runStatus, ticket.status, false)
   if (move !== null) actions.push({ action: 'move', page: ticket.url, from: move.from, to: move.to, then: `set Status to "${move.to}" in ${join(options.folder, TICKET_FILE)}` })
   const expected = move?.to ?? ticket.status
   trace.expected = expected
@@ -1017,7 +1044,7 @@ export async function localBoardEnd(options: LocalBoardEndOptions): Promise<Loca
   // Nothing for the session to do: the trace is complete as it stands.
   trace.verified = actions.length === 0
   const traceFile = await writeBoardTrace(options.exportDir, trace)
-  return { stage: 'board-end', actions, verify: actions.length === 0 ? null : { command: options.verifyCommand, file: join(options.folder, TICKET_FILE), status: expected }, traceFile, remaining: remainingStep(options.skill, options.ok, expected, false, options.runStatus) }
+  return { stage: 'board-end', actions, verify: actions.length === 0 ? null : { command: options.verifyCommand, file: join(options.folder, TICKET_FILE), status: expected }, traceFile, remaining: remainingStep(options.skill, expected, false, runStatus, options.reasonCode ?? null) }
 }
 
 /**
@@ -1036,10 +1063,11 @@ async function localGroomEnd(options: LocalBoardEndOptions): Promise<LocalBoardE
   const page = ticket.pages[title]?.url ?? ticket.url
   const marker = state.startedAt === undefined ? 'Run: <startedAt> local in progress' : runMarkerText(state.startedAt, 'local')
   const actions: BoardAction[] = [{ action: 'unmark', page, text: marker, then: `delete the paragraph ${marker} from ${title}; delete no other block` }]
-  const final: GroomRunStatus = options.ok ? groomStatusOf(options.runStatus) : 'incomplete'
+  const final: RunStatus = options.runStatus
+  const reasonCode = options.reasonCode ?? null
   const record = await readGroomRecord(options.folder)
-  if (final !== 'incomplete') {
-    for (const push of pushesFor(options.skill, options.runStatus)) {
+  if (final === 'ready' || final === 'needs-author') {
+    for (const push of pushesFor(options.skill, final)) {
       const file = join(options.folder, push.file)
       if (!existsSync(file)) throw new FlowRefused(`${file} is missing; the round did not render ${push.title}`)
       actions.push({
@@ -1053,7 +1081,7 @@ async function localGroomEnd(options: LocalBoardEndOptions): Promise<LocalBoardE
     }
   }
   let move: { from: string; to: string } | null = null
-  if (final === 'confirmed') {
+  if (final === 'ready') {
     const summaryFile = join(options.folder, GROOM_IDEA_SUMMARY_FILE)
     const summary = await readFile(summaryFile, 'utf8').catch(() => null)
     if (summary === null) throw new FlowRefused(`${summaryFile} is missing; the summary stage writes it before the board stage`)
@@ -1070,11 +1098,11 @@ async function localGroomEnd(options: LocalBoardEndOptions): Promise<LocalBoardE
       file: summaryFile,
       then: 'write the file into the card body under ## Idea, replacing a previous summary found by its opening paragraph; delete no block the groomer did not write',
     })
-    move = endMove(options.skill, true, ticket.status, false, final)
+    move = endMove(options.skill, final, ticket.status, false)
     if (move !== null) actions.push({ action: 'move', page: ticket.url, from: move.from, to: move.to, then: `set Status to "${move.to}" in ${ticketFile}` })
   }
   const open = record === undefined ? 0 : openCount(record)
-  if (record !== undefined) await writeGroomRecord(options.folder, { ...record, status: final, open })
+  if (record !== undefined) await writeGroomRecord(options.folder, { ...record, status: final, reasonCode, open })
   state.round = options.round ?? record?.round ?? (state.round ?? 0) + 1
   state.pushAskedAt = new Date().toISOString()
   const before = ticket.pages[title]?.url
@@ -1087,7 +1115,7 @@ async function localGroomEnd(options: LocalBoardEndOptions): Promise<LocalBoardE
   trace.verified = false
   const traceFile = await writeBoardTrace(options.exportDir, trace)
   const url = record?.page.url
-  return { stage: 'board-end', actions, verify: { command: options.verifyCommand, file: ticketFile, status: expected }, traceFile, remaining: remainingStep(options.skill, options.ok, expected, false, final, { open, ...(url === undefined ? {} : { url }) }) }
+  return { stage: 'board-end', actions, verify: { command: options.verifyCommand, file: ticketFile, status: expected }, traceFile, remaining: remainingStep(options.skill, expected, false, final, reasonCode, { open, ...(url === undefined ? {} : { url }) }) }
 }
 
 /** A time floored to its minute, or NaN: the board records page edits at minute precision. */
@@ -1158,7 +1186,7 @@ export async function localBoardVerify(options: { skill: Skill; folder: string; 
     if (record !== undefined && url !== undefined) await writeGroomRecord(options.folder, { ...record, page: { ...record.page, url } })
   }
   trace.statusAfter = ticket.status
-  trace.verified = problem === null && (record?.status === 'confirmed' || record?.status === 'stopped')
+  trace.verified = problem === null && (record?.status === 'ready' || (record?.status === 'needs-author' && record?.reasonCode === 'paused'))
   const traceFile = await writeBoardTrace(options.exportDir, trace)
   return { ok: problem === null, header: reportHeader(trace), trace, traceFile, problem }
 }

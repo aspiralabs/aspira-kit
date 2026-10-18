@@ -282,7 +282,7 @@ export function renderGroomPage(record: GroomRecord, options: GroomRenderOptions
     blocks.push('## STOP — Stop grooming', '- [ ] Stop grooming')
   } else {
     blocks.push('## CONFIRM — Grooming is complete')
-    if (record.status === 'confirmed') blocks.push('- [x] Confirm', `Confirmed ${options.date}`)
+    if (record.status === 'ready') blocks.push('- [x] Confirm', `Confirmed ${options.date}`)
     else if (options.confirmUnticked === true) blocks.push('- [ ] Confirm', `Confirm was unticked on ${options.date}; tick it again to re-confirm`)
     else blocks.push('- [ ] Confirm')
   }

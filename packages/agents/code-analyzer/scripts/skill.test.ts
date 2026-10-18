@@ -26,6 +26,8 @@ async function stubs(name: string, output = '{}') {
     join(bin, 'node'),
     [
       '#!/bin/bash',
+      // The launcher reads a run record's status with `node -p`: that one goes to the real node, unrecorded.
+      `case " $* " in *" -p "*) exec '${process.execPath}' "$@" ;; esac`,
       '{ printf \'%s\\n\' "$@"; echo ---; } >> "$CAPTURE"',
       'case " $* " in',
       '  *" start "*) printf \'folder=%s\\nid=NOM-4\\ntitle=Explore pagination\\nurl=https://www.notion.so/nom-4\\nbefore=In Progress: Implementation\\nstatus=In Progress: Implementation\\n\' "$TICKET_FOLDER" ;;',
@@ -92,6 +94,9 @@ it('routes a local path to the CLI and a remote repository to the eve entry poin
   // The ticket form: the board step first (resolve, gate, pull), the app directory from --app, the trace after the run.
   const folder = join(repo, '.work/nom-4-explore-pagination')
   await mkdir(folder, { recursive: true })
+  // The run record the analysis leaves: finish passes its status on, never one the launcher derives itself (F5).
+  await mkdir(join(sub, '.static-analysis'), { recursive: true })
+  await writeFile(join(sub, '.static-analysis', 'rounds.json'), JSON.stringify({ status: 'ready', reasonCode: null }))
   await reset()
   const ticket = await exec('bash', [launcher, 'start', 'NOM-4', '--app', 'packages/a', '--force-pull'], { cwd: repo, env: { ...env, TICKET_FOLDER: folder } })
   const [board, analysis, finish] = await calls()
@@ -99,12 +104,14 @@ it('routes a local path to the CLI and a remote repository to the eve entry poin
   expect(ticket.stdout).toContain('ticket: NOM-4 Explore pagination (https://www.notion.so/nom-4)')
   expect(ticket.stdout).toContain(`folder: ${folder}`)
   expect(ticket.stdout).toContain(`source: ${sub}\n`)
-  expect(analysis).toEqual([...prefix, join(root, 'scripts/static-analysis.ts'), sub, '--output', join(sub, '.static-analysis')])
-  expect(finish).toEqual([...prefix, join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--ok', '--run-status', 'clean', '--export', join(sub, '.static-analysis')])
+  // The ticket goes to the analysis, so rounds.json records which ticket it analyzed (F21).
+  expect(analysis).toEqual([...prefix, join(root, 'scripts/static-analysis.ts'), sub, '--output', join(sub, '.static-analysis'), '--ticket', 'NOM-4'])
+  // finish takes only the run status (F7: --ok/--failed are gone); the board derives pushes and moves from it.
+  expect(finish).toEqual([...prefix, join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--run-status', 'ready', '--export', join(sub, '.static-analysis')])
   // Without --app the repository root is analyzed; --app does not go with --no-ticket.
   await reset()
   await exec('bash', [launcher, 'start', 'NOM-4'], { cwd: sub, env: { ...env, TICKET_FOLDER: folder } })
-  expect((await calls())[1]).toEqual([...prefix, join(root, 'scripts/static-analysis.ts'), repo, '--output', join(repo, '.static-analysis')])
+  expect((await calls())[1]).toEqual([...prefix, join(root, 'scripts/static-analysis.ts'), repo, '--output', join(repo, '.static-analysis'), '--ticket', 'NOM-4'])
   await expect(exec('bash', [launcher, 'start', repo, '--no-ticket', '--app', 'packages/a'], { cwd: repo, env })).rejects.toThrow('--app goes with a ticket')
   // A refusal from the board step (exit 3) stops the launcher before anything is launched.
   await writeFile(join(bin, 'node'), '#!/bin/bash\necho "code-analyzer: refused: NOM-4 is Grooming" >&2\nexit 3\n', { mode: 0o755 })

@@ -1,33 +1,19 @@
 // The engineering guidelines for every code-analyzer path. The other agents load them with the
 // shared load-knowledge tool, which writes into the eve sandbox; code-analyzer's fixer runs on the
-// host for local and remote repositories alike, so this walks the same Notion tree with the same
-// helpers and limits (packages/agents/common) into a host folder. A run gets them one of three
-// ways: from Notion (NOTION_TOKEN + KNOWLEDGE_PAGE), from a --knowledge folder in load-knowledge's
-// layout, or from a --guidelines REQUIRED.md snapshot. Without any of them it does not run.
+// host for local and remote repositories alike, so this walks the same Notion tree through the
+// one shared walk (packages/agents/common/src/lib/knowledge-walk.ts) into a host folder instead of
+// the sandbox. A run gets them one of three ways: from Notion (NOTION_TOKEN + KNOWLEDGE_PAGE),
+// from a --knowledge folder in load-knowledge's layout, or from a --guidelines REQUIRED.md
+// snapshot. Without any of them it does not run.
 
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseEnv } from 'node:util'
-import {
-  INDEX_FILE,
-  KNOWLEDGE_ENV,
-  MAX_DEPTH,
-  MAX_PAGES,
-  NOTION_API,
-  NOTION_VERSION,
-  REQUIRED_ENV,
-  childPagesOf,
-  fileFor,
-  pageIdFrom,
-  parseRequired,
-  renderPage,
-  renderRequired,
-  resolveRequired,
-  rewriteLinks,
-  type LoadedPage,
-} from '@aspiralabs/agent-common/lib/knowledge'
+import { KNOWLEDGE_ENV, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, pageIdFrom, parseRequired } from '@aspiralabs/agent-common/lib/knowledge'
+import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
+import { notionToken } from '@aspiralabs/agent-common/lib/notion-token'
 import type { Knowledge } from './fixer.ts'
 
 /** The Notion pages the agent's knowledge configuration names, without the token. */
@@ -147,119 +133,42 @@ export async function fixKnowledge(knowledge: LoadedKnowledge): Promise<Knowledg
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>
 
 /**
- * load-knowledge on the host: the same breadth-first walk from KNOWLEDGE_PAGE, the same depth and
- * page caps, file names, link rewriting and REQUIRED.md, written to `dir` instead of the sandbox.
- * Throws when a required page was not reached, as load-knowledge does.
- */
-export async function loadKnowledgeFromNotion(args: { token: string; page: string; required: string[]; dir: string; fetch?: Fetch }): Promise<{ written: string[]; skipped: string[] }> {
-  const request = args.fetch ?? fetch
-  const headers = { Authorization: `Bearer ${args.token}`, 'Notion-Version': NOTION_VERSION }
-  const get = async (path: string, attempt = 0): Promise<unknown> => {
-    const res = await request(`${NOTION_API}${path}`, { headers })
-    if (res.status === 429 && attempt < 2) {
-      await new Promise((done) => setTimeout(done, Math.min(Number(res.headers.get('retry-after') ?? '1') * 1000, 10_000)))
-      return get(path, attempt + 1)
-    }
-    if (!res.ok) throw new Error(`Notion ${res.status} on ${path}${res.status === 404 || res.status === 403 ? ' (is the page shared with the integration?)' : ''}: ${(await res.text()).slice(0, 300)}`)
-    return res.json()
-  }
-  const markdownOf = async (id: string) => {
-    const body = await get(`/pages/${id}/markdown`)
-    const markdown = typeof body === 'object' && body !== null && 'markdown' in body && typeof body.markdown === 'string' ? body.markdown : ''
-    const truncated = typeof body === 'object' && body !== null && 'truncated' in body && body.truncated === true
-    return { markdown, truncated }
-  }
-  const titleOf = async (id: string) => {
-    const body = await get(`/pages/${id}`)
-    const properties = typeof body === 'object' && body !== null && 'properties' in body && typeof body.properties === 'object' && body.properties !== null ? Object.values(body.properties) : []
-    for (const prop of properties) {
-      if (typeof prop !== 'object' || prop === null || !('type' in prop) || prop.type !== 'title' || !('title' in prop) || !Array.isArray(prop.title)) continue
-      const text = prop.title.map((part: unknown) => (typeof part === 'object' && part !== null && 'plain_text' in part && typeof part.plain_text === 'string' ? part.plain_text : '')).join('').trim()
-      if (text) return text
-    }
-    return 'Engineering'
-  }
-
-  const rootId = pageIdFrom(args.page)
-  if (rootId === undefined) throw new Error(`Not a Notion page URL or id: ${args.page}`)
-  // Paths as load-knowledge names them in the sandbox; only the file name is kept on the host.
-  const local = (sandboxPath: string) => basename(sandboxPath)
-  const queue = [{ id: rootId, title: await titleOf(rootId), url: args.page, depth: 0 }]
-  const seen = new Set([rootId])
-  const files = new Map([[rootId, INDEX_FILE]])
-  const titles = new Map([[rootId, queue[0]?.title ?? 'Engineering']])
-  const used = new Set([INDEX_FILE])
-  const bodies = new Map<string, { markdown: string; truncated: boolean; title: string; url: string }>()
-  const skipped: string[] = []
-  while (queue.length > 0 && bodies.size < MAX_PAGES) {
-    const next = queue.shift()
-    if (next === undefined) break
-    let body: { markdown: string; truncated: boolean }
-    try {
-      body = await markdownOf(next.id)
-    } catch (error) {
-      skipped.push(`${next.title}: ${error instanceof Error ? error.message : String(error)}`)
-      continue
-    }
-    bodies.set(next.id, { ...body, title: next.title, url: next.url })
-    if (next.depth >= MAX_DEPTH) continue
-    for (const child of childPagesOf(body.markdown)) {
-      if (seen.has(child.id)) continue
-      seen.add(child.id)
-      let title = child.title
-      if (title === '') {
-        try {
-          title = await titleOf(child.id)
-        } catch (error) {
-          skipped.push(`${child.url}: ${error instanceof Error ? error.message : String(error)}`)
-          continue
-        }
-      }
-      files.set(child.id, fileFor(title, used))
-      titles.set(child.id, title)
-      queue.push({ ...child, title, depth: next.depth + 1 })
-    }
-  }
-  // Links point at the host file names, which sit side by side like the sandbox ones.
-  const hostFiles = new Map([...files].map(([id, path]) => [id, local(path)]))
-  const fetchedAt = new Date().toISOString()
-  await mkdir(args.dir, { recursive: true })
-  const loaded: LoadedPage[] = []
-  const written: string[] = []
-  for (const [id, body] of bodies) {
-    const name = hostFiles.get(id)
-    if (name === undefined) continue
-    const markdown = rewriteLinks(body.markdown, hostFiles, titles)
-    loaded.push({ id, title: body.title, url: body.url, markdown })
-    await writeFile(join(args.dir, name), renderPage({ title: body.title, url: body.url, fetchedAt, truncated: body.truncated }, markdown))
-    written.push(name)
-  }
-  const resolved = resolveRequired(args.required, loaded)
-  if (resolved.missing.length > 0) {
-    throw new Error(`Required knowledge page${resolved.missing.length === 1 ? '' : 's'} not loaded: ${resolved.missing.join(', ')}. Loaded: ${loaded.map((p) => p.title).join(', ')}. Fix the title in ${REQUIRED_ENV}, or link the page from the index within ${MAX_DEPTH} levels and ${MAX_PAGES} pages.`)
-  }
-  await writeFile(join(args.dir, 'REQUIRED.md'), renderRequired(resolved.found, fetchedAt))
-  written.push('REQUIRED.md')
-  return { written, skipped }
-}
-
-/**
  * The guidelines for a default run, in order: a --knowledge folder, a --guidelines REQUIRED.md,
- * else Notion from the agent's env. Refuses (KnowledgeRequired) when none of them is available.
+ * else Notion from the agent's env, through the one shared walk (knowledge-walk.ts) instead of a
+ * host copy of it. Refuses (KnowledgeRequired) when none of them is available.
+ *
+ * checkKnowledgeDir/checkGuidelinesFile still check the folder/file the way they always have
+ * (REQUIRED.md and INDEX.md present, every configured required page present by heading) rather
+ * than through knowledge-snapshot.ts's hash-verifying verifyKnowledgeDir/verifySnapshot: runLocal
+ * (./local.ts) does not yet pass those checks a resolved Notion root id to verify against, and
+ * sessions still write REQUIRED.md snapshots without the new provenance header (see
+ * knowledge-stage.test.ts, T64 -- wiring that through is P27's job, not this one's).
  */
 export async function resolveKnowledge(input: { knowledge?: string; guidelines?: string }, deps: { agentDir: string | null; env: NodeJS.ProcessEnv; fetch?: Fetch; progress?: (message: string) => void }): Promise<LoadedKnowledge> {
   const config = await knowledgeConfig(deps.agentDir, deps.env)
   const hint = 'set NOTION_TOKEN and KNOWLEDGE_PAGE in the agent\'s env, or pass --knowledge DIR (a load-knowledge folder) or --guidelines FILE (a REQUIRED.md snapshot).'
   if (input.knowledge !== undefined) return checkKnowledgeDir(resolve(input.knowledge), config, hint)
   if (input.guidelines !== undefined) return checkGuidelinesFile(resolve(input.guidelines), config)
-  const { values } = await agentEnv(deps.agentDir, deps.env)
-  const token = values[KNOWLEDGE_ENV.token]?.trim()
-  if (!token || config.page === null) {
-    const missing = [!token && KNOWLEDGE_ENV.token, config.page === null && KNOWLEDGE_ENV.page].filter(Boolean).join(' and ')
+
+  // notionToken never reads an agent package's own .env.local (packages/agents/common/src/lib/
+  // notion-token.ts); the agent's shared ../.env.local plays the "project root" role here, and the
+  // agent's own .env.local (if the deployment carries one) plays "app", so the agent's own value
+  // still wins over the shared one, exactly as agentEnv's own precedence did.
+  const resolvedToken =
+    deps.agentDir === null
+      ? await notionToken({ env: deps.env, projectRoot: NO_PROJECT_ROOT })
+      : await notionToken({ env: deps.env, projectRoot: join(deps.agentDir, '..'), appDir: deps.agentDir })
+  const token = resolvedToken?.token
+  if (token === undefined || config.page === null) {
+    const missing = [token === undefined && KNOWLEDGE_ENV.token, config.page === null && KNOWLEDGE_ENV.page].filter(Boolean).join(' and ')
     throw new KnowledgeRequired(`The engineering guidelines are required and none were given: ${missing} not set. To run, ${hint}`, planFor(config, join(tmpdir(), 'code-analyzer-knowledge')))
   }
   const dir = await mkdtemp(join(tmpdir(), 'code-analyzer-knowledge-'))
   deps.progress?.(`load-knowledge ${config.page}`)
-  await loadKnowledgeFromNotion({ token, page: config.page, required: config.required, dir, ...(deps.fetch ? { fetch: deps.fetch } : {}) })
+  const walk = await walkKnowledge({ token, page: config.page, required: config.required, ...(deps.fetch ? { fetch: deps.fetch } : {}) })
+  await writeKnowledgeFolder(dir, walk)
   return { ...(await checkKnowledgeDir(dir, config, hint)), source: 'notion' }
 }
+
+/** A path that cannot carry a real project's .env.local, for when there is no agent directory to anchor one. */
+const NO_PROJECT_ROOT = join(tmpdir(), '.aspira-no-project-root-sentinel')

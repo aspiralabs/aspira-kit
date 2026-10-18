@@ -69,7 +69,7 @@ it('write-round writes only round-<n>.json, and idea-summary.md only once Confir
   await mkdir(join(output, 'trace'), { recursive: true })
   const decision = { id: 'Q1', branch: 'problem', question: 'Which limit applies to the cart?', options: ['Ten items', 'Twenty items'], recommended: 'Ten items', reasoning: 'it is the limit today', whyYours: 'it is a product call', facts: [{ path: 'src/cart.ts', line: 1 }], decidedBy: 'author' as const, answer: 'Ten items' }
   const branches = ['problem', 'who', 'done', 'intent', 'f-list', 'tests', 'constraints', 'out-of-scope', 'blast-radius', 'security', 'architecture', 'data', 'behavior', 'ui', 'acceptance'].map((id) => ({ id, state: 'visited' as const }))
-  const record = { decisions: [decision], branches, round: 1, startedAt: '2026-10-11T09:00:00.000Z', open: 0, page: { url: 'https://www.notion.so/gd' }, status: 'needs-author' as const }
+  const record = { decisions: [decision], branches, round: 1, startedAt: '2026-10-11T09:00:00.000Z', open: 0, page: { url: 'https://www.notion.so/gd' }, status: 'needs-author' as const, reasonCode: null, reason: null }
   await writeGroomRecord(folder, record)
   const unticked = renderGroomPage(record, { date: '2026-10-11', notes: [] })
   const round = JSON.stringify({ round: 1, searched: ['cart limit'], facts: [], questions: [], branches: [] })

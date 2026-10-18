@@ -12,6 +12,7 @@ import { expect, it, vi } from 'vitest'
 
 vi.mock('./repository.ts', () => ({ repository: async () => ({ instructions: '', packet: () => 'source.ts:1: evidence', gaps: [], files: new Map(), commit: 'abc', dirty: false, tools: {} }) }))
 import { runLocal, type LocalInput } from './local.ts'
+import { writeSnapshot } from './snapshot.test-helper.ts'
 
 const draft = '# Save items\n## Intent\nLet people save items.\n## Acceptance criteria\n### Features\n- [ ] F1: A saved item appears in the list.\n'
 const review = (findings: unknown[] = []) => ({ facts: [], findings, checks: [{ rule: 'REV-001', evidence: 'spec: Save items' }], uiEvidence: [], gaps: [] })
@@ -23,7 +24,7 @@ async function setup() {
   const ideaPath = join(dir, 'idea.md')
   const guidelinesPath = join(dir, 'rules.md')
   await writeFile(ideaPath, 'Let people save items.')
-  await writeFile(guidelinesPath, 'REV-001 Check the spec')
+  await writeSnapshot(guidelinesPath)
   return { dir, ideaPath, input: { ideaPath, guidelinesPath, repoPath: dir, uiRequired: false } }
 }
 

@@ -757,6 +757,8 @@ describe('finishFlow for the groomer, a tick made on Notion', () => {
       open: 1,
       page: { id: GD, url: GD_URL },
       status: 'needs-author',
+      reasonCode: null,
+      reason: null,
     }
     const rendered = renderGroomPage(record, { date: '2026-10-11', notes: [] })
     // The page on Notion: the rendering the start pulled, Q1's first option since ticked by a person, and this run's marker.
@@ -785,7 +787,7 @@ describe('finishFlow for the groomer, a tick made on Notion', () => {
       }),
     )
 
-    await finishFlow({ skill: 'groomer', folder, ok: true, runStatus: 'needs-author', board: `collection://${DS}`, client })
+    await finishFlow({ skill: 'groomer', folder, runStatus: 'needs-author', board: `collection://${DS}`, client })
 
     const page = stored.get(GD) ?? []
     expect(page.map(plain)).toContain('Decided by the author: The team.')

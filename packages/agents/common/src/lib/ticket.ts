@@ -5,8 +5,12 @@
 // system and board work on top of it.
 
 import { BoardError, parseTicketRef, type Ticket, type TicketPage } from './board.ts'
-import { GROOM_RUN_STATUSES, type GroomRunStatus } from './groom-record.ts'
 import { pageIdFrom } from './knowledge.ts'
+import { RUN_STATUSES, type RunStatus } from './run-status.ts'
+
+/** Every run status word, and the type (moved to `run-status.ts`; re-exported here since most of this file's own callers already import it from `./ticket.ts`). */
+export { RUN_STATUSES }
+export type { RunStatus }
 
 /** The skills a model may run through the board tool: every skill but the groomer, whose start and finish only its driver runs. */
 export const TOOL_SKILLS = ['spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer'] as const
@@ -14,15 +18,6 @@ export type ToolSkill = (typeof TOOL_SKILLS)[number]
 
 export const SKILLS = [...TOOL_SKILLS, 'groomer'] as const
 export type Skill = (typeof SKILLS)[number]
-
-/** The words the six sibling launchers pass as --run-status. */
-const SIBLING_RUN_STATUSES = ['ready', 'needs-author', 'incomplete', 'complete', 'clean', 'partial'] as const
-type SiblingRunStatus = (typeof SIBLING_RUN_STATUSES)[number]
-const siblingRunStatuses: ReadonlySet<string> = new Set(SIBLING_RUN_STATUSES)
-
-/** Every run status word: the siblings' words, then the groomer's own (groom-record.ts) that they lack. */
-export const RUN_STATUSES = [...SIBLING_RUN_STATUSES, ...GROOM_RUN_STATUSES.filter((status): status is Exclude<GroomRunStatus, SiblingRunStatus> => !siblingRunStatuses.has(status))] as const
-export type RunStatus = (typeof RUN_STATUSES)[number]
 
 /** The folder under the repository root that holds one working folder per ticket. */
 export const WORK_DIR = '.work'
@@ -43,10 +38,11 @@ export const TICKET_PAGES: { title: string; file: string }[] = [
 
 /**
  * One page a skill pushes on success: its fixed title and the file in the working folder it comes
- * from. `replace: 'append-first'` replaces the page's body without ever leaving it empty; `note` is
- * passed to the --local session with the push action.
+ * from. `pushOn` is every run status that makes this push (F53). `replace: 'append-first'` replaces
+ * the page's body without ever leaving it empty; `note` is passed to the --local session with the
+ * push action.
  */
-export type Push = { title: string; file: string; when?: RunStatus; replace?: 'append-first'; note?: string }
+export type Push = { title: string; file: string; pushOn: RunStatus[]; replace?: 'append-first'; note?: string }
 
 /** One page a skill pulls before it runs, over the local file every time (`overwrite`). */
 export type Pull = { title: string; file: string; overwrite: true; note?: string }
@@ -78,33 +74,34 @@ export type Gate = {
   pulls?: Pull[]
   /** The skill's run record in the working folder. */
   record?: { file: string }
-  /** The run status that makes the success move; any other makes none. */
-  endMoveWhen?: RunStatus
+  /** The run statuses that make the success move; any other makes none. Absent: the move never happens from a run status alone (the skill has no success/inProgress pair, or its move is gated some other way). */
+  moveOn?: RunStatus[]
 }
 
 /** What the groomer's refusal adds on a Status it does not accept. */
 export const GROOMER_REOPEN = 'grooming is finished; a human moves the card back to Grooming to reopen it (for Dropped, a human decides whether to revive it)'
 
 export const GATES: Record<Skill, Gate> = {
-  'spec-writer': { accepts: ['Ready: Idea'], inProgress: 'In Progress: Spec', success: 'In Review: Spec', pushes: [{ title: 'Spec', file: 'spec.md' }], input: IDEA_FILE },
+  'spec-writer': { accepts: ['Ready: Idea'], inProgress: 'In Progress: Spec', success: 'In Review: Spec', pushes: [{ title: 'Spec', file: 'spec.md', pushOn: ['ready', 'needs-author'] }], input: IDEA_FILE, moveOn: ['ready', 'needs-author'] },
   'spec-reviewer': {
     accepts: ['In Review: Spec'],
     pushes: [
-      { title: 'Spec Reviewed', file: 'spec.reviewed/spec.reviewed.md' },
-      { title: 'Spec Review Decisions', file: 'spec.reviewed/trace/decisions.md', when: 'needs-author' },
+      { title: 'Spec Reviewed', file: 'spec.reviewed/spec.reviewed.md', pushOn: ['ready', 'needs-author'] },
+      { title: 'Spec Review Decisions', file: 'spec.reviewed/trace/decisions.md', pushOn: ['needs-author'] },
     ],
     input: ['spec.reviewed/spec.reviewed.md', 'spec.md'],
   },
-  planner: { accepts: ['Ready: Spec'], inProgress: 'In Progress: Plan', success: 'In Review: Plan', pushes: [{ title: 'Plan', file: 'plan.review/plan.reviewed.md' }], input: 'spec.reviewed/spec.reviewed.md' },
+  planner: { accepts: ['Ready: Spec'], inProgress: 'In Progress: Plan', success: 'In Review: Plan', pushes: [{ title: 'Plan', file: 'plan.review/plan.reviewed.md', pushOn: ['ready', 'needs-author'] }], input: 'spec.reviewed/spec.reviewed.md', moveOn: ['ready', 'needs-author'] },
   implementor: {
     accepts: ['Ready: Plan'],
     inProgress: 'In Progress: Implementation',
     success: 'In Review: Implementation',
-    pushes: [{ title: 'Implementation', file: 'plan.review/implementation.md' }],
+    pushes: [{ title: 'Implementation', file: 'plan.review/implementation.md', pushOn: ['ready'] }],
     input: 'plan.review/plan.reviewed.md',
+    moveOn: ['ready'],
   },
   'code-analyzer': { accepts: ['In Progress: Implementation', 'In Review: Implementation'], pushes: [] },
-  'pr-reviewer': { accepts: ['In Review: Implementation'], requires: 'PR', pushes: [{ title: 'PR Review', file: 'pr-review/review.md' }] },
+  'pr-reviewer': { accepts: ['In Review: Implementation'], requires: 'PR', pushes: [{ title: 'PR Review', file: 'pr-review/review.md', pushOn: ['ready'] }] },
   groomer: {
     accepts: ['Idea', 'Grooming', 'Shortlist'],
     inProgress: 'Grooming',
@@ -115,10 +112,10 @@ export const GATES: Record<Skill, Gate> = {
     noTicket: false,
     reopen: GROOMER_REOPEN,
     pulls: [{ title: 'Grooming Decisions', file: 'groom/trace/decisions.md', overwrite: true }],
-    pushes: [{ title: 'Grooming Decisions', file: 'groom/trace/decisions.md', replace: 'append-first' }],
+    pushes: [{ title: 'Grooming Decisions', file: 'groom/trace/decisions.md', replace: 'append-first', pushOn: ['ready', 'needs-author'] }],
     record: { file: 'groom/trace/groom.json' },
     input: IDEA_FILE,
-    endMoveWhen: 'confirmed',
+    moveOn: ['ready'],
   },
 }
 
@@ -186,20 +183,19 @@ export function checkGate(skill: Skill, ticket: Pick<Ticket, 'id' | 'title' | 's
   return { ok: false, message: gate.reopen === undefined ? refusal : `${refusal} ${gate.reopen}.` }
 }
 
-/** The pushes a skill makes for a run status: every success push, plus the ones the status asks for. */
-export function pushesFor(skill: Skill, runStatus: string): Push[] {
-  return GATES[skill].pushes.filter((push) => push.when === undefined || push.when === runStatus)
+/** The pushes a skill makes for a run status: every push whose `pushOn` includes it (F53). */
+export function pushesFor(skill: Skill, status: RunStatus): Push[] {
+  return GATES[skill].pushes.filter((push) => push.pushOn.includes(status))
 }
 
 /**
- * The moves a skill makes once its run ended. `prOpened` is the implementor's condition for its
- * success move; `runStatus` is the condition of a row with `endMoveWhen` (the groomer moves only
- * on confirmed).
+ * The move a skill makes once its run ended (F12): only from its own In Progress status, only
+ * when the status is in the gate's `moveOn`, and, for the implementor, only once the PR opened.
  */
-export function endMove(skill: Skill, ok: boolean, current: string, prOpened = false, runStatus?: RunStatus): { from: string; to: string } | null {
+export function endMove(skill: Skill, status: RunStatus, current: string, prOpened = false): { from: string; to: string } | null {
   const gate = GATES[skill]
-  if (!ok || gate.success === undefined || gate.inProgress === undefined) return null
-  if (gate.endMoveWhen !== undefined && runStatus !== gate.endMoveWhen) return null
+  if (gate.success === undefined || gate.inProgress === undefined) return null
+  if (gate.moveOn === undefined || !gate.moveOn.includes(status)) return null
   if (skill === 'implementor' && !prOpened) return null
   if (current !== gate.inProgress) return null
   return { from: gate.inProgress, to: gate.success }

@@ -1,12 +1,14 @@
 // --local knowledge: which Notion pages the implementor's own knowledge configuration loads, and
-// whether a session-fetched folder holds them. The configuration is load-knowledge's: the index
-// page in KNOWLEDGE_PAGE and the required pages in KNOWLEDGE_REQUIRED (load-knowledge's default
-// when unset), read from the same env the agent runs with. The topic pages are the ones the
+// whether the run's folder holds them. The configuration is load-knowledge's: the index page in
+// KNOWLEDGE_PAGE and the required pages in KNOWLEDGE_REQUIRED (load-knowledge's default when
+// unset), read from the same env the agent runs with. The first call of a run fetches the folder
+// itself through the one shared walk (knowledge-walk.ts) with the NOTION_TOKEN the project's env
+// gives it (F49, F52); the session never fetches guidelines. The topic pages are the ones the
 // required pages route to in their tables, as the procedure tells the agent to follow them.
 
 import { createHash } from 'node:crypto'
 import { readFile, readdir, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import {
   KNOWLEDGE_ENV,
   REQUIRED_ENV,
@@ -18,11 +20,14 @@ import {
   resolveRequired,
   type LoadedPage,
 } from '@aspiralabs/agent-common/lib/knowledge'
+import { parseProvenance, verifySnapshot } from '@aspiralabs/agent-common/lib/knowledge-snapshot'
+import { notionToken } from '@aspiralabs/agent-common/lib/notion-token'
+import { KnowledgePrerequisiteError } from '@aspiralabs/agent-common/lib/ticket-driver'
 
 /** The pages the agent's configuration names: the index page (or null when unset) and the required entries. */
 export type KnowledgeConfig = { indexPage: string | null; required: string[]; from: string[] }
 
-/** One page the session must fetch into the knowledge folder, and whether it is there. */
+/** One page the knowledge folder should hold, and whether it is there. */
 export type KnowledgePage = {
   role: 'index' | 'required' | 'topic'
   /** Null for a routed page: Notion mentions carry no title. */
@@ -137,8 +142,9 @@ export async function inspectKnowledge(dir: string, config: KnowledgeConfig): Pr
     if (file !== undefined) record('index', file)
   }
 
-  const candidates = files.filter((f) => f.name !== INDEX_NAME)
-  const resolved = resolveRequired(config.required, candidates.map((f) => f.page))
+  // The index page can itself be a required page (load-knowledge resolves required pages over
+  // every page it fetched), so INDEX.md is a candidate too.
+  const resolved = resolveRequired(config.required, files.map((f) => f.page))
   const used = new Set<string>([INDEX_NAME, REQUIRED_NAME])
   for (const entry of config.required) {
     const asUrl = pageIdFrom(entry) === undefined ? null : entry
@@ -195,4 +201,44 @@ export async function requiredFetchedAt(dir: string, required: LoadedPage[], fal
     .filter((t): t is string => t !== undefined)
     .sort()
   return times[0] ?? fallback
+}
+
+/** No folder yet and nothing to fetch it with (no NOTION_TOKEN, or no KNOWLEDGE_PAGE): the run ends blocked (F52), never a session stage. */
+export class KnowledgeBlocked extends KnowledgePrerequisiteError {
+  readonly pending = false as const
+  readonly status = 'blocked' as const
+  readonly stage = 'knowledge' as const
+}
+
+/** The load-knowledge command a refusal names instead of a session fetch. */
+export const LOAD_KNOWLEDGE = 'load-knowledge --out <dir> (packages/agents/common/scripts/load-knowledge.ts)'
+
+/**
+ * The NOTION_TOKEN a run fetches with (F52): the process environment, the app's .env.local
+ * (aspira.json `app`), then the project root's .env.local. The agent package's own env files are
+ * never read for it. Returns the token (when any) and the files it was looked for in.
+ */
+export async function knowledgeToken(repo: string, env: Record<string, string | undefined>): Promise<{ token?: string; files: string[] }> {
+  const root = resolve(repo)
+  const aspira = await readFile(join(root, 'aspira.json'), 'utf8').then((text) => JSON.parse(text) as { app?: unknown }, () => null)
+  const app = typeof aspira?.app === 'string' && aspira.app !== '.' && aspira.app !== '' ? resolve(root, aspira.app) : undefined
+  const found = await notionToken({ env, projectRoot: root, ...(app === undefined ? {} : { appDir: app }) })
+  return { ...(found === null ? {} : { token: found.token }), files: [...(app === undefined ? [] : [join(app, '.env.local')]), join(root, '.env.local')] }
+}
+
+/** True when REQUIRED.md is the one load-knowledge wrote (it carries the provenance header): the walk's own file, kept as written. */
+export const hasProvenance = (text: string): boolean => parseProvenance(text) !== null
+
+/**
+ * A --guidelines snapshot: accepted only when it is a REQUIRED.md load-knowledge wrote, still where
+ * it was written and unedited, and loaded from KNOWLEDGE_PAGE when one is configured (F50). A copy
+ * under a trace/ folder (the planner's trace/guidelines.md, say) or a file without the header is
+ * refused, naming load-knowledge.
+ */
+export async function verifyGuidelines(file: string, config: Pick<KnowledgeConfig, 'indexPage'>): Promise<void> {
+  const path = resolve(file)
+  const header = parseProvenance(await readFile(path, 'utf8').catch(() => ''))
+  const expectedRootId = (config.indexPage === null ? undefined : pageIdFrom(config.indexPage)) ?? header?.rootId ?? ''
+  const verified = await verifySnapshot(path, { expectedRootId })
+  if (!verified.ok) throw new KnowledgePrerequisiteError(`--guidelines ${path} is refused: ${verified.reason} ${verified.hint}`)
 }

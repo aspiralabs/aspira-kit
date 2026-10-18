@@ -6,9 +6,10 @@ import { z } from 'zod'
 import { applyAnswersById, classifyRenderings, normalizeQuestion, parseGroomPage, renderGroomPage, reviseAnswers, takenDecision, type Answer } from '@aspiralabs/agent-common/lib/decisions'
 import { GROOMER_MARKER_PREFIX, groomRecordSchema, readGroomRecord, rebuildGroomRecord, validateIdeaSummary, writeGroomRecord, type GroomDecision, type GroomRecord, type GroomRunStatus } from '@aspiralabs/agent-common/lib/groom-record'
 import { allowedPath } from '@aspiralabs/agent-common/lib/repository'
+import { type ReasonCode } from '@aspiralabs/agent-common/lib/run-status'
 import { readTicketMd } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { GROOM_PAGE, groomPaths, type GroomPaths as Paths } from './paths.ts'
-import { knowledgeConfig, loadKnowledge, snapshotKnowledge, type Env, type Knowledge, type KnowledgePlan, type KnowledgeRequired } from './local-knowledge.ts'
+import { KnowledgeBlocked, knowledgeConfig, loadKnowledge, snapshotKnowledge, type Env, type Knowledge, type KnowledgePlan, type KnowledgeRequired } from './local-knowledge.ts'
 import { allBranchesVisited, applyRound, EXIT_CRITERIA, frontier, nextQuestionId, roundSchema, roundZeroReport, seedBranches, type Round } from './rounds.ts'
 
 // --local: the groomer's procedure with the Claude Code session as the model. Each call is one step
@@ -36,8 +37,8 @@ export const orchestratorFile = (agentDir: string = PACKAGE_DIR) => join(agentDi
 
 export type LocalInput = { folder: string; repoPath: string; guidelinesPath?: string; finish?: boolean; takeRecommended?: boolean }
 
-/** Seams for tests: the agent package whose files and env are read. */
-export type LocalDeps = { agentDir?: string; env?: Env }
+/** Seams for tests: the agent package whose files and env are read, and the knowledge walk's own fetch/API base. */
+export type LocalDeps = { agentDir?: string; env?: Env; fetch?: (url: string, init?: RequestInit) => Promise<Response>; api?: string }
 
 export type LocalTask = { prompt: string; output: string; error?: string }
 
@@ -154,7 +155,7 @@ async function baseRecord(folder: string, paths: Paths, n: number): Promise<Groo
   if (record === undefined) {
     const pulled = await readText(paths.decisions)
     const classified = pulled === null ? null : classifyRenderings(pulled)
-    record = classified?.round == null ? { decisions: [], branches: seedBranches(), round: 0, startedAt: new Date().toISOString(), open: 0, page: {}, status: 'needs-author' } : rebuildGroomRecord(classified.kept).record
+    record = classified?.round == null ? { decisions: [], branches: seedBranches(), round: 0, startedAt: new Date().toISOString(), open: 0, page: {}, status: 'needs-author', reasonCode: null, reason: null } : rebuildGroomRecord(classified.kept).record
   }
   if (record.branches.length === 0) record = { ...record, branches: seedBranches() }
   if (record.page.url === undefined && page !== undefined) record = { ...record, page: { id: page.id, url: page.url } }
@@ -206,10 +207,13 @@ function applyTakeRecommended(record: GroomRecord, take: boolean): GroomRecord {
 }
 
 const readExclusions = 'Never read .env* files, secrets or credentials files, private keys (*.pem, *.key, *.p12, *.pfx, id_rsa, id_ed25519), .npmrc, .netrc, .git, node_modules or .work/; the agent\'s repository tools cannot read them either.'
+// Every knowledge source is now a folder this run fetched itself (loadKnowledge) or a --guidelines
+// snapshot (snapshotKnowledge); either way the round prompt points at a local file, never the
+// Notion MCP (F49/F27: the session never fetches guidelines on this driver's behalf).
 const knowledgeNote = (knowledge: Pick<Knowledge, 'source' | 'path' | 'requiredFile'>) =>
   knowledge.source === 'folder'
     ? `Engineering guidelines: read ${knowledge.requiredFile} in full first. The topic pages it routes to are files in ${knowledge.path}, indexed by ${join(knowledge.path, 'INDEX.md')}. Do not edit them.`
-    : `Engineering guidelines: read ${knowledge.requiredFile} in full first. Read the topic pages it routes to with the Notion MCP (notion-fetch, read-only); never create, edit, move or comment on anything in Notion.`
+    : `Engineering guidelines: read ${knowledge.requiredFile} in full first. Do not edit it.`
 
 /** The round task's prompt file: the instructions are the authority, the files are the input, the schema is the output contract. */
 export function renderRoundPrompt(args: { n: number; output: string; agentDir: string; repo: string; paths: Paths; knowledge: Knowledge; record: GroomRecord; titleOnly: boolean }): string {
@@ -308,13 +312,24 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   const folder = resolve(input.folder)
   const repo = resolve(input.repoPath)
   const paths = groomPaths(folder)
-  const knowledge = input.guidelinesPath === undefined ? await loadKnowledge(paths.knowledge, await knowledgeConfig(agentDir, deps.env ?? process.env)) : await snapshotKnowledge(input.guidelinesPath)
+  let knowledge: Knowledge
+  try {
+    knowledge = input.guidelinesPath === undefined
+      ? await loadKnowledge(paths.knowledge, await knowledgeConfig(agentDir, deps.env ?? process.env, repo), { fetch: deps.fetch, api: deps.api })
+      : await snapshotKnowledge(input.guidelinesPath)
+  } catch (error) {
+    // No token and no folder already there: blocked, not the old pending session stage. `stage`
+    // is kept (rather than dropped) so every other caller that narrows on it (scripts/local.ts,
+    // this package's own tests) still type-checks against this new result shape.
+    if (error instanceof KnowledgeBlocked) return { pending: false as const, status: 'blocked' as const, stage: 'knowledge' as const, reason: error.message }
+    throw error
+  }
   const idea = (await readText(paths.idea)) ?? ''
   const { round: n, ended } = await currentRound(paths, await readGroomRecord(folder).catch(() => undefined))
   const pending = (): Pending => ({ pending: true, status: 'pending', round: n, orchestrator })
   const files: RoundFiles = { ended, round: 'missing', answers: 'missing', control: null, summary: 'missing', page: 'missing' }
   /** --finish: what exists is exported as an incomplete round; the board stage then only removes the marker. */
-  const unfinished = (why: string) => ({ ...pending(), stage: 'board' as const, runStatus: 'incomplete' as GroomRunStatus, notes: [`round ${n} ended incomplete: ${why}`] })
+  const unfinished = (why: string) => ({ ...pending(), stage: 'board' as const, runStatus: 'incomplete' as GroomRunStatus, reasonCode: null as ReasonCode | null, notes: [`round ${n} ended incomplete: ${why}`] })
 
   if (nextStage(files) === 'verify') return { ...pending(), stage: 'verify' as const, note: `The board stage of round ${n} was printed; perform its actions, then run local --verify.` }
 
@@ -363,7 +378,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     const summary = await readText(paths.summary)
     if (summary !== null) {
       const problem = summaryHeadingProblem(summary)
-      const valid = problem === null ? validateIdeaSummary(summary, { ...answered, status: 'confirmed' }) : { ok: false as const, reason: problem }
+      const valid = problem === null ? validateIdeaSummary(summary, { ...answered, status: 'ready' }) : { ok: false as const, reason: problem }
       if (!valid.ok) throw new Error(`${paths.summary}: ${valid.reason}`)
       files.summary = 'valid'
     }
@@ -393,12 +408,16 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   const open = merged.decisions.filter((decision) => decision.decidedBy === 'open').length
   const notes = merged.notes
   let status: GroomRunStatus = 'needs-author'
-  if (control === 'STOP' || (merged.stopTicked && control !== 'CONFIRM')) status = 'stopped'
+  let reasonCode: ReasonCode | null = null
+  if (control === 'STOP' || (merged.stopTicked && control !== 'CONFIRM')) { status = 'needs-author'; reasonCode = 'paused' }
   else if (control === 'CONFIRM') {
-    if (open === 0 && allBranchesVisited(applied) && !merged.changedByPage) status = 'confirmed'
+    if (open === 0 && allBranchesVisited(applied) && !merged.changedByPage) status = 'ready'
     else notes.push(open > 0 ? `Confirm was ticked but ${open} question(s) are open; it is re-offered when they are answered` : 'a tick on Grooming Decisions changed a decision during this round; Confirm is re-offered')
   } else if (merged.confirmTicked) notes.push('Confirm is ticked on Grooming Decisions; in --local it is asked in chat, at the end of the next round')
-  const record: GroomRecord = { ...applied, decisions: merged.decisions, round: n, open, status }
+  const reason = status === 'ready' ? null
+    : reasonCode === 'paused' ? 'Stop grooming was ticked on the Grooming Decisions page'
+      : `${open} decision${open === 1 ? '' : 's'} still open on the Grooming Decisions page`
+  const record: GroomRecord = { ...applied, decisions: merged.decisions, round: n, open, status, reasonCode, reason }
   await writeGroomRecord(folder, record)
   await mkdir(dirname(paths.decisions), { recursive: true })
   await writeFile(paths.decisions, renderGroomPage(record, { date: today(), notes: merged.carried }))
@@ -406,11 +425,12 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     ...pending(),
     stage: 'board' as const,
     runStatus: status,
+    reasonCode,
     decisions: paths.decisions,
     record: paths.record,
     open,
     notes,
-    ...(status === 'confirmed' ? { summary: paths.summary } : {}),
+    ...(status === 'ready' ? { summary: paths.summary } : {}),
     note: `After the board actions, fetch Grooming Decisions again into ${pageFile} (it must carry no "Run:" line), then run local --verify.`,
   }
 }

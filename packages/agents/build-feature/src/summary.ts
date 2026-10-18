@@ -9,12 +9,12 @@
 // fences and Mermaid blocks.
 
 import { compareIds } from '@aspiralabs/agent-common/lib/decisions'
+import { redact, tail } from '@aspiralabs/agent-common/lib/redact'
 import { allowedPath } from '@aspiralabs/agent-common/lib/repository'
 import { SEVERITIES } from '@aspiralabs/agent-common/lib/severity'
 import { orderedTaken } from '#src/decisions.ts'
 import { gateSummaryLines } from '#src/gate.ts'
 import { MODELS, type ModelName } from '#src/models.ts'
-import { redact, tail } from '#src/redact.ts'
 import { modeLine, RESUME, STEPS } from '#src/route.ts'
 import type { RunState, StepRecord } from '#src/run-state.ts'
 
@@ -25,6 +25,8 @@ export type RenderBuildSummaryInput = {
   ticket: BuildSummaryTicket
   state: SummaryRunState
   repo: string
+  /** aspira.json `app`, when the project names one: redaction also scrubs this directory's own `.env*` values. */
+  app?: string
   /** plan.json, read by the driver next to the run state; absent until the planner has run. */
   plan?: unknown
   /** The files changed on the branch; when absent, every planned task's own `changes` paths stand in for it. */
@@ -108,7 +110,7 @@ function orderedRemaining(remaining: RunState['remaining']): RunState['remaining
 // ---------------------------------------------------------------------------------------------
 
 async function statusLines(input: RenderBuildSummaryInput, resume: string): Promise<string[]> {
-  const { state, repo } = input
+  const { state, repo, app } = input
   const lines: string[] = []
   const run = state.runs.at(-1)
   if (run?.end !== undefined) lines.push(run.end.message, '')
@@ -121,7 +123,7 @@ async function statusLines(input: RenderBuildSummaryInput, resume: string): Prom
   const remaining = orderedRemaining(state.remaining)
   if (remaining.length > 0) {
     lines.push('Remaining findings:', '')
-    for (const finding of remaining) lines.push(`- ${finding.id} (${finding.severity}): ${await redact(finding.title, repo)}`)
+    for (const finding of remaining) lines.push(`- ${finding.id} (${finding.severity}): ${await redact(finding.title, repo, { app })}`)
     lines.push('')
   }
   const refused = state.steps.find((step) => step.status === 'refused')
@@ -129,8 +131,8 @@ async function statusLines(input: RenderBuildSummaryInput, resume: string): Prom
   if (state.failure !== null) {
     const failure = state.failure
     const parts = [failure.action, ...(failure.command === undefined ? [] : [`\`${failure.command}\``]), ...(failure.exitCode === undefined ? [] : [`exit ${failure.exitCode}`])]
-    lines.push(`Failed: ${parts.join(', ')}${failure.message === undefined ? '' : `: ${await redact(failure.message, repo)}`}`, '')
-    if (failure.output !== undefined) lines.push(fence('text', await redact(tail(failure.output), repo)), '')
+    lines.push(`Failed: ${parts.join(', ')}${failure.message === undefined ? '' : `: ${await redact(failure.message, repo, { app })}`}`, '')
+    if (failure.output !== undefined) lines.push(fence('text', await redact(tail(failure.output), repo, { app })), '')
   }
   for (const approval of state.approvals) lines.push(`Run-start approval for ${approval.runId}: ${approval.name} (${approval.notionUserId}) at ${approval.at}, by "${approval.command}".`)
   if (state.approvals.length > 0) lines.push('')
@@ -143,19 +145,19 @@ async function statusLines(input: RenderBuildSummaryInput, resume: string): Prom
 // what was asked in chat.
 // ---------------------------------------------------------------------------------------------
 
-async function decisionLines(state: SummaryRunState, repo: string): Promise<string[]> {
+async function decisionLines(state: SummaryRunState, repo: string, app: string | undefined): Promise<string[]> {
   const taken = orderedTaken(state.takenKeys)
   const lines: string[] = []
   for (const entry of taken) {
-    const question = await redact(entry.decision.question, repo)
-    const answer = await redact(entry.decision.answer ?? entry.decision.recommended, repo)
+    const question = await redact(entry.decision.question, repo, { app })
+    const answer = await redact(entry.decision.answer ?? entry.decision.recommended, repo, { app })
     lines.push(`- \`${entry.key}\`: ${question} Taken: ${answer}.`)
   }
   if (state.asked.length > 0) {
     lines.push('', '### Asked in chat', '')
     for (const asked of state.asked) {
-      const question = await redact(asked.question.replaceAll('\n', ' '), repo)
-      const answer = asked.answer === null ? '(no answer)' : await redact(asked.answer, repo)
+      const question = await redact(asked.question.replaceAll('\n', ' '), repo, { app })
+      const answer = asked.answer === null ? '(no answer)' : await redact(asked.answer, repo, { app })
       lines.push(`- ${asked.step}: ${question} Answer: ${answer}`)
     }
   }
@@ -241,17 +243,17 @@ function costLines(steps: readonly StepRecord[]): string[] {
  * line break folded to a space, so the label can neither close its quotes nor the fence.
  */
 const mermaidText = (text: string): string => text.replace(/[`"\\]/g, '').replace(/\s*[\r\n]+\s*/g, ' ')
-const mermaidLabel = async (text: string, repo: string): Promise<string> => mermaidText(await redact(text, repo))
+const mermaidLabel = async (text: string, repo: string, app: string | undefined): Promise<string> => mermaidText(await redact(text, repo, { app }))
 
 /** A task id as a Mermaid node id: the id itself when it is a plain word, else a generated one. */
 const nodeId = (id: string, index: number): string => (/^\w+$/.test(id) ? id : `t${index}`)
 
-async function architectureLines(plan: unknown, changedFiles: readonly string[] | undefined, repo: string): Promise<string[]> {
+async function architectureLines(plan: unknown, changedFiles: readonly string[] | undefined, repo: string, app: string | undefined): Promise<string[]> {
   const tasks = planTasks(plan)
   if (tasks.length === 0) return NONE
   const nodes = new Map(tasks.map((task, index) => [task.id, nodeId(task.id, index)]))
   const body: string[] = ['flowchart TD']
-  for (const task of tasks) body.push(`  ${nodes.get(task.id)!}["${await mermaidLabel(`${task.id}: ${task.title}`, repo)}"]`)
+  for (const task of tasks) body.push(`  ${nodes.get(task.id)!}["${await mermaidLabel(`${task.id}: ${task.title}`, repo, app)}"]`)
   for (const task of tasks) {
     for (const dependsOn of task.dependsOn) {
       const from = nodes.get(dependsOn)
@@ -264,7 +266,7 @@ async function architectureLines(plan: unknown, changedFiles: readonly string[] 
     for (const file of files) {
       const node = `f${index}`
       index += 1
-      body.push(`  ${node}["${await mermaidLabel(file, repo)}"]`, `  ${nodes.get(task.id)!} --> ${node}`)
+      body.push(`  ${node}["${await mermaidLabel(file, repo, app)}"]`, `  ${nodes.get(task.id)!} --> ${node}`)
     }
   }
   return [fence('mermaid', body.join('\n'))]
@@ -291,18 +293,18 @@ function timelineLines(steps: readonly StepRecord[]): string[] {
 
 /** The Build Summary for this run state, cumulative over every run of the ticket (A16). Pure: no writes, no Notion calls. */
 export async function renderBuildSummary(input: RenderBuildSummaryInput): Promise<string> {
-  const { ticket, state, repo, plan, changedFiles } = input
+  const { ticket, state, repo, app, plan, changedFiles } = input
   const mode = state.runs.at(-1)?.mode ?? 'local'
   const resume = RESUME(ticket.id, mode)
-  const title = await redact(ticket.title, repo)
+  const title = await redact(ticket.title, repo, { app })
   const header = `# Build Summary: ${ticket.id}${title === '' ? '' : ` ${title}`}`
   const sections = [
     section('Status', await statusLines(input, resume)),
-    section('Decisions taken for you', await decisionLines(state, repo)),
+    section('Decisions taken for you', await decisionLines(state, repo, app)),
     section('Tests written', testsWrittenLines(plan, changedFiles)),
     section('Deviations and assumptions', deviationLines(state)),
     section('Cost and time', costLines(state.steps)),
-    section('Architecture', await architectureLines(plan, changedFiles, repo)),
+    section('Architecture', await architectureLines(plan, changedFiles, repo, app)),
     section('Step timeline', timelineLines(state.steps)),
     mode === 'local' ? 'Reviews ran in the same session as the build, not as a separate pass.' : "Each step and each review ran as that step's own agent run, not in this session.",
   ]

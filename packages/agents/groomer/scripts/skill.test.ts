@@ -32,6 +32,8 @@ async function sandbox(prefix: string) {
     [
       '#!/bin/bash',
       'case " $* " in *" -p "*|*" -e "*) exec "$REAL_NODE" "$@" ;; esac',
+      // With REAL_RECORD set, `ticket.ts record` (the F7 old-word mapping of a run record) runs for real, unrecorded.
+      'if [ -n "$REAL_RECORD" ]; then case "$*" in *"scripts/ticket.ts record "*) exec "$REAL_NODE" "$@" ;; esac; fi',
       '{ printf \'%s\\n\' "$@"; echo ---; } >> "$CAPTURE"',
       'case "$*" in',
       '  *"scripts/ticket.ts start"*)',
@@ -48,7 +50,7 @@ async function sandbox(prefix: string) {
   await writeFile(join(bin, 'screen'), '#!/bin/bash\necho "$@" >> "$SCREENS"\nexec "$3"\n', { mode: 0o755 })
   const capture = join(dir, 'arguments')
   await writeFile(capture, '')
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, REAL_NODE: process.execPath, CAPTURE: capture, SCREENS: screens, GROOMER_AGENT_DIR: '', ASPIRA_KIT: '', AI_GATEWAY_API_KEY: 'test', NOTION_TOKEN: '', NOTION_API_KEY: '', TICKET_FOLDER: folder, START_EXIT: '', START_ERROR: '', FINISH_STATUS: '' }
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, REAL_NODE: process.execPath, CAPTURE: capture, SCREENS: screens, GROOMER_AGENT_DIR: '', ASPIRA_KIT: '', AI_GATEWAY_API_KEY: 'test', NOTION_TOKEN: '', NOTION_API_KEY: '', TICKET_FOLDER: folder, START_EXIT: '', START_ERROR: '', FINISH_STATUS: '', REAL_RECORD: '' }
   const calls = async (): Promise<string[][]> => (await readFile(capture, 'utf8')).split('---\n').filter((call) => call.trim() !== '').map((call) => call.split('\n').filter(Boolean))
   return { dir, repo, folder, env, calls, screens }
 }
@@ -127,14 +129,15 @@ describe('start', () => {
     expect(lines(refused.output)).toContain(`Board: ${BOARD}; check BOARD-010 (the aspira-agents connection on the product teamspace)`)
   })
 
-  it('finishes with --ok for confirmed and stopped, --failed for incomplete, and keeps the finish step\'s run status word', async () => {
+  it('finishes with only the run status the record maps to (old words included, F7), no --ok/--failed, and keeps the finish step\'s run status word', async () => {
     const outcomes: { recorded: string; flag: string | undefined; runStatus: string | undefined; kept: string }[] = []
-    // The finish step is the one writer of the final word: a reported `confirmed` may come back as `needs-author`.
-    for (const [recorded, finished] of [['confirmed', 'needs-author'], ['stopped', 'stopped'], ['incomplete', 'incomplete']] as const) {
+    // The finish step is the one writer of the final word: a reported `ready` may come back as `needs-author`.
+    // A record an older groomer wrote (`confirmed`, `stopped`) reads as the new word before finish sees it.
+    for (const [recorded, finished] of [['confirmed', 'needs-author'], ['stopped', 'needs-author'], ['ready', 'ready'], ['incomplete', 'incomplete']] as const) {
       const { repo, folder, env, calls } = await sandbox(`groomer-finish-${recorded}-`)
       await mkdir(join(folder, 'groom', 'trace'), { recursive: true })
       await writeFile(join(folder, 'groom', 'trace', 'groom.json'), JSON.stringify({ status: recorded, open: 0, page: { url: 'https://notion.so/gd' } }))
-      const { stdout } = await exec('bash', [launcher, 'start', 'KIT-9'], { cwd: repo, env: { ...env, FINISH_STATUS: finished } })
+      const { stdout } = await exec('bash', [launcher, 'start', 'KIT-9'], { cwd: repo, env: { ...env, FINISH_STATUS: finished, REAL_RECORD: '1' } })
       const run = /^run: (.+)$/m.exec(stdout)?.[1] ?? ''
       const finish = (await calls()).find((call) => call.some((arg) => arg.endsWith('scripts/ticket.ts')) && call.includes('finish')) ?? []
       outcomes.push({
@@ -145,9 +148,10 @@ describe('start', () => {
       })
     }
     expect(outcomes).toEqual([
-      { recorded: 'confirmed', flag: '--ok', runStatus: 'confirmed', kept: 'needs-author' },
-      { recorded: 'stopped', flag: '--ok', runStatus: 'stopped', kept: 'stopped' },
-      { recorded: 'incomplete', flag: '--failed', runStatus: 'incomplete', kept: 'incomplete' },
+      { recorded: 'confirmed', flag: undefined, runStatus: 'ready', kept: 'needs-author' },
+      { recorded: 'stopped', flag: undefined, runStatus: 'needs-author', kept: 'needs-author' },
+      { recorded: 'ready', flag: undefined, runStatus: 'ready', kept: 'ready' },
+      { recorded: 'incomplete', flag: undefined, runStatus: 'incomplete', kept: 'incomplete' },
     ])
   })
 })

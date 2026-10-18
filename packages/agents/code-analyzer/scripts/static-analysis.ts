@@ -1,3 +1,4 @@
+import { exitCodeFor } from '@aspiralabs/agent-common/lib/run-status'
 import { runStaticAnalysis } from '../agent/lib/runner.ts'
 
 const args = process.argv.slice(2)
@@ -15,7 +16,7 @@ for (let i = 0; i < args.length; i++) {
 }
 const [source] = positional
 if (!source || positional.length > 1) {
-  console.error('Usage: pnpm analyze <absolute-repo-path> [--knowledge DIR | --guidelines FILE] [--output DIR] [--max-rounds N] [--max-cost USD] [--fix-warnings]\nRemote repositories need the eve entry point: pnpm exec eve invoke "Run static analysis on owner/name"')
+  console.error('Usage: pnpm analyze <absolute-repo-path> [--knowledge DIR | --guidelines FILE] [--output DIR] [--max-rounds N] [--max-cost USD] [--fix-warnings] [--ticket ID]\nRemote repositories need the eve entry point: pnpm exec eve invoke "Run static analysis on owner/name"')
   process.exit(2)
 }
 const controller = new AbortController()
@@ -24,12 +25,13 @@ const text = (name: string) => (typeof flags[name] === 'string' ? flags[name] : 
 try {
   const knowledge = text('knowledge')
   const guidelines = text('guidelines')
+  const ticket = text('ticket')
   const result = await runStaticAnalysis(
-    { source, outputDir: text('output'), maxRounds: flags['max-rounds'] ? Number(flags['max-rounds']) : undefined, maxCostUsd: flags['max-cost'] ? Number(flags['max-cost']) : undefined, fixWarnings: flags['fix-warnings'] === true, ...(knowledge ? { knowledge } : {}), ...(guidelines ? { guidelines } : {}) },
+    { source, outputDir: text('output'), maxRounds: flags['max-rounds'] ? Number(flags['max-rounds']) : undefined, maxCostUsd: flags['max-cost'] ? Number(flags['max-cost']) : undefined, fixWarnings: flags['fix-warnings'] === true, ...(knowledge ? { knowledge } : {}), ...(guidelines ? { guidelines } : {}), ...(ticket ? { ticket } : {}) },
     { signal: controller.signal, progress: (message) => console.error(`${new Date().toISOString()} ${message}`) },
   )
   console.log(JSON.stringify(result, null, 2))
-  if (result.status !== 'clean') process.exitCode = 1
+  process.exitCode = exitCodeFor(result.status)
 } catch (error) {
   // A run without the engineering guidelines (or any other setup failure) never starts.
   console.error(`code-analyzer: ${error instanceof Error ? error.message : String(error)}`)

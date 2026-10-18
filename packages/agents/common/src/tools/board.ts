@@ -21,7 +21,7 @@ export default defineTool({
     repo: z.string().describe('The repository root on the host (holds aspira.json and .work/).'),
     ticket: z.string().optional().describe('A board ID such as NOM-4 or a Notion page URL. Omitted: the one working folder under .work/.'),
     folder: z.string().optional().describe('finish: the working folder the start step returned.'),
-    ok: z.boolean().optional().describe('finish: did the run succeed.'),
+    ok: z.boolean().optional().describe('finish: accepted and ignored (an older caller sends it, F7); the run status alone decides the pushes and the move.'),
     runStatus: z.enum(RUN_STATUSES).optional().describe(`finish: the run status word (${RUN_STATUSES.join(', ')}).`),
     prUrl: z.string().optional().describe('finish, implementor only: the pull request it opened.'),
     exportDir: z.string().optional().describe('finish: the export directory the trace is written into.'),
@@ -44,8 +44,8 @@ export default defineTool({
         const started = await startFlow({ skill: input.skill, repo: input.repo, argument, board: config.board, force: input.forcePull, client })
         return { folder: started.folder, ticket: { id: started.ticket.id, title: started.ticket.title, url: started.ticket.url }, statusBefore: started.trace.statusBefore, status: started.ticket.status, pulled: started.pulled, kept: started.kept, actions: started.trace.actions }
       }
-      if (input.folder === undefined || input.ok === undefined || input.runStatus === undefined) return { refused: true as const, reason: 'finish needs folder, ok and runStatus' }
-      const finished = await finishFlow({ skill: input.skill, folder: input.folder, ok: input.ok, runStatus: input.runStatus, prUrl: input.prUrl, exportDir: input.exportDir, board: config.board, client })
+      if (input.folder === undefined || input.runStatus === undefined) return { refused: true as const, reason: 'finish needs folder and runStatus' }
+      const finished = await finishFlow({ skill: input.skill, folder: input.folder, runStatus: input.runStatus, prUrl: input.prUrl, exportDir: input.exportDir, board: config.board, client })
       return { report: finished.header, pushed: finished.trace.pushed, pushFailures: finished.pushFailures, remaining: finished.remaining, trace: finished.traceFile, actions: finished.trace.actions }
     } catch (error) {
       if (error instanceof FlowRefused) return { refused: true as const, reason: error.message }

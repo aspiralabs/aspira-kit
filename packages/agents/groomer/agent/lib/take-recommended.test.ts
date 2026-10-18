@@ -88,6 +88,8 @@ const groomRecord = <D extends { decidedBy: 'open' | 'author' }>(round: number, 
   open: decisions.filter((decision) => decision.decidedBy === 'open').length,
   page: { id: 'gd', url: 'https://www.notion.so/gd' },
   status: 'needs-author' as const,
+  reasonCode: null,
+  reason: null,
 })
 
 /** The page a first run created: the title, the intro and this run's marker, nothing else yet. */

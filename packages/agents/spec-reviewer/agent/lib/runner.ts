@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import { writeArtifacts } from './artifacts.ts'
@@ -96,7 +97,9 @@ export async function runReview(input: RunInput, options: { signal?: AbortSignal
       const exportMs = Date.now() - exportStarted
       const analysis = runAnalysis(ledger, result.phases, { prepareMs, reviewMs: result.reviewMs, exportMs, totalMs, status: result.status })
       reportedCostUsd = analysis.reportedCostUsd
-      const report = { ...result, candidate: undefined, input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, models, reportedCostUsd, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, exportMs, totalMs, dir }
+      // The export's own hash of spec.reviewed.md, so a later run can tell whether it still describes this review (F33).
+      const specSha256 = files['spec.reviewed.md'] === undefined ? undefined : createHash('sha256').update(files['spec.reviewed.md']).digest('hex')
+      const report = { ...result, candidate: undefined, input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, specSha256, models, reportedCostUsd, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, exportMs, totalMs, dir }
       return { 'run-analysis.md': analysis.markdown, 'trace/review.json': JSON.stringify(report, null, 2) }
     })
     return { status: result.status, dir, findings: result.findings.length, problems: result.problems, authorDecisions: result.authorDecisions, prepareMs, reviewMs: result.reviewMs, reportedCostUsd, totalMs }

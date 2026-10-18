@@ -26,7 +26,8 @@ it('keeps the agent procedure eve loads, carrying every step of the contract', a
 
 it('is a Claude Code skill that only launches the agent or steps --local, and names the agent files as the authority', async () => {
   const skill = await readFile(join(skillDir, 'SKILL.md'), 'utf8')
-  expect(skill).toMatch(/^---\nname: aspira-implementor\ndescription: .+\nargument-hint: .+\n---\n/)
+  // User-invoked only (F44): the model never starts it on its own initiative.
+  expect(skill).toMatch(/^---\nname: aspira-implementor\ndescription: .+\nargument-hint: .+\ndisable-model-invocation: true\n---\n/)
   expect(skill).toContain(PROCEDURE)
   expect(skill).toContain(INSTRUCTIONS)
   for (const term of ['scripts/implementor.sh start', 'scripts/implementor.sh local', '--local', '`knowledge`', '--guidelines', '--finish', 'general-purpose', 'in one message']) expect(skill).toContain(term)
@@ -56,13 +57,16 @@ async function stubs() {
   await mkdir(bin)
   await writeFile(join(bin, 'screen'), '#!/bin/bash\nexec "$3"\n', { mode: 0o755 })
   // A node that records its arguments (one per line, one block per call) instead of running, answers the
-  // ticket step with a fake working folder, and prints the agent's report lines for an invoke.
+  // ticket step with a fake working folder, and prints the agent's report lines for an invoke. The run
+  // record is real: export-record.ts and the launcher's `node -p` read of its status run on the real
+  // node, so finish gets the status the agent reported, mapped as the record maps it.
   await writeFile(
     join(bin, 'node'),
     [
       '#!/bin/bash',
       '{ printf \'%s\\n\' "$@"; echo ---; } >> "$CAPTURE"',
       'case " $* " in',
+      '  *"/scripts/export-record.ts "*|*" -p "*) exec "$REAL_NODE" "$@" ;;',
       '  *" start "*) printf \'folder=%s\\nid=NOM-4\\ntitle=Explore pagination\\nurl=https://www.notion.so/nom-4\\nbefore=Ready: Plan\\nstatus=In Progress: Implementation\\ninput=%s\\n\' "$TICKET_FOLDER" "$TICKET_INPUT" ;;',
       '  *" invoke "*) echo "stub run completed"; echo "status: ${INVOKE_STATUS:-incomplete}"; [ -z "${INVOKE_PR:-}" ] || echo "Pull request: $INVOKE_PR" ;;',
       '  *) echo "stub run completed" ;;',
@@ -72,7 +76,7 @@ async function stubs() {
     { mode: 0o755 },
   )
   const capture = join(dir, 'arguments')
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CAPTURE: capture, IMPLEMENTOR_AGENT_DIR: '', ASPIRA_KIT: '', AI_GATEWAY_API_KEY: 'test', TICKET_FOLDER: '', TICKET_INPUT: '', INVOKE_STATUS: '', INVOKE_PR: '' }
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, REAL_NODE: process.execPath, CAPTURE: capture, IMPLEMENTOR_AGENT_DIR: '', ASPIRA_KIT: '', AI_GATEWAY_API_KEY: 'test', TICKET_FOLDER: '', TICKET_INPUT: '', INVOKE_STATUS: '', INVOKE_PR: '' }
   const calls = async (): Promise<string[][]> => (await readFile(capture, 'utf8')).split('---\n').filter((block) => block.trim() !== '').map((block) => command(block.split('\n').filter(Boolean)))
   /** The arguments of the last node call. */
   const captured = async (): Promise<string[]> => (await calls()).at(-1) ?? []
@@ -175,18 +179,22 @@ it('start with a ticket runs the board step first, builds the pulled plan, and f
   await git('remote', 'add', 'origin', 'https://github.com/aspiralabs/nomnomzz.git')
   const ticketEnv = { ...env, TICKET_FOLDER: folder, TICKET_INPUT: plan, INVOKE_STATUS: 'complete', INVOKE_PR: 'https://github.com/aspiralabs/nomnomzz/pull/7' }
   const out = await exec('bash', [launcher, 'start', 'NOM-4', '--pr', '--force-pull'], { cwd: repo, env: ticketEnv })
-  const [board, run, finish] = await calls()
+  const first = await calls()
+  const [board, run] = first
+  const finish = first.find((call) => call.includes('finish'))
   expect(board).toEqual([...prefix, join(root, 'scripts/ticket.ts'), 'start', 'NOM-4', '--repo', repo, '--force-pull'])
   expect(out.stdout).toContain('ticket: NOM-4 Explore pagination (https://www.notion.so/nom-4)')
   expect(out.stdout).toContain('status: Ready: Plan -> In Progress: Implementation')
   expect(out.stdout).toContain('source: .work/nom-4-explore-pagination/plan.review/plan.reviewed.md')
   expect(run!.slice(0, 5)).toEqual([...prefix, eve, 'invoke'])
   expect(run![5]).toBe(`Implement .work/nom-4-explore-pagination/plan.review/plan.reviewed.md in the GitHub repository aspiralabs/nomnomzz, starting from branch feat/nom-4-explore-pagination. Follow the aspira-implementor skill. Push the branch and open a draft pull request. The ticket's board moves and pushes are made by the launcher around this run; do not call board yourself. ${tail}`)
-  expect(finish).toEqual([...prefix, join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--ok', '--run-status', 'complete', '--pr-url', 'https://github.com/aspiralabs/nomnomzz/pull/7', '--export', join(folder, 'plan.review')])
-  // Without --pr no PR is set, and a run that did not complete finishes as failed.
+  // finish takes only the run status from the record (an older agent's "complete" reads as ready):
+  // no --ok/--failed, the status alone decides the pushes and moves (F7, F53).
+  expect(finish).toEqual([...prefix, join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--run-status', 'ready', '--pr-url', 'https://github.com/aspiralabs/nomnomzz/pull/7', '--export', join(folder, 'plan.review')])
+  // Without --pr no PR is set, and a run that did not finish carries its own status to finish.
   await reset()
   await exec('bash', [launcher, 'start', 'NOM-4'], { cwd: repo, env: { ...ticketEnv, INVOKE_STATUS: 'blocked' } })
-  expect((await calls())[2]).toEqual([...prefix, join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--failed', '--run-status', 'incomplete', '--export', join(folder, 'plan.review')])
+  expect((await calls()).find((call) => call.includes('finish'))).toEqual([...prefix, join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--run-status', 'blocked', '--export', join(folder, 'plan.review')])
   // A ticket with no Plan page yet stops before the agent.
   await expect(exec('bash', [launcher, 'start', 'NOM-4'], { cwd: repo, env: { ...ticketEnv, TICKET_INPUT: '' } })).rejects.toThrow('has no Plan page yet')
   // A refusal from the board step (exit 3) stops the launcher before anything is launched.
