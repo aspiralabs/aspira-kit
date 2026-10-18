@@ -1,7 +1,8 @@
 // The Build Summary: a pure renderer from the run state (cumulative over every run of the ticket,
 // A16) to markdown, written to `.work/<id>-<slug>/build-summary.md`. Sections always appear in the
 // same order (F38): status and where the card ended (blocking items first); decisions taken for
-// you; tests written; deviations and assumptions; cost and time; architecture; step timeline.
+// you; tests written; deviations and assumptions; cost and time; run telemetry (KIT-19);
+// architecture; step timeline.
 // Empty sections say "None yet." (F41). Mermaid diagrams render as diagrams on the Notion page
 // (F39). Untrusted fragments (a card's title, a command's output) are redacted and escaped one at
 // a time through redact.ts before they are woven into this module's own markdown (SEC-010): the
@@ -17,6 +18,7 @@ import { gateSummaryLines } from '#src/gate.ts'
 import { MODELS, type ModelName } from '#src/models.ts'
 import { modeLine, RESUME, STEPS } from '#src/route.ts'
 import type { RunState, StepRecord } from '#src/run-state.ts'
+import { tableRows, type Cell } from '#src/telemetry.ts'
 
 export type BuildSummaryTicket = { id: string; title: string; url: string }
 /** A run state as a caller hands it to the renderer: the fields this module never reads (card, overrides, queue, afterAsks, phases) are optional, since a run that stopped before its first resolution, or a hand-built fixture, may not carry them. */
@@ -31,6 +33,8 @@ export type RenderBuildSummaryInput = {
   plan?: unknown
   /** The files changed on the branch; when absent, every planned task's own `changes` paths stand in for it. */
   changedFiles?: readonly string[]
+  /** When the summary is rendered (the summary stage's time), the end of the Run telemetry table; absent, the run's end or its last step's. */
+  now?: string
 }
 
 const NONE = ['None yet.']
@@ -233,6 +237,55 @@ function costLines(steps: readonly StepRecord[]): string[] {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Run telemetry (KIT-19 F15, F21): the current run's steps with their children, Orchestration with
+// the run's fixes, and the Total to the summary stage, from the same span tree as the telemetry
+// file (telemetry.ts). Every cell is a closed-set label, a number, "not measured" or "(partial)"
+// (SEC-010): no free text from the run state reaches the table.
+// ---------------------------------------------------------------------------------------------
+
+/** A duration as 1h2m3s, 10m0s or 45s. */
+function fmtDuration(ms: number): string {
+  const totalSeconds = Math.round(ms / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) return `${hours}h${minutes}m${seconds}s`
+  return minutes > 0 ? `${minutes}m${seconds}s` : `${seconds}s`
+}
+
+const NOT_MEASURED = 'not measured'
+
+function fmtCell(cell: Cell, format: (value: number) => string): string {
+  if (cell.value === null) return NOT_MEASURED
+  return `${format(cell.value)}${cell.partial ? ' (partial)' : ''}`
+}
+
+const fmtCount = (value: number): string => Math.round(value).toLocaleString('en-US')
+const fmtCost = (value: number): string => `$${Number(value.toFixed(4))}`
+
+/** The end of the table when the caller gives no time: the run's end, else its last step's, else its start. */
+function tableEnd(state: SummaryRunState, runId: string, startedAt: string, endedAt: string | null): string {
+  const lastStep = state.steps
+    .filter((step) => step.runId === runId)
+    .map((step) => step.endedAt)
+    .sort()
+    .at(-1)
+  return endedAt ?? lastStep ?? startedAt
+}
+
+function telemetryLines(state: SummaryRunState, now: string | undefined): string[] {
+  const run = state.runs.at(-1)
+  if (run === undefined) return NONE
+  const rows = tableRows(state, run.runId, now ?? tableEnd(state, run.runId, run.startedAt, run.endedAt))
+  const lines = [`Run ${run.runId}, to the summary stage.`, '', '| Span | Duration | Input tokens | Output tokens | Total tokens | Tool calls | Reported cost |', '| --- | --- | --- | --- | --- | --- | --- |']
+  for (const entry of rows) {
+    const label = entry.depth === 0 ? entry.label : `&nbsp;&nbsp;↳ ${entry.label}`
+    lines.push(`| ${label} | ${fmtDuration(entry.durationMs)} | ${fmtCell(entry.input, fmtCount)} | ${fmtCell(entry.output, fmtCount)} | ${fmtCell(entry.total, fmtCount)} | ${fmtCell(entry.toolCalls, fmtCount)} | ${fmtCell(entry.cost, fmtCost)} |`)
+  }
+  return lines
+}
+
+// ---------------------------------------------------------------------------------------------
 // Architecture: a flowchart from the plan's tasks and their dependencies, with each task's changed
 // files narrowed to the ones actually on the branch when that is known (A11).
 // ---------------------------------------------------------------------------------------------
@@ -290,10 +343,9 @@ function timelineLines(steps: readonly StepRecord[]): string[] {
 // The renderer.
 // ---------------------------------------------------------------------------------------------
 
-
 /** The Build Summary for this run state, cumulative over every run of the ticket (A16). Pure: no writes, no Notion calls. */
 export async function renderBuildSummary(input: RenderBuildSummaryInput): Promise<string> {
-  const { ticket, state, repo, app, plan, changedFiles } = input
+  const { ticket, state, repo, app, plan, changedFiles, now } = input
   const mode = state.runs.at(-1)?.mode ?? 'local'
   const resume = RESUME(ticket.id, mode)
   const title = await redact(ticket.title, repo, { app })
@@ -304,6 +356,7 @@ export async function renderBuildSummary(input: RenderBuildSummaryInput): Promis
     section('Tests written', testsWrittenLines(plan, changedFiles)),
     section('Deviations and assumptions', deviationLines(state)),
     section('Cost and time', costLines(state.steps)),
+    section('Run telemetry', telemetryLines(state, now)),
     section('Architecture', await architectureLines(plan, changedFiles, repo, app)),
     section('Step timeline', timelineLines(state.steps)),
     mode === 'local' ? 'Reviews ran in the same session as the build, not as a separate pass.' : "Each step and each review ran as that step's own agent run, not in this session.",

@@ -7,7 +7,7 @@ import { prStep, type PrStepResult } from '@aspiralabs/agent-common/lib/pr-step'
 import { USAGE_EXIT, exitCodeFor } from '@aspiralabs/agent-common/lib/run-status'
 import { type TicketRecord } from '@aspiralabs/agent-common/lib/ticket'
 import { ticketBranch } from '@aspiralabs/agent-common/lib/ticket-branch'
-import { afterRun, beforeRun, handleRunError, UsageError, verifyRun, type DriverContext, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
+import { afterRun, attachArg, beforeRun, handleRunError, sessionUsageStep, UsageError, verifyRun, type DriverContext, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { FlowRefused, readTicketMd, writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { exportDirOf, runLocal } from '../agent/lib/local.ts'
 
@@ -25,7 +25,11 @@ const exec = promisify(execFile)
 // printing the set or move action the session performs next; without it, Step 8 is reported still
 // open. --finish exports what exists as incomplete. Every step names the agent package that ran (`agent`).
 const usage =
-  'Usage: pnpm run implement:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <plan.review | plan.reviewed.md | spec.md>) [--guidelines FILE] [--max-parallel N] [--serial] [--work DIR] [--force-pull] [--verify [--pr-url URL [--replace-pending]]] [--finish]'
+  'Usage: pnpm run implement:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <plan.review | plan.reviewed.md | spec.md>) [--guidelines FILE] [--max-parallel N] [--serial] [--work DIR] [--force-pull] [--verify [--pr-url URL [--replace-pending]]] [--finish] [--parent-run RUN:NONCE] [--attach JSON]'
+const SKILL = 'implementor' as const
+
+/** The session usage report of a --local hand run: <export>/trace/session-usage.json (KIT-19, F9). */
+const sessionUsageFile = (exportDir: string) => join(exportDir, 'trace', 'session-usage.json')
 
 async function git(repo: string, ...args: string[]): Promise<string> {
   return (await exec('git', ['-C', repo, ...args])).stdout.trim()
@@ -107,6 +111,8 @@ try {
       finish: { type: 'boolean' },
       'pr-url': { type: 'string' },
       'replace-pending': { type: 'boolean' },
+      'parent-run': { type: 'string' },
+      attach: { type: 'string' },
     },
   }))
   if (values.repo === undefined || positionals.length > 0 || (values.ticket !== undefined && values['no-ticket'] !== undefined)) throw new UsageError(usage)
@@ -114,11 +120,11 @@ try {
   const repo = values.repo
   const parallel = values['max-parallel']
   const agent = await agentVersion(new URL('..', import.meta.url))
-  context = { skill: 'implementor', repo, beforeClaim: beforeClaim(repo) }
-  driverArgs = { positional: values['no-ticket'] ?? values.ticket, noTicket: values['no-ticket'] !== undefined, forcePull: values['force-pull'] }
+  context = { skill: SKILL, repo, beforeClaim: beforeClaim(repo) }
+  driverArgs = { positional: values['no-ticket'] ?? values.ticket, noTicket: values['no-ticket'] !== undefined, forcePull: values['force-pull'], parentRun: values['parent-run'] }
   const outputFor = (folder: string) => join(folder, 'plan.review')
   if (values.verify === true) {
-    const verified = await verifyRun(context, { positional: values.ticket }, outputFor)
+    const verified = await verifyRun(context, { positional: values.ticket, attach: attachArg(values.attach) }, outputFor)
     const record = await step8For(outputFor, verified.folder)
     const prUrl = values['pr-url']
     const step8 =
@@ -148,11 +154,12 @@ try {
       if (exported !== null) await recordAgentVersion(exported, agent)
       if (!result.pending && before.kind === 'ticket') {
         const exportDir = exported ?? outputFor(before.folder)
-        const board = await afterRun(context, before, { status: result.status, reasonCode: result.reasonCode ?? null, exportDir, verifyCommand: `implementor.sh local ${before.ticket.id} --verify` })
+        const board = await afterRun(context, before, { status: result.status, reasonCode: result.reasonCode ?? null, exportDir, verifyCommand: `implementor.sh local ${before.ticket.id} --verify`, sessionUsage: sessionUsageFile(exportDir) })
         console.log(JSON.stringify({ ...result, agent, ...board }, null, 2))
       } else {
         if (exported !== null) await writeBoardTrace(exported, before.trace)
-        console.log(JSON.stringify({ ...result, agent, ticket: before.kind === 'none' ? 'none' : `${before.ticket.id} ${before.ticket.title}`, ...(before.kind === 'none' ? {} : { folder: before.folder }) }, null, 2))
+        const report = before.kind === 'ticket' && result.pending ? await sessionUsageStep(SKILL, before.folder, sessionUsageFile(outputFor(before.folder))) : {}
+        console.log(JSON.stringify({ ...result, agent, ticket: before.kind === 'none' ? 'none' : `${before.ticket.id} ${before.ticket.title}`, ...(before.kind === 'none' ? {} : { folder: before.folder }), ...report }, null, 2))
       }
       if (!result.pending) process.exitCode = exitCodeFor(result.status)
     }

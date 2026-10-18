@@ -61,6 +61,19 @@ function fakeBoard(status: string): Board & { status: string; calls: string[]; p
     async me() {
       return { id: 'bot-1' }
     },
+    // KIT-19 Board methods: no rules page, so these tests make no telemetry attach.
+    async uploadFile(name: string) {
+      return { id: `upload-${name}`, status: 'uploaded' }
+    },
+    async appendFileBlock() {
+      return { id: 'block-telemetry' }
+    },
+    async fileBlockNames() {
+      return []
+    },
+    async rulesPage() {
+      return null
+    },
   }
   return state
 }

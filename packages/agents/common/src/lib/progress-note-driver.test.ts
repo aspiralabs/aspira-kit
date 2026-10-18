@@ -98,6 +98,11 @@ function fakeBoard(): Board {
     writeIdeaSummary: async () => ({ ids: [], deleted: [] }),
     listToDos: async () => [],
     me: async () => ({ id: 'bot-1' }),
+    // KIT-19 Board methods: no rules page, so this test makes no telemetry attach.
+    uploadFile: async (name: string) => ({ id: `upload-${name}`, status: 'uploaded' }),
+    appendFileBlock: async () => ({ id: 'block-telemetry' }),
+    fileBlockNames: async () => [],
+    rulesPage: async () => null,
   }
 }
 

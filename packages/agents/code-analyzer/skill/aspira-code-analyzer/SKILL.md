@@ -1,7 +1,7 @@
 ---
 name: aspira-code-analyzer
 description: Run every static analyzer a repository uses (ESLint, tsc, Prettier, Biome, Ruff, mypy, gofmt, go vet, cargo clippy, RuboCop and the project's own lint/typecheck scripts), auto-fix, let the official code-analyzer fix the rest, and loop until clean. Works on a whole repository or one app inside it. By default it runs code-analyzer as a separate process; with --local the analyzers still run from the agent's code and this Claude Code session is the fix model. Use for /aspira-code-analyzer or requests to clean up lint and type errors across a repo with this agent.
-argument-hint: [<ticket ID | Notion URL> [--app DIR] | <repo-path | app-dir | github-url | owner/name> --no-ticket] [--local] [--force-pull] [--push]
+argument-hint: [<ticket ID | Notion URL> [--app DIR] | <repo-path | app-dir | github-url | owner/name> --no-ticket] [--local] [--force-pull] [--push] [--parent-run RUN:NONCE]
 disable-model-invocation: true
 ---
 
@@ -28,7 +28,7 @@ The analyzer runs only from `In Progress: Implementation` or `In Review: Impleme
 ## Default: run the agent
 
 ```bash
-<skill-dir>/scripts/code-analyzer.sh start [<ticket> [--app DIR] | <repo-path | app-dir | github-url | owner/name> --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output /absolute/dir] [--max-rounds N] [--fix-warnings]
+<skill-dir>/scripts/code-analyzer.sh start [<ticket> [--app DIR] | <repo-path | app-dir | github-url | owner/name> --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output /absolute/dir] [--max-rounds N] [--fix-warnings] [--parent-run RUN:NONCE]
 ```
 
 With a ticket, the launcher does the board work itself, through the shared board module with `NOTION_TOKEN` from the project's `.env.local`: the ticket step before the agent starts (a refusal exits 3 and launches nothing) and the trace after it exits, appended to the run's log. A ticket run analyzes the local checkout; `--push` and `--ref` are for a remote repository with `--no-ticket`.
@@ -42,7 +42,7 @@ The launcher detaches the run and prints its run directory. Tell the user it sta
 ## `--local`: the session is the fix model
 
 ```bash
-<skill-dir>/scripts/code-analyzer.sh local [<ticket> [--app DIR] | <repo-path | app-dir> --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish]
+<skill-dir>/scripts/code-analyzer.sh local [<ticket> [--app DIR] | <repo-path | app-dir> --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish] [--parent-run RUN:NONCE] [--attach JSON]
 ```
 
 Each `local` call is one step and makes no model call. Pass the same ticket (or path) and options on every call. It prints JSON:
@@ -59,6 +59,19 @@ Each `local` call is one step and makes no model call. Pass the same ticket (or 
 A task that comes back with an `error` wrote an output that failed the fixer's schema; the driver has set it aside. Resend it once to a new subagent with the same message plus the error. `retry: false` means it was already resent. Then, or when a subagent cannot finish, run `local ... --finish`: it takes a last analysis and exports, listing the missing tasks in `missing`.
 
 `--no-fix` only detects and analyzes: no dependency install, no auto-fix, no fix stage. Use it for a read-only check; with `--output` outside the repository nothing is written there. The work directory is `<output>/.local/`; it is removed after export, and every prompt and output is kept in `calls.json`. A remote repository is refused: use `start`.
+
+## Run telemetry
+
+Every run of this skill on a ticket writes one telemetry file, `.work/<id>-<slug>/telemetry/<run-id>.json` (OpenTelemetry JSON: the run, its fix rounds and subagents, with timings, tokens, tool calls and cost where they are measured), and attaches it to the end of the ticket page when the Feature Board rules list it (BOARD-003). A telemetry failure is a notice beside the result: it never changes the run's status, the card's move or the exit code.
+
+- **Default.** The launcher does it all: `ticket.ts start` prints `run-id=` and `run-started=`, and the finish step after the agent exits writes the file from them and attaches it. Nothing to do here.
+- **`--local`.** The session reports its own usage, since only it sees its subagents:
+  1. Record the wall-clock start and end (ISO 8601) of every subagent you launch (every fix batch is its own entry), with the total tokens, tool uses and duration the Agent tool reports for it, and its model when you know it.
+  2. Every pending step on a ticket prints `sessionUsage` with a `file` and a `runId`. Before the call that exports the run (the call after the last fix round's outputs are written, or `--finish`), write that `file` (`.static-analysis/session-usage.json`, beside `board.json`; the analyzer's report folder gets no `trace/`) as JSON: `{"runId": "<runId>", "subagents": [{"label": "…", "startedAt": "…", "endedAt": "…", "totalTokens": 0, "toolUses": 0, "wallMs": 0, "model": "…"}]}`, one entry per subagent in launch order. `label` is a short name of your own (`research`, `lane A`), never the task's description or prompt text. Leave out a number you do not have; never guess one. Without the file the run's telemetry records the subagents as missing.
+  3. The export's `board.actions` then end with two telemetry actions. `read` (`target: "board-rules"`): fetch the Feature Board rules page with the Notion MCP (`notion-fetch`, read-only) and write it to `file` as plain markdown, one rule per line. `attach`: only when one line of the rules you saved contains every string of `onlyIf`, attach `file`, as `name`, in one file block at the end of the ticket page `page`: `notion-create-attachment` for a file of at most 200 KiB, otherwise `notion-create-file-upload`, then `notion-update-page`. Attach no other file, to no other page, and never edit or delete another block.
+  4. Pass the result to the verify step: `local <ticket> --verify --attach '{"blockId":"<the new block id>"}'`, or `--attach '{"error":"<why>"}'` when the rules do not allow it or the attach failed. A missing, refused or failed attach is a notice in the verify output, never a failed verify.
+- **`--parent-run <run-id>:<nonce>`** (a step of an `/aspira-build-feature` run, which prints it on the step's command). Skip all of the above: the run writes no usage report, reads no rules and attaches nothing; build-feature records the step in its own telemetry. Pass `--parent-run` unchanged on every call of the launcher, `start` or `local`, `--verify` included. A malformed value, or one that does not name the pending step of the build-feature run on the ticket, is refused (exit 3) naming `--parent-run`.
+- **`--no-ticket`** runs write no telemetry.
 
 ## Results
 

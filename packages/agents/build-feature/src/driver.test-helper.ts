@@ -9,7 +9,7 @@
 //
 // The stage contract these tests pin (the driver prints exactly one JSON object per call):
 //   { stage, runId, nonce?, output?, ... }  stage is one of resolve, approval, overrides, worktree,
-//   step, ask, move, set-pr, gate, step10, fix, release-row, summary, end. A stage that needs an answer has a
+//   step, ask, move, set-pr, gate, step10, fix, release-row, summary, telemetry, end. A stage that needs an answer has a
 //   `nonce` and an `output` path; the session writes `{ nonce, ...answer }` as JSON to `output`
 //   and calls the driver again with `--run <runId>`. A call without `--run` is a new invocation
 //   (a run start, refused while a run is in progress unless `--force-run`).
@@ -34,6 +34,10 @@
 //     carries `error` when the draft was refused; the write stage carries `write: { action }`.
 //   - summary: `path` (build-summary.md); first with `rules` (where the session writes the fetched
 //     Feature Board page), then with `push` (null, or { action, page }); answer { pushed } or { error }.
+//   - telemetry (KIT-19): { files }; printed after the summary push when the rules list the run
+//     telemetry file; answer { attached: true, blockId } or { error }.
+//   - step commands end with `--parent-run <runId>:<nonce>`; every step skill's .kit-version must be
+//     this package's version (project() commits them on main; `kitVersion` changes or omits them).
 //   - end: { stopped, message, resume? }; the message's last line is the resume command on a stop.
 //   Stages that act on Notion list the actions as `notion: [{ op: 'read' | 'write', target, page? }]`.
 // The origin is compared as configured (`git config remote.origin.url`, here the GitHub URL);
@@ -47,12 +51,14 @@
 // working directory and arguments.
 
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { z } from 'zod'
+import type { usageSchema } from '#src/run-state.ts'
 
 const exec = promisify(execFile)
 
@@ -82,11 +88,20 @@ export const APPROVER = { notionUserId: 'user-1', name: 'Ada Approver', at: NOW 
 /** The Feature Board rules page as the session fetches it; BOARD-003 without and with the Build Summary title. */
 export const BOARD_RULES_WITHOUT_SUMMARY = '# Feature Board\n\n**BOARD-003 — MUST** push outputs as child pages under fixed titles: Spec, Spec Reviewed, Spec Review Decisions, Plan, Implementation, PR Review, Grooming Decisions.\n'
 export const BOARD_RULES_WITH_SUMMARY = '# Feature Board\n\n**BOARD-003 — MUST** push outputs as child pages under fixed titles: Spec, Spec Reviewed, Spec Review Decisions, Plan, Implementation, PR Review, Grooming Decisions, Build Summary.\n'
+/** BOARD-003 with the run telemetry file block (the KIT-19 amendment), for project({ rules }). */
+export const BOARD_RULES_WITH_TELEMETRY =
+  '# Feature Board\n\n**BOARD-003 — MUST** push outputs as child pages under fixed titles: Spec, Spec Reviewed, Spec Review Decisions, Plan, Implementation, PR Review, Grooming Decisions, Build Summary. Every /aspira-* run on the ticket may also append one run telemetry file block, holding its <run-id>.json, at the end of the ticket page body.\n'
+
+/** This package's version: what kit init writes into every step skill's .kit-version. */
+const PACKAGE_VERSION = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8'))).version
+/** The seven step skills, whose .kit-version the driver checks before a run's first step (KIT-19). */
+export const STEP_SKILLS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer']
 
 export type Stage = { stage: string; runId?: string; nonce?: string; output?: string; [key: string]: unknown }
 export type Result = { code: number; stage: Stage | null; text: string }
 export type Card = { found: boolean; status: string; pr: string | null; dev: string | null; title: string; type: string | null }
-export type Usage = { tokens: number | null; wallMs: number | null } | null
+/** A step or fix report's usage, in the driver's own usageSchema shape. */
+export type Usage = z.infer<typeof usageSchema>
 export type DecisionFixture = { id: string; question: string; options: string[]; recommended: string; reasoning: string; whyYours: string; decidedBy: 'open' | 'author' | 'agent'; answer: string | null }
 export type Handler = (stage: Stage) => Promise<'return' | void>
 
@@ -157,6 +172,13 @@ type ProjectOptions = {
   mode?: 'local' | 'cloud'
   /** Extra variables in the session's environment (such as a fake credential the gate must strip). */
   env?: Record<string, string>
+  /**
+   * The kit version kit init leaves in every step skill's `.claude/skills/aspira-<step>/.kit-version`,
+   * committed on main (so every worktree has it). Default: this package's version; null leaves the files out.
+   */
+  kitVersion?: string | null
+  /** The Feature Board rules page the default summary handler writes. Default: BOARD_RULES_WITHOUT_SUMMARY. */
+  rules?: string
 }
 
 const temps: string[] = []
@@ -192,7 +214,9 @@ export async function project(options: ProjectOptions) {
   await mkdir(join(main, 'src'))
   await writeFile(join(main, 'README.md'), '# Fixture\n')
   await writeFile(join(main, 'src/app.ts'), 'export const app = 1\n')
-  for (const [path, content] of Object.entries(options.mainFiles ?? {})) {
+  const kitVersion = options.kitVersion === undefined ? PACKAGE_VERSION : options.kitVersion
+  const kitFiles = kitVersion === null ? {} : Object.fromEntries(STEP_SKILLS.map((step) => [`.claude/skills/aspira-${step}/.kit-version`, `${kitVersion}\n`]))
+  for (const [path, content] of Object.entries({ ...kitFiles, ...options.mainFiles })) {
     await mkdir(dirname(join(main, path)), { recursive: true })
     await writeFile(join(main, path), content)
   }
@@ -344,7 +368,7 @@ export async function project(options: ProjectOptions) {
         } else if (stage.stage === 'summary') {
           if (typeof stage.rules === 'string') {
             await mkdir(dirname(stage.rules), { recursive: true })
-            await writeFile(stage.rules, BOARD_RULES_WITHOUT_SUMMARY)
+            await writeFile(stage.rules, options.rules ?? BOARD_RULES_WITHOUT_SUMMARY)
             await h.answer(stage, {})
           } else await h.answer(stage, { pushed: stage.push !== null && stage.push !== undefined })
         } else return result

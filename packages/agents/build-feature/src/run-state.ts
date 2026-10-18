@@ -8,6 +8,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { z } from 'zod'
+import { GAPS, TIME_BASES, TOOL_COUNT_BASES, USAGE_SCOPE_VALUES } from '@aspiralabs/agent-common/lib/telemetry'
 import { buildStopSchema } from '#src/build-status.ts'
 
 /** Where the driver keeps its files inside the ticket's working folder. */
@@ -16,7 +17,66 @@ export const stateFileOf = (folder: string): string => join(stateDirOf(folder), 
 
 const text = z.string().min(1)
 
-export const usageSchema = z.object({ tokens: z.number().nonnegative().nullable(), wallMs: z.number().nonnegative().nullable() }).nullable()
+const count = z.number().nonnegative()
+const optionalCount = count.nullable().optional()
+
+/** One subagent a step (or fix) subagent launched, as the Agent tool reported it; an entry that failed validation keeps only `gap: 'invalid'`. */
+export const subagentUsageSchema = z.object({
+  startedAt: z.string().optional(),
+  endedAt: z.string().optional(),
+  totalTokens: count.optional(),
+  toolUses: count.optional(),
+  wallMs: count.optional(),
+  model: z.string().optional(),
+  gap: z.enum(GAPS).optional(),
+})
+export type SubagentUsage = z.infer<typeof subagentUsageSchema>
+
+/** One reduced group of a cloud step's own usage file (a phase/model, a code-analyzer round or a pr-reviewer agent), numbers only. */
+export const phaseUsageSchema = z.object({
+  phase: z.string(),
+  model: z.string().nullable().optional(),
+  inputTokens: optionalCount,
+  outputTokens: optionalCount,
+  totalTokens: optionalCount,
+  cacheRead: optionalCount,
+  cacheWrite: optionalCount,
+  toolCalls: optionalCount,
+  costUsd: optionalCount,
+  startedAt: z.string(),
+  endedAt: z.string(),
+  status: z.string().optional(),
+  anchored: z.boolean().optional(),
+  timeBasis: z.enum(TIME_BASES).optional(),
+  toolCountBasis: z.enum(TOOL_COUNT_BASES).optional(),
+  usageScope: z.enum(USAGE_SCOPE_VALUES).optional(),
+  partial: z.boolean().optional(),
+})
+export type PhaseRecord = z.infer<typeof phaseUsageSchema>
+
+/**
+ * What a step (or fix) used. `tokens` and `wallMs` keep their meaning from before KIT-19: the total
+ * tokens and the wall time the Agent tool reported for the step subagent. Every other field is
+ * optional, so a state.json written before KIT-19 still parses (F22): the session's richer report
+ * (input/output tokens, tool uses, model, start and end, one entry per subagent it launched), the
+ * reduced groups of a cloud step's usage file (`phases`, read by the driver, never reported), and
+ * the gap that kept a source out.
+ */
+export const usageSchema = z
+  .object({
+    tokens: count.nullable().default(null),
+    wallMs: count.nullable().default(null),
+    inputTokens: optionalCount,
+    outputTokens: optionalCount,
+    toolUses: optionalCount,
+    model: z.string().nullable().optional(),
+    startedAt: z.string().optional(),
+    endedAt: z.string().optional(),
+    subagents: z.array(subagentUsageSchema).optional(),
+    phases: z.array(phaseUsageSchema).optional(),
+    gap: z.enum(GAPS).optional(),
+  })
+  .nullable()
 export type Usage = z.infer<typeof usageSchema>
 
 /** `type`: the card's Type (Feature, Bug, Chore), which names the worktree and the branch prefix (F50). */
@@ -39,6 +99,8 @@ const runSchema = z.object({
   mode: z.enum(['local', 'cloud']).default('local'),
   /** The ticket's worktree the run worked in (F50). */
   worktree: z.string().optional(),
+  /** KIT-19: the run's telemetry file was written (once; a later --finish never rewrites it), where, and the file block it was attached as. */
+  telemetry: z.object({ written: z.boolean(), attached: z.string().optional(), file: z.string().optional() }).optional(),
 })
 export type RunRecord = z.infer<typeof runSchema>
 
@@ -67,6 +129,8 @@ const stepSchema = z.object({
   report: z.string().optional(),
   /** pr-reviewer: the counts read from findings.md. */
   counts: countsSchema.nullable().optional(),
+  /** The driver's verdict on the step (KIT-19: the step span's status code). */
+  verdict: z.enum(['continue', 'stop']).optional(),
 })
 export type StepRecord = z.infer<typeof stepSchema>
 

@@ -9,18 +9,53 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { countsFromFindings } from '@aspiralabs/agent-common/lib/findings-counts'
 import { readRunStatus, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
+import type { SourceKind } from '@aspiralabs/agent-common/lib/telemetry-sources'
 import type { StepName } from '#src/route.ts'
-import { usageSchema, type RunState } from '#src/run-state.ts'
+import { subagentUsageSchema, usageSchema, type RunState, type SubagentUsage, type Usage } from '#src/run-state.ts'
 
-/** The report the session writes for a step stage. */
-export const stepReportSchema = z.object({ nonce: z.string().min(1), step: z.string().min(1), status: z.string().min(1), resultLine: z.string(), usage: usageSchema })
+/**
+ * The report the session writes for a step stage. nonce, step, status and resultLine are strict;
+ * usage is taken as it comes and read by readStepUsage, so a malformed usage never fails the report
+ * (KIT-19 F22).
+ */
+export const stepReportSchema = z.object({ nonce: z.string().min(1), step: z.string().min(1), status: z.string().min(1), resultLine: z.string(), usage: z.unknown() })
 export type StepReport = z.infer<typeof stepReportSchema>
+
+/** What a session may report as usage: the stored usage without the fields only the driver fills (phases, gap). */
+const reportedUsageSchema = usageSchema.unwrap().omit({ phases: true, gap: true, subagents: true })
+
+/** Every number not measured, with the gap that says why. */
+const invalidUsage = (): NonNullable<Usage> => ({ tokens: null, wallMs: null, gap: 'invalid' })
+
+/** One reported subagent entry: its numbers, or not measured with gap invalid when it fails the schema. The free-text label is dropped. */
+function readSubagent(raw: unknown): SubagentUsage {
+  const parsed = subagentUsageSchema.omit({ gap: true }).safeParse(raw)
+  return parsed.success ? parsed.data : { gap: 'invalid' }
+}
+
+/**
+ * A step or fix report's usage as the run stores it: null when the session reported none; the
+ * reported numbers when they validate (each subagent entry checked on its own); otherwise every
+ * number not measured with gap 'invalid'. Never throws and never fails the report (KIT-19 F9, F22).
+ */
+export function readStepUsage(raw: unknown): Usage {
+  if (raw === null || raw === undefined) return null
+  const object = z.record(z.string(), z.unknown()).safeParse(raw)
+  if (!object.success) return invalidUsage()
+  const { subagents, ...rest } = object.data
+  if (subagents !== undefined && !Array.isArray(subagents)) return invalidUsage()
+  const parsed = reportedUsageSchema.safeParse(rest)
+  if (!parsed.success) return invalidUsage()
+  return { ...parsed.data, ...(subagents === undefined ? {} : { subagents: subagents.map(readSubagent) }) }
+}
 
 export type ResultPaths = { folder: string; repo: string; app: string }
 
 type ResultRow = {
   /** The export file the status word is read from. */
   file: (paths: ResultPaths) => string
+  /** The step agent's own usage file, read in cloud mode when the step is accepted (KIT-19), or null when it records none (implementor). */
+  usage: (paths: ResultPaths) => { file: string; kind: SourceKind } | null
 }
 
 /** The `status` word of an export, the rest of the file passed through. */
@@ -29,15 +64,15 @@ const reviewStatus = z.looseObject({ status: z.string().min(1) }).transform((val
 /** Every step continues on `ready` and stops on anything else readRunStatus knows (F7); an unknown word also stops, as "a status the run does not know". */
 const CONTINUE_ON: RunStatus = 'ready'
 
-/** Per step: where its result is read. */
+/** Per step: where its result is read, and where its agent records its usage (KIT-19). */
 export const stepResultTable: Readonly<Record<StepName, ResultRow>> = {
-  groomer: { file: ({ folder }) => join(folder, 'groom/trace/groom.json') },
-  'spec-writer': { file: ({ folder }) => join(folder, 'spec.written/trace/review.json') },
-  'spec-reviewer': { file: ({ folder }) => join(folder, 'spec.reviewed/trace/review.json') },
-  planner: { file: ({ folder }) => join(folder, 'plan.review/trace/review.json') },
-  implementor: { file: ({ folder }) => join(folder, 'plan.review/trace/implementation-local.json') },
-  'code-analyzer': { file: ({ repo, app }) => join(repo, app, '.static-analysis/rounds.json') },
-  'pr-reviewer': { file: ({ folder }) => join(folder, 'pr-review/trace/review.json') },
+  groomer: { file: ({ folder }) => join(folder, 'groom/trace/groom.json'), usage: ({ folder }) => ({ file: join(folder, 'groom/trace/usage.json'), kind: 'usage.json' }) },
+  'spec-writer': { file: ({ folder }) => join(folder, 'spec.written/trace/review.json'), usage: ({ folder }) => ({ file: join(folder, 'spec.written/trace/usage.json'), kind: 'usage.json' }) },
+  'spec-reviewer': { file: ({ folder }) => join(folder, 'spec.reviewed/trace/review.json'), usage: ({ folder }) => ({ file: join(folder, 'spec.reviewed/trace/usage.json'), kind: 'usage.json' }) },
+  planner: { file: ({ folder }) => join(folder, 'plan.review/trace/review.json'), usage: ({ folder }) => ({ file: join(folder, 'plan.review/trace/usage.json'), kind: 'usage.json' }) },
+  implementor: { file: ({ folder }) => join(folder, 'plan.review/trace/implementation-local.json'), usage: () => null },
+  'code-analyzer': { file: ({ repo, app }) => join(repo, app, '.static-analysis/rounds.json'), usage: ({ repo, app }) => ({ file: join(repo, app, '.static-analysis/usage.json'), kind: 'ledger' }) },
+  'pr-reviewer': { file: ({ folder }) => join(folder, 'pr-review/trace/review.json'), usage: ({ folder }) => ({ file: join(folder, 'pr-review/usage.jsonl'), kind: 'usage.jsonl' }) },
 }
 
 export type Counts = { critical: number; high: number; medium: number; low: number; info: number }

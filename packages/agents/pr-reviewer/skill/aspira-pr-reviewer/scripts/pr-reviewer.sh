@@ -167,12 +167,23 @@ absolute_source() {
 absolute_path() {
   if [[ $1 = /* ]]; then printf '%s\n' "$1"; else printf '%s/%s\n' "$PWD" "$1"; fi
 }
-SOURCE="" POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" REPO="" BRANCH="" BASE="" ROUNDS="" OUT="" KNOWLEDGE="" SINCE="" MAX_COST="" NO_COMMENT="" FINISH="" YES=""
+SOURCE="" POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" REPO="" BRANCH="" BASE="" ROUNDS="" OUT="" KNOWLEDGE="" SINCE="" MAX_COST="" NO_COMMENT="" FINISH="" YES="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
 is_pr() { [[ $1 =~ ^(https?://(www\.)?github\.com/[^/]+/[^/]+/pull/[0-9]+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+)/?$ ]]; }
+# --parent-run <run-id>:<nonce> marks a step of a build-feature run (KIT-19): ticket.ts and the local
+# driver check that it names the run's pending step, and the step writes and attaches no telemetry of
+# its own. A malformed value is refused here, before anything runs (exit 3, as ticket.ts refuses).
+check_parent_run() {
+  local pattern='^run-[0-9]{8}T[0-9]{6}Z(-[0-9]+)?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+  [ -n "$PARENT_RUN" ] || return 0
+  if [[ ! $PARENT_RUN =~ $pattern ]]; then
+    echo "$NAME: refused: --parent-run must be <run-id>:<nonce>, the build-feature run id and the nonce of its pending step" >&2
+    exit 3
+  fi
+}
 # The ticket argument (F1 of the ticket flow): a board ID such as NOM-4, a Notion page URL, nothing
 # (the one folder under .work/ that holds a ticket.md), or, with --no-ticket, the GitHub PR or repository
-# path exactly as before. Sets POSITIONAL, NO_TICKET, FORCE_PULL, VERIFY, REPO and the review options;
-# with --no-ticket, SOURCE.
+# path exactly as before. Sets POSITIONAL, NO_TICKET, FORCE_PULL, VERIFY, REPO, the review options,
+# PARENT_RUN and ATTACH (the --local verify step's telemetry attach result); with --no-ticket, SOURCE.
 parse() {
   local mode=$1; shift
   while [ $# -gt 0 ]; do
@@ -192,10 +203,14 @@ parse() {
       --yes) YES=1; shift ;;
       --local) shift ;;
       --finish) [ "$mode" = local ] || die "--finish is for local"; FINISH=1; shift ;;
+      --parent-run) [ $# -ge 2 ] || die "--parent-run needs <run-id>:<nonce>"; PARENT_RUN=$2; shift 2 ;;
+      --attach) [ $# -ge 2 ] || die "--attach needs the telemetry attach result as JSON"; [ "$mode" = local ] || die "--attach is for local"; ATTACH=$2; shift 2 ;;
       -*) die "unknown option: $1" ;;
       *) [ -z "$POSITIONAL" ] || die "one ticket at a time (or one PR with --no-ticket)"; POSITIONAL=${1#@}; shift ;;
     esac
   done
+  check_parent_run
+  [ -z "$PARENT_RUN" ] || [ -z "$NO_TICKET" ] || die "--parent-run names a step of a build-feature run on a ticket; it does not go with --no-ticket"
   if [ -n "$ROUNDS" ]; then
     [[ $ROUNDS =~ ^[0-9]+$ ]] && [ "$ROUNDS" -ge 1 ] && [ "$ROUNDS" -le 10 ] || die "--max-rounds must be 1..10"
   fi
@@ -217,11 +232,12 @@ parse() {
 }
 # The board step before a separate-process run: resolve the ticket, check its Status and PR (a refusal
 # exits 3 before anything is launched) and pull its pages into .work/<id>-<slug>/. Reads the key=value
-# lines of scripts/ticket.ts into T_FOLDER, T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS, T_PR.
+# lines of scripts/ticket.ts into T_FOLDER, T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS, T_PR,
+# and the run id and start time finish takes back into T_RUN_ID and T_RUN_STARTED (none with --parent-run).
 ticket_start() {
   local out code line key value
   out=$(mktemp "${TMPDIR:-/tmp}/pr-reviewer-ticket.XXXXXX")
-  agent_node scripts/ticket.ts start "$POSITIONAL" --repo "$REPO" ${FORCE_PULL:+--force-pull} > "$out"; code=$?
+  agent_node scripts/ticket.ts start "$POSITIONAL" --repo "$REPO" ${FORCE_PULL:+--force-pull} ${PARENT_RUN:+--parent-run "$PARENT_RUN"} > "$out"; code=$?
   if [ "$code" != 0 ]; then rm -f "$out"; exit "$code"; fi
   T_FOLDER="" T_ID="" T_TITLE="" T_URL="" T_BEFORE="" T_STATUS="" T_PR=""
   while IFS= read -r line; do
@@ -229,6 +245,7 @@ ticket_start() {
     case $key in
       folder) T_FOLDER=$value ;; id) T_ID=$value ;; title) T_TITLE=$value ;; url) T_URL=$value ;;
       before) T_BEFORE=$value ;; status) T_STATUS=$value ;; pr) T_PR=$value ;;
+      run-id) T_RUN_ID=$value ;; run-started) T_RUN_STARTED=$value ;;
     esac
   done < "$out"
   rm -f "$out"
@@ -302,11 +319,16 @@ printf '%s\n' "$code" > "$RUN/exit"
 if [ -n "$FOLDER" ]; then
   node "${NODE_ARGS[@]}" "$AGENT/scripts/export-record.ts" --output "$OUTPUT" --exit-code "$code" >> "$RUN/log" 2>&1 || true
   status=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).status ?? 'incomplete' } catch { 'incomplete' }" "$OUTPUT/trace/review.json" 2>/dev/null || echo incomplete)
-  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" --run-status "$status" --export "$OUTPUT" >> "$RUN/log" 2>&1
+  # The run's telemetry (KIT-19): the run id and start time ticket.ts start printed, or the build-feature
+  # step this run is (--parent-run), which writes none of its own.
+  telemetry=()
+  [ -z "$RUN_ID" ] || telemetry+=(--run-id "$RUN_ID" --run-started "$RUN_STARTED")
+  [ -z "$PARENT_RUN" ] || telemetry+=(--parent-run "$PARENT_RUN")
+  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" --run-status "$status" --export "$OUTPUT" ${telemetry[@]+"${telemetry[@]}"} >> "$RUN/log" 2>&1
 fi
 RUNNER
   chmod +x "$run/run.sh"
-  AGENT="$AGENT" EVE="$eve" PROMPT="$prompt" RUN="$run" FOLDER="$folder" REPO="$REPO" OUTPUT="$OUT" screen -dmS "pr-review-$(basename "$run")" "$run/run.sh"
+  AGENT="$AGENT" EVE="$eve" PROMPT="$prompt" RUN="$run" FOLDER="$folder" REPO="$REPO" OUTPUT="$OUT" RUN_ID="$T_RUN_ID" RUN_STARTED="$T_RUN_STARTED" PARENT_RUN="$PARENT_RUN" screen -dmS "pr-review-$(basename "$run")" "$run/run.sh"
   printf 'started\nrun: %s\nsource: %s\n' "$run" "$SOURCE"
   agent_line
 }
@@ -329,6 +351,8 @@ cmd_local() {
   [ -z "$FORCE_PULL" ] || args+=(--force-pull)
   [ -z "$VERIFY" ] || args+=(--verify)
   [ -z "$FINISH" ] || args+=(--finish)
+  [ -z "$PARENT_RUN" ] || args+=(--parent-run "$PARENT_RUN")
+  [ -z "$ATTACH" ] || args+=(--attach "$ATTACH")
   command -v node >/dev/null || die "node is not installed"
   resolve_agent
   agent_node scripts/local.ts "${args[@]}"
@@ -381,5 +405,5 @@ case ${1:-} in
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
   load-knowledge) shift; cmd_load_knowledge "$@" ;;
-  *) die "usage: pr-reviewer.sh start [TICKET | SOURCE --no-ticket] [--force-pull] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--yes] | status RUN | wait RUN [--max SECONDS] | local [TICKET | SOURCE --no-ticket] [--force-pull] [--verify] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--knowledge DIR] [--finish] | load-knowledge --out DIR" ;;
+  *) die "usage: pr-reviewer.sh start [TICKET | SOURCE --no-ticket] [--force-pull] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--yes] [--parent-run RUN:NONCE] | status RUN | wait RUN [--max SECONDS] | local [TICKET | SOURCE --no-ticket] [--force-pull] [--verify] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--knowledge DIR] [--finish] [--parent-run RUN:NONCE] [--attach JSON] | load-knowledge --out DIR" ;;
 esac

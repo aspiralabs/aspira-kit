@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { createServer, type IncomingMessage, type Server } from 'node:http'
+import { createServer, type IncomingHttpHeaders, type IncomingMessage, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BoardError, board, ideaOf, parseTicketRef, type Board } from './board'
 import { renderGroomPage } from './decisions'
 import type { GroomRecord } from './groom-record'
@@ -24,7 +24,8 @@ const SPEC_REVIEWED = '3ec3e59b-2258-8123-961c-ce4ccd8e662a'
 const TOKEN = 'test-token'
 
 type Json = Record<string, unknown>
-type Call = { method: string; path: string; body?: Json }
+/** One request as the server saw it: `body` is the parsed JSON body, `raw` the bytes as sent (a multipart body stays raw). */
+type Call = { method: string; path: string; body?: Json; headers?: IncomingHttpHeaders; raw?: string }
 
 let server: Server
 let api: string
@@ -45,6 +46,12 @@ let refusePosition: boolean
 /** Page objects GET /pages/{id} serves beyond the ticket: child pages created or registered by a test. */
 let pageObjects: Map<string, Json>
 let clock: number
+/** The first POST /v1/file_uploads/{id}/send answers 429 with Retry-After 0. */
+let rateLimitSendOnce: boolean
+/** Every POST /v1/file_uploads/{id}/send answers 500. */
+let failSend: boolean
+/** Page markdown served by GET /pages/{id}/markdown for pages that are not block trees: the guidelines the knowledge walk reads. */
+let markdownPages: Map<string, string>
 
 function page(): Json {
   const base = fixture<Json>('nom-4.page.json')
@@ -88,16 +95,27 @@ function listed(path: string, all: Json[]): { status: number; body: Json } {
 
 const asBlock = (json: Json): Block => ({ ...json, type: typeof json.type === 'string' ? json.type : 'unsupported' })
 
-async function readBody(request: IncomingMessage): Promise<Json | undefined> {
+/** The request's bytes, and the parsed body when it was sent as JSON. */
+async function readBody(request: IncomingMessage): Promise<{ raw?: string; body?: Json }> {
   const chunks: Buffer[] = []
   for await (const chunk of request) chunks.push(chunk as Buffer)
-  return chunks.length === 0 ? undefined : (JSON.parse(Buffer.concat(chunks).toString()) as Json)
+  if (chunks.length === 0) return {}
+  const raw = Buffer.concat(chunks).toString()
+  return { raw, body: (request.headers['content-type'] ?? '').startsWith('application/json') ? (JSON.parse(raw) as Json) : undefined }
 }
 
 function route(call: Call): { status: number; body: Json } {
   const { method, path, body } = call
   const json = (value: Json, code = 200) => ({ status: code, body: value })
   if (method === 'GET' && path === '/v1/users/me') return json({ object: 'user', id: 'bot-1', type: 'bot', bot: {} })
+  if (method === 'POST' && path === '/v1/file_uploads') return json({ object: 'file_upload', id: 'u1', status: 'pending', filename: body?.filename, content_type: body?.content_type })
+  if (method === 'POST' && path === '/v1/file_uploads/u1/send') {
+    if (failSend) return json({ object: 'error', status: 500, code: 'internal_server_error', message: 'send failed' }, 500)
+    return json({ object: 'file_upload', id: 'u1', status: 'uploaded', filename: 'run-x.json', content_type: 'application/json' })
+  }
+  const knowledge = path.match(/^\/v1\/pages\/([^/]+)\/markdown$/)
+  const guideline = knowledge === null ? undefined : markdownPages.get(knowledge[1]!)
+  if (method === 'GET' && guideline !== undefined) return json({ object: 'page_markdown', id: knowledge?.[1], markdown: guideline, truncated: false, unknown_block_ids: [] })
   if (method === 'GET' && path === `/v1/data_sources/${DS}`) return json(fixture('feature-board.data-source.json'))
   if (method === 'GET' && path === `/v1/data_sources/${DB}`) return json({ object: 'error', status: 404, code: 'object_not_found', message: `Could not find data_source with ID: ${DB}` }, 404)
   if (method === 'GET' && path === `/v1/databases/${DB}`) return json({ object: 'database', id: DB, data_sources: [{ id: DS, name: 'Feature Board' }] })
@@ -170,7 +188,7 @@ function route(call: Call): { status: number; body: Json } {
 
 beforeAll(async () => {
   server = createServer(async (request, response) => {
-    const call: Call = { method: request.method ?? 'GET', path: request.url ?? '/', body: await readBody(request) }
+    const call: Call = { method: request.method ?? 'GET', path: request.url ?? '/', headers: request.headers, ...(await readBody(request)) }
     calls.push(call)
     const reply = (code: number, body: Json, headers: Record<string, string> = {}) => {
       response.writeHead(code, { 'Content-Type': 'application/json', ...headers })
@@ -179,6 +197,10 @@ beforeAll(async () => {
     if (request.headers.authorization !== `Bearer ${TOKEN}` || request.headers['notion-version'] !== '2026-03-11') return reply(401, { object: 'error', status: 401, code: 'unauthorized', message: 'bad token or version' })
     if (rateLimitOnce) {
       rateLimitOnce = false
+      return reply(429, { object: 'error', status: 429, code: 'rate_limited', message: 'slow down' }, { 'Retry-After': '0' })
+    }
+    if (rateLimitSendOnce && call.method === 'POST' && /^\/v1\/file_uploads\/[^/]+\/send$/.test(call.path)) {
+      rateLimitSendOnce = false
       return reply(429, { object: 'error', status: 429, code: 'rate_limited', message: 'slow down' }, { 'Retry-After': '0' })
     }
     const { status: code, body } = route(call)
@@ -207,6 +229,9 @@ beforeEach(() => {
   refusePosition = false
   pageObjects = new Map()
   clock = 0
+  rateLimitSendOnce = false
+  failSend = false
+  markdownPages = new Map()
   client = board({ token: TOKEN, board: `collection://${DS}`, api })
 })
 
@@ -794,5 +819,93 @@ describe('finishFlow for the groomer, a tick made on Notion', () => {
     expect(page.filter((block) => block.type === 'to_do' && isChecked(block)).map(plain)).toEqual([expect.stringMatching(/^The team\b/)])
     const saved: unknown = JSON.parse(await readFile(join(folder, 'groom', 'trace', 'groom.json'), 'utf8'))
     expect(saved).toMatchObject({ decisions: [expect.objectContaining({ id: 'Q1', tickedBy: { kind: 'notion', id: 'human-7' } })] })
+  })
+})
+
+const SEND = '/v1/file_uploads/u1/send'
+const sendCalls = (): Call[] => calls.filter((call) => call.method === 'POST' && call.path === SEND)
+
+describe('file upload', () => {
+  beforeEach(() => setBody([]))
+
+  it('creates the upload as a JSON request with the filename and content type', async () => {
+    await client.uploadFile('run-x.json', '{}')
+    const create = calls.find((call) => call.method === 'POST' && call.path === '/v1/file_uploads')
+    expect({ contentType: create?.headers?.['content-type'], body: create?.body }).toEqual({ contentType: 'application/json', body: { filename: 'run-x.json', content_type: 'application/json' } })
+  })
+
+  it('sends the file as multipart/form-data with a file field, Bearer auth and the Notion-Version header', async () => {
+    await client.uploadFile('run-x.json', '{}')
+    const send = sendCalls().at(-1)
+    expect({
+      multipart: /^multipart\/form-data; boundary=/.test(send?.headers?.['content-type'] ?? ''),
+      fileField: /Content-Disposition: form-data; name="file"/.test(send?.raw ?? ''),
+      authorization: send?.headers?.authorization,
+      version: send?.headers?.['notion-version'],
+    }).toEqual({ multipart: true, fileField: true, authorization: `Bearer ${TOKEN}`, version: '2026-03-11' })
+  })
+
+  it('retries the send after a 429 and completes the upload', async () => {
+    rateLimitSendOnce = true
+    await client.uploadFile('run-x.json', '{}')
+    expect(sendCalls()).toHaveLength(2)
+  })
+
+  it('appends one file block naming the upload to the end of the page', async () => {
+    await client.appendFileBlock(PAGE, 'u1')
+    const append = calls.find((call) => call.method === 'PATCH' && call.path === `/v1/blocks/${PAGE}/children`)
+    expect(append?.body).toEqual({ children: [{ type: 'file', file: { type: 'file_upload', file_upload: { id: 'u1' } } }] })
+  })
+
+  it('returns the id of the created file block', async () => {
+    await expect(client.appendFileBlock(PAGE, 'u1')).resolves.toEqual({ id: 'blk-1' })
+  })
+
+  it('raises a BoardError carrying the status when the send answers 500', async () => {
+    failSend = true
+    const error: unknown = await client.uploadFile('run-x.json', '{}').catch((caught: unknown) => caught)
+    expect(error instanceof BoardError ? error.status : error).toBe(500)
+  })
+})
+
+describe('fileBlockNames', () => {
+  const fileBlock = (id: string, name: string): Json => ({ object: 'block', id, type: 'file', file: { type: 'file', name, caption: [], file: { url: `https://files.notion.test/${name}`, expiry_time: '2026-10-15T12:00:00.000Z' } } })
+
+  it('names every top-level file block across pages of the block list', async () => {
+    const filler = Array.from({ length: 148 }, (_, i) => paragraph(`p-${i}`, `line ${i}`))
+    setBody([fileBlock('f-a', 'run-a.json'), ...filler, fileBlock('f-b', 'run-b.json')])
+    await expect(client.fileBlockNames(PAGE)).resolves.toEqual(['run-a.json', 'run-b.json'])
+  })
+})
+
+describe('rulesPage', () => {
+  // The guidelines tree as the knowledge walk reaches it: Engineering Central › AI-DLC › Feature Board.
+  const ROOT = '3e73e59b-2258-8032-b0c4-c2c10bd18cab'
+  const AIDLC = '3e83e59b-2258-817b-8658-f355337a4917'
+  const FEATURE_BOARD = '3e93e59b-2258-81bb-a552-f8e336ad08ad'
+  const RULES = 'BOARD-003 Every run on the ticket may append one run telemetry file block at the end of the page body.'
+  const link = (id: string, title: string) => `<page url="https://app.notion.com/p/${id.replaceAll('-', '')}">${title}</page>`
+
+  beforeEach(() => {
+    vi.stubEnv('KNOWLEDGE_PAGE', `https://app.notion.com/p/${ROOT.replaceAll('-', '')}`)
+    markdownPages.set(ROOT, `Engineering rules.\n${link(AIDLC, 'AI-DLC (AI Development Lifecycle)')}`)
+    markdownPages.set(AIDLC, `How work moves.\n${link(FEATURE_BOARD, 'Feature Board')}`)
+    markdownPages.set(FEATURE_BOARD, RULES)
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  // A client made after KNOWLEDGE_PAGE is set, so it does not matter when board() reads it.
+  const rulesClient = () => board({ token: TOKEN, board: `collection://${DS}`, api })
+
+  it('returns the Feature Board page markdown found through the knowledge walk from KNOWLEDGE_PAGE', async () => {
+    expect((await rulesClient().rulesPage())?.trim()).toBe(RULES)
+  })
+
+  it('returns null when the Feature Board page is not reachable', async () => {
+    markdownPages.delete(FEATURE_BOARD)
+    await expect(rulesClient().rulesPage()).resolves.toBeNull()
   })
 })

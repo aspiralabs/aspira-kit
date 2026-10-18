@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
 import { USAGE_EXIT, exitCodeFor, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
-import { afterRun, beforeRun, handleRunError, UsageError, verifyRun, type DriverContext, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
+import { afterRun, attachArg, beforeRun, handleRunError, sessionUsageStep, UsageError, verifyRun, type DriverContext, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { readTicketMd, writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { runLocal } from '../agent/lib/local.ts'
 
@@ -28,7 +28,11 @@ async function recordSpecReviewedEditedAt(folder: string, exportDir: string): Pr
 // phase output is present, the finished report with the end-of-run board actions. --verify is the
 // last step: ticket.md must show what the end stage expected. --finish exports what exists as
 // incomplete. Every step names the agent package that ran (`agent`), and an export records it in its trace.
-const usage = 'Usage: pnpm run review:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <absolute-spec>) [--guidelines FILE] [--output DIR] [--force-pull] [--verify] [--finish]'
+const usage = 'Usage: pnpm run review:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <absolute-spec>) [--guidelines FILE] [--output DIR] [--force-pull] [--verify] [--finish] [--parent-run RUN:NONCE] [--attach JSON]'
+const SKILL = 'spec-reviewer' as const
+
+/** The session usage report of a --local hand run: <export>/trace/session-usage.json (KIT-19, F9). */
+const sessionUsageFile = (exportDir: string) => join(exportDir, 'trace', 'session-usage.json')
 
 /** parseArgs, with an unknown or malformed option reported as a usage error naming it, not a crash. */
 function parseUsage<T>(parse: () => T): T {
@@ -40,20 +44,20 @@ function parseUsage<T>(parse: () => T): T {
 }
 
 const agent = await agentVersion(new URL('..', import.meta.url))
-let context: DriverContext = { skill: 'spec-reviewer', repo: '' }
+let context: DriverContext = { skill: SKILL, repo: '' }
 let driverArgs: DriverTicketArgs = {}
 try {
   const { values, positionals } = parseUsage(() => parseArgs({
     allowPositionals: true,
-    options: { repo: { type: 'string' }, ticket: { type: 'string' }, 'no-ticket': { type: 'string' }, guidelines: { type: 'string' }, output: { type: 'string' }, 'force-pull': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' } },
+    options: { repo: { type: 'string' }, ticket: { type: 'string' }, 'no-ticket': { type: 'string' }, guidelines: { type: 'string' }, output: { type: 'string' }, 'force-pull': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' }, 'parent-run': { type: 'string' }, attach: { type: 'string' } },
   }))
   if (values.repo === undefined || positionals.length > 0 || (values.ticket !== undefined && values['no-ticket'] !== undefined)) throw new UsageError(usage)
   const repo = values.repo
-  context = { skill: 'spec-reviewer', repo }
-  driverArgs = { positional: values['no-ticket'] ?? values.ticket, noTicket: values['no-ticket'] !== undefined, forcePull: values['force-pull'] }
+  context = { skill: SKILL, repo }
+  driverArgs = { positional: values['no-ticket'] ?? values.ticket, noTicket: values['no-ticket'] !== undefined, forcePull: values['force-pull'], parentRun: values['parent-run'] }
   const outputFor = (folder: string) => values.output ?? join(folder, 'spec.reviewed')
   if (values.verify === true) {
-    const verified = await verifyRun(context, { positional: values.ticket }, outputFor)
+    const verified = await verifyRun(context, { positional: values.ticket, attach: attachArg(values.attach) }, outputFor)
     if (verified.verified) await recordSpecReviewedEditedAt(verified.folder, outputFor(verified.folder))
     console.log(JSON.stringify({ pending: false, stage: 'board-verify', ...verified, agent }, null, 2))
     process.exitCode = verified.exitCode
@@ -74,12 +78,13 @@ try {
       if (!result.pending) await recordAgentVersion(result.dir, agent)
       if (!result.pending && before.kind === 'ticket') {
         const status = result.status as RunStatus
-        const board = await afterRun(context, before, { status, exportDir: result.dir, verifyCommand: `spec-reviewer.sh local ${before.ticket.id} --verify` })
+        const board = await afterRun(context, before, { status, exportDir: result.dir, verifyCommand: `spec-reviewer.sh local ${before.ticket.id} --verify`, sessionUsage: sessionUsageFile(result.dir) })
         console.log(JSON.stringify({ ...result, agent, ...board }, null, 2))
         process.exitCode = board.exitCode
       } else {
         if (!result.pending) await writeBoardTrace(result.dir, before.trace)
-        console.log(JSON.stringify({ ...result, agent, ticket: before.kind === 'none' ? 'none' : `${before.ticket.id} ${before.ticket.title}`, ...(before.kind === 'none' ? {} : { folder: before.folder }) }, null, 2))
+        const report = before.kind === 'ticket' && result.pending ? await sessionUsageStep(SKILL, before.folder, sessionUsageFile(outputFor(before.folder))) : {}
+        console.log(JSON.stringify({ ...result, agent, ticket: before.kind === 'none' ? 'none' : `${before.ticket.id} ${before.ticket.title}`, ...(before.kind === 'none' ? {} : { folder: before.folder }), ...report }, null, 2))
         if (!result.pending) process.exitCode = exitCodeFor(result.status as RunStatus)
       }
     }

@@ -4,6 +4,9 @@
   "description": "pr-reviewer on eve: six specialist seats review a PR and argue, an independent verifier rules on every finding, and the loop runs until the fix list settles.",
   "type": "module",
   "license": "MIT",
+  "exports": {
+    "./models": "./agent/lib/models.ts"
+  },
   "scripts": {
     "dev": "eve dev",
     "build": "echo '@aspiralabs/pr-reviewer is not published; run `pnpm dev` to start the agent'",

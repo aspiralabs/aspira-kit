@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
 import { USAGE_EXIT, exitCodeFor, reportHead, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
-import { afterRun, beforeRun, handleRunError, UsageError, verifyRun, type DriverContext, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
+import { afterRun, attachArg, beforeRun, handleRunError, sessionUsageStep, UsageError, verifyRun, type DriverContext, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { runLocal } from '../agent/lib/local.ts'
 
@@ -15,7 +15,11 @@ import { runLocal } from '../agent/lib/local.ts'
 // spec is copied to the working folder's spec.md, the file pushed to the ticket as Spec. --verify is
 // the last step: ticket.md must show what the end stage expected. --finish exports what exists as
 // incomplete. Every step names the agent package that ran (`agent`), and an export records it in its trace.
-const usage = 'Usage: pnpm run write:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <absolute-idea>) [--guidelines FILE] [--output DIR] [--force-pull] [--verify] [--finish]'
+const usage = 'Usage: pnpm run write:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <absolute-idea>) [--guidelines FILE] [--output DIR] [--force-pull] [--verify] [--finish] [--parent-run RUN:NONCE] [--attach JSON]'
+const SKILL = 'spec-writer' as const
+
+/** The session usage report of a --local hand run: <export>/trace/session-usage.json (KIT-19, F9). */
+const sessionUsageFile = (exportDir: string) => join(exportDir, 'trace', 'session-usage.json')
 
 /** parseArgs, with an unknown or malformed option reported as a usage error naming it, not a crash. */
 function parseUsage<T>(parse: () => T): T {
@@ -27,20 +31,20 @@ function parseUsage<T>(parse: () => T): T {
 }
 
 const agent = await agentVersion(new URL('..', import.meta.url))
-let context: DriverContext = { skill: 'spec-writer', repo: '' }
+let context: DriverContext = { skill: SKILL, repo: '' }
 let driverArgs: DriverTicketArgs = {}
 try {
   const { values, positionals } = parseUsage(() => parseArgs({
     allowPositionals: true,
-    options: { repo: { type: 'string' }, ticket: { type: 'string' }, 'no-ticket': { type: 'string' }, guidelines: { type: 'string' }, output: { type: 'string' }, 'force-pull': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' } },
+    options: { repo: { type: 'string' }, ticket: { type: 'string' }, 'no-ticket': { type: 'string' }, guidelines: { type: 'string' }, output: { type: 'string' }, 'force-pull': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' }, 'parent-run': { type: 'string' }, attach: { type: 'string' } },
   }))
   if (values.repo === undefined || positionals.length > 0 || (values.ticket !== undefined && values['no-ticket'] !== undefined)) throw new UsageError(usage)
   const repo = values.repo
-  context = { skill: 'spec-writer', repo }
-  driverArgs = { positional: values['no-ticket'] ?? values.ticket, noTicket: values['no-ticket'] !== undefined, forcePull: values['force-pull'] }
+  context = { skill: SKILL, repo }
+  driverArgs = { positional: values['no-ticket'] ?? values.ticket, noTicket: values['no-ticket'] !== undefined, forcePull: values['force-pull'], parentRun: values['parent-run'] }
   const outputFor = (folder: string) => values.output ?? join(folder, 'spec.written')
   if (values.verify === true) {
-    const verified = await verifyRun(context, { positional: values.ticket }, outputFor)
+    const verified = await verifyRun(context, { positional: values.ticket, attach: attachArg(values.attach) }, outputFor)
     console.log(JSON.stringify({ pending: false, stage: 'board-verify', ...verified, agent }, null, 2))
     process.exitCode = verified.exitCode
   } else {
@@ -68,7 +72,7 @@ try {
           // rule, F53), so this script no longer gates the push on result.spec itself.
           const spec = result.spec === null ? null : join(before.folder, 'spec.md')
           if (result.spec !== null && spec !== null) await copyFile(result.spec, spec)
-          const board = await afterRun(context, before, { status, exportDir: result.dir, verifyCommand: `spec-writer.sh local ${before.ticket.id} --verify` })
+          const board = await afterRun(context, before, { status, exportDir: result.dir, verifyCommand: `spec-writer.sh local ${before.ticket.id} --verify`, sessionUsage: sessionUsageFile(result.dir) })
           console.log(JSON.stringify({ report: head, ...result, agent, ...board, ...(spec === null ? {} : { ticketSpec: spec }) }, null, 2))
           process.exitCode = board.exitCode
         } else {
@@ -77,7 +81,8 @@ try {
           process.exitCode = exitCodeFor(status)
         }
       } else {
-        console.log(JSON.stringify({ ...result, agent, ticket: before.kind === 'none' ? 'none' : `${before.ticket.id} ${before.ticket.title}`, ...(before.kind === 'none' ? {} : { folder: before.folder }) }, null, 2))
+        const report = before.kind === 'ticket' ? await sessionUsageStep(SKILL, before.folder, sessionUsageFile(outputFor(before.folder))) : {}
+        console.log(JSON.stringify({ ...result, agent, ticket: before.kind === 'none' ? 'none' : `${before.ticket.id} ${before.ticket.title}`, ...(before.kind === 'none' ? {} : { folder: before.folder }), ...report }, null, 2))
       }
     }
   }

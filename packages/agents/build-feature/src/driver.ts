@@ -1,7 +1,7 @@
 // The build-feature stage machine. Each call reads the run state, takes the answer to the one stage
 // the session had to perform (only when it carries that stage's nonce), records it, and prints
 // exactly one next stage as JSON: resolve, approval, overrides, worktree, step, ask, move, set-pr,
-// gate, step10, fix, release-row, summary or end. The session performs the stage and calls again.
+// gate, step10, fix, release-row, summary, telemetry or end. The session performs the stage and calls again.
 //
 // Modes (F2, Q10 revised): with --local every step stage runs its step skill with --local in this
 // session; without it every step stage runs the step skill's default mode, which starts that step's
@@ -22,6 +22,15 @@
 // open release page (F46); and every stop goes through one path that writes build-summary.md and
 // ends on the resume command (F32).
 //
+// Run telemetry (KIT-19): every printed step command carries `--parent-run <runId>:<nonce>` (never
+// stored); acceptStep stores the step's usage (the session's report, and in cloud mode the reduced
+// groups of the step agent's own usage file); a run writes one telemetry/<run-id>.json when it ends
+// (stopped or finished at the summary push, replaced by the run that replaced it, never at a move
+// into the worktree), built from the run state alone (telemetry.ts), and a telemetry stage attaches
+// it to the ticket when BOARD-003 lists the run telemetry file. A telemetry failure only adds a
+// notice to the end message: it never changes how a run ends (OBS-002). A run refuses before its
+// first step when a step skill's .kit-version is not this driver's version.
+//
 // Steps 6-10 beyond routing live in later-phase modules (gate.ts, step8.ts, step10.ts,
 // review-loop.ts) and the Build Summary and PR body renderers in summary.ts and pr-body.ts. They
 // all ship in this package, so the driver imports them statically: each phase module exports a
@@ -34,7 +43,10 @@ import { basename, join, relative } from 'node:path'
 import { z } from 'zod'
 import { nextAction, writeProgressNote, type NextAction } from '@aspiralabs/agent-common/lib/progress-note'
 import { readRunStatus } from '@aspiralabs/agent-common/lib/run-status'
+import { encodeTrace, listsTelemetry, readAttached, recordAttached, releaseRunId, reserveRunId, telemetryFile, telemetryNotice, writeTelemetry, type WriteResult } from '@aspiralabs/agent-common/lib/telemetry'
+import { readUsageSource, type PhaseUsage } from '@aspiralabs/agent-common/lib/telemetry-sources'
 import { slug } from '@aspiralabs/agent-common/lib/ticket'
+import { MODELS as REVIEWER_MODELS } from '@aspiralabs/pr-reviewer/models'
 import { acceptApproval, approvalFor, approvalStage, recordApproval } from '#src/approval.ts'
 import { buildRunStatus, buildStopSchema, type BuildStop } from '#src/build-status.ts'
 import { addTaken, collectTakenDecisions, isDecisionStep, openDecisions, takenKeyOf } from '#src/decisions.ts'
@@ -43,17 +55,18 @@ import { modelFor, parseModels, subagentModels, type Role } from '#src/models.ts
 import { BACKWARD_MOVES_SKILL_MAY_MAKE, decideOverrides, findOverrides, overridesStage, recordOverrides } from '#src/overrides.ts'
 import { renderPrBody } from '#src/pr-body.ts'
 import { acceptResolution, cardDifferences, resolveStage, resolveWithToken, type Resolution } from '#src/resolve.ts'
-import { assertNever, launcherFor, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, type EndRoute, type Mode, type PhaseName, type StepName } from '#src/route.ts'
+import { assertNever, launcherFor, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, STEPS, type EndRoute, type Mode, type PhaseName, type StepName } from '#src/route.ts'
 import { reviewPhase } from '#src/review-loop.ts'
-import { readRunState, stateDirOf, writeRunState, type Card, type Failure, type Pending, type RunState } from '#src/run-state.ts'
-import { analyzerReady, readImplementorStatus, readSpecCoverage, readStepResult, stepReportSchema } from '#src/step-results.ts'
+import { readRunState, stateDirOf, writeRunState, type Card, type Failure, type Pending, type PhaseRecord, type RunState, type Usage } from '#src/run-state.ts'
+import { analyzerReady, readImplementorStatus, readSpecCoverage, readStepResult, readStepUsage, stepReportSchema, stepResultTable } from '#src/step-results.ts'
 import { releaseRowPhase, step10Phase } from '#src/step10.ts'
 import { step8Phase } from '#src/step8.ts'
 import { renderBuildSummary } from '#src/summary.ts'
 import { shown, system } from '#src/system.ts'
+import { runSpans } from '#src/telemetry.ts'
 import { carryTicketFolder, existingWorktree, insideWorktree, locate, prepareWorktree, ticketTypeOf, worktreePath, type Place } from '#src/worktree.ts'
 
-export const STAGE_KINDS = ['resolve', 'approval', 'overrides', 'worktree', 'step', 'ask', 'move', 'set-pr', 'gate', 'step10', 'fix', 'release-row', 'summary', 'end'] as const
+export const STAGE_KINDS = ['resolve', 'approval', 'overrides', 'worktree', 'step', 'ask', 'move', 'set-pr', 'gate', 'step10', 'fix', 'release-row', 'summary', 'telemetry', 'end'] as const
 export type StageKind = (typeof STAGE_KINDS)[number]
 /** One stage as printed: `nonce` and `output` when it needs an answer. Only the worktree stage that sends a new invocation into the worktree carries no runId. */
 export type Stage = { stage: StageKind; runId?: string; nonce?: string; output?: string; [key: string]: unknown }
@@ -98,7 +111,7 @@ export type PhaseResult =
   /** Nothing (more) for this phase now: the run goes on to the next item. `note`: a line the end of the run adds (a skipped item). */
   | { kind: 'done'; state: RunState; note?: string }
   /** Print a stage this phase owns (gate, set-pr, step10, fix, release-row, ask); its answer comes back to accept(). */
-  | { kind: 'stage'; state: RunState; stage: Exclude<StageKind, 'resolve' | 'approval' | 'overrides' | 'step' | 'move' | 'summary' | 'end'>; body: Record<string, unknown>; data?: Record<string, unknown> }
+  | { kind: 'stage'; state: RunState; stage: Exclude<StageKind, 'resolve' | 'approval' | 'overrides' | 'step' | 'move' | 'summary' | 'telemetry' | 'end'>; body: Record<string, unknown>; data?: Record<string, unknown> }
   /** Run a step (the pr-reviewer); its report is recorded like every step's. */
   | { kind: 'step'; state: RunState; step: StepName; command: string }
   /** Make a move: re-resolved first against `expect`; only Step 8's move (or an allowed backward move) is accepted. */
@@ -167,7 +180,7 @@ const allowedMove = (from: string, to: string) =>
   [...READY_MOVES, STEP8_MOVE, ...BACKWARD_MOVES_SKILL_MAY_MAKE].some((move) => move.from === from && move.to === to)
 const isReadyMove = (from: string, to: string) => READY_MOVES.some((move) => move.from === from && move.to === to)
 
-/** A run id from the start time, unique among the ticket's runs. */
+/** A run id from the start time, unique among the ticket's runs (the fallback when the telemetry reservation cannot be made). */
 function newRunId(state: RunState, now: string): string {
   const base = `run-${now.replace(/\.\d+Z$/, 'Z').replace(/[-:]/g, '')}`
   const taken = new Set(state.runs.map((run) => run.runId))
@@ -177,9 +190,34 @@ function newRunId(state: RunState, now: string): string {
   return `${base}-${n}`
 }
 
-/** A stage that needs an answer: a fresh nonce, an output file, and the pending record. */
-function pend(ctx: Ctx, state: RunState, kind: StageKind, body: (output: string) => Record<string, unknown>, options: { phase?: string; data?: Record<string, unknown>; startedAt?: string } = {}): Out {
-  const nonce = randomUUID()
+const MAX_RESERVE = 1000
+
+/**
+ * The new run's id, reserved with agent-common's reserveRunId (an exclusive .pending marker, so two
+ * runs started in the same second differ) and also unused by every run in the state. An id that a
+ * recorded run already has is released again. A reservation that cannot be made falls back to
+ * newRunId: telemetry never stops a run (OBS-002).
+ */
+async function reserveNewRunId(folder: string, state: RunState, now: string): Promise<string> {
+  const taken = new Set(state.runs.map((run) => run.runId))
+  const skipped: string[] = []
+  try {
+    for (let tries = 0; tries < MAX_RESERVE; tries += 1) {
+      const id = await reserveRunId(folder, now)
+      if (!taken.has(id)) return id
+      skipped.push(id)
+    }
+    return newRunId(state, now)
+  } catch {
+    return newRunId(state, now)
+  } finally {
+    for (const id of skipped) await releaseRunId(folder, id)
+  }
+}
+
+/** A stage that needs an answer: a fresh nonce (or the one the caller minted), an output file, and the pending record. */
+function pend(ctx: Ctx, state: RunState, kind: StageKind, body: (output: string) => Record<string, unknown>, options: { phase?: string; data?: Record<string, unknown>; startedAt?: string; nonce?: string } = {}): Out {
+  const nonce = options.nonce ?? randomUUID()
   const output = join(ctx.dir, 'stages', `${kind}-${nonce}.json`)
   const stage: Stage = { stage: kind, runId: ctx.runId, nonce, output, ...body(output) }
   checkNotion(stage)
@@ -230,7 +268,7 @@ async function writeSummary(ctx: Ctx, state: RunState): Promise<void> {
   const plan = await readFile(join(ctx.folder, 'plan.review/trace/plan.json'), 'utf8')
     .then((text) => JSON.parse(text) as unknown)
     .catch(() => undefined)
-  const text = await renderBuildSummary({ ticket, state, repo: ctx.input.repo, ...(plan === undefined ? {} : { plan }) })
+  const text = await renderBuildSummary({ ticket, state, repo: ctx.input.repo, now: ctx.input.now, ...(plan === undefined ? {} : { plan }) })
   await mkdir(ctx.folder, { recursive: true })
   await writeFile(summaryPath(ctx), text)
   await mkdir(ctx.dir, { recursive: true })
@@ -239,6 +277,156 @@ async function writeSummary(ctx: Ctx, state: RunState): Promise<void> {
 
 /** BOARD-003 on the fetched Feature Board page lists Build Summary among the fixed titles. */
 const listsBuildSummary = (rules: string) => rules.split('\n').some((line) => line.includes('BOARD-003') && line.includes('Build Summary'))
+
+// ---------------------------------------------------------------------------------------------
+// Run telemetry (KIT-19): the one file per run, and the stage that attaches it.
+// ---------------------------------------------------------------------------------------------
+
+const packageSchema = z.object({ version: z.string().min(1) })
+
+/** This package's version: the kit version every step skill's .kit-version must name, and the file's service.version. */
+async function driverVersion(): Promise<string> {
+  return packageSchema.parse(JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))).version
+}
+
+const VERSION_TEXT = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]{1,40})?$/
+
+/**
+ * Refuse (exit 1, no stage, nothing recorded) when a step skill's `.claude/skills/aspira-<step>/.kit-version`
+ * is missing or names another kit version than this driver's: an older launcher would reject the
+ * `--parent-run` option every step command now carries (KIT-19 F6, F22).
+ */
+export async function checkKitVersion(repo: string): Promise<void> {
+  const version = await driverVersion()
+  for (const step of STEPS) {
+    const file = join('.claude', 'skills', `aspira-${step}`, '.kit-version')
+    const text = await readFile(join(repo, file), 'utf8').catch(() => null)
+    if (text === null) throw new Refusal(`step skills are from kit (none: ${file} is missing), the driver is ${version}: run kit init`)
+    const found = text.trim()
+    if (found !== version) throw new Refusal(`step skills are from kit ${VERSION_TEXT.test(found) ? found : `(unreadable: ${file})`}, the driver is ${version}: run kit init`)
+  }
+}
+
+type Written = { state: RunState; result: WriteResult | null }
+
+/**
+ * Write a run's telemetry file once, from the run state alone, with the root ending at `end` under
+ * the run's ended word. A run whose file was already written (or tried) is left alone, so a later
+ * --finish never rewrites it. Never throws: a failure is the result's reason (OBS-002).
+ */
+async function writeRunTelemetry(ctx: Ctx, state: RunState, runId: string, end: string, word: 'stopped' | 'finished' | 'replaced'): Promise<Written> {
+  const run = state.runs.find((candidate) => candidate.runId === runId)
+  if (run === undefined || run.telemetry !== undefined) return { state, result: null }
+  let result: WriteResult
+  try {
+    const tree = runSpans(state, runId, end, word)
+    result = await writeTelemetry(ctx.folder, runId, encodeTrace(tree.root, { kitVersion: await driverVersion(), ticketId: ctx.input.id, runId, mode: run.mode }))
+  } catch {
+    result = { ok: false, reason: 'the telemetry file could not be built' }
+  }
+  return { state: withRun(state, runId, { telemetry: result.ok ? { written: true, file: result.path } : { written: false } }), result }
+}
+
+type TelemetryFile = { runId: string; path: string }
+
+/** The written telemetry files this run still has to attach: its own and the run it replaced, each unless its attach is recorded. */
+async function unattachedFiles(ctx: Ctx, state: RunState): Promise<TelemetryFile[]> {
+  const run = state.runs.find((candidate) => candidate.runId === ctx.runId)
+  const ids = [ctx.runId, ...(run?.replaced === undefined ? [] : [run.replaced])]
+  const files: TelemetryFile[] = []
+  for (const runId of ids) {
+    const record = state.runs.find((candidate) => candidate.runId === runId)
+    if (record?.telemetry?.written !== true || record.telemetry.attached !== undefined) continue
+    if ((await readAttached(ctx.folder, runId)) !== null) continue
+    files.push({ runId, path: record.telemetry.file ?? telemetryFile(ctx.folder, runId) })
+  }
+  return files
+}
+
+/** Why the files were not attached, one notice per file; a run whose own file could not be written says so too. */
+function telemetryNotices(files: readonly TelemetryFile[], reason: string, written: Written | null): string[] {
+  const failed = written?.result?.ok === false ? [`Telemetry not written: ${written.result.reason}.`] : []
+  return [...failed, ...files.map((file) => telemetryNotice(reason, file.path))]
+}
+
+/** Where the rules stand for the attach: BOARD-003 lists the run telemetry file, does not, or the page could not be read. */
+type RulesVerdict = 'listed' | 'unlisted' | 'unreadable'
+const rulesVerdict = (rules: string): RulesVerdict => (rules.trim() === '' ? 'unreadable' : listsTelemetry(rules) ? 'listed' : 'unlisted')
+const NOT_ATTACHED: Readonly<Record<Exclude<RulesVerdict, 'listed'>, string>> = {
+  unlisted: 'BOARD-003 does not list the run telemetry file',
+  unreadable: 'board rules unreadable',
+}
+
+/**
+ * After the Build Summary push (or a stop before the card was resolved): write the run's file, then
+ * print the telemetry stage when the rules list the run telemetry file and something is left to
+ * attach, else end with a notice saying why nothing was attached.
+ */
+async function endWithTelemetry(ctx: Ctx, state: RunState, end: { message: string; stopped: boolean; pushError: string | null; rules: RulesVerdict; reason: BuildStop }): Promise<Out> {
+  const written = await writeRunTelemetry(ctx, state, ctx.runId, ctx.input.now, end.stopped ? 'stopped' : 'finished')
+  const files = await unattachedFiles(ctx, written.state)
+  if (files.length === 0 || end.rules !== 'listed') return finalize(ctx, written.state, end.message, end.stopped, end.pushError, end.reason, telemetryNotices(files, end.rules === 'listed' ? '' : NOT_ATTACHED[end.rules], written))
+  const names = files.map((file) => basename(file.path))
+  return pend(
+    ctx,
+    written.state,
+    'telemetry',
+    (output) => ({
+      files: files.map((file) => file.path),
+      notion: [{ op: 'write', target: 'ticket' }],
+      instructions: [
+        `Attach the run telemetry file${files.length === 1 ? '' : 's'} ${names.join(', ')} to ${ctx.input.id}'s ticket page (BOARD-003).`,
+        'First list the file blocks of the ticket page body (every page of results) and skip a file whose name already appears as a file block.',
+        'Otherwise upload the file and append it as one file block at the end of the page body. Change or delete no other block, and attach nothing else.',
+        `Write {"nonce", "attached": true, "blockId": "<the block id of ${names[0] ?? ''}>"${files.length === 1 ? '' : ', "blocks": {"<run id>": "<its block id>", ...}'}}, or {"nonce", "error": "<what failed>"}, to ${output}.`,
+      ].join(' '),
+    }),
+    { data: { message: end.message, stopped: end.stopped, pushError: end.pushError, reason: end.reason, files, failed: telemetryNotices([], '', written) } },
+  )
+}
+
+const telemetryData = z.object({
+  message: z.string(),
+  stopped: z.boolean(),
+  pushError: z.string().nullable(),
+  /** The stop's reason (F20), carried through the stage so the end still reports its run status. */
+  reason: buildStopSchema.optional(),
+  files: z.array(z.object({ runId: z.string(), path: z.string() })),
+  failed: z.array(z.string()).default([]),
+})
+const telemetryAnswer = z.union([
+  z.object({ nonce: z.string(), attached: z.literal(true), blockId: z.string().min(1), blocks: z.record(z.string(), z.string().min(1)).optional() }),
+  z.object({ nonce: z.string(), error: z.string().min(1) }),
+])
+
+/** The telemetry stage's answer: record each attached block (exclusive, keyed by run id), or end with the notice. The run's ended word never changes. */
+async function acceptTelemetry(ctx: Ctx, state: RunState, pending: Pending, answer: unknown): Promise<Out> {
+  const data = telemetryData.safeParse(pending.data ?? {})
+  if (!data.success) return finalize(ctx, state, 'The run ended, but its telemetry stage lost what it was ending with.', true, null, { kind: 'unexpected-error' }, ['Telemetry not attached: the telemetry stage lost its record.'])
+  const { message, stopped, pushError, files, failed } = data.data
+  const reason: BuildStop = data.data.reason ?? { kind: 'unexpected-error' }
+  const parsed = telemetryAnswer.safeParse(answer)
+  if (!parsed.success) return finalize(ctx, state, message, stopped, pushError, reason, [...failed, ...telemetryNotices(files, 'the attach answer was not readable', null)])
+  if ('error' in parsed.data) return finalize(ctx, state, message, stopped, pushError, reason, [...failed, ...telemetryNotices(files, parsed.data.error, null)])
+  const { blockId, blocks } = parsed.data
+  let next = state
+  const notices = [...failed]
+  for (const file of files) {
+    const block = blocks?.[file.runId] ?? (file.runId === ctx.runId ? blockId : undefined)
+    if (block === undefined) {
+      notices.push(telemetryNotice('the session named no block for it', file.path))
+      continue
+    }
+    try {
+      await recordAttached(ctx.folder, { runId: file.runId, blockId: block })
+      const run = next.runs.find((candidate) => candidate.runId === file.runId)
+      next = withRun(next, file.runId, { telemetry: { ...(run?.telemetry ?? { written: true }), attached: block } })
+    } catch {
+      notices.push(`Telemetry attached as block ${block}, but the attach could not be recorded for ${file.runId}.`)
+    }
+  }
+  return finalize(ctx, next, message, stopped, pushError, reason, notices)
+}
 
 // ---------------------------------------------------------------------------------------------
 // The one stop path (F32), and the end.
@@ -250,7 +438,8 @@ async function stop(ctx: Ctx, state: RunState, message: string, options: { stopp
   const runs = state.runs.map((run) => (run.runId === ctx.runId ? { ...run, end: { message, stopped: options.stopped, reason: options.reason } } : run))
   const stopped: RunState = { ...state, runs, failure, pending: null, queue: [], afterAsks: null }
   await writeSummary(ctx, stopped)
-  if (stopped.card === null) return finalize(ctx, stopped, message, options.stopped, null, options.reason)
+  // No card, no summary stage and no rules: the file is still written, and the end says it was not attached.
+  if (stopped.card === null) return endWithTelemetry(ctx, stopped, { message, stopped: options.stopped, pushError: null, rules: 'unreadable', reason: options.reason })
   return pend(
     ctx,
     stopped,
@@ -265,8 +454,9 @@ async function stop(ctx: Ctx, state: RunState, message: string, options: { stopp
   )
 }
 
-async function finalize(ctx: Ctx, state: RunState, message: string, stopped: boolean, pushError: string | null, reason: BuildStop): Promise<Out> {
-  const lines = [...(pushError === null ? [] : [`Build Summary push failed: ${pushError}. build-summary.md is kept at ${summaryPath(ctx)}.`]), message, `Build summary: ${summaryPath(ctx)}`, ...(stopped ? [ctx.resume] : [])]
+/** The end: `reason` is why the run ended (F20); `notices` are the telemetry lines the end message carries (KIT-19, OBS-002: they never change how the run ends). */
+async function finalize(ctx: Ctx, state: RunState, message: string, stopped: boolean, pushError: string | null, reason: BuildStop, notices: readonly string[] = []): Promise<Out> {
+  const lines = [...(pushError === null ? [] : [`Build Summary push failed: ${pushError}. build-summary.md is kept at ${summaryPath(ctx)}.`]), message, `Build summary: ${summaryPath(ctx)}`, ...notices, ...(stopped ? [ctx.resume] : [])]
   const full = lines.join('\n')
   const runs = state.runs.map((run) => (run.runId === ctx.runId ? { ...run, endedAt: ctx.input.now, ended: stopped ? 'stopped' : 'finished', end: { message: full, stopped, reason } } : run))
   const ended: RunState = { ...state, runs, inProgress: state.inProgress?.runId === ctx.runId ? null : state.inProgress, pending: null }
@@ -328,6 +518,7 @@ async function writeStopNote(ctx: Ctx, state: RunState, message: string, reason:
 }
 
 const summaryAnswer = z.object({ nonce: z.string(), pushed: z.boolean().optional(), error: z.string().optional() })
+const rulesVerdictSchema = z.enum(['listed', 'unlisted', 'unreadable']).catch('unreadable')
 
 async function acceptSummary(ctx: Ctx, state: RunState, pending: Pending, answer: unknown): Promise<Out> {
   const data = pending.data ?? {}
@@ -351,12 +542,12 @@ async function acceptSummary(ctx: Ctx, state: RunState, pending: Pending, answer
             ? `BOARD-003 does not list Build Summary yet: keep ${summaryPath(ctx)} local and push nothing. Write {"nonce", "pushed": false} to the output file.`
             : `Create the ticket's child page "Build Summary" from ${summaryPath(ctx)}, or replace it when it exists. Write {"nonce", "pushed": true}, or {"nonce", "error"} when the push fails, to the output file.`,
       }),
-      { data: { part: 'push', message, stopped, reason } },
+      { data: { part: 'push', message, stopped, reason, rules: rulesVerdict(rules) } },
     )
   }
   const parsed = summaryAnswer.safeParse(answer)
   const pushError = parsed.success ? (parsed.data.error ?? null) : 'the push answer was not readable'
-  return finalize(ctx, state, message, stopped, pushError, reason)
+  return endWithTelemetry(ctx, state, { message, stopped, pushError, reason, rules: rulesVerdictSchema.parse(data.rules) })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -435,6 +626,8 @@ async function moveIntoWorktree(ctx: Ctx, state: RunState, place: Place, type: N
   if (!prepared.ok) return stop(ctx, state, prepared.message, { stopped: true, reason: { kind: 'worktree-command' }, failure: { action: 'worktree', command: prepared.command, exitCode: prepared.exitCode, output: prepared.output, message: prepared.message } })
   const { worktree, branch } = prepared
   const folder = await carryTicketFolder(ctx.folder, worktree)
+  // The run id's .pending marker went with the ticket folder: the run writes its one telemetry file there at its end, nothing here (KIT-19).
+  await releaseRunId(ctx.folder, ctx.runId)
   const inWorktree: Ctx = { ...ctx, input: { ...ctx.input, repo: worktree }, folder, dir: stateDirOf(folder) }
   // The run state left behind says where the run went; the lock moves with it.
   const left: RunState = { ...withRun(state, ctx.runId, { ended: 'moved', endedAt: ctx.input.now, worktree }), inProgress: state.inProgress?.runId === ctx.runId ? null : state.inProgress, pending: null }
@@ -613,16 +806,49 @@ async function cloudImplementorBlocked(ctx: Ctx): Promise<string | null> {
   return `In cloud mode the implementor runs as a separate process that clones the repository from GitHub, and it cannot read .work/ (gitignored here, \`${shown('git', ['check-ignore', '--no-index', '.work/'])}\`), where ${ctx.input.id}'s plan is. It would refuse the ticket, so the run stops before it. Build this step with --local: ${RESUME(ctx.input.id, 'local')}`
 }
 
+/** The option every printed step command ends with: the build-feature run and the step stage's nonce (KIT-19 F6). */
+const parentRun = (runId: string, nonce: string): string => ` --parent-run ${runId}:${nonce}`
+
+/**
+ * The launcher lines as printed (F44 + KIT-19 F6): the line that starts the step (`local`, or cloud's
+ * `start`) carries --parent-run; the `wait <RUN>` line, which starts nothing, does not.
+ */
+const launcherWithParentRun = (launcher: readonly string[], runId: string, nonce: string): string[] => launcher.map((line) => (/\.sh wait\b/.test(line) ? line : `${line}${parentRun(runId, nonce)}`))
+
+/** A pending stage as it is printed again: a step stage's command and launcher carry --parent-run, which the stored stage never does. */
+function printed(pending: Pending): Stage {
+  const stage = pending.stage as Stage
+  if (pending.kind !== 'step' || typeof stage.command !== 'string' || typeof stage.runId !== 'string') return stage
+  const launcher = Array.isArray(stage.launcher) ? launcherWithParentRun(stage.launcher as string[], stage.runId, pending.nonce) : undefined
+  return { ...stage, command: `${stage.command}${parentRun(stage.runId, pending.nonce)}`, ...(launcher === undefined ? {} : { launcher }) }
+}
+
+/** The usage report a step (or fix) subagent writes: what the Agent tool reported for it, and one entry per subagent it launched. */
+export const USAGE_REPORT_SHAPE = {
+  tokens: '<total tokens, or null>',
+  wallMs: '<wall time in ms, or null>',
+  model: '<model id, if known>',
+  toolUses: '<tool uses, if known>',
+  startedAt: '<ISO time it started>',
+  endedAt: '<ISO time it ended>',
+  subagents: [{ label: '<what it did>', startedAt: '<ISO wall clock before the Agent call>', endedAt: '<ISO wall clock after it>', totalTokens: '<number>', toolUses: '<number>', wallMs: '<number>', model: '<model id, if known>' }],
+}
+
 async function printStep(ctx: Ctx, state: RunState, step: StepName, command: string): Promise<Out> {
   if (ctx.mode === 'cloud' && step === 'implementor') {
     const blocked = await cloudImplementorBlocked(ctx)
     if (blocked !== null) return stop(ctx, state, blocked, { stopped: true, reason: { kind: 'cloud-implementor' }, failure: { action: step, command, message: blocked } })
   }
+  await checkKitVersion(ctx.input.repo)
   const model = modelFor(STEP_ROLE[step], ctx.aspira)
   const promptDir = join(ctx.dir, 'prompts')
   await mkdir(promptDir, { recursive: true })
   const launcher = launcherFor(command, ctx.mode)
   const skillMd = `.claude/skills/aspira-${step}/SKILL.md`
+  // The nonce is minted first so the printed command and launcher can carry it; what is stored keeps both without it.
+  const nonce = randomUUID()
+  const shownCommand = `${command}${parentRun(ctx.runId, nonce)}`
+  const shownLauncher = launcherWithParentRun(launcher, ctx.runId, nonce)
   const out = pend(
     ctx,
     state,
@@ -638,9 +864,9 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
       notion: [{ op: 'read', target: 'ticket' }, ...STEP_NOTION[step]],
       report: { output, fields: ['nonce', 'step', 'status', 'resultLine', 'usage'] },
     }),
-    { data: { step, command, launcher } },
+    { data: { step, command, launcher }, nonce },
   )
-  const { output, nonce, prompt } = out.stage as Stage & { prompt: string }
+  const { output, prompt } = out.stage as Stage & { prompt: string }
   const lines = [
     `# ${ctx.input.id}: the ${step} step of /aspira-build-feature`,
     '',
@@ -649,7 +875,7 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
     `Read ${skillMd} first. Then run this, exactly as written, and follow the skill to its end:`,
     '',
     '```',
-    ...launcher,
+    ...shownLauncher,
     '```',
     '',
     ...(ctx.mode === 'cloud'
@@ -665,14 +891,60 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
     `When the skill has finished, write ONE JSON object to ${output}:`,
     '',
     '```json',
-    JSON.stringify({ nonce, step, status: '<status word>', resultLine: '<the single result line the skill printed>', usage: { tokens: '<number or null>', wallMs: '<number or null>' } }, null, 2),
+    JSON.stringify({ nonce, step, status: '<status word>', resultLine: '<the single result line the skill printed>', usage: USAGE_REPORT_SHAPE }, null, 2),
     '```',
     '',
-    `status: ${STATUS_WORDS[step]}. usage: the tokens and wall time the Agent tool reported for this subagent, null when it reported none.`,
+    `status: ${STATUS_WORDS[step]}. usage: the tokens, wall time, tool uses and model the Agent tool reported for this subagent (null for each it did not report), and in subagents one entry per subagent this step launched, with the wall clock before and after each Agent call and what the Agent tool reported for it. Use null for usage when nothing was reported.`,
     '',
   ]
   await writeFile(prompt, lines.join('\n'))
-  return out
+  return { ...out, stage: { ...out.stage, command: shownCommand, launcher: shownLauncher } }
+}
+
+/** A phase as the run stores it: the reduced group's numbers, times as ISO strings, and its closed-set attributes. */
+function phaseRecord(group: PhaseUsage): PhaseRecord {
+  const iso = (value: string | number): string => new Date(typeof value === 'number' ? value : Date.parse(value)).toISOString()
+  const usage = group.usage
+  const attributes = group.attributes ?? {}
+  return {
+    phase: group.name,
+    model: usage?.model ?? null,
+    inputTokens: usage?.inputTokens ?? null,
+    outputTokens: usage?.outputTokens ?? null,
+    totalTokens: usage?.totalTokens ?? null,
+    cacheRead: usage?.cacheRead ?? null,
+    cacheWrite: usage?.cacheWrite ?? null,
+    toolCalls: usage?.toolCalls ?? null,
+    costUsd: usage?.costUsd ?? null,
+    startedAt: iso(group.start),
+    endedAt: iso(group.end),
+    ...(group.status === undefined ? {} : { status: group.status }),
+    ...(attributes['aspira.time.anchored'] === undefined ? {} : { anchored: attributes['aspira.time.anchored'] }),
+    ...(attributes['aspira.time_basis'] === undefined ? {} : { timeBasis: attributes['aspira.time_basis'] }),
+    ...(attributes['aspira.tool_count_basis'] === undefined ? {} : { toolCountBasis: attributes['aspira.tool_count_basis'] }),
+    ...(attributes['aspira.usage_scope'] === undefined ? {} : { usageScope: attributes['aspira.usage_scope'] }),
+    ...(attributes['aspira.partial'] === true ? { partial: true } : {}),
+  }
+}
+
+/**
+ * Cloud mode only: the step agent's own usage file (stepResultTable's usage column), read right after
+ * the status word for the step's interval and reduced to phase groups stored on the step record, or
+ * the gap that kept it out (missing, empty, invalid, stale). --local reads no usage file. Never
+ * throws and never changes the step's result (OBS-002).
+ */
+async function withCloudUsage(ctx: Ctx, step: StepName, usage: Usage, interval: { start: string; end: string }): Promise<Usage> {
+  if (ctx.mode !== 'cloud') return usage
+  const source = stepResultTable[step].usage({ folder: ctx.folder, repo: ctx.input.repo, app: ctx.aspira?.app ?? '.' })
+  if (source === null) return usage
+  const base = usage ?? { tokens: null, wallMs: null }
+  try {
+    const read = await readUsageSource(source.file, { ...interval, kind: source.kind, skill: step, models: REVIEWER_MODELS })
+    if ('gap' in read) return { ...base, gap: base.gap ?? read.gap }
+    return { ...base, phases: read.groups.map(phaseRecord) }
+  } catch {
+    return { ...base, gap: base.gap ?? 'invalid' }
+  }
 }
 
 async function acceptStep(ctx: Ctx, state: RunState, pending: Pending, answer: unknown): Promise<Out> {
@@ -686,6 +958,8 @@ async function acceptStep(ctx: Ctx, state: RunState, pending: Pending, answer: u
   }
   const report = parsed.data
   const result = await readStepResult(step, report, { folder: ctx.folder, repo: ctx.input.repo, app: ctx.aspira?.app ?? '.' })
+  // A malformed usage is recorded as not measured and never stops the run (KIT-19 F9, F22).
+  const usage = await withCloudUsage(ctx, step, readStepUsage(report.usage), { start: pending.startedAt, end: ctx.input.now })
   const record = {
     step,
     runId: ctx.runId,
@@ -694,10 +968,11 @@ async function acceptStep(ctx: Ctx, state: RunState, pending: Pending, answer: u
     status: result.status,
     startedAt: pending.startedAt,
     endedAt: ctx.input.now,
-    usage: report.usage,
+    usage,
     resultLine: report.resultLine,
     nonce: pending.nonce,
     report: pending.output,
+    verdict: result.verdict,
     ...(result.counts === undefined ? {} : { counts: result.counts }),
   }
   let next: RunState = { ...state, steps: [...state.steps, record] }
@@ -798,15 +1073,22 @@ async function settleFolder(ctx: Ctx, title: string): Promise<Ctx> {
   return { ...ctx, folder: target, dir: stateDirOf(target) }
 }
 
-async function startRun(ctx: Ctx, state: RunState): Promise<Out> {
-  const { now, forceRun, id } = ctx.input
-  if (state.inProgress !== null && !forceRun) {
-    throw new Refusal(`a build-feature run of ${id} is already in progress since ${state.inProgress.startedAt} (${state.inProgress.runId}). Let it finish, end it with --finish, or start over with ${ctx.resume} --force-run.`)
+/** F48: a new run is refused while another is in progress, unless --force-run. Checked before the new run's id is reserved. */
+function refuseInProgress(input: DriverInput, state: RunState): void {
+  if (state.inProgress !== null && !input.forceRun) {
+    throw new Refusal(`a build-feature run of ${input.id} is already in progress since ${state.inProgress.startedAt} (${state.inProgress.runId}). Let it finish, end it with --finish, or start over with ${RESUME(input.id, input.mode)} --force-run.`)
   }
+}
+
+async function startRun(ctx: Ctx, state: RunState): Promise<Out> {
+  const { now, id } = ctx.input
+  refuseInProgress(ctx.input, state)
   const replaced = state.inProgress?.runId
   const runs = state.runs.map((run) => (run.runId === replaced ? { ...run, endedAt: now, ended: 'replaced' } : run))
   const run = { runId: ctx.runId, command: invoked(ctx.input), startedAt: now, endedAt: null, ended: null, mode: ctx.mode, ...(replaced === undefined ? {} : { replaced }) }
-  const started: RunState = { ...state, runs: [...runs, run], inProgress: { runId: ctx.runId, startedAt: now }, pending: null, card: null, queue: [], afterAsks: null, failure: null }
+  const opened: RunState = { ...state, runs: [...runs, run], inProgress: { runId: ctx.runId, startedAt: now }, pending: null, card: null, queue: [], afterAsks: null, failure: null }
+  // The replaced run ends here, so its telemetry file is written here, from the state read (KIT-19 F13); this run attaches it.
+  const started = replaced === undefined ? opened : (await writeRunTelemetry(ctx, opened, replaced, now, 'replaced')).state
   const aspira = await readAspira(ctx.input.repo)
   if (!aspira.ok) return stop(ctx, started, aspira.message, { stopped: true, reason: { kind: 'aspira-json' }, failure: { action: 'aspira.json', message: aspira.message } })
   return pend({ ...ctx, aspira: aspira.aspira }, started, 'approval', (output) => approvalStage({ id, command: run.command, output }))
@@ -856,6 +1138,8 @@ async function dispatch(ctx: Ctx, state: RunState, pending: Pending, answer: Rec
       return acceptMove(ctx, state, pending, answer)
     case 'summary':
       return acceptSummary(ctx, state, pending, answer)
+    case 'telemetry':
+      return acceptTelemetry(ctx, state, pending, answer)
     default:
       return stop(ctx, state, `the pending ${pending.kind} stage has no handler in the driver`, { stopped: true, reason: { kind: 'unexpected-error' } })
   }
@@ -882,7 +1166,8 @@ export async function nextStage(input: DriverInput): Promise<Stage> {
   const base = { input, folder: initialFolder, dir: stateDirOf(initialFolder), aspira: null }
 
   if (input.run === undefined && !input.finish) {
-    const ctx: Ctx = { ...base, runId: newRunId(state, input.now), mode: input.mode, resume: RESUME(input.id, input.mode) }
+    refuseInProgress(input, state)
+    const ctx: Ctx = { ...base, runId: await reserveNewRunId(initialFolder, state, input.now), mode: input.mode, resume: RESUME(input.id, input.mode) }
     return save(ctx, await startRun(ctx, state))
   }
   const fallback = RESUME(input.id, input.mode)
@@ -906,7 +1191,7 @@ export async function nextStage(input: DriverInput): Promise<Stage> {
   const pending = state.pending
   if (pending === null) return save(ctx, await route(ctx, state))
   const answer = await readAnswer(pending)
-  if (answer === null || answer.nonce !== pending.nonce) return pending.stage as Stage
+  if (answer === null || answer.nonce !== pending.nonce) return printed(pending)
   await rename(pending.output, `${pending.output}.accepted`)
   const taken: RunState = { ...state, pending: null }
   if (pending.kind === 'resolve' && answer.found === true && typeof answer.title === 'string') {

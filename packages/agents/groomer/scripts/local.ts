@@ -1,9 +1,10 @@
 import { rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
 import { readGroomRecord } from '@aspiralabs/agent-common/lib/groom-record'
 import { exitCodeFor } from '@aspiralabs/agent-common/lib/run-status'
-import { afterRun, beforeRun, handleRunError, KnowledgePrerequisiteError, UsageError, verifyRun, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
+import { afterRun, attachArg, beforeRun, handleRunError, KnowledgePrerequisiteError, sessionUsageStep, UsageError, verifyRun, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
 import { FlowRefused } from '@aspiralabs/agent-common/lib/ticket-flow'
 import { KnowledgeRequired, knowledgeStage, runLocal } from '../agent/lib/local.ts'
 import { groomPaths } from '../agent/lib/paths.ts'
@@ -16,24 +17,28 @@ import { groomPaths } from '../agent/lib/paths.ts'
 // board actions). `--verify` follows every board stage; the round state is kept until a confirmed
 // or stopped round verifies, or `--verify --finish`. `--finish` alone exports the round as
 // incomplete. Every step names the agent package that ran.
-const usage = 'Usage: pnpm run groom:local --repo <absolute-repo> [--ticket ID | URL] [--guidelines FILE] [--force-pull] [--force-run] [--verify] [--finish]'
+const usage = 'Usage: pnpm run groom:local --repo <absolute-repo> [--ticket ID | URL] [--guidelines FILE] [--force-pull] [--force-run] [--verify] [--finish] [--parent-run RUN:NONCE] [--attach JSON]'
+const SKILL = 'groomer' as const
+
+/** The session usage report of a --local round: <export>/trace/session-usage.json (KIT-19, F9). */
+const sessionUsageFile = (exportDir: string) => join(exportDir, 'trace', 'session-usage.json')
 
 const agent = await agentVersion(new URL('..', import.meta.url))
-let context = { skill: 'groomer' as const, repo: '' }
+let context = { skill: SKILL, repo: '' }
 let driverArgs: DriverTicketArgs = {}
 try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { repo: { type: 'string' }, ticket: { type: 'string' }, guidelines: { type: 'string' }, 'force-pull': { type: 'boolean' }, 'force-run': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' } },
+    options: { repo: { type: 'string' }, ticket: { type: 'string' }, guidelines: { type: 'string' }, 'force-pull': { type: 'boolean' }, 'force-run': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' }, 'parent-run': { type: 'string' }, attach: { type: 'string' } },
   })
   if (values.repo === undefined || positionals.length > 0) throw new UsageError(usage)
   const repo = values.repo
-  context = { skill: 'groomer' as const, repo }
-  driverArgs = { positional: values.ticket, forcePull: values['force-pull'], forceRun: values['force-run'] }
+  context = { skill: SKILL, repo }
+  driverArgs = { positional: values.ticket, forcePull: values['force-pull'], forceRun: values['force-run'], parentRun: values['parent-run'] }
   const outputFor = (folder: string) => groomPaths(folder).output
   if (values.verify === true) {
     const finish = values.finish === true
-    const verified = await verifyRun(context, { positional: values.ticket, finish }, outputFor)
+    const verified = await verifyRun(context, { positional: values.ticket, finish, attach: attachArg(values.attach) }, outputFor)
     const record = verified.verified ? await readGroomRecord(verified.folder).catch(() => undefined) : undefined
     const runStatus = record?.status ?? verified.runStatus
     // The round state ends with the run: the driver removes .local/groomer/, this removes groom.local/.
@@ -54,10 +59,11 @@ try {
       if (step.stage === 'board' && 'runStatus' in step && step.runStatus !== undefined) {
         const output = outputFor(before.folder)
         await recordAgentVersion(output, agent)
-        const board = await afterRun(context, before, { status: step.runStatus, reasonCode: step.reasonCode ?? null, exportDir: output, verifyCommand: `groomer.sh local ${before.ticket.id} --verify`, round: step.round })
+        const board = await afterRun(context, before, { status: step.runStatus, reasonCode: step.reasonCode ?? null, exportDir: output, verifyCommand: `groomer.sh local ${before.ticket.id} --verify`, round: step.round, sessionUsage: sessionUsageFile(output) })
         console.log(JSON.stringify({ ...step, agent, ...board }, null, 2))
       } else {
-        console.log(JSON.stringify({ ...step, agent, ticket, folder: before.folder }, null, 2))
+        const report = await sessionUsageStep(SKILL, before.folder, sessionUsageFile(outputFor(before.folder)))
+        console.log(JSON.stringify({ ...step, agent, ticket, folder: before.folder, ...report }, null, 2))
       }
     }
   }

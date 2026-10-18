@@ -1,7 +1,7 @@
 ---
 name: aspira-planner
 description: Turn a reviewed business spec into concrete implementation tasks and unit/integration test checklists by calling the Aspira planner agent. By default it runs the planner as a separate process; with --local the same pipeline runs inside this Claude Code session. Use for /aspira-planner or requests to generate an implementation plan with this agent.
-argument-hint: [<ticket ID | Notion URL> | <spec.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended]
+argument-hint: [<ticket ID | Notion URL> | <spec.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended] [--parent-run RUN:NONCE]
 disable-model-invocation: true
 ---
 
@@ -20,7 +20,7 @@ The planner runs only from `Ready: Spec`, or from its own `In Progress: Plan` (a
 ## Default: the agent as a separate process
 
 ```bash
-<skill-dir>/scripts/planner.sh start [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output]
+<skill-dir>/scripts/planner.sh start [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output] [--parent-run RUN:NONCE]
 ```
 
 The launcher makes the board moves itself, through the shared board module with `NOTION_TOKEN` from the project's `.env.local`: the ticket step before the agent starts (a refusal exits 3 and launches nothing), and the push and the success move after it exits, appended to the run's log and recorded in `trace/board.json`. With a complete guidelines snapshot, the launcher uses the direct CLI. Otherwise it uses the eve entry point, which loads the engineering rules from Notion with `load-knowledge` (integration credentials and the loader's Docker sandbox). It also needs screen and the agent environment.
@@ -30,7 +30,7 @@ The helper detaches the run and prints its run/log directory. Tell the user wher
 ## --local: the same pipeline in this session
 
 ```bash
-<skill-dir>/scripts/planner.sh local [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output] [--finish] [--verify] [--take-recommended]
+<skill-dir>/scripts/planner.sh local [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output] [--finish] [--verify] [--take-recommended] [--parent-run RUN:NONCE] [--attach JSON]
 ```
 
 Each call is one synchronous step that makes no model call and launches nothing. `--take-recommended` takes every decision still open after the author's ticks as the agent's recommended option instead of waiting on the author. It prints JSON: the next stage, or the exported plan once `pending` is `false`. The driver assembles every prompt from the agent's own files when the step runs, so nothing here restates them. `--local` is not independent of this session: every phase runs on this session's model, and no cost is itemized.
@@ -46,6 +46,19 @@ The engineering rules come first, and the driver refuses to start any model stag
 7. Do not change the spec, the repository or the knowledge folder during a run: the driver refuses to continue. To start over, delete `workDir`.
 
 The work directory is `<output>.local/`. It is deleted after export; every prompt and output is kept in `trace/calls.json`, the rules used in `trace/knowledge.json` and `trace/knowledge/`, and every board action with the Status before and after in `trace/board.json`.
+
+## Run telemetry
+
+Every run of this skill on a ticket writes one telemetry file, `.work/<id>-<slug>/telemetry/<run-id>.json` (OpenTelemetry JSON: the run, its phases and subagents, with timings, tokens, tool calls and cost where they are measured), and attaches it to the end of the ticket page when the Feature Board rules list it (BOARD-003). A telemetry failure is a notice beside the result: it never changes the run's status, the card's move or the exit code.
+
+- **Default.** The launcher does it all: `ticket.ts start` prints `run-id=` and `run-started=`, and the finish step after the agent exits writes the file from them and attaches it. Nothing to do here.
+- **`--local`.** The session reports its own usage, since only it sees its subagents:
+  1. Record the wall-clock start and end (ISO 8601) of every subagent you launch, with the total tokens, tool uses and duration the Agent tool reports for it, and its model when you know it.
+  2. Every pending step on a ticket prints `sessionUsage` with a `file` and a `runId`. Before the call that exports the run (the call after the planning output is written, or `--finish`), write that `file` (`plan.review/trace/session-usage.json`) as JSON: `{"runId": "<runId>", "subagents": [{"label": "…", "startedAt": "…", "endedAt": "…", "totalTokens": 0, "toolUses": 0, "wallMs": 0, "model": "…"}]}`, one entry per subagent in launch order. `label` is a short name of your own (`research`, `lane A`), never the task's description or prompt text. Leave out a number you do not have; never guess one. Without the file the run's telemetry records the subagents as missing.
+  3. The export's `board.actions` then end with two telemetry actions. `read` (`target: "board-rules"`): fetch the Feature Board rules page with the Notion MCP (`notion-fetch`, read-only) and write it to `file` as plain markdown, one rule per line. `attach`: only when one line of the rules you saved contains every string of `onlyIf`, attach `file`, as `name`, in one file block at the end of the ticket page `page`: `notion-create-attachment` for a file of at most 200 KiB, otherwise `notion-create-file-upload`, then `notion-update-page`. Attach no other file, to no other page, and never edit or delete another block.
+  4. Pass the result to the verify step: `local <ticket> --verify --attach '{"blockId":"<the new block id>"}'`, or `--attach '{"error":"<why>"}'` when the rules do not allow it or the attach failed. A missing, refused or failed attach is a notice in the verify output, never a failed verify.
+- **`--parent-run <run-id>:<nonce>`** (a step of an `/aspira-build-feature` run, which prints it on the step's command). Skip all of the above: the run writes no usage report, reads no rules and attaches nothing; build-feature records the step in its own telemetry. Pass `--parent-run` unchanged on every call of the launcher, `start` or `local`, `--verify` included. A malformed value, or one that does not name the pending step of the build-feature run on the ticket, is refused (exit 3) naming `--parent-run`.
+- **`--no-ticket`** runs write no telemetry.
 
 ## Output
 

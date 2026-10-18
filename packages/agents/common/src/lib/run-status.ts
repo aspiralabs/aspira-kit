@@ -150,4 +150,6 @@ export const NOT_RUN_STATUS: readonly { file: string; symbol: string }[] = [
   { file: 'packages/agents/spec-reviewer/agent/lib/models.ts', symbol: "the research ledger's turn.status (UsageEntry)" },
   { file: 'packages/agents/build-feature/src/driver.test-helper.ts', symbol: 'SUCCESS / writeStepExport (deliberate pre-upgrade word fixtures)' },
   { file: 'packages/agents/build-feature/src/driver.ts', symbol: "run-state.ts's run.ended ('stopped' | 'finished'): the run's own lifecycle word, not a skill run status" },
+  { file: 'packages/agents/common/src/lib/telemetry.ts', symbol: 'STATUS_WORDS / STEP_RESULT_WORDS / statusCode: the source words a telemetry span may carry (KIT-19), read from old records, never emitted as a run status' },
+  { file: 'packages/agents/common/src/lib/telemetry-sources.ts', symbol: 'groupStatus: a model-turn status, not a skill run status' },
 ]

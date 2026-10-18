@@ -8,8 +8,10 @@
 // it. Nothing here mocks a module the kit owns (TEST-007): the repository is a real temp directory
 // and NOTION_TOKEN is never set, so no Notion call can happen on this path.
 
+import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { STEP_SKILLS } from './driver.test-helper.ts'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { nextStage, type DriverInput } from '#src/driver.ts'
@@ -31,6 +33,12 @@ async function seedReadySpecRun(): Promise<{ repo: string; folder: string; runId
   await mkdir(join(skillDir, 'scripts'), { recursive: true })
   await writeFile(join(skillDir, 'SKILL.md'), '# aspira-planner\n')
   await writeFile(join(skillDir, 'scripts/planner.sh'), '#!/bin/bash\necho planner\n', { mode: 0o755 })
+  // KIT-19: the driver refuses a step when any step skill's .kit-version is missing or differs from its own version.
+  const kitVersion = (JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8')) as { version: string }).version
+  for (const step of STEP_SKILLS) {
+    await mkdir(join(repo, '.claude/skills', `aspira-${step}`), { recursive: true })
+    await writeFile(join(repo, '.claude/skills', `aspira-${step}`, '.kit-version'), `${kitVersion}\n`)
+  }
   const folder = join(repo, '.work', 'kit-2-x')
   await mkdir(folder, { recursive: true })
   const runId = 'run-test'
@@ -59,7 +67,9 @@ describe('T30 F44: the step stage tells the subagent to run the launcher, not th
     const { repo, runId } = await seedReadySpecRun()
     const input: DriverInput = { id: 'KIT-2', repo, run: runId, forceRun: false, finish: false, mode: 'local', now: NOW, env: {} }
     const stage = await nextStage(input)
-    expect({ command: stage.command, launcher: stage.launcher }).toEqual({
+    // The printed stage carries --parent-run <runId>:<nonce> (KIT-19 F6); the forms themselves are what this test pins.
+    const bare = (text: unknown) => String(text).replace(/ --parent-run \S+$/, '')
+    expect({ command: bare(stage.command), launcher: (stage.launcher as string[]).map(bare) }).toEqual({
       command: '/aspira-planner KIT-2 --local --take-recommended',
       launcher: ['.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 --take-recommended'],
     })
