@@ -9,7 +9,6 @@ import { randomBytes } from 'node:crypto'
 import { link, mkdir, open, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { GROOM_RUN_STATUSES } from './groom-record.ts'
 import { LENSES } from './lenses.ts'
 import { RUN_STATUSES, SKILLS } from './ticket.ts'
 import { FlowRefused } from './ticket-flow.ts'
@@ -116,7 +115,7 @@ const STEP_RESULT_WORDS = ['confirmed', 'needs-author', 'stopped', 'incomplete',
 
 /** Every status word the file may carry. */
 export const STATUS_WORDS: readonly string[] = [
-  ...new Set<string>([...RUN_STATUSES, ...GROOM_RUN_STATUSES, ...STEP_RESULT_WORDS, 'refused', 'blocked', 'nothing-detected', 'failed', 'running', 'completed', 'stopped', 'finished', 'replaced', 'moved', 'complete', 'not measured']),
+  ...new Set<string>([...RUN_STATUSES, ...STEP_RESULT_WORDS, 'refused', 'blocked', 'nothing-detected', 'failed', 'running', 'completed', 'stopped', 'finished', 'replaced', 'moved', 'complete', 'clean', 'confirmed', 'partial', 'not measured']),
 ]
 
 /** A model id as the gateway names it: provider/model, lowercase. */

@@ -214,7 +214,16 @@ function deeperThan(block: Block, depth: number): boolean {
   return depth === 0 || block.children.some((child) => deeperThan(child, depth - 1))
 }
 
-export function board(options: BoardOptions): Board {
+/**
+ * A page's raw Notion markdown and whether Notion truncated it, straight from `/pages/<id>/markdown`,
+ * with no `notionToMarkdown` conversion: the implementor's plan-block recovery (plan-block.ts) hashes
+ * and parses this exact text, which is what was actually on the page, not `pullPage`'s converted copy.
+ * Kept off the `Board` interface itself (every other caller's mocks need not implement it) and only
+ * on `board()`'s own return type.
+ */
+export type BoardWithPageMarkdown = Board & { pageMarkdown(pageId: string): Promise<{ markdown: string; truncated: boolean }> }
+
+export function board(options: BoardOptions): BoardWithPageMarkdown {
   const request = options.request ?? fetch
   const api = options.api ?? NOTION_API
   const given = pageIdFrom(options.board)
@@ -551,6 +560,11 @@ export function board(options: BoardOptions): Board {
       const result = await call<{ markdown?: string; truncated?: boolean }>(`/pages/${found.id}/markdown`)
       if (result.truncated) throw new BoardError(`Notion truncated the page "${title}" (${found.url}); not returning a partial copy`)
       return { ...found, markdown: notionToMarkdown(result.markdown ?? '') }
+    },
+
+    async pageMarkdown(pageId) {
+      const result = await call<{ markdown?: string; truncated?: boolean }>(`/pages/${pageId}/markdown`)
+      return { markdown: result.markdown ?? '', truncated: result.truncated === true }
     },
 
     async createPage(page, title, markdown) {

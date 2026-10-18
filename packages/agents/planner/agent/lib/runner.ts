@@ -1,20 +1,21 @@
 import { readFile, realpath } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { generateText, Output, stepCountIs, tool, type ModelMessage, type ToolSet } from 'ai'
 import { gateway, streamStructured } from '@aspiralabs/agent-common/lib/gateway'
 import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
+import { openDecisions } from '@aspiralabs/agent-common/lib/decisions'
 import { connectReadTools } from '@aspiralabs/agent-common/lib/mcp'
 import { modelTrace } from '@aspiralabs/agent-common/lib/model-trace'
+import { renderPlanBlock } from '@aspiralabs/agent-common/lib/plan-block'
 import { repository } from '@aspiralabs/agent-common/lib/repository'
 import { runAnalysis } from '@aspiralabs/agent-common/lib/run-analysis'
+import { type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
 import { checkBusinessSpec } from '@aspiralabs/agent-common/lib/spec'
 import { pageIdFrom } from '@aspiralabs/agent-common/lib/knowledge'
 import type { Answer, DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
 import { mergeDecisions, planSchema, readAnswers, renderChecks, renderDecisionsFile, renderPlan, researchSchema, touchesUi, validatePlan, type Plan, type Research } from './plan.ts'
 import { system, researchSystem, researchInstructions, planningInstructions, repairInstructions } from './prompts.ts'
-
-/** Research model turns, including the final forced `submit_research` turn. */
-const RESEARCH_STEPS = 10
+import { renderFactsBlock, researchSteps, reviewFacts } from './review-facts.ts'
 
 /** Correction passes planning gets when its plan fails the checks a model can fix. */
 export const REPAIR_ROUNDS = 2
@@ -27,11 +28,15 @@ export type PlanRepository = Awaited<ReturnType<typeof repository>>
 /** Inputs read and checked before any model work: the same for the agent and for --local. */
 export type PreparedPlan = { dir: string; spec: string; specPath: string; guidelines: string; repo: PlanRepository; uiRequired: boolean }
 
+/** The ticket's working folder: the spec's own directory, or its parent when the spec came from spec.reviewed/ (the reviewer's own export). */
+export function ticketFolderFor(specPath: string): string {
+  const specDirectory = dirname(resolve(specPath))
+  return basename(specDirectory) === 'spec.reviewed' ? dirname(specDirectory) : specDirectory
+}
+
 /** The export directory: an explicit one, else plan.review/ beside the spec (beside spec.reviewed/ for a reviewed spec). */
 export function outputDirFor(input: Pick<PlanInput, 'specPath' | 'outputDir'>): string {
-  const specDirectory = dirname(resolve(input.specPath))
-  const featureDirectory = basename(specDirectory) === 'spec.reviewed' ? dirname(specDirectory) : specDirectory
-  return resolve(input.outputDir ?? resolve(featureDirectory, 'plan.review'))
+  return resolve(input.outputDir ?? resolve(ticketFolderFor(input.specPath), 'plan.review'))
 }
 
 /** Refuse a spec the planner cannot plan from: not a business spec, or a review still awaiting resolution. */
@@ -85,9 +90,9 @@ export function researchGapsRefusal(gaps: string[], turnsLeft: number, guideline
   return `Not accepted: you have ${turnsLeft} turns left, so read these now instead of listing them as gaps.${pages} Kit configuration is under node_modules/@aspiralabs/config/ and readable with read_files. Then submit again, keeping as gaps only what you tried and failed to read:\n${gaps.map((gap) => `- ${gap}`).join('\n')}`
 }
 
-/** The research phase's user prompt. */
-export function researchPrompt(context: string, instructions: string = researchInstructions): string {
-  return `${context}\n\n${instructions}`
+/** The research phase's user prompt, with the spec reviewer's reusable facts (reviewFacts/renderFactsBlock) appended when there are any. */
+export function researchPrompt(context: string, instructions: string = researchInstructions, factsBlock: string = ''): string {
+  return `${context}\n\n${instructions}${factsBlock}`
 }
 
 /** The planning phase's user prompt, over the submitted research. */
@@ -187,8 +192,16 @@ export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<
   return { status, problems, decisions }
 }
 
-/** The report files that do not depend on how the models were called. */
-export function planReportFiles(args: { prepared: PreparedPlan; specPath: string; research: Research | null; plan: Plan | null; status: string; problems: string[]; decisions: DecisionRecord[] }): Record<string, string> {
+/** `problems` with any occurrence of `repoPath` (absolute) made repository-relative: the Plan page's
+ * block never carries a host's own filesystem layout (F36). */
+function repositoryRelative(problems: readonly string[], repoPath: string): string[] {
+  const root = `${resolve(repoPath).replace(/\/+$/, '')}/`
+  return problems.map((problem) => problem.split(root).join(''))
+}
+
+/** The report files that do not depend on how the models were called. `repoPath` is the repository
+ * root: used only to redact it out of `problems` before they reach the Plan page's block. */
+export function planReportFiles(args: { prepared: PreparedPlan; specPath: string; repoPath: string; research: Research | null; plan: Plan | null; status: string; problems: string[]; decisions: DecisionRecord[] }): Record<string, string> {
   const { prepared, research, plan, status, problems, decisions } = args
   const files: Record<string, string> = {
     'trace/spec.original.md': prepared.spec, 'trace/guidelines.md': prepared.guidelines,
@@ -196,7 +209,18 @@ export function planReportFiles(args: { prepared: PreparedPlan; specPath: string
     'trace/checks.md': renderChecks(status, problems),
     'trace/decisions.md': renderDecisionsFile(status, decisions),
   }
-  if (plan) files['plan.reviewed.md'] = renderPlan(plan, status, { specPath: args.specPath, commit: prepared.repo.commit, dirty: prepared.repo.dirty }, problems, decisions)
+  if (plan) {
+    const rendered = renderPlan(plan, status, { specPath: args.specPath, commit: prepared.repo.commit, dirty: prepared.repo.dirty }, problems, decisions)
+    // The Plan page's block carries plan.json and the gate fields so a fresh pull can rebuild them
+    // (F36): pageTextSha256 is unknown until the pushed page is read back once (ticket-flow.ts's
+    // planner verify step fills it in with a second, final push).
+    files['plan.reviewed.md'] = renderPlanBlock({
+      pageMarkdown: rendered,
+      plan,
+      review: { status, decisions, repoCommit: prepared.repo.commit, problems: repositoryRelative(problems, args.repoPath) },
+      pageTextSha256: null,
+    })
+  }
   return files
 }
 
@@ -217,9 +241,13 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   let research: Research | null = null
   const pages: GuidelinePage[] = []
   const readTools = readingGuidelines(mcp.tools, pages)
+  // The spec reviewer's own facts, reused when they still describe this spec and commit (F33-F35):
+  // research then gets a smaller turn budget and the facts block in its prompt.
+  const facts = await reviewFacts({ folder: ticketFolderFor(input.specPath), repoPath: input.repoPath, repo: { commit: repo.commit, dirty: repo.dirty } })
+  const steps = researchSteps(facts.included)
   try {
     options.progress?.('research')
-    const prompt = researchPrompt(context)
+    const prompt = researchPrompt(context, researchInstructions, renderFactsBlock(facts))
     research = await trace.invoke({ phase: 'research', model: models.research, prompt }, async (signal, hooks) => {
       let submitted: Research | undefined
       // Until its last turn, research cannot submit checks that leave a required rule out: the
@@ -233,7 +261,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       const submit = async (value: Research) => {
         const missing = uncoveredRules(guidelines, value.checks)
         if (missing.length && !lastTurn) return { accepted: false, reason: `Checks must name every required rule ID. Add a check for each of these, with how it applies or evidence that it does not, then submit again: ${missing.join(', ')}` }
-        const turnsLeft = RESEARCH_STEPS - turn - 1
+        const turnsLeft = steps - turn - 1
         if (value.gaps.length && !gapsRefused && turnsLeft >= 2) {
           gapsRefused = true
           return { accepted: false, reason: researchGapsRefusal(value.gaps, turnsLeft, guidelineTools) }
@@ -246,13 +274,13 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       // told how many turns it has left. Only its last turn is forced to submit what it has.
       let messages: ModelMessage[] = [{ role: 'user', content: prompt }]
       let used = 0
-      while (!submitted && RESEARCH_STEPS - used > 1 && !signal.aborted) {
-        const remaining = RESEARCH_STEPS - used
+      while (!submitted && steps - used > 1 && !signal.aborted) {
+        const remaining = steps - used
         const first = used === 0
         const result = await generateText({ model: gateway(models.research), system: researchSystem, ...(first ? { prompt } : { messages }), tools, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', stopWhen: [stepCountIs(remaining - 1), () => submitted !== undefined], prepareStep: ({ stepNumber }) => { turn = used + stepNumber; return first && stepNumber === 0 ? { activeTools: Object.keys(tools).filter((name) => name !== 'submit_research'), toolChoice: 'required' as const } : {} }, ...hooks })
         used += Math.max(1, result.steps?.length ?? 1)
         messages = [...messages, ...(result.responseMessages ?? [])]
-        if (!submitted) messages.push({ role: 'user', content: researchContinue(RESEARCH_STEPS - used) })
+        if (!submitted) messages.push({ role: 'user', content: researchContinue(steps - used) })
       }
       lastTurn = true
       if (!submitted && !signal.aborted) await generateText({ model: gateway(models.research), system: researchSystem, messages: [...messages.slice(0, -1), { role: 'user', content: 'Your turns are used up. Submit the evidence you gathered with submit_research now. Cite only files and lines you actually read; list anything you did not read as a gap.' }], tools: { submit_research: tools.submit_research! }, toolChoice: { type: 'tool', toolName: 'submit_research' }, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', ...hooks })
@@ -282,10 +310,11 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       }
     }
     const { status, problems, decisions } = assessPlan({ spec, guidelines, repo, research, plan, phaseErrors: trace.phases, uiRequired, reads: mcp.reads, cancelled: options.signal?.aborted === true, answers, takeRecommended: input.takeRecommended ?? false })
+    const runStatus: RunStatus = status
     const reviewMs = Date.now() - started - prepareMs
     const exportStarted = Date.now()
     const files: Record<string, string> = {
-      ...planReportFiles({ prepared, specPath: input.specPath, research, plan, status, problems, decisions }),
+      ...planReportFiles({ prepared, specPath: input.specPath, repoPath: input.repoPath, research, plan, status, problems, decisions }),
       'trace/calls.json': JSON.stringify({ system: { research: researchSystem, planning: system }, models, calls: trace.calls }, null, 2),
       'trace/usage.json': JSON.stringify({ scope: 'Direct planner calls only; excludes eve routing and guideline loading before entry.', turns: trace.turns }, null, 2),
     }
@@ -296,7 +325,15 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       const exportMs = Date.now() - exportStarted
       const analysis = runAnalysis(trace.turns, trace.phases, { prepareMs, reviewMs, exportMs, totalMs, status })
       reportedCostUsd = analysis.reportedCostUsd
-      return { 'run-analysis.md': analysis.markdown, 'trace/review.json': JSON.stringify({ status, problems, decisions, input, repoCommit: repo.commit, repoDirty: repo.dirty, models, phases: trace.phases, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, reviewMs, exportMs, totalMs, reportedCostUsd }, null, 2) }
+      // One sentence for a non-ready status: the open decision count and the decisions file for
+      // needs-author, the first problem otherwise (F4, F18); reasonCode is always null here, the
+      // planner has no sub-cases of its own.
+      const openCount = openDecisions(decisions).length
+      const reason = runStatus === 'ready' ? null
+        : runStatus === 'needs-author' ? `${openCount} decision${openCount === 1 ? '' : 's'} open: ${join(dir, 'trace', 'decisions.md')}`
+          : (problems[0] ?? null)
+      const reasonCode = null
+      return { 'run-analysis.md': analysis.markdown, 'trace/review.json': JSON.stringify({ status: runStatus, reason, reasonCode, problems, decisions, input, repoCommit: repo.commit, repoDirty: repo.dirty, reviewFacts: { included: facts.included, reason: facts.reason }, models, phases: trace.phases, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, reviewMs, exportMs, totalMs, reportedCostUsd }, null, 2) }
     })
     return { status, dir, problems, decisions, prepareMs, reviewMs, totalMs, reportedCostUsd }
   } finally { await mcp.close() }

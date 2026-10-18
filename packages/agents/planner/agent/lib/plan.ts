@@ -1,29 +1,21 @@
 import { z } from 'zod'
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
-import { applyAnswers, decisionSchema, normalizeQuestion, parseTickedDecisions, renderDecision, renderDecisions, takenDecision, type Answer, type Decision, type DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
+import { decisionSchema, parseTickedDecisions, renderDecisions, type Answer, type DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
+import { mergeDecisions, planSchema, problemSeverity, renderPlan, type Plan } from '@aspiralabs/agent-common/lib/plan'
 import { allowedPath } from '@aspiralabs/agent-common/lib/repository'
-import { countBySeverity, findingsHeader, severityHeading, sortBySeverity, type Severity } from '@aspiralabs/agent-common/lib/severity'
+import { countBySeverity, findingsHeader, severityHeading, sortBySeverity } from '@aspiralabs/agent-common/lib/severity'
 import { specFeatures } from '@aspiralabs/agent-common/lib/spec'
 
 const text = z.string().trim().min(1)
-const features = z.array(z.string().regex(/^F\d+$/)).min(1)
 /** A product question for the spec's author: the question, the options, the recommended one and why it is theirs. */
 export { decisionSchema }
+// planSchema, Plan, renderPlan, mergeDecisions and problemSeverity now live in
+// @aspiralabs/agent-common/lib/plan (the implementor's plan-block recovery needs them without
+// depending on this package); re-exported here unchanged so every existing import of './plan.ts' keeps working.
+export { planSchema, renderPlan, mergeDecisions, problemSeverity }
+export type { Plan }
 export const researchSchema = z.object({ facts: z.array(text), checks: z.array(z.object({ rule: text, evidence: text })), gaps: z.array(text), decisions: z.array(decisionSchema) })
-export const planSchema = z.object({
-  summary: text,
-  tasks: z.array(z.object({
-    id: z.string().regex(/^P\d+$/), title: text, kind: z.enum(['tests', 'implementation', 'verification', 'handoff']),
-    featureIds: features, dependsOn: z.array(text), testIds: z.array(text),
-    changes: z.array(z.object({ operation: z.enum(['create', 'modify', 'delete']), path: text, symbols: z.array(text).min(1), instructions: text, evidence: z.array(text).min(1) })),
-    commands: z.array(text), outcome: text,
-  })).min(1),
-  tests: z.array(z.object({ id: z.string().regex(/^T\d+$/), kind: z.enum(['unit', 'integration']), path: text, featureIds: features, setup: text, action: text, assertions: z.array(text).min(1) })).min(1),
-  checks: z.array(z.object({ rule: text, evidence: text })),
-  decisions: z.array(decisionSchema), gaps: z.array(text),
-})
-export type Plan = z.infer<typeof planSchema>
 export type Research = z.infer<typeof researchSchema>
 
 function safePath(path: string) {
@@ -125,26 +117,6 @@ export function validatePlan(plan: Plan, spec: string, files: Map<string, string
   return errors
 }
 
-/**
- * Research's and planning's decisions as one list, D1, D2, ..., the same question once, with the
- * author's ticked answers applied. With `takeRecommended` (F10), every decision still open after the
- * author's ticks are applied is taken as the agent's recommended option instead of waiting on the
- * author; a tick the agent made itself is ignored by `applyAnswers`, so a rerun never records it as
- * the author's.
- */
-export function mergeDecisions(lists: readonly (readonly Decision[])[], answers: readonly Answer[] = [], takeRecommended = false): DecisionRecord[] {
-  const seen = new Set<string>()
-  const merged: DecisionRecord[] = []
-  for (const decision of lists.flat()) {
-    const key = normalizeQuestion(decision.question)
-    if (seen.has(key)) continue
-    seen.add(key)
-    merged.push({ ...decision, id: `D${merged.length + 1}`, decidedBy: 'open', answer: null })
-  }
-  const applied = applyAnswers(merged, answers)
-  return takeRecommended ? applied.map((decision) => (decision.decidedBy === 'open' ? takenDecision(decision.id, decision) : decision)) : applied
-}
-
 /** The ticks the author made in the previous plan's trace/decisions.md, or none when there is no previous plan. */
 export async function readAnswers(outputDir: string): Promise<Answer[]> {
   const text = await readFile(join(outputDir, 'trace', 'decisions.md'), 'utf8').catch(() => null)
@@ -154,16 +126,6 @@ export async function readAnswers(outputDir: string): Promise<Answer[]> {
 /** trace/decisions.md: every decision as checkboxes the author ticks, recommended option first. */
 export function renderDecisionsFile(status: string, decisions: readonly DecisionRecord[]): string {
   return renderDecisions(decisions, { title: 'Author decisions', status, intro: 'Tick one option per decision to answer it. The next plan of this spec reads the tick and records the decision as yours in trace/review.json.' })
-}
-
-/**
- * How bad a readiness problem is, for the order a human reads them in. Critical: a phase did not
- * produce its output. High: the plan has a structural fault. Medium: evidence or a rule check is missing.
- */
-export function problemSeverity(problem: string): Severity {
-  if (/^(?:research|planning|repair-\d+): /.test(problem) || ['Research unavailable', 'No structured plan produced', 'Planning cancelled'].includes(problem)) return 'critical'
-  if (/^(?:Uncovered guideline|Research gap|Plan gap): /.test(problem) || problem.startsWith('UI planning requires')) return 'medium'
-  return 'high'
 }
 
 /** trace/checks.md: the readiness problems in severity order under a header whose count equals the list. */
@@ -176,23 +138,5 @@ export function renderChecks(status: string, problems: readonly string[]): strin
     if (!group.length) continue
     lines.push(`## ${severityHeading(severity)}`, '', ...group.map((problem) => `- ${problem}`), '')
   }
-  return lines.join('\n')
-}
-
-export function renderPlan(plan: Plan, status: string, source: { specPath: string; commit: string; dirty: boolean }, problems: string[], decisions: readonly DecisionRecord[] = mergeDecisions([plan.decisions])): string {
-  const lines = ['# Implementation plan', '', `Status: **${status}**`, '', `Source spec: ${source.specPath}`, `Repository commit: ${source.commit}; uncommitted changes: ${source.dirty ? 'yes' : 'no'}. Recheck this context before implementation.`, '', '## Intent', '', plan.summary, '', '## Ordered tasks', '']
-  for (const task of plan.tasks) {
-    lines.push(`- [ ] **${task.id}: ${task.title}** (${task.kind}) — ${task.featureIds.map((id) => `[${id}]`).join(' ')}`, `  - Prerequisites: ${task.dependsOn.join(', ') || 'none'}`, `  - Test cases: ${task.testIds.join(', ') || 'none'}`)
-    for (const change of task.changes) lines.push(`  - ${change.operation} \`${change.path}\`; symbols: ${change.symbols.map((symbol) => `\`${symbol}\``).join(', ')}. ${change.instructions}`, `    - Evidence: ${change.evidence.join('; ')}`)
-    for (const command of task.commands) lines.push(`  - Run: \`${command}\``)
-    lines.push(`  - Done when: ${task.outcome}`, '')
-  }
-  lines.push('## Test checklists', '')
-  for (const kind of ['unit', 'integration']) {
-    lines.push(`### ${kind === 'unit' ? 'Unit' : 'Integration'} tests`, '')
-    for (const test of plan.tests.filter((item) => item.kind === kind)) lines.push(`- [ ] **${test.id}** — \`${test.path}\` ${test.featureIds.map((id) => `[${id}]`).join(' ')}`, `  - Setup: ${test.setup}`, `  - Action: ${test.action}`, ...test.assertions.map((assertion) => `  - Assert: ${assertion}`), '')
-  }
-  const open = decisions.filter((decision) => decision.decidedBy === 'open').length
-  lines.push('## Author decisions', '', `${decisions.length} decision${decisions.length === 1 ? '' : 's'}: ${open} open · ${decisions.length - open} answered. Each has a recommended option; answer them in trace/decisions.md.`, '', ...(decisions.length ? decisions.map((decision) => `${renderDecision(decision).replace(/^## /, '### ')}\n`) : ['None.', '']), '## Readiness checks', '', ...(problems.length ? sortBySeverity(problems, problemSeverity).map((item) => `- **${problemSeverity(item)}** · ${item}`) : ['All structural checks passed; tasks and commands are instructions for the build agent and have not been executed.']), '', 'See trace/ for the source spec, guidelines, evidence, model activity and validation details.', '')
   return lines.join('\n')
 }

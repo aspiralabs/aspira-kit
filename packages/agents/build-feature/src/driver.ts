@@ -41,21 +41,24 @@ import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, join, relative } from 'node:path'
 import { z } from 'zod'
+import { nextAction, writeProgressNote, type NextAction } from '@aspiralabs/agent-common/lib/progress-note'
+import { readRunStatus } from '@aspiralabs/agent-common/lib/run-status'
 import { encodeTrace, listsTelemetry, readAttached, recordAttached, releaseRunId, reserveRunId, telemetryFile, telemetryNotice, writeTelemetry, type WriteResult } from '@aspiralabs/agent-common/lib/telemetry'
 import { readUsageSource, type PhaseUsage } from '@aspiralabs/agent-common/lib/telemetry-sources'
 import { slug } from '@aspiralabs/agent-common/lib/ticket'
 import { MODELS as REVIEWER_MODELS } from '@aspiralabs/pr-reviewer/models'
 import { acceptApproval, approvalFor, approvalStage, recordApproval } from '#src/approval.ts'
+import { buildRunStatus, buildStopSchema, type BuildStop } from '#src/build-status.ts'
 import { addTaken, collectTakenDecisions, isDecisionStep, openDecisions, takenKeyOf } from '#src/decisions.ts'
 import { gatePhase } from '#src/gate.ts'
 import { modelFor, parseModels, subagentModels, type Role } from '#src/models.ts'
 import { BACKWARD_MOVES_SKILL_MAY_MAKE, decideOverrides, findOverrides, overridesStage, recordOverrides } from '#src/overrides.ts'
 import { renderPrBody } from '#src/pr-body.ts'
 import { acceptResolution, cardDifferences, resolveStage, resolveWithToken, type Resolution } from '#src/resolve.ts'
-import { assertNever, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, STEPS, type EndRoute, type Mode, type PhaseName, type StepName } from '#src/route.ts'
+import { assertNever, launcherFor, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, STEPS, type EndRoute, type Mode, type PhaseName, type StepName } from '#src/route.ts'
 import { reviewPhase } from '#src/review-loop.ts'
 import { readRunState, stateDirOf, writeRunState, type Card, type Failure, type Pending, type PhaseRecord, type RunState, type Usage } from '#src/run-state.ts'
-import { analyzerClean, readImplementorStatus, readSpecCoverage, readStepResult, readStepUsage, stepReportSchema, stepResultTable } from '#src/step-results.ts'
+import { analyzerReady, readImplementorStatus, readSpecCoverage, readStepResult, readStepUsage, stepReportSchema, stepResultTable } from '#src/step-results.ts'
 import { releaseRowPhase, step10Phase } from '#src/step10.ts'
 import { step8Phase } from '#src/step8.ts'
 import { renderBuildSummary } from '#src/summary.ts'
@@ -113,7 +116,8 @@ export type PhaseResult =
   | { kind: 'step'; state: RunState; step: StepName; command: string }
   /** Make a move: re-resolved first against `expect`; only Step 8's move (or an allowed backward move) is accepted. */
   | { kind: 'move'; state: RunState; from: string; to: string; expect: Pick<Card, 'status' | 'pr' | 'dev'> }
-  | { kind: 'stop'; state: RunState; message: string; failure?: Failure }
+  /** `reason`: why, for build-feature's own run status (F20); without one, it is read from `failure`. */
+  | { kind: 'stop'; state: RunState; message: string; failure?: Failure; reason?: BuildStop }
 
 export type Phase = {
   next(context: PhaseContext, state: RunState): Promise<PhaseResult>
@@ -358,10 +362,10 @@ const NOT_ATTACHED: Readonly<Record<Exclude<RulesVerdict, 'listed'>, string>> = 
  * print the telemetry stage when the rules list the run telemetry file and something is left to
  * attach, else end with a notice saying why nothing was attached.
  */
-async function endWithTelemetry(ctx: Ctx, state: RunState, end: { message: string; stopped: boolean; pushError: string | null; rules: RulesVerdict }): Promise<Out> {
+async function endWithTelemetry(ctx: Ctx, state: RunState, end: { message: string; stopped: boolean; pushError: string | null; rules: RulesVerdict; reason: BuildStop }): Promise<Out> {
   const written = await writeRunTelemetry(ctx, state, ctx.runId, ctx.input.now, end.stopped ? 'stopped' : 'finished')
   const files = await unattachedFiles(ctx, written.state)
-  if (files.length === 0 || end.rules !== 'listed') return finalize(ctx, written.state, end.message, end.stopped, end.pushError, telemetryNotices(files, end.rules === 'listed' ? '' : NOT_ATTACHED[end.rules], written))
+  if (files.length === 0 || end.rules !== 'listed') return finalize(ctx, written.state, end.message, end.stopped, end.pushError, end.reason, telemetryNotices(files, end.rules === 'listed' ? '' : NOT_ATTACHED[end.rules], written))
   const names = files.map((file) => basename(file.path))
   return pend(
     ctx,
@@ -377,11 +381,19 @@ async function endWithTelemetry(ctx: Ctx, state: RunState, end: { message: strin
         `Write {"nonce", "attached": true, "blockId": "<the block id of ${names[0] ?? ''}>"${files.length === 1 ? '' : ', "blocks": {"<run id>": "<its block id>", ...}'}}, or {"nonce", "error": "<what failed>"}, to ${output}.`,
       ].join(' '),
     }),
-    { data: { message: end.message, stopped: end.stopped, pushError: end.pushError, files, failed: telemetryNotices([], '', written) } },
+    { data: { message: end.message, stopped: end.stopped, pushError: end.pushError, reason: end.reason, files, failed: telemetryNotices([], '', written) } },
   )
 }
 
-const telemetryData = z.object({ message: z.string(), stopped: z.boolean(), pushError: z.string().nullable(), files: z.array(z.object({ runId: z.string(), path: z.string() })), failed: z.array(z.string()).default([]) })
+const telemetryData = z.object({
+  message: z.string(),
+  stopped: z.boolean(),
+  pushError: z.string().nullable(),
+  /** The stop's reason (F20), carried through the stage so the end still reports its run status. */
+  reason: buildStopSchema.optional(),
+  files: z.array(z.object({ runId: z.string(), path: z.string() })),
+  failed: z.array(z.string()).default([]),
+})
 const telemetryAnswer = z.union([
   z.object({ nonce: z.string(), attached: z.literal(true), blockId: z.string().min(1), blocks: z.record(z.string(), z.string().min(1)).optional() }),
   z.object({ nonce: z.string(), error: z.string().min(1) }),
@@ -390,11 +402,12 @@ const telemetryAnswer = z.union([
 /** The telemetry stage's answer: record each attached block (exclusive, keyed by run id), or end with the notice. The run's ended word never changes. */
 async function acceptTelemetry(ctx: Ctx, state: RunState, pending: Pending, answer: unknown): Promise<Out> {
   const data = telemetryData.safeParse(pending.data ?? {})
-  if (!data.success) return finalize(ctx, state, 'The run ended, but its telemetry stage lost what it was ending with.', true, null, ['Telemetry not attached: the telemetry stage lost its record.'])
+  if (!data.success) return finalize(ctx, state, 'The run ended, but its telemetry stage lost what it was ending with.', true, null, { kind: 'unexpected-error' }, ['Telemetry not attached: the telemetry stage lost its record.'])
   const { message, stopped, pushError, files, failed } = data.data
+  const reason: BuildStop = data.data.reason ?? { kind: 'unexpected-error' }
   const parsed = telemetryAnswer.safeParse(answer)
-  if (!parsed.success) return finalize(ctx, state, message, stopped, pushError, [...failed, ...telemetryNotices(files, 'the attach answer was not readable', null)])
-  if ('error' in parsed.data) return finalize(ctx, state, message, stopped, pushError, [...failed, ...telemetryNotices(files, parsed.data.error, null)])
+  if (!parsed.success) return finalize(ctx, state, message, stopped, pushError, reason, [...failed, ...telemetryNotices(files, 'the attach answer was not readable', null)])
+  if ('error' in parsed.data) return finalize(ctx, state, message, stopped, pushError, reason, [...failed, ...telemetryNotices(files, parsed.data.error, null)])
   const { blockId, blocks } = parsed.data
   let next = state
   const notices = [...failed]
@@ -412,20 +425,21 @@ async function acceptTelemetry(ctx: Ctx, state: RunState, pending: Pending, answ
       notices.push(`Telemetry attached as block ${block}, but the attach could not be recorded for ${file.runId}.`)
     }
   }
-  return finalize(ctx, next, message, stopped, pushError, notices)
+  return finalize(ctx, next, message, stopped, pushError, reason, notices)
 }
 
 // ---------------------------------------------------------------------------------------------
 // The one stop path (F32), and the end.
 // ---------------------------------------------------------------------------------------------
 
-async function stop(ctx: Ctx, state: RunState, message: string, options: { stopped: boolean; failure?: Failure }): Promise<Out> {
+/** Every stop names its reason (F20): the end stage's run status and the CLI's exit code come from it. */
+async function stop(ctx: Ctx, state: RunState, message: string, options: { stopped: boolean; reason: BuildStop; failure?: Failure }): Promise<Out> {
   const failure = options.failure ?? (options.stopped ? { action: 'stop', message } : null)
-  const runs = state.runs.map((run) => (run.runId === ctx.runId ? { ...run, end: { message, stopped: options.stopped } } : run))
+  const runs = state.runs.map((run) => (run.runId === ctx.runId ? { ...run, end: { message, stopped: options.stopped, reason: options.reason } } : run))
   const stopped: RunState = { ...state, runs, failure, pending: null, queue: [], afterAsks: null }
   await writeSummary(ctx, stopped)
   // No card, no summary stage and no rules: the file is still written, and the end says it was not attached.
-  if (stopped.card === null) return endWithTelemetry(ctx, stopped, { message, stopped: options.stopped, pushError: null, rules: 'unreadable' })
+  if (stopped.card === null) return endWithTelemetry(ctx, stopped, { message, stopped: options.stopped, pushError: null, rules: 'unreadable', reason: options.reason })
   return pend(
     ctx,
     stopped,
@@ -436,16 +450,71 @@ async function stop(ctx: Ctx, state: RunState, message: string, options: { stopp
       notion: [{ op: 'read', target: 'board-rules' }],
       instructions: `Fetch the Feature Board rules page (read-only) and write it as markdown to the "rules" path, then write {"nonce"} to the output file.`,
     }),
-    { data: { part: 'rules', message, stopped: options.stopped } },
+    { data: { part: 'rules', message, stopped: options.stopped, reason: options.reason } },
   )
 }
 
-function finalize(ctx: Ctx, state: RunState, message: string, stopped: boolean, pushError: string | null, notices: readonly string[] = []): Out {
+/** The end: `reason` is why the run ended (F20); `notices` are the telemetry lines the end message carries (KIT-19, OBS-002: they never change how the run ends). */
+async function finalize(ctx: Ctx, state: RunState, message: string, stopped: boolean, pushError: string | null, reason: BuildStop, notices: readonly string[] = []): Promise<Out> {
   const lines = [...(pushError === null ? [] : [`Build Summary push failed: ${pushError}. build-summary.md is kept at ${summaryPath(ctx)}.`]), message, `Build summary: ${summaryPath(ctx)}`, ...notices, ...(stopped ? [ctx.resume] : [])]
   const full = lines.join('\n')
-  const runs = state.runs.map((run) => (run.runId === ctx.runId ? { ...run, endedAt: ctx.input.now, ended: stopped ? 'stopped' : 'finished', end: { message: full, stopped } } : run))
+  const runs = state.runs.map((run) => (run.runId === ctx.runId ? { ...run, endedAt: ctx.input.now, ended: stopped ? 'stopped' : 'finished', end: { message: full, stopped, reason } } : run))
   const ended: RunState = { ...state, runs, inProgress: state.inProgress?.runId === ctx.runId ? null : state.inProgress, pending: null }
-  return { state: ended, stage: { stage: 'end', runId: ctx.runId, stopped, message: full, ...(stopped ? { resume: ctx.resume } : {}) } }
+  const { status } = buildRunStatus(reason)
+  // The marker ends first, so the note below is build-feature's own, not a step's override of it.
+  await writeActive(ctx.folder, ended, ctx.runId, ctx.input.now)
+  if (ended.card !== null) await writeStopNote(ctx, ended, message, reason)
+  return { state: ended, stage: { stage: 'end', runId: ctx.runId, status, reason, stopped, message: full, ...(stopped ? { resume: ctx.resume } : {}) } }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The marker a step's progress note reads, and build-feature's own note when the run ends (F20).
+// ---------------------------------------------------------------------------------------------
+
+/** `<folder>/.local/build-feature/active.json` (agent-common BUILD_FEATURE_ACTIVE): no `end` while the run is in progress. */
+async function writeActive(folder: string, state: RunState, runId: string, now: string): Promise<void> {
+  const run = state.runs.find((candidate) => candidate.runId === runId)
+  if (run === undefined) return
+  const end = state.inProgress?.runId === runId ? null : (run.endedAt ?? now)
+  await mkdir(stateDirOf(folder), { recursive: true })
+  await writeFile(join(stateDirOf(folder), 'active.json'), `${JSON.stringify({ runId, mode: run.mode, end }, null, 2)}\n`)
+}
+
+/**
+ * progress.md when the run ends (F14, F20): ready on a finished run, with the Status's Playbook
+ * step as Next action; on any other end the run status of the stop and the command that resumes
+ * the run, with the stopping step's own command under Open issues.
+ */
+async function writeStopNote(ctx: Ctx, state: RunState, message: string, reason: BuildStop): Promise<void> {
+  const card = state.card!
+  const { status } = buildRunStatus(reason)
+  const steps = state.steps.filter((step) => step.runId === ctx.runId)
+  const stoppedStep = reason.kind === 'step' ? steps.findLast((step) => step.step === reason.step) : undefined
+  const resume: NextAction = { step: 'Resume the build-feature run', do: [], run: [ctx.resume], session: ctx.resume }
+  const token = ctx.input.env.NOTION_TOKEN
+  await writeProgressNote({
+    folder: ctx.folder,
+    repo: ctx.input.repo,
+    ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }),
+    ...(token === undefined || token === '' ? {} : { notionToken: token }),
+    note: {
+      id: ctx.input.id,
+      title: card.title,
+      skill: 'build-feature',
+      runId: ctx.runId,
+      runStatus: status,
+      status: card.status,
+      expectedStatus: null,
+      outputs: ['build-summary.md'],
+      completed: steps.map((step) => `${step.step}: ${step.status}`),
+      decisions: [],
+      openIssues:
+        reason.kind === 'finished'
+          ? []
+          : [message.split('\n')[0]!, ...(stoppedStep === undefined ? [] : [`The ${stoppedStep.step} step ended ${stoppedStep.status}; its own command: ${stoppedStep.command}`])],
+      nextAction: reason.kind === 'finished' ? nextAction({ kind: 'playbook', id: ctx.input.id, boardStatus: card.status }) : resume,
+    },
+  })
 }
 
 const summaryAnswer = z.object({ nonce: z.string(), pushed: z.boolean().optional(), error: z.string().optional() })
@@ -455,6 +524,8 @@ async function acceptSummary(ctx: Ctx, state: RunState, pending: Pending, answer
   const data = pending.data ?? {}
   const message = String(data.message ?? '')
   const stopped = data.stopped === true
+  const recorded = buildStopSchema.safeParse(data.reason)
+  const reason: BuildStop = recorded.success ? recorded.data : { kind: 'unexpected-error' }
   if (data.part === 'rules') {
     const rules = await readFile(String(pending.stage.rules), 'utf8').catch(() => '')
     const push = listsBuildSummary(rules) ? { action: 'create-or-replace', page: 'Build Summary' } : null
@@ -471,12 +542,12 @@ async function acceptSummary(ctx: Ctx, state: RunState, pending: Pending, answer
             ? `BOARD-003 does not list Build Summary yet: keep ${summaryPath(ctx)} local and push nothing. Write {"nonce", "pushed": false} to the output file.`
             : `Create the ticket's child page "Build Summary" from ${summaryPath(ctx)}, or replace it when it exists. Write {"nonce", "pushed": true}, or {"nonce", "error"} when the push fails, to the output file.`,
       }),
-      { data: { part: 'push', message, stopped, rules: rulesVerdict(rules) } },
+      { data: { part: 'push', message, stopped, reason, rules: rulesVerdict(rules) } },
     )
   }
   const parsed = summaryAnswer.safeParse(answer)
   const pushError = parsed.success ? (parsed.data.error ?? null) : 'the push answer was not readable'
-  return endWithTelemetry(ctx, state, { message, stopped, pushError, rules: rulesVerdictSchema.parse(data.rules) })
+  return endWithTelemetry(ctx, state, { message, stopped, pushError, reason, rules: rulesVerdictSchema.parse(data.rules) })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -496,7 +567,7 @@ async function requestResolve(ctx: Ctx, state: RunState, purpose: ResolvePurpose
 }
 
 async function afterResolution(ctx: Ctx, state: RunState, resolution: Resolution, purpose: ResolvePurpose): Promise<Out> {
-  if (resolution.kind === 'stop') return stop(ctx, state, resolution.message, { stopped: true, failure: { action: 'resolve', message: resolution.message } })
+  if (resolution.kind === 'stop') return stop(ctx, state, resolution.message, { stopped: true, reason: { kind: resolution.notFound === true ? 'not-found' : 'unexpected-error' }, failure: { action: 'resolve', message: resolution.message } })
   if (resolution.kind === 'pending') return { state, stage: state.pending?.stage as Stage }
   const { card } = resolution
   const resolved: RunState = { ...state, card }
@@ -509,7 +580,7 @@ async function afterResolution(ctx: Ctx, state: RunState, resolution: Resolution
       const differences = cardDifferences(purpose.expect, card)
       if (differences.length > 0) {
         const message = `${ctx.input.id} changed before the move ${purpose.move.from} -> ${purpose.move.to}, so the run made no move: ${differences.join('; ')}.`
-        return stop(ctx, resolved, message, { stopped: true, failure: { action: 'move', message } })
+        return stop(ctx, resolved, message, { stopped: true, reason: { kind: 'move' }, failure: { action: 'move', message } })
       }
       return printMove(ctx, resolved, purpose.move, purpose.phase)
     }
@@ -537,12 +608,12 @@ async function worktreeGate(ctx: Ctx, state: RunState): Promise<Out> {
   const type = ticketTypeOf(card.type)
   if (type === null) {
     const message = `${ctx.input.id} has ${card.type === null ? 'no Type' : `the Type "${card.type}"`}: the run needs the card's Type (Feature, Bug or Chore) to name its worktree and branch (GIT-001, GIT-002). Set the Type on the card, then resume.`
-    return stop(ctx, state, message, { stopped: true, failure: { action: 'worktree', message } })
+    return stop(ctx, state, message, { stopped: true, reason: { kind: 'worktree-prerequisite' }, failure: { action: 'worktree', message } })
   }
   const place = await locate(ctx.input.repo, ctx.input.env)
   if (place === null) {
     const message = `${ctx.input.repo} is not a git repository, so the run cannot make the ticket's worktree`
-    return stop(ctx, state, message, { stopped: true, failure: { action: 'worktree', message } })
+    return stop(ctx, state, message, { stopped: true, reason: { kind: 'worktree-prerequisite' }, failure: { action: 'worktree', message } })
   }
   const target = join(place.main, worktreePath(type, ctx.input.id))
   if (place.top === target) return afterStart(ctx, withRun(state, ctx.runId, { worktree: target }))
@@ -552,7 +623,7 @@ async function worktreeGate(ctx: Ctx, state: RunState): Promise<Out> {
 async function moveIntoWorktree(ctx: Ctx, state: RunState, place: Place, type: NonNullable<ReturnType<typeof ticketTypeOf>>, cardType: string): Promise<Out> {
   const card = state.card!
   const prepared = await prepareWorktree({ place, id: ctx.input.id, title: card.title, type, cardType, env: ctx.input.env })
-  if (!prepared.ok) return stop(ctx, state, prepared.message, { stopped: true, failure: { action: 'worktree', command: prepared.command, exitCode: prepared.exitCode, output: prepared.output, message: prepared.message } })
+  if (!prepared.ok) return stop(ctx, state, prepared.message, { stopped: true, reason: { kind: 'worktree-command' }, failure: { action: 'worktree', command: prepared.command, exitCode: prepared.exitCode, output: prepared.output, message: prepared.message } })
   const { worktree, branch } = prepared
   const folder = await carryTicketFolder(ctx.folder, worktree)
   // The run id's .pending marker went with the ticket folder: the run writes its one telemetry file there at its end, nothing here (KIT-19).
@@ -561,6 +632,7 @@ async function moveIntoWorktree(ctx: Ctx, state: RunState, place: Place, type: N
   // The run state left behind says where the run went; the lock moves with it.
   const left: RunState = { ...withRun(state, ctx.runId, { ended: 'moved', endedAt: ctx.input.now, worktree }), inProgress: state.inProgress?.runId === ctx.runId ? null : state.inProgress, pending: null }
   await writeRunState(ctx.folder, left)
+  await writeActive(ctx.folder, left, ctx.runId, ctx.input.now)
   const moved = withRun(state, ctx.runId, { worktree })
   const out = pend(
     inWorktree,
@@ -612,11 +684,11 @@ function printMove(ctx: Ctx, state: RunState, move: { from: string; to: string }
 async function requestMove(ctx: Ctx, state: RunState, move: { from: string; to: string }, expect: Pick<Card, 'status' | 'pr' | 'dev'>, phase?: string): Promise<Out> {
   if (!allowedMove(move.from, move.to)) {
     const message = `the run will not move ${ctx.input.id} ${move.from} -> ${move.to}: a run makes only the three Ready moves and Step 8's move`
-    return stop(ctx, state, message, { stopped: true, failure: { action: 'move', message } })
+    return stop(ctx, state, message, { stopped: true, reason: { kind: 'move' }, failure: { action: 'move', message } })
   }
   if (isReadyMove(move.from, move.to) && approvalFor(state, ctx.runId) === null) {
     const message = `no run-start approval is recorded for run ${ctx.runId}, so the run will not make the Ready move ${move.from} -> ${move.to}. Start a new run to record one.`
-    return stop(ctx, state, message, { stopped: true, failure: { action: 'approval', message } })
+    return stop(ctx, state, message, { stopped: true, reason: { kind: 'approval' }, failure: { action: 'approval', message } })
   }
   return requestResolve(ctx, state, { purpose: 'premove', move, expect, ...(phase === undefined ? {} : { phase }) })
 }
@@ -646,14 +718,29 @@ async function handlePhase(ctx: Ctx, phase: PhaseName, result: PhaseResult): Pro
     case 'move':
       return requestMove(ctx, result.state, { from: result.from, to: result.to }, result.expect, phase)
     case 'stop':
-      return stop(ctx, result.state, result.message, { stopped: true, ...(result.failure === undefined ? {} : { failure: result.failure }) })
+      return stop(ctx, result.state, result.message, { stopped: true, reason: result.reason ?? stopOfFailure(result.failure), ...(result.failure === undefined ? {} : { failure: result.failure }) })
     default:
       return assertNever(result)
   }
 }
 
+/** A phase's stop without its own reason: gh not installed (exit 127) is blocked (F20), anything else incomplete. */
+function stopOfFailure(failure: Failure | undefined): BuildStop {
+  const command = failure?.command ?? failure?.action ?? ''
+  return failure?.exitCode === 127 && /^gh\b/.test(command) ? { kind: 'gh' } : { kind: 'unexpected-error' }
+}
+
+/** Each EndRoute reason as build-feature's stop (F20). */
+const END_STOPS: Readonly<Record<EndRoute['reason'], BuildStop>> = {
+  finished: { kind: 'finished' },
+  'nothing-to-do': { kind: 'nothing-to-do' },
+  dropped: { kind: 'dropped' },
+  unknown: { kind: 'no-row' },
+  unsettled: { kind: 'unsettled' },
+}
+
 async function endRoute(ctx: Ctx, state: RunState, end: EndRoute): Promise<Out> {
-  return stop(ctx, state, end.message, { stopped: end.reason === 'unknown' })
+  return stop(ctx, state, end.message, { stopped: end.reason === 'unknown' || end.reason === 'unsettled', reason: END_STOPS[end.reason] })
 }
 
 /** The live Status picks the next stage. */
@@ -665,7 +752,7 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
     app: ctx.aspira?.app ?? '.',
     specCovered: await readSpecCoverage(ctx.folder, state),
     implementor: await readImplementorStatus(ctx.folder),
-    analyzerClean: analyzerClean(state),
+    analyzerReady: analyzerReady(state),
     mode: ctx.mode,
   }
   const next = routeStatus(card.status, facts)
@@ -701,14 +788,15 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
 // Steps and their results.
 // ---------------------------------------------------------------------------------------------
 
+/** The five statuses every skill ends in (F7): each entry names the one file the run reads it from. */
 const STATUS_WORDS: Readonly<Record<StepName, string>> = {
-  groomer: 'the groom status in groom/trace/groom.json (confirmed, needs-author, stopped or incomplete)',
-  'spec-writer': 'the status in spec.written/trace/review.json (ready, needs-author or incomplete)',
-  'spec-reviewer': 'the status in spec.reviewed/trace/review.json (ready, needs-author or incomplete)',
-  planner: 'the status in plan.review/trace/review.json (ready, needs-author or incomplete)',
-  implementor: 'the status in plan.review/trace/implementation-local.json (complete, incomplete, refused or blocked)',
-  'code-analyzer': 'the status the analyzer finished with (clean, or what it reported)',
-  'pr-reviewer': 'complete when the review finished and wrote pr-review/findings.md, else incomplete',
+  groomer: 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in groom/trace/groom.json',
+  'spec-writer': 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in spec.written/trace/review.json',
+  'spec-reviewer': 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in spec.reviewed/trace/review.json',
+  planner: 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in plan.review/trace/review.json',
+  implementor: 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in plan.review/trace/implementation-local.json',
+  'code-analyzer': 'the five-word run status (ready, needs-author, incomplete, refused or blocked) the analyzer finished with, in .static-analysis/rounds.json',
+  'pr-reviewer': 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in pr-review/trace/review.json',
 }
 
 /** The cloud implementor clones the repository from GitHub and refuses a ticket whose .work/ is gitignored (implementor SKILL.md). */
@@ -721,11 +809,18 @@ async function cloudImplementorBlocked(ctx: Ctx): Promise<string | null> {
 /** The option every printed step command ends with: the build-feature run and the step stage's nonce (KIT-19 F6). */
 const parentRun = (runId: string, nonce: string): string => ` --parent-run ${runId}:${nonce}`
 
-/** A pending stage as it is printed again: a step stage's command carries --parent-run, which the stored stage never does. */
+/**
+ * The launcher lines as printed (F44 + KIT-19 F6): the line that starts the step (`local`, or cloud's
+ * `start`) carries --parent-run; the `wait <RUN>` line, which starts nothing, does not.
+ */
+const launcherWithParentRun = (launcher: readonly string[], runId: string, nonce: string): string[] => launcher.map((line) => (/\.sh wait\b/.test(line) ? line : `${line}${parentRun(runId, nonce)}`))
+
+/** A pending stage as it is printed again: a step stage's command and launcher carry --parent-run, which the stored stage never does. */
 function printed(pending: Pending): Stage {
   const stage = pending.stage as Stage
   if (pending.kind !== 'step' || typeof stage.command !== 'string' || typeof stage.runId !== 'string') return stage
-  return { ...stage, command: `${stage.command}${parentRun(stage.runId, pending.nonce)}` }
+  const launcher = Array.isArray(stage.launcher) ? launcherWithParentRun(stage.launcher as string[], stage.runId, pending.nonce) : undefined
+  return { ...stage, command: `${stage.command}${parentRun(stage.runId, pending.nonce)}`, ...(launcher === undefined ? {} : { launcher }) }
 }
 
 /** The usage report a step (or fix) subagent writes: what the Agent tool reported for it, and one entry per subagent it launched. */
@@ -742,15 +837,18 @@ export const USAGE_REPORT_SHAPE = {
 async function printStep(ctx: Ctx, state: RunState, step: StepName, command: string): Promise<Out> {
   if (ctx.mode === 'cloud' && step === 'implementor') {
     const blocked = await cloudImplementorBlocked(ctx)
-    if (blocked !== null) return stop(ctx, state, blocked, { stopped: true, failure: { action: step, command, message: blocked } })
+    if (blocked !== null) return stop(ctx, state, blocked, { stopped: true, reason: { kind: 'cloud-implementor' }, failure: { action: step, command, message: blocked } })
   }
   await checkKitVersion(ctx.input.repo)
   const model = modelFor(STEP_ROLE[step], ctx.aspira)
   const promptDir = join(ctx.dir, 'prompts')
   await mkdir(promptDir, { recursive: true })
-  // The nonce is minted first so the printed command can carry it; what is stored keeps the command without it.
+  const launcher = launcherFor(command, ctx.mode)
+  const skillMd = `.claude/skills/aspira-${step}/SKILL.md`
+  // The nonce is minted first so the printed command and launcher can carry it; what is stored keeps both without it.
   const nonce = randomUUID()
   const shownCommand = `${command}${parentRun(ctx.runId, nonce)}`
+  const shownLauncher = launcherWithParentRun(launcher, ctx.runId, nonce)
   const out = pend(
     ctx,
     state,
@@ -758,6 +856,7 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
     (output) => ({
       step,
       command,
+      launcher,
       mode: ctx.mode,
       cwd: ctx.input.repo,
       model,
@@ -765,7 +864,7 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
       notion: [{ op: 'read', target: 'ticket' }, ...STEP_NOTION[step]],
       report: { output, fields: ['nonce', 'step', 'status', 'resultLine', 'usage'] },
     }),
-    { data: { step, command }, nonce },
+    { data: { step, command, launcher }, nonce },
   )
   const { output, prompt } = out.stage as Stage & { prompt: string }
   const lines = [
@@ -773,15 +872,15 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
     '',
     `Work in ${ctx.input.repo} (the ticket's worktree): change into it first and run everything from there.`,
     '',
-    'Run this command, exactly as written, and follow the skill it loads to its end:',
+    `Read ${skillMd} first. Then run this, exactly as written, and follow the skill to its end:`,
     '',
     '```',
-    shownCommand,
+    ...shownLauncher,
     '```',
     '',
     ...(ctx.mode === 'cloud'
       ? [
-          "This run is in cloud mode: the command is the step skill's default mode, which starts the step's cloud agent (`start`). Let the skill start it, then `wait` on that run, again and again, until it ends; waiting does not stop the agent. Do not stop after `start`, do not run the step yourself, and never retry a failed run. When it has ended, read its result exactly as for --local.",
+          "This run is in cloud mode: the first line above starts the step's cloud agent (`start`). Let it start, then run the second line (`wait`) again and again until it ends; waiting does not stop the agent. Do not stop after `start`, do not run the step yourself, and never retry a failed run. When it has ended, read its result exactly as for --local.",
           '',
         ]
       : []),
@@ -799,7 +898,7 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
     '',
   ]
   await writeFile(prompt, lines.join('\n'))
-  return { ...out, stage: { ...out.stage, command: shownCommand } }
+  return { ...out, stage: { ...out.stage, command: shownCommand, launcher: shownLauncher } }
 }
 
 /** A phase as the run stores it: the reduced group's numbers, times as ISO strings, and its closed-set attributes. */
@@ -851,10 +950,11 @@ async function withCloudUsage(ctx: Ctx, step: StepName, usage: Usage, interval: 
 async function acceptStep(ctx: Ctx, state: RunState, pending: Pending, answer: unknown): Promise<Out> {
   const step = String(pending.data?.step) as StepName
   const command = String(pending.data?.command)
+  const launcher = Array.isArray(pending.data?.launcher) ? (pending.data.launcher as string[]) : launcherFor(command, ctx.mode)
   const parsed = stepReportSchema.safeParse(answer)
   if (!parsed.success || parsed.data.step !== step) {
     const message = `the ${step} step report at ${pending.output} is not a step report for ${step}${parsed.success ? ` (it names ${parsed.data.step})` : `: ${parsed.error.issues.map((issue) => issue.message).join('; ')}`}`
-    return stop(ctx, state, message, { stopped: true, failure: { action: step, command, message } })
+    return stop(ctx, state, message, { stopped: true, reason: { kind: 'unexpected-error' }, failure: { action: step, command, message } })
   }
   const report = parsed.data
   const result = await readStepResult(step, report, { folder: ctx.folder, repo: ctx.input.repo, app: ctx.aspira?.app ?? '.' })
@@ -864,6 +964,7 @@ async function acceptStep(ctx: Ctx, state: RunState, pending: Pending, answer: u
     step,
     runId: ctx.runId,
     command,
+    launcher,
     status: result.status,
     startedAt: pending.startedAt,
     endedAt: ctx.input.now,
@@ -877,7 +978,7 @@ async function acceptStep(ctx: Ctx, state: RunState, pending: Pending, answer: u
   let next: RunState = { ...state, steps: [...state.steps, record] }
   if (result.verdict === 'continue' && isDecisionStep(step)) {
     const collected = await collectTakenDecisions(step, { folder: ctx.folder, runId: ctx.runId })
-    if (!collected.ok) return stop(ctx, next, collected.message, { stopped: true, failure: { action: step, command, message: collected.message } })
+    if (!collected.ok) return stop(ctx, next, collected.message, { stopped: true, reason: { kind: 'unexpected-error' }, failure: { action: step, command, message: collected.message } })
     next = { ...addTaken(next, collected.taken), queue: [...next.queue, ...collected.asks] }
   }
   let after = result.verdict === 'stop' ? result.message : null
@@ -885,8 +986,10 @@ async function acceptStep(ctx: Ctx, state: RunState, pending: Pending, answer: u
     const open = await openDecisions(step, ctx.folder)
     if (open.length > 0) after = `${after} Open decisions: ${open.map((decision) => `${decision.id}: ${decision.question}`).join('; ')}`
   }
-  if (next.queue.length > 0) return printAsk(ctx, { ...next, afterAsks: { stop: after } })
-  if (after !== null) return stop(ctx, next, after, { stopped: true, failure: { action: step, command, message: after } })
+  // The step's own word read as one of the five (old words through F7's mapping; anything else is incomplete, F6).
+  const stepStop: BuildStop = { kind: 'step', step, status: readRunStatus(result.status)?.status ?? 'incomplete' }
+  if (next.queue.length > 0) return printAsk(ctx, { ...next, afterAsks: { stop: after, ...(after === null ? {} : { reason: stepStop }) } })
+  if (after !== null) return stop(ctx, next, after, { stopped: true, reason: stepStop, failure: { action: step, command, message: after } })
   return requestResolve(ctx, next, { purpose: 'route' })
 }
 
@@ -918,8 +1021,9 @@ async function acceptAsk(ctx: Ctx, state: RunState, answer: unknown): Promise<Ou
   const next: RunState = { ...state, asked: [...state.asked, asked], queue: rest }
   if (rest.length > 0) return printAsk(ctx, next)
   const after = next.afterAsks?.stop ?? null
+  const reason = next.afterAsks?.reason ?? { kind: 'unexpected-error' }
   const cleared: RunState = { ...next, afterAsks: null }
-  if (after !== null) return stop(ctx, cleared, after, { stopped: true })
+  if (after !== null) return stop(ctx, cleared, after, { stopped: true, reason })
   return requestResolve(ctx, cleared, { purpose: 'route' })
 }
 
@@ -931,7 +1035,7 @@ async function acceptMove(ctx: Ctx, state: RunState, pending: Pending, answer: u
   const parsed = moveAnswer.safeParse(answer)
   if (!parsed.success || 'error' in parsed.data) {
     const message = `the move ${from} -> ${to} failed: ${parsed.success && 'error' in parsed.data ? parsed.data.error : 'the answer did not say it was done'}`
-    return stop(ctx, state, message, { stopped: true, failure: { action: 'move', message } })
+    return stop(ctx, state, message, { stopped: true, reason: { kind: 'move' }, failure: { action: 'move', message } })
   }
   const moved: RunState = { ...state, moves: [...state.moves, { from, to, at: ctx.input.now, runId: ctx.runId }] }
   return requestResolve(ctx, moved, { purpose: 'route' })
@@ -949,7 +1053,7 @@ async function acceptOverrides(ctx: Ctx, state: RunState, pending: Pending): Pro
     case 'move':
       return requestMove(ctx, recorded, { from: decision.from, to: decision.to }, { status: card.status, pr: card.pr, dev: card.dev })
     case 'stop':
-      return stop(ctx, recorded, decision.message, { stopped: true, failure: { action: 'override', message: decision.message } })
+      return stop(ctx, recorded, decision.message, { stopped: true, reason: { kind: 'human-gate' }, failure: { action: 'override', message: decision.message } })
     default:
       return assertNever(decision)
   }
@@ -986,7 +1090,7 @@ async function startRun(ctx: Ctx, state: RunState): Promise<Out> {
   // The replaced run ends here, so its telemetry file is written here, from the state read (KIT-19 F13); this run attaches it.
   const started = replaced === undefined ? opened : (await writeRunTelemetry(ctx, opened, replaced, now, 'replaced')).state
   const aspira = await readAspira(ctx.input.repo)
-  if (!aspira.ok) return stop(ctx, started, aspira.message, { stopped: true, failure: { action: 'aspira.json', message: aspira.message } })
+  if (!aspira.ok) return stop(ctx, started, aspira.message, { stopped: true, reason: { kind: 'aspira-json' }, failure: { action: 'aspira.json', message: aspira.message } })
   return pend({ ...ctx, aspira: aspira.aspira }, started, 'approval', (output) => approvalStage({ id, command: run.command, output }))
 }
 
@@ -1013,7 +1117,7 @@ async function dispatch(ctx: Ctx, state: RunState, pending: Pending, answer: Rec
       const run = state.runs.find((candidate) => candidate.runId === ctx.runId)!
       const outcome = acceptApproval(answer, pending.nonce, { runId: ctx.runId, command: run.command })
       if (outcome.kind === 'pending') return { state: { ...state, pending }, stage: pending.stage as Stage }
-      if (outcome.kind === 'stop') return stop(ctx, state, outcome.message, { stopped: true, failure: { action: 'approval', message: outcome.message } })
+      if (outcome.kind === 'stop') return stop(ctx, state, outcome.message, { stopped: true, reason: { kind: 'approval' }, failure: { action: 'approval', message: outcome.message } })
       return requestResolve(ctx, recordApproval(state, outcome.approval), { purpose: 'start' })
     }
     case 'resolve': {
@@ -1037,7 +1141,7 @@ async function dispatch(ctx: Ctx, state: RunState, pending: Pending, answer: Rec
     case 'telemetry':
       return acceptTelemetry(ctx, state, pending, answer)
     default:
-      return stop(ctx, state, `the pending ${pending.kind} stage has no handler in the driver`, { stopped: true })
+      return stop(ctx, state, `the pending ${pending.kind} stage has no handler in the driver`, { stopped: true, reason: { kind: 'unexpected-error' } })
   }
 }
 
@@ -1075,11 +1179,15 @@ export async function nextStage(input: DriverInput): Promise<Stage> {
   const aspira = await readAspira(input.repo)
   let ctx: Ctx = { ...base, runId, aspira: aspira.ok ? aspira.aspira : null, mode: run.mode, resume }
   if (state.inProgress?.runId !== runId) {
-    if (input.finish && run.end !== undefined) return { stage: 'end', runId, stopped: run.end.stopped, message: run.end.message, ...(run.end.stopped ? { resume } : {}) }
+    if (input.finish && run.end !== undefined) {
+      // A run ended before its end recorded a reason reads as it did then: finished, or cut short.
+      const reason: BuildStop = run.end.reason ?? { kind: run.end.stopped ? 'unexpected-error' : 'finished' }
+      return { stage: 'end', runId, status: buildRunStatus(reason).status, reason, stopped: run.end.stopped, message: run.end.message, ...(run.end.stopped ? { resume } : {}) }
+    }
     throw new Refusal(`run ${runId} of ${input.id} is not in progress (${run.ended ?? 'ended'}); start a new run with ${resume}`)
   }
   await refuseSecondReport(state, runId)
-  if (input.finish) return save(ctx, await stop(ctx, { ...state, pending: null }, `The run was ended with --finish before the ticket reached a merge-ready PR.`, { stopped: true }))
+  if (input.finish) return save(ctx, await stop(ctx, { ...state, pending: null }, `The run was ended with --finish before the ticket reached a merge-ready PR.`, { stopped: true, reason: { kind: 'finish-before-pr' } }))
   const pending = state.pending
   if (pending === null) return save(ctx, await route(ctx, state))
   const answer = await readAnswer(pending)
@@ -1098,6 +1206,8 @@ export async function nextStage(input: DriverInput): Promise<Stage> {
 }
 
 async function save(ctx: Ctx, out: Out): Promise<Stage> {
-  await writeRunState((out.ctx ?? ctx).folder, out.state)
+  const at = out.ctx ?? ctx
+  await writeRunState(at.folder, out.state)
+  await writeActive(at.folder, out.state, at.runId, at.input.now)
   return out.stage
 }

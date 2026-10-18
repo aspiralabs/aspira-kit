@@ -36,7 +36,7 @@ export function resolveStage(input: ResolveStageInput): Record<string, unknown> 
   }
 }
 
-export type Resolution = { kind: 'pending'; why: string } | { kind: 'card'; card: Card } | { kind: 'stop'; message: string }
+export type Resolution = { kind: 'pending'; why: string } | { kind: 'card'; card: Card } | { kind: 'stop'; message: string; notFound?: true }
 
 /** Accept a resolution answer only when it carries the pending nonce. */
 export function acceptResolution(answer: unknown, pendingNonce: string, context: { id: string; board: string }): Resolution {
@@ -45,7 +45,7 @@ export function acceptResolution(answer: unknown, pendingNonce: string, context:
   const value = parsed.data
   if (value.nonce !== pendingNonce) return { kind: 'pending', why: `the resolution carries nonce ${value.nonce}, not the pending ${pendingNonce}` }
   if ('error' in value) return { kind: 'stop', message: `the board could not be reached to resolve ${context.id}: ${value.error}` }
-  if (!value.found) return { kind: 'stop', message: `ticket ${context.id} not found on the board ${context.board}` }
+  if (!value.found) return { kind: 'stop', message: `ticket ${context.id} not found on the board ${context.board}`, notFound: true }
   const { id, title, url, status, pr, dev } = value
   const type = value.type === undefined || value.type === null || value.type.trim() === '' ? null : value.type.trim()
   return { kind: 'card', card: { id, title, url, status, pr: pr === '' ? null : pr, dev: dev === '' ? null : dev, type } }
@@ -74,7 +74,7 @@ export async function resolveWithToken(context: { id: string; board: string; rep
   )
   if (!outcome.ok) {
     const reason = outcome.stderr.trim()
-    if (/not found|no ticket/i.test(reason)) return { kind: 'stop', message: `ticket ${context.id} not found on the board ${context.board}: ${reason}` }
+    if (/not found|no ticket/i.test(reason)) return { kind: 'stop', message: `ticket ${context.id} not found on the board ${context.board}: ${reason}`, notFound: true }
     return { kind: 'stop', message: `the board could not be reached to resolve ${context.id}: ${reason}` }
   }
   const fields = Object.fromEntries(

@@ -42,6 +42,8 @@ const record = <D extends { decidedBy: 'open' | 'author' }, B extends { id: stri
   open: decisions.filter((decision) => decision.decidedBy === 'open').length,
   page: { url: 'https://www.notion.so/gd' },
   status: 'needs-author' as const,
+  reasonCode: null,
+  reason: null,
 })
 
 describe('the design tree', () => {

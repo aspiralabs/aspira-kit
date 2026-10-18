@@ -1,7 +1,7 @@
 // --local: the implementor's procedure with this Claude Code session as the orchestrator and its
 // subagents as the lane workers. Each call makes no model call. It replays the run over the files
-// already in the run directory and returns the first stage that has work left: the knowledge
-// stage (Notion pages to fetch), then the plan (spec input), the parallelization, each wave's
+// already in the run directory and returns the first stage that has work left, once the run has
+// loaded its knowledge itself (load-knowledge's shared walk; blocked without a NOTION_TOKEN): the plan (spec input), the parallelization, each wave's
 // worker lanes and the orchestrator's commit of that wave, and the final verification. Every
 // prompt is assembled when the step runs from the agent's own files: its procedure (the skill eve
 // loads, agent/skills/aspira-implementor/SKILL.md) and its instructions (agent/instructions.md).
@@ -15,19 +15,27 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { z } from 'zod'
+import { changedApps } from '@aspiralabs/agent-common/lib/changed-apps'
+import { readRunStatus, type ReasonCode } from '@aspiralabs/agent-common/lib/run-status'
+import { parseTicketMd, TICKET_FILE } from '@aspiralabs/agent-common/lib/ticket'
 import { dependenciesAdded, renderDependencies, type DependencyReport } from './dependencies.ts'
+import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
+import { KnowledgePrerequisiteError } from '@aspiralabs/agent-common/lib/ticket-driver'
 import {
   agentEnv,
+  hasProvenance,
   inspectKnowledge,
+  KnowledgeBlocked,
   knowledgeConfig,
   knowledgeFiles,
   knowledgeFingerprint,
+  knowledgeToken,
+  LOAD_KNOWLEDGE,
   requiredFetchedAt,
+  verifyGuidelines,
   writeRequired,
-  PAGE_HEADER,
   REQUIRED_NAME,
   type KnowledgeConfig,
-  type KnowledgePage,
   type RecordedPage,
 } from './local-knowledge.ts'
 import {
@@ -60,7 +68,7 @@ export type LocalInput = {
   source: string
   /** The local repository; default: the git repository holding the source. */
   repo?: string
-  /** A REQUIRED.md snapshot to use instead of live Notion pages. */
+  /** A REQUIRED.md snapshot load-knowledge wrote, used instead of live Notion pages (F50). */
   guidelines?: string
   /** Cap on concurrent worker lanes (default 4); fixed by the first call of a run. */
   maxParallel?: number
@@ -72,8 +80,8 @@ export type LocalInput = {
   finish?: boolean
 }
 
-/** Seams for tests: the agent package to read files from and the env its knowledge config comes from. */
-export type LocalDeps = { packageDir?: string; env?: Record<string, string | undefined>; now?: () => Date }
+/** Seams for tests: the agent package to read files from, the env its knowledge config and token come from, and the knowledge walk's own fetch/API base (never set outside tests). */
+export type LocalDeps = { packageDir?: string; env?: Record<string, string | undefined>; now?: () => Date; fetch?: (url: string, init?: RequestInit) => Promise<Response>; api?: string }
 
 /** Where a run is. */
 export type Stage = 'plan' | 'parallelize' | 'wave' | 'wave-commit' | 'verification'
@@ -81,36 +89,31 @@ export type Stage = 'plan' | 'parallelize' | 'wave' | 'wave-commit' | 'verificat
 /** A task as printed for the session. Orchestrator tasks run in the session; worker tasks run as subagents. */
 export type LocalTask = { id: string; agent: 'orchestrator' | 'worker'; prompt: string; output: string; schema: SchemaName; error?: string; retry?: boolean }
 
-/** The knowledge stage: the pages to fetch into knowledgeDir before anything else runs. */
-export type LocalKnowledge = {
-  pending: true
-  status: 'pending'
-  stage: 'knowledge'
-  workDir: string
-  knowledgeDir: string
-  config: KnowledgeConfig
-  /** The header line every page file starts with. */
-  pageHeader: string
-  pages: KnowledgePage[]
-}
-
 /** A model stage for the session to run. */
 export type LocalPending = { pending: true; status: 'pending'; stage: Stage; wave?: number; workDir: string; runDir: string; parallel: boolean; tasks: LocalTask[] }
 
-/** The run is over: exported, or refused or blocked at the gate. */
+/** The run is over: exported (`ready`/`incomplete`), refused or blocked at the gate, or blocked before it started because the knowledge could not be loaded. */
 export type LocalDone = {
   pending: false
-  status: 'complete' | 'incomplete' | 'refused' | 'blocked'
+  status: 'ready' | 'incomplete' | 'refused' | 'blocked'
   reason?: string
+  /** Which sub-case of status this is (a plan gone stale under a drifted repository, say). */
+  reasonCode?: ReasonCode | null
   problems?: string[]
   workDir: string
   export: string | null
   missing: { id: string; reason: string }[]
   verification?: z.infer<typeof SCHEMAS.VERIFICATION>
+  /** A ready export only: the branch the board-stage gate made the ticket branch. */
+  branch?: string
+  /** A ready export only: the app directories the build touched (changedApps), from the plan's repoCommit. */
+  apps?: string[]
+  /** A ready export only: HEAD when the build finished. */
+  head?: string
 }
 
 /** Any step's result. */
-export type LocalResult = LocalKnowledge | LocalPending | LocalDone
+export type LocalResult = LocalPending | LocalDone
 
 /**
  * Where a finished run's board trace, agent version and end-of-run board actions go: the run's work
@@ -140,8 +143,25 @@ const stateSchema = z.object({
       config: z.object({ indexPage: z.string().nullable(), required: z.array(z.string()), from: z.array(z.string()) }).nullable(),
     })
     .nullable(),
-  gate: z.object({ status: z.string(), repoCommit: z.string().nullable(), head: z.string(), decisions: z.array(z.unknown()) }).nullable(),
-  planAccepted: z.string().nullable(),
+  // Read through readRunStatus so a state saved before the five-status rename (one of run-status.ts's
+  // old per-skill words) still resumes instead of failing the schema (F7).
+  gate: z
+    .object({
+      status: z.string().transform((word) => readRunStatus(word)?.status ?? word),
+      repoCommit: z.string().nullable(),
+      head: z.string(),
+      decisions: z.array(z.unknown()),
+      // The Plan page's own URL when this gate's review.json was rebuilt from the Plan page's fenced
+      // block rather than produced by this machine's own planner run (F36); absent for an ordinary run.
+      recoveredFrom: z.string().nullable().optional(),
+    })
+    .nullable(),
+  // Pre-upgrade states carry the old boolean flag; read as "not yet accepted" (its only effect is a
+  // redundant target recheck, never incorrect behavior) so the schema does not reject the state.
+  planAccepted: z
+    .union([z.string(), z.boolean()])
+    .nullable()
+    .transform((value) => (typeof value === 'boolean' ? null : value)),
   rejections: z.record(z.string(), z.array(z.string())),
 })
 type State = z.infer<typeof stateSchema>
@@ -150,6 +170,14 @@ const sha256 = (text: string) => createHash('sha256').update(text).digest('hex')
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 async function git(repo: string, ...args: string[]): Promise<string> {
   return (await run('git', ['-C', repo, ...args])).stdout.trim()
+}
+
+/** Whether `commit` is an ancestor of (or equal to) `head` in `repo`: a recovered plan's gate needs its repoCommit to still be in this branch's history. */
+async function isAncestor(repo: string, commit: string, head: string): Promise<boolean> {
+  return run('git', ['-C', repo, 'merge-base', '--is-ancestor', commit, head]).then(
+    () => true,
+    () => false,
+  )
 }
 
 /** The worker brief template in the procedure: the fenced block after "Use this template:". */
@@ -248,36 +276,55 @@ function verificationInput(args: { base: string; dependencies: DependencyReport;
   ].join('\n')
 }
 
-/** Loads the knowledge (or says what to fetch); refuses a folder that changed mid-run. */
-async function loadKnowledge(source: Source, runDir: string, state: State, input: LocalInput, deps: LocalDeps): Promise<{ ready: Knowledge } | { stage: LocalKnowledge }> {
+/**
+ * Loads the knowledge, once per run: the first call fetches the folder itself through the shared
+ * walk (F49), or takes a verified --guidelines snapshot (F50); every later call of the run reads
+ * the same folder and refuses one that changed mid-run. Throws KnowledgeBlocked when there is no
+ * folder and no NOTION_TOKEN or KNOWLEDGE_PAGE to fetch with, and a KnowledgePrerequisiteError when
+ * the folder lacks the index or a required page. A topic page the walk did not reach is listed in
+ * the export, not required (F47).
+ */
+async function loadKnowledge(source: Source, runDir: string, state: State, input: LocalInput, deps: LocalDeps): Promise<Knowledge> {
   const dir = join(runDir, 'knowledge')
   if (state.knowledge !== null) {
     if ((await knowledgeFingerprint(dir)) !== state.knowledge.fingerprint) {
       throw new Error(`The knowledge folder ${dir} changed since this run started; the rules a run follows cannot change mid-run. Delete ${runDir} to start over.`)
     }
-    return { ready: state.knowledge }
+    return state.knowledge
   }
+  const packageDir = deps.packageDir ?? PACKAGE_DIR
+  const loaded = deps.env === undefined ? await agentEnv(packageDir) : { env: deps.env, from: ['injected env'] }
+  const config = knowledgeConfig(loaded.env, loaded.from)
   if (input.guidelines !== undefined) {
+    await verifyGuidelines(input.guidelines, config)
     await mkdir(dir, { recursive: true })
     const target = join(dir, REQUIRED_NAME)
     await copyFile(resolve(input.guidelines), target)
     const text = await readFile(target, 'utf8')
     const page: RecordedPage = { role: 'snapshot', title: basename(input.guidelines), url: null, file: REQUIRED_NAME, sha256: sha256(text) }
-    return { ready: { source: 'guidelines', fingerprint: await knowledgeFingerprint(dir), fetchedAt: null, pages: [page], config: null } }
+    return { source: 'guidelines', fingerprint: await knowledgeFingerprint(dir), fetchedAt: null, pages: [page], config: null }
   }
-  const packageDir = deps.packageDir ?? PACKAGE_DIR
-  const loaded = deps.env === undefined ? await agentEnv(packageDir) : { env: deps.env, from: ['injected env'] }
-  const config = knowledgeConfig(loaded.env, loaded.from)
+  // A folder already there (a resumed run, or one written before this run's own walk) is read as
+  // it is; otherwise this run fetches it, with the token from the project's env, never the agent's.
+  const already = (await readdir(dir).catch(() => [] as string[])).some((name) => name.endsWith('.md'))
+  if (!already) {
+    const found = await knowledgeToken(source.repo, deps.env ?? process.env)
+    if (found.token === undefined || config.indexPage === null) {
+      const missing = [found.token === undefined && `NOTION_TOKEN is not set in the environment or in ${found.files.join(' or ')}`, config.indexPage === null && 'KNOWLEDGE_PAGE is not set in the implementor\'s environment'].filter(Boolean).join('; ')
+      throw new KnowledgeBlocked(`The Notion rules are required and cannot be loaded: ${missing}. Set it, or run ${LOAD_KNOWLEDGE} and give the run its REQUIRED.md.`)
+    }
+    const walk = await walkKnowledge({ token: found.token, page: config.indexPage, required: config.required, ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.api ? { api: deps.api } : {}) })
+    await writeKnowledgeFolder(dir, walk)
+  }
   const found = await inspectKnowledge(dir, config)
-  if (!found.complete) {
-    await mkdir(dir, { recursive: true })
-    if (input.finish === true) throw new Error(`No knowledge: the Notion rules are not in ${dir} yet, so there is nothing to export. Fetch them (run local without --finish to see the pages) or pass --guidelines.`)
-    return { stage: { pending: true, status: 'pending', stage: 'knowledge', workDir: source.workDir, knowledgeDir: dir, config, pageHeader: PAGE_HEADER, pages: found.pages } }
-  }
+  const missing = found.pages.filter((page) => !page.present && page.role !== 'topic')
+  if (missing.length > 0) throw new KnowledgePrerequisiteError(`The Notion rules in ${dir} lack ${missing.map((page) => page.title ?? page.url ?? page.role).join(', ')}. Delete ${dir} so the next call loads it again from Notion.`)
   const fetchedAt = await requiredFetchedAt(dir, found.required, (deps.now ?? (() => new Date()))().toISOString())
-  const requiredPath = await writeRequired(dir, found.required, fetchedAt)
+  // The walk's own REQUIRED.md (with its provenance header) is kept as written; a folder without one gets it rendered as load-knowledge does.
+  const existing = await readFile(join(dir, REQUIRED_NAME), 'utf8').catch(() => '')
+  const requiredPath = hasProvenance(existing) ? join(dir, REQUIRED_NAME) : await writeRequired(dir, found.required, fetchedAt)
   const requiredPage: RecordedPage = { role: 'required', title: 'REQUIRED.md', url: null, file: REQUIRED_NAME, sha256: sha256(await readFile(requiredPath, 'utf8')) }
-  return { ready: { source: 'notion', fingerprint: await knowledgeFingerprint(dir), fetchedAt, pages: [...found.recorded, requiredPage], config } }
+  return { source: 'notion', fingerprint: await knowledgeFingerprint(dir), fetchedAt, pages: [...found.recorded, requiredPage], config }
 }
 
 type AgentFiles = { procedure: string; instructions: string }
@@ -380,7 +427,7 @@ function readInFull(repo: string, scope: string[], knowledge: { path: string }[]
   return [...project, ...(existsSync(constraints) ? [constraints] : []), ...knowledge.map((file) => file.path).filter((file) => basename(file) !== 'INDEX.md')]
 }
 
-/** One step of a --local build: the knowledge stage, the next model stage, or the finished run. */
+/** One step of a --local build: the next model stage, or the finished run (blocked when the knowledge cannot be loaded). */
 export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise<LocalResult> {
   if (input.maxParallel !== undefined && (!Number.isInteger(input.maxParallel) || input.maxParallel < 1 || input.maxParallel > 16)) throw new Error('--max-parallel must be a whole number from 1 to 16.')
   const source = await resolveSource(input)
@@ -402,41 +449,113 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   await mkdir(join(runDir, 'outputs'), { recursive: true })
   const save = () => writeFile(stateFile, JSON.stringify(state, null, 2))
 
-  const knowledge = await loadKnowledge(source, runDir, state, input, deps)
-  if ('stage' in knowledge) {
-    await save()
-    return knowledge.stage
+  let knowledge: Knowledge
+  try {
+    knowledge = await loadKnowledge(source, runDir, state, input, deps)
+  } catch (error) {
+    // No folder and nothing to fetch it with: a blocked run end (F52), not a pending stage for the session.
+    if (error instanceof KnowledgeBlocked) return { pending: false, status: 'blocked', reason: error.message, reasonCode: null, workDir: source.workDir, export: null, missing: [] }
+    throw error
   }
-  state.knowledge = knowledge.ready
+  state.knowledge = knowledge
   const knowledgeDir = join(runDir, 'knowledge')
 
   const done = (status: LocalDone['status'], extra: Partial<LocalDone> = {}): LocalDone => ({ pending: false, status, workDir: source.workDir, export: null, missing: [], ...extra })
 
+  const missing: { id: string; reason: string }[] = []
+  const calls: { id: string; stage: Stage; output: unknown }[] = []
+  const outputFile = (id: string) => join(runDir, 'outputs', `${id}.json`)
+  const promptFile = (id: string) => join(runDir, 'prompts', `${id}.md`)
+
+  /** The trace every outcome writes, win or not, so a reader of the run's record (RUN_RECORDS) always finds status, reason and reasonCode there. */
+  async function writeTrace(status: LocalDone['status'], extra: Partial<LocalDone>): Promise<string> {
+    const traceDir = join(source.workDir, 'trace')
+    await mkdir(traceDir, { recursive: true })
+    const withPrompts = await Promise.all(calls.map(async (call) => ({ ...call, prompt: await readFile(promptFile(call.id), 'utf8').catch(() => null) })))
+    const trace = {
+      mode: 'local',
+      source: { kind: source.kind, path: source.path },
+      repository: source.repo,
+      startedAt: state.startedAt,
+      finishedAt: new Date().toISOString(),
+      status,
+      reason: extra.reason ?? null,
+      reasonCode: extra.reasonCode ?? null,
+      ...(status === 'ready' ? { branch: extra.branch, apps: extra.apps, head: extra.head } : {}),
+      knowledge: { ...state.knowledge, required: await readFile(join(knowledgeDir, REQUIRED_NAME), 'utf8') },
+      gate: state.gate,
+      rejections: state.rejections,
+      missing,
+      calls: withPrompts,
+    }
+    const path = join(traceDir, 'implementation-local.json')
+    await writeFile(path, JSON.stringify(trace, null, 2))
+    return path
+  }
+
+  /** A finished build: ready or incomplete. The trace is written, the run's own work directory is cleared, and, for a ready build, the assumptions are recorded as reversible decisions. */
+  const exportRun = async (status: 'ready' | 'incomplete', extra: Partial<LocalDone> = {}): Promise<LocalDone> => {
+    const path = await writeTrace(status, extra)
+    // The assumptions as decisions the human can reverse: the taken option ticked, the others open.
+    if (extra.verification !== undefined) await writeFile(join(source.workDir, 'trace/decisions.md'), renderAssumptions(extra.verification.assumptions, extra.verification.status))
+    await rm(runDir, { recursive: true, force: true })
+    return done(status, { export: path, missing, ...extra })
+  }
+
+  /** The gate refuses or blocks before any stage runs: the trace is written (so the run's record always exists), but the run directory (and its cached knowledge) is kept, so a rerun after the human fixes it need not re-fetch Notion. */
+  const refuse = async (status: 'refused' | 'blocked', extra: Partial<LocalDone> = {}): Promise<LocalDone> => {
+    await writeTrace(status, extra)
+    return done(status, { missing, ...extra })
+  }
+
   // The gate, for a reviewed plan: once, before anything is written.
   if (source.kind === 'plan' && state.gate === null) {
     const review = await readFile(source.reviewFile ?? '', 'utf8').then(
-      (text) => z.looseObject({ status: z.string(), problems: z.array(z.unknown()).default([]), decisions: z.array(z.unknown()).default([]), repoCommit: z.string().optional() }).parse(JSON.parse(text)),
+      (text) => z.looseObject({ status: z.string(), problems: z.array(z.unknown()).default([]), decisions: z.array(z.unknown()).default([]), repoCommit: z.string().optional(), recoveredFrom: z.string().optional() }).parse(JSON.parse(text)),
       () => null,
     )
     if (review === null || !['ready', 'needs-author'].includes(review.status)) {
-      return done('refused', { reason: review === null ? `No readable trace/review.json in ${source.path}.` : `The reviewed plan's status is ${review.status}.`, problems: (review?.problems ?? []).map(String) })
+      return refuse('refused', {
+        reason: review === null ? `No readable trace/review.json in ${source.path}. Run the planner again (/aspira-planner --local) to produce a ready review.` : `The reviewed plan's status is ${review.status}. Run the planner again (/aspira-planner --local) to produce a ready review.`,
+        reasonCode: null,
+        problems: (review?.problems ?? []).map(String),
+      })
+    }
+    // A review.json rebuilt from the Plan page's fenced block (F36) was not produced by this
+    // machine's own planner run: it needs a stronger check than an ordinary reviewed plan before the
+    // gate trusts it. The ticket's live Status (not whatever an attacker's recovered copy claims)
+    // must still be "Ready: Plan", and the recorded repoCommit must still be in this branch's history.
+    if (review.recoveredFrom !== undefined) {
+      const ticket = await readFile(join(dirname(source.workDir), TICKET_FILE), 'utf8').then(parseTicketMd, () => null)
+      if (ticket === null || ticket.status !== 'Ready: Plan') {
+        return refuse('refused', {
+          reason: `This plan was recovered from Notion (${review.recoveredFrom}); recovery only runs while the ticket is "Ready: Plan". ${TICKET_FILE} shows "${ticket?.status ?? 'an unreadable Status'}".`,
+          reasonCode: null,
+          problems: [],
+        })
+      }
+      if (review.repoCommit === undefined || !(await isAncestor(source.repo, review.repoCommit, head))) {
+        return refuse('refused', {
+          reason: `This plan was recovered from Notion (${review.recoveredFrom}); its repoCommit (${review.repoCommit ?? 'missing'}) is not an ancestor of HEAD (${head}), so it no longer matches this branch's history. Run the planner again (/aspira-planner --local).`,
+          reasonCode: null,
+          problems: [],
+        })
+      }
     }
     if (review.repoCommit !== undefined && review.repoCommit !== head) {
       const plan = planOf(await readFile(source.planFile, 'utf8'))
       const drift = plan === null ? [`${source.planFile} is not a readable plan.`] : targetProblems(plan, (path) => existsSync(join(source.repo, path)))
-      if (drift.length > 0) return done('blocked', { reason: `The plan was made at ${review.repoCommit} and HEAD is ${head}; its targets no longer match.`, problems: drift })
+      if (drift.length > 0) {
+        return refuse('refused', { reason: `The plan was made at ${review.repoCommit} and HEAD is ${head}; its targets no longer match. Run the planner again (/aspira-planner --local).`, reasonCode: 'plan-drift', problems: drift })
+      }
     }
-    state.gate = { status: review.status, repoCommit: review.repoCommit ?? null, head, decisions: review.decisions }
+    state.gate = { status: review.status, repoCommit: review.repoCommit ?? null, head, decisions: review.decisions, recoveredFrom: review.recoveredFrom ?? null }
   }
 
   const files = await agentFiles(deps)
   const knowledgeText = await knowledgeSection(knowledgeDir)
   const knowledgeList = await knowledgeFiles(knowledgeDir)
   const finish = input.finish === true
-  const missing: { id: string; reason: string }[] = []
-  const calls: { id: string; stage: Stage; output: unknown }[] = []
-  const outputFile = (id: string) => join(runDir, 'outputs', `${id}.json`)
-  const promptFile = (id: string) => join(runDir, 'prompts', `${id}.md`)
   await mkdir(join(runDir, 'prompts'), { recursive: true })
 
   /** Reads and checks one output; a bad one is set aside for one resend. */
@@ -499,31 +618,6 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     return { pending: true, status: 'pending', stage: task.stage, ...(task.wave === undefined ? {} : { wave: task.wave }), workDir: source.workDir, runDir, parallel: false, tasks: [{ id: task.id, agent: 'orchestrator', prompt, output, schema, ...outcome }] }
   }
 
-  const exportRun = async (status: 'complete' | 'incomplete', extra: Partial<LocalDone> = {}): Promise<LocalDone> => {
-    const traceDir = join(source.workDir, 'trace')
-    await mkdir(traceDir, { recursive: true })
-    const withPrompts = await Promise.all(calls.map(async (call) => ({ ...call, prompt: await readFile(promptFile(call.id), 'utf8').catch(() => null) })))
-    const trace = {
-      mode: 'local',
-      source: { kind: source.kind, path: source.path },
-      repository: source.repo,
-      startedAt: state.startedAt,
-      finishedAt: new Date().toISOString(),
-      status,
-      knowledge: { ...state.knowledge, required: await readFile(join(knowledgeDir, REQUIRED_NAME), 'utf8') },
-      gate: state.gate,
-      rejections: state.rejections,
-      missing,
-      calls: withPrompts,
-    }
-    const path = join(traceDir, 'implementation-local.json')
-    await writeFile(path, JSON.stringify(trace, null, 2))
-    // The assumptions as decisions the human can reverse: the taken option ticked, the others open.
-    if (extra.verification !== undefined) await writeFile(join(traceDir, 'decisions.md'), renderAssumptions(extra.verification.assumptions, extra.verification.status))
-    await rm(runDir, { recursive: true, force: true })
-    return done(status, { export: path, missing, ...extra })
-  }
-
   // The plan: the reviewed one, or the one the session drafts from the spec.
   let plan: Plan
   if (source.kind === 'plan') {
@@ -557,9 +651,15 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     return orchestrator({ id: 'parallelize', stage: 'parallelize', sections, does: 'Decide the waves and lanes, and for every lane whether a worker builds it, its write scope and the rules its brief carries. Print the parallelization as the Procedure says, then record it in the output.', input }, 'PARALLELIZATION', parOutput, par)
   }
 
+  // The checked-out branch: the board-stage gate (the driver's beforeClaim) already refused a
+  // wrong branch before the ticket was claimed, so this is the ticket branch (or, for a run with
+  // no ticket, whatever the human switched to). A build never lands on the default branch or a
+  // detached HEAD: that is refused as a run status before any build stage, not thrown (F22).
   const branch = await git(source.repo, 'rev-parse', '--abbrev-ref', 'HEAD')
   const main = await defaultBranch(source.repo)
-  if (branch === main || branch === 'HEAD') throw new Error(`${source.repo} is on ${branch === 'HEAD' ? 'a detached HEAD' : `the default branch ${main}`}. The procedure's "${procedureHeading(files.procedure, 1)}" builds on a dedicated branch: switch to it, then run local again.`)
+  if (branch === main || branch === 'HEAD') {
+    return refuse('refused', { reason: `${source.repo} is on ${branch === 'HEAD' ? 'a detached HEAD' : `the default branch ${main}`}. The procedure's "${procedureHeading(files.procedure, 1)}" builds on a dedicated branch: run \`git switch -c <branch>\`, then run local again.` })
+  }
 
   const tasksById = new Map(plan.tasks.map((t) => [t.id, t]))
   const rawPlan = z.object({ tasks: z.array(z.looseObject({ id: z.string() })), tests: z.array(z.looseObject({ id: z.string() })).default([]) }).parse(JSON.parse(await readFile(source.planFile, 'utf8')))
@@ -692,7 +792,11 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     const input = verificationInput({ base, dependencies, notes, workDir: source.workDir, slopAreas })
     return orchestrator({ id: 'verification', stage: 'verification', sections: [6, 7], does, input }, 'VERIFICATION', verifyOutput, verification, { features, branchBase: base, notesFiles, slopAreas })
   }
-  return exportRun('complete', { verification: verification.value })
+  // The app directories this build touched, from the plan's own repoCommit (the gate's base), so
+  // the progress note can offer Step 7 (static analysis) per app without recomputing the diff.
+  const appsBase = state.gate?.repoCommit ?? (state.startCommit === '' ? head : state.startCommit)
+  const apps = await changedApps(source.repo, appsBase)
+  return exportRun('ready', { verification: verification.value, branch, apps, head })
 }
 
 function planOf(text: string): Plan | null {

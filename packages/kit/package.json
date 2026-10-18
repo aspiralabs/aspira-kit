@@ -28,6 +28,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aspiralabs/agent-common": "workspace:*",
     "zod": "4.5.4"
   },
   "devDependencies": {

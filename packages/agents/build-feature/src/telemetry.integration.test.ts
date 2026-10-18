@@ -308,7 +308,8 @@ describe('KIT-19 T24 F6: every printed step command carries --parent-run <runId>
     expect({
       stage: step.stage?.stage,
       command: String(step.stage?.command).endsWith(suffix),
-      prompt: prompt.split('\n').some((line) => line.startsWith('/aspira-planner') && line.endsWith(suffix)),
+      // KIT-2 (F44): the prompt names the launcher form, not the slash command; the launcher line carries the suffix.
+      prompt: prompt.split('\n').some((line) => line.includes('/scripts/planner.sh') && line.endsWith(suffix)),
     }).toEqual({ stage: 'step', command: true, prompt: true })
   }, SLOW)
 
@@ -578,7 +579,7 @@ describe('KIT-19 T27 F9 F22: an earlier run state and step reports in three shap
   })
 
   it('marks the malformed usage step gap invalid and keeps its status', () => {
-    expect({ gap: attr(seen.trace.step('implementor'), 'aspira.gap'), status: seen.implementorStatus }).toEqual({ gap: 'invalid', status: 'complete' })
+    expect({ gap: attr(seen.trace.step('implementor'), 'aspira.gap'), status: seen.implementorStatus }).toEqual({ gap: 'invalid', status: 'ready' })
   })
 
   it('writes no telemetry file for the earlier run', () => {
@@ -752,9 +753,9 @@ describe('KIT-19 T31 F20: status words map to the OTLP status code', () => {
     seen.trace = await readTrace(h.folder, h.runId)
   }, SLOW)
 
-  it('records the code-analyzer step that ended partial as aspira.status partial with code ERROR', () => {
+  it('records the code-analyzer step that ended partial (now incomplete, KIT-2) as aspira.status incomplete with code ERROR', () => {
     const span = seen.trace.step('code-analyzer')
-    expect({ status: attr(span, 'aspira.status'), code: statusOf(span) }).toEqual({ status: 'partial', code: 'ERROR' })
+    expect({ status: attr(span, 'aspira.status'), code: statusOf(span) }).toEqual({ status: 'incomplete', code: 'ERROR' })
   })
 
   it('gives the root span of a run that ended stopped the code ERROR', () => {

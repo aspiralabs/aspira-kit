@@ -21,7 +21,7 @@ cd packages/agents/spec-writer
 pnpm write /absolute/idea.md /absolute/repository /absolute/REQUIRED.md [/absolute/output]
 ```
 
-Results go to `spec.written/` beside the idea unless an output directory is given: `idea.md`, `spec.draft.md`, `spec.md` (when the review produced valid edits), `run-analysis.md` and `trace/` (exploration, findings, decisions, checks, prompts, outputs, usage). Reruns archive the previous report in `trace/history/`. The idea file is never edited. Exit 0 means ready; 1 means needs-author or incomplete.
+Results go to `spec.written/` beside the idea unless an output directory is given: `idea.md`, `spec.draft.md`, `spec.md` (when the review produced valid edits), `run-analysis.md` and `trace/` (exploration, findings, decisions, checks, prompts, outputs, usage). Reruns archive the previous report in `trace/history/`. The idea file is never edited. The CLI exits by run status: exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author.
 
 The eve entry point loads the required guidelines from Notion when no snapshot is given:
 

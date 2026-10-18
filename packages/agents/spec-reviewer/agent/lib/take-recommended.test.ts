@@ -11,6 +11,7 @@ import { expect, it, vi } from 'vitest'
 
 vi.mock('./repository.ts', () => ({ repository: async () => ({ instructions: '', packet: () => 'source.ts:1: evidence', gaps: [], files: new Map(), commit: 'abc', dirty: false, tools: {} }) }))
 import { runLocal, type LocalInput } from './local.ts'
+import { writeSnapshot } from './snapshot.test-helper.ts'
 
 // A spec that already satisfies the business spec contract (common/lib/spec.ts checkBusinessSpec),
 // since the author disposition below carries no edit to fix it up.
@@ -25,7 +26,7 @@ async function setup() {
   const specPath = join(dir, 'spec.md')
   const guidelinesPath = join(dir, 'rules.md')
   await writeFile(specPath, SPEC)
-  await writeFile(guidelinesPath, 'REV-001 Check the spec')
+  await writeSnapshot(guidelinesPath)
   return { dir, specPath, guidelinesPath, input: { specPath, guidelinesPath, repoPath: dir, uiRequired: false } }
 }
 

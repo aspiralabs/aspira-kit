@@ -2,13 +2,19 @@
 // when given, and, in a repository where the app that owns package.json and node_modules is not
 // the root (apps/web), that app's directory. `kit init` writes it, `kit doctor` checks it, the
 // skills, the launchers and `kit next` read it.
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import { readJson, writeJson, type Log } from './fs.js'
 
 export const ASPIRA_FILE = 'aspira.json'
 
-export type AspiraConfig = { board: string; releases?: string; app?: string }
+export type AspiraConfig = { board: string; releases?: string; glossary?: string; decisions?: string; app?: string }
+
+/** aspira.json's Notion keys that `kit doctor` resolves by id: the Feature Board (a database or,
+ * for a collection:// value, a data source) and three pages, once those keys exist. */
+export const NOTION_KEYS = ['board', 'releases', 'glossary', 'decisions'] as const
+export type NotionKey = (typeof NOTION_KEYS)[number]
+export type NotionTarget = { key: NotionKey; url: string; kind: 'database' | 'page' | 'data_source' }
 
 /** A Notion page or database URL (notion.so or app.notion.com) or a collection:// data source URL. */
 export function isNotionUrl(value: unknown): value is string {
@@ -94,6 +100,48 @@ export function writeAspira(opts: { projectRoot: string; board?: string; release
   const keys = [next.board === undefined ? '' : 'board', next.releases === undefined ? '' : 'releases', next.app === undefined ? '' : `app ${next.app}`].filter(Boolean).join(', ')
   opts.log(`${existsSync(path) ? 'update' : 'write '} ${path} (${keys}${next.board === undefined ? '; no --board given, the project has no Feature Board until it is' : ''})`)
   if (!opts.dryRun) writeJson(path, next)
+}
+
+/** The Notion keys aspira.json actually sets, each resolved to the check `kind` Notion needs: `board`
+ * as a database (a data source for a `collection://` value), every other key as a page. `repository`,
+ * `app` and anything else in aspira.json are never included: they are not Notion URLs `kit doctor`
+ * resolves by id. */
+export function notionTargets(config: Partial<AspiraConfig> | undefined): NotionTarget[] {
+  if (config === undefined) return []
+  return NOTION_KEYS.flatMap((key) => {
+    const url = config[key]
+    if (typeof url !== 'string' || url.trim() === '') return []
+    const kind = key === 'board' ? (url.trim().toLowerCase().startsWith('collection://') ? 'data_source' : 'database') : 'page'
+    return [{ key, url, kind }]
+  })
+}
+
+/** Where `kit doctor` looks for NOTION_TOKEN, in precedence order: the process environment first
+ * (so `kit next`'s own env-file precedence is matched), then the app's `.env.local`, then the
+ * project root's. When there is no `app` (a single-app project) the app and root files are the
+ * same file, so only one is named. Labels are relative, for display: never an absolute path. */
+export function notionTokenCandidates(app: string | undefined): string[] {
+  return ['the process environment', ...(app ? [`${app}/.env.local`] : []), '.env.local']
+}
+
+export type NotionTokenSource = { token: string; source: string }
+
+/** The first NOTION_TOKEN found, by `notionTokenCandidates`'s order, with the label it came from.
+ * Reads the env files directly; never mutates `env` or `process.env`. */
+export function notionTokenSource(projectRoot: string, app: string | undefined, env: Record<string, string | undefined> = process.env): NotionTokenSource | undefined {
+  const fromEnv = env.NOTION_TOKEN?.trim()
+  if (fromEnv) return { token: fromEnv, source: 'the process environment' }
+  const appDir = appRoot(projectRoot, app)
+  const files: { file: string; label: string }[] = []
+  if (app !== undefined && app !== '.') files.push({ file: join(appDir, '.env.local'), label: `${app}/.env.local` })
+  files.push({ file: join(projectRoot, '.env.local'), label: '.env.local' })
+  for (const { file, label } of files) {
+    if (!existsSync(file)) continue
+    const match = /^NOTION_TOKEN=(.*)$/m.exec(readFileSync(file, 'utf8'))
+    const value = match?.[1]?.trim()
+    if (value) return { token: value, source: label }
+  }
+  return undefined
 }
 
 /** The doctor's view: ok, or why not. */

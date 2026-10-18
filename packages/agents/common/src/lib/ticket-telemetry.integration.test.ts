@@ -466,7 +466,7 @@ describe('hand-run telemetry', () => {
       const one = await handFinish('groomer', first, AT_5M, { runStatus: 'needs-author', exportDir })
       const second = await handStart('groomer', '2026-10-15T09:10:00.000Z')
       await ledger('2026-10-15T09:12:00.000Z')
-      const two = await handFinish('groomer', second, '2026-10-15T09:15:00.000Z', { runStatus: 'confirmed', exportDir })
+      const two = await handFinish('groomer', second, '2026-10-15T09:15:00.000Z', { runStatus: 'ready', exportDir })
       return { one, two }
     }
 
@@ -477,10 +477,10 @@ describe('hand-run telemetry', () => {
 
     it('the groomer\'s exit code and recorded run-status are as before', async () => {
       const { one, two } = await twoRounds()
-      // As the finish records them without telemetry: a confirm with Confirm unticked is recorded needs-author and exits 1.
+      // As the finish records them without telemetry (KIT-2, Decision Q4): a ready reported with Confirm unticked is recorded needs-author, and needs-author exits NEEDS_AUTHOR_EXIT (5) either way.
       expect([one, two].map((round) => ({ code: round.code, runStatus: valueOf(round.out, 'run-status') }))).toEqual([
-        { code: 0, runStatus: 'needs-author' },
-        { code: 1, runStatus: 'needs-author' },
+        { code: 5, runStatus: 'needs-author' },
+        { code: 5, runStatus: 'needs-author' },
       ])
     })
   })
@@ -610,7 +610,7 @@ describe('hand-run telemetry', () => {
         )
       }
       at(AT_20M)
-      const run = { ok: true, status: 'ready', exportDir: exportOf(), verifyCommand: 'planner.sh local NOM-4 --verify', sessionUsage: reportOf() }
+      const run = { status: 'ready' as const, exportDir: exportOf(), verifyCommand: 'planner.sh local NOM-4 --verify', sessionUsage: reportOf() }
       const end = await afterRun(ctx(), ready, run)
       return { ready, end }
     }
@@ -628,7 +628,7 @@ describe('hand-run telemetry', () => {
       await mkdir(exportOf(), { recursive: true })
       await writeFile(join(exportOf(), 'plan.reviewed.md'), '# Plan\n')
       at(AT_20M)
-      const run = { ok: true, status: 'ready', exportDir: exportOf(), verifyCommand: 'planner.sh local NOM-4 --verify', sessionUsage: reportOf() }
+      const run = { status: 'ready' as const, exportDir: exportOf(), verifyCommand: 'planner.sh local NOM-4 --verify', sessionUsage: reportOf() }
       await afterRun(ctx(), ready, run)
       expect({ id: persisted.includes(RUN_T0), start: persisted.some((value) => Date.parse(value) === T0_MS), files: await telemetryFiles() }).toEqual({ id: true, start: true, files: [`${RUN_T0}.json`] })
     })
@@ -689,7 +689,7 @@ describe('hand-run telemetry', () => {
       await writeFile(join(exportOf(), 'trace', 'decisions.md'), `# Grooming Decisions\n\nRound ${n}.\n`)
       at(when)
       const ready = await localReady(ctx(), resolveAs())
-      const run = { ok: true, status: 'needs-author', exportDir: exportOf(), verifyCommand: 'groomer.sh local NOM-4 --verify', round: n, sessionUsage: join(exportOf(), 'trace', 'session-usage.json') }
+      const run = { status: 'needs-author' as const, exportDir: exportOf(), verifyCommand: 'groomer.sh local NOM-4 --verify', round: n, sessionUsage: join(exportOf(), 'trace', 'session-usage.json') }
       return { ready, run }
     }
 

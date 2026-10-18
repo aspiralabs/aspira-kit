@@ -1,11 +1,14 @@
 // Where each step's result is read and whether the run goes on. The session's step report (one
 // result line and the usage) is validated, but the verdict comes from the step's own export,
-// validated at the boundary (PATTERN-012): a status word the table does not know stops the run.
+// validated at the boundary (PATTERN-012): every status word is read through readRunStatus (F7),
+// so a pre-upgrade per-skill word (complete, clean, confirmed, ...) reads as its new five-word
+// status and a word readRunStatus does not know stops the run as incomplete.
 
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { countsFromFindings } from '@aspiralabs/agent-common/lib/findings-counts'
+import { readRunStatus, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
 import type { SourceKind } from '@aspiralabs/agent-common/lib/telemetry-sources'
 import type { StepName } from '#src/route.ts'
 import { subagentUsageSchema, usageSchema, type RunState, type SubagentUsage, type Usage } from '#src/run-state.ts'
@@ -49,12 +52,8 @@ export function readStepUsage(raw: unknown): Usage {
 export type ResultPaths = { folder: string; repo: string; app: string }
 
 type ResultRow = {
-  /** The export file the verdict is read from, or null when the report carries the status (pr-reviewer). */
-  file: (paths: ResultPaths) => string | null
-  /** The status word in that file. */
-  status: z.ZodType<string>
-  continueOn: readonly string[]
-  stopOn: readonly string[]
+  /** The export file the status word is read from. */
+  file: (paths: ResultPaths) => string
   /** The step agent's own usage file, read in cloud mode when the step is accepted (KIT-19), or null when it records none (implementor). */
   usage: (paths: ResultPaths) => { file: string; kind: SourceKind } | null
 }
@@ -62,15 +61,18 @@ type ResultRow = {
 /** The `status` word of an export, the rest of the file passed through. */
 const reviewStatus = z.looseObject({ status: z.string().min(1) }).transform((value) => value.status)
 
-/** Per step: where its result is read, the continue/stop rule, and where its agent records its usage (KIT-19). */
+/** Every step continues on `ready` and stops on anything else readRunStatus knows (F7); an unknown word also stops, as "a status the run does not know". */
+const CONTINUE_ON: RunStatus = 'ready'
+
+/** Per step: where its result is read, and where its agent records its usage (KIT-19). */
 export const stepResultTable: Readonly<Record<StepName, ResultRow>> = {
-  groomer: { file: ({ folder }) => join(folder, 'groom/trace/groom.json'), status: reviewStatus, continueOn: ['confirmed'], stopOn: ['needs-author', 'stopped', 'incomplete'], usage: ({ folder }) => ({ file: join(folder, 'groom/trace/usage.json'), kind: 'usage.json' }) },
-  'spec-writer': { file: ({ folder }) => join(folder, 'spec.written/trace/review.json'), status: reviewStatus, continueOn: ['ready'], stopOn: ['needs-author', 'incomplete'], usage: ({ folder }) => ({ file: join(folder, 'spec.written/trace/usage.json'), kind: 'usage.json' }) },
-  'spec-reviewer': { file: ({ folder }) => join(folder, 'spec.reviewed/trace/review.json'), status: reviewStatus, continueOn: ['ready'], stopOn: ['needs-author', 'incomplete'], usage: ({ folder }) => ({ file: join(folder, 'spec.reviewed/trace/usage.json'), kind: 'usage.json' }) },
-  planner: { file: ({ folder }) => join(folder, 'plan.review/trace/review.json'), status: reviewStatus, continueOn: ['ready'], stopOn: ['needs-author', 'incomplete'], usage: ({ folder }) => ({ file: join(folder, 'plan.review/trace/usage.json'), kind: 'usage.json' }) },
-  implementor: { file: ({ folder }) => join(folder, 'plan.review/trace/implementation-local.json'), status: reviewStatus, continueOn: ['complete'], stopOn: ['incomplete', 'refused', 'blocked'], usage: () => null },
-  'code-analyzer': { file: ({ repo, app }) => join(repo, app, '.static-analysis/rounds.json'), status: reviewStatus, continueOn: ['clean'], stopOn: [], usage: ({ repo, app }) => ({ file: join(repo, app, '.static-analysis/usage.json'), kind: 'ledger' }) },
-  'pr-reviewer': { file: () => null, status: z.string(), continueOn: ['complete'], stopOn: ['incomplete'], usage: ({ folder }) => ({ file: join(folder, 'pr-review/usage.jsonl'), kind: 'usage.jsonl' }) },
+  groomer: { file: ({ folder }) => join(folder, 'groom/trace/groom.json'), usage: ({ folder }) => ({ file: join(folder, 'groom/trace/usage.json'), kind: 'usage.json' }) },
+  'spec-writer': { file: ({ folder }) => join(folder, 'spec.written/trace/review.json'), usage: ({ folder }) => ({ file: join(folder, 'spec.written/trace/usage.json'), kind: 'usage.json' }) },
+  'spec-reviewer': { file: ({ folder }) => join(folder, 'spec.reviewed/trace/review.json'), usage: ({ folder }) => ({ file: join(folder, 'spec.reviewed/trace/usage.json'), kind: 'usage.json' }) },
+  planner: { file: ({ folder }) => join(folder, 'plan.review/trace/review.json'), usage: ({ folder }) => ({ file: join(folder, 'plan.review/trace/usage.json'), kind: 'usage.json' }) },
+  implementor: { file: ({ folder }) => join(folder, 'plan.review/trace/implementation-local.json'), usage: () => null },
+  'code-analyzer': { file: ({ repo, app }) => join(repo, app, '.static-analysis/rounds.json'), usage: ({ repo, app }) => ({ file: join(repo, app, '.static-analysis/usage.json'), kind: 'ledger' }) },
+  'pr-reviewer': { file: ({ folder }) => join(folder, 'pr-review/trace/review.json'), usage: ({ folder }) => ({ file: join(folder, 'pr-review/usage.jsonl'), kind: 'usage.jsonl' }) },
 }
 
 export type Counts = { critical: number; high: number; medium: number; low: number; info: number }
@@ -88,38 +90,40 @@ async function readJson(file: string): Promise<{ ok: true; value: unknown } | { 
   }
 }
 
-/** The verdict for a step from its export (and, for the pr-reviewer, its report and findings.md). */
+/** The pr-reviewer's counts from findings.md, alongside its own verdict (every other step has none). */
+async function pullReviewerCounts(paths: ResultPaths): Promise<Counts | null> {
+  const findings = join(paths.folder, 'pr-review/findings.md')
+  const text = await readFile(findings, 'utf8').catch(() => null)
+  return text === null ? null : countsFromFindings(text)
+}
+
+/** The verdict for a step from its export (F7); the pr-reviewer also carries findings.md's counts. */
 export async function readStepResult(step: StepName, report: StepReport, paths: ResultPaths): Promise<StepResult> {
   const row = stepResultTable[step]
   if (report.status === 'refused') return { verdict: 'stop', status: 'refused', file: null, message: `${step} refused: ${report.resultLine || 'the step refused at its Status gate'}` }
   const file = row.file(paths)
-  if (file === null) {
-    // pr-reviewer: the report's word, then the counts from findings.md.
-    if (!row.continueOn.includes(report.status)) return { verdict: 'stop', status: report.status, file: null, message: `${step} ended ${report.status}: ${report.resultLine}` }
-    const findings = join(paths.folder, 'pr-review/findings.md')
-    const text = await readFile(findings, 'utf8').catch(() => null)
-    const counts = text === null ? null : countsFromFindings(text)
-    if (counts === null) return { verdict: 'stop', status: report.status, file: findings, message: `${step} left no findings the run can count: ${relative(paths, findings)} is missing or not a findings file`, counts: null }
-    return { verdict: 'continue', status: report.status, file: findings, message: `${step} complete: ${counts.critical} critical, ${counts.high} high`, counts }
-  }
   const shown = relative(paths, file)
   const json = await readJson(file)
   if (!json.ok) return { verdict: 'stop', status: report.status, file, message: `${step} left no result the run can read: ${shown} ${json.reason}` }
-  const parsed = row.status.safeParse(json.value)
+  const parsed = reviewStatus.safeParse(json.value)
   if (!parsed.success) return { verdict: 'stop', status: report.status, file, message: `${step} left no status in ${shown}` }
-  const status = parsed.data
-  if (row.continueOn.includes(status)) return { verdict: 'continue', status, file, message: `${step} ${status}` }
-  const known = row.stopOn.includes(status)
+  const read = readRunStatus(parsed.data)
+  if (read === null) return { verdict: 'stop', status: parsed.data, file, message: `${step} ended ${parsed.data} (a status the run does not know) in ${shown}: ${report.resultLine}.` }
+  const counts = step === 'pr-reviewer' ? await pullReviewerCounts(paths) : undefined
+  if (read.status === CONTINUE_ON) {
+    const message = step === 'pr-reviewer' && counts !== null && counts !== undefined ? `${step} ${read.status}: ${counts.critical} critical, ${counts.high} high` : `${step} ${read.status}`
+    return { verdict: 'continue', status: read.status, file, message, ...(counts === undefined ? {} : { counts }) }
+  }
   const before = step === 'code-analyzer' ? ' The run stops before the PR.' : ''
-  return { verdict: 'stop', status, file, message: `${step} ended ${status}${known ? '' : ' (a status the run does not know)'} in ${shown}: ${report.resultLine}.${before}` }
+  return { verdict: 'stop', status: read.status, file, message: `${step} ended ${read.status} in ${shown}: ${report.resultLine}.${before}`, ...(counts === undefined ? {} : { counts }) }
 }
 
-/** The implementor's last exported status, or null when it has not exported. */
-export async function readImplementorStatus(folder: string): Promise<string | null> {
+/** The implementor's last exported status, read through readRunStatus (F7), or null when it has not exported or the word is unknown. */
+export async function readImplementorStatus(folder: string): Promise<RunStatus | null> {
   const json = await readJson(join(folder, 'plan.review/trace/implementation-local.json'))
   if (!json.ok) return null
   const parsed = reviewStatus.safeParse(json.value)
-  return parsed.success ? parsed.data : null
+  return parsed.success ? (readRunStatus(parsed.data)?.status ?? null) : null
 }
 
 const readText = (file: string) => readFile(file, 'utf8').catch(() => null)
@@ -137,8 +141,8 @@ export async function readSpecCoverage(folder: string, state: RunState): Promise
   return reviewerReady && state.steps.some((step) => step.step === 'spec-reviewer' && step.status === 'ready')
 }
 
-/** The code-analyzer finished clean after the last build. */
-export function analyzerClean(state: RunState): boolean {
+/** The code-analyzer finished ready (or its pre-upgrade clean) after the last build. */
+export function analyzerReady(state: RunState): boolean {
   const last = state.steps.filter((step) => step.step === 'implementor' || step.step === 'code-analyzer').at(-1)
-  return last?.step === 'code-analyzer' && last.status === 'clean'
+  return last?.step === 'code-analyzer' && readRunStatus(last.status)?.status === 'ready'
 }

@@ -44,7 +44,7 @@ describe('runStaticAnalysis (local)', () => {
       return { edits: batch.files.length, editedFiles: batch.files, rejected: [], unresolved: [] }
     }
     const result = await runStaticAnalysis({ source: dir, guidelines: await snapshot() }, { fixer })
-    expect(result.status).toBe('clean')
+    expect(result.status).toBe('ready')
     expect(result.initial).toBe(1)
     expect(result.remaining).toBe(0)
     expect(result.editedFiles).toEqual(['src/a.js'])
@@ -52,7 +52,7 @@ describe('runStaticAnalysis (local)', () => {
     expect((await readdir(result.dir)).sort()).toEqual(['calls.json', 'diagnostics.json', 'guidelines', 'report.md', 'rounds.json', 'usage.json'])
     expect(await readFile(join(result.dir, 'guidelines', 'REQUIRED.md'), 'utf8')).toBe(REQUIRED_MD)
     expect(await readFile(join(dir, 'src/a.js'), 'utf8')).toContain('const x')
-    expect(await readFile(join(dir, '.static-analysis/report.md'), 'utf8')).toContain('Status: **clean**')
+    expect(await readFile(join(dir, '.static-analysis/report.md'), 'utf8')).toContain('Status: **ready**')
     const status = (await exec('git', ['-C', dir, 'status', '--porcelain'])).stdout.split('\n').filter(Boolean)
     expect(status).toEqual([' M .gitignore', ' M src/a.js'])
     await runStaticAnalysis({ source: dir, maxRounds: 1, guidelines: await snapshot() }, { fixer: noFix })
@@ -74,7 +74,7 @@ describe('runStaticAnalysis (local)', () => {
       return { edits: batch.files.length, editedFiles: batch.files, rejected: [], unresolved: [] }
     }
     const result = await runStaticAnalysis({ source: web, guidelines: await snapshot() }, { fixer })
-    expect(result).toMatchObject({ status: 'clean', label: web, dir: join(web, '.static-analysis'), initial: 1, remaining: 0, editedFiles: ['src/a.js'] })
+    expect(result).toMatchObject({ status: 'ready', label: web, dir: join(web, '.static-analysis'), initial: 1, remaining: 0, editedFiles: ['src/a.js'] })
     expect(seen).toEqual([['src/a.js']])
     expect(await readFile(join(web, 'src/a.js'), 'utf8')).toContain('const x')
     expect(await readFile(join(web, '.gitignore'), 'utf8')).toBe('.static-analysis/\n')
@@ -84,10 +84,10 @@ describe('runStaticAnalysis (local)', () => {
     expect(await repositoryInstructions(hostExecutor(web), dir)).toContain('SOURCE AGENTS.md\nRoot rule: prefer const.')
     expect(await repositoryInstructions(hostExecutor(dir), dir)).toBe('SOURCE AGENTS.md\nRoot rule: prefer const.\n')
   })
-  it('reports partial with the stop reason when nothing can be fixed', async () => {
+  it('reports incomplete (formerly partial) with the stop reason when nothing can be fixed', async () => {
     const dir = await fixture()
     const result = await runStaticAnalysis({ source: dir, maxRounds: 2, guidelines: await snapshot() }, { fixer: noFix })
-    expect(result.status).toBe('partial')
+    expect(result.status).toBe('incomplete')
     expect(result.reason).toContain('no progress')
     expect(result.remaining).toBe(1)
   })
@@ -126,7 +126,7 @@ describe('runStaticAnalysis (remote)', () => {
     const out = await mkdtemp(join(tmpdir(), 'sa-remote-out-'))
     const fixer: Fixer = async ({ batch }) => { files.set('/workspace/repo/src/a.js', 'const x = 1\n'); state.errors = false; return { edits: 1, editedFiles: batch.files, rejected: [], unresolved: [] } }
     const result = await runStaticAnalysis({ source: 'aspiralabs/fixture', outputDir: out, guidelines: await snapshot() }, { getSandbox: async () => sandbox, fixer, now: () => new Date('2026-09-27T10:00:00Z') })
-    expect(result.status).toBe('clean')
+    expect(result.status).toBe('ready')
     expect(result.remote).toEqual({ branch: 'static-analysis/20260927-100000', commit: 'deadbeefcafe', pushed: false, pullRequest: null })
     expect(commands[0]).toContain("git clone --quiet --depth 50 'https://github.com/aspiralabs/fixture.git' '/workspace/repo'")
     expect(commands.some((c) => c.includes('npm install'))).toBe(true)

@@ -2,6 +2,7 @@
 name: aspira-pr-reviewer
 description: Run the official pr-reviewer agent on a pull request (a GitHub PR or a local branch) and report its result. By default it launches pr-reviewer as a separate process; with --local the same agent pipeline runs inside this Claude Code session, using the agent's own instruction files. Use for /aspira-pr-reviewer or requests to review a PR or branch with this agent.
 argument-hint: [<ticket ID | Notion URL> | <github-pr | repo-path> --no-ticket] [--local] [--force-pull] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--yes] [--parent-run RUN:NONCE]
+disable-model-invocation: true
 ---
 
 # PR review
@@ -30,11 +31,13 @@ Flags both modes take: `--max-rounds N` caps the rounds; `--max-cost USD` is the
 | Where the model work runs | `pr-reviewer`, a separate eve process | subagents of this Claude Code session |
 | Models | as configured in the agent's `agent.ts` files | this session's model, for every seat and Quinn |
 | Instructions | the agent's files | the same files, read from disk on every `local` call |
-| Guidelines | `load-knowledge` fetches them from Notion | this session fetches the same pages with the Notion MCP |
+| Guidelines | `load-knowledge` fetches them from Notion | `local` runs `load-knowledge` itself, once per review, before any seat |
 | Cost | Vercel AI Gateway, itemized in `cost.md`; `--max-cost` stops the run | this session's usage, not itemized; `--max-cost` is recorded, not enforced |
-| Needs | Node 24, pnpm, screen, the agent's `.env.local` | Node 24, pnpm, git, the Notion MCP; `GITHUB_TOKEN` or `gh` for a GitHub PR |
+| Needs | Node 24, pnpm, screen, the agent's `.env.local` | Node 24, pnpm, git, the Notion MCP for the board, `NOTION_TOKEN` in the environment or the project's `.env.local`; `GITHUB_TOKEN` or `gh` for a GitHub PR |
 
 The launcher resolves the package from `PR_REVIEWER_AGENT_DIR` (kit development only; the report says so), then the installed `@aspiralabs/pr-reviewer` under the project's `node_modules`, then its own location. A launcher that resolves to a kit checkout prints one line saying it is running kit source, not the installed version. Every `start`, `status` and `local` output names the agent package and version that ran (`agent:` line, or `agent` in the JSON), and an export records it in `trace/agent-version.json`. That package's files are the ones that run.
+
+The engineering guidelines are mandatory, local mode included: no seat runs without them and there is no flag to skip them. `load-knowledge` builds the folder from the pages the agent is configured with (`KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`); a truncated or missing page stops the run, naming it, and with no `NOTION_TOKEN` the run ends `blocked`.
 
 ## Default: launch the agent
 
@@ -55,19 +58,7 @@ With a ticket, the launcher does the board work itself, through the shared board
 Pass the same ticket (or source) and options to every call.
 
 0. **Board.** With a ticket, the first call prints `stage: "board"`: the board work for this session to perform with the Notion MCP, listed as data in `actions`. A `resolve` action names the ticket and the board: fetch the ticket and write `ticket.md` at `write` in exactly the `format` given. A `pull` action names a child page and the file to write it to as plain markdown. Perform every action, then run `local` again; the driver reads `ticket.md`, refuses when its Status is not `In Review: Implementation` or its PR is unset, and lists what is still missing until the folder is in sync. The reviewer lists no `move` action, and the session makes none. Never move a card anywhere the stage does not list.
-1. **Guidelines.** The engineering guidelines are mandatory. `local` will not start a review without them, and there is no flag to skip them. Run `local`. Until the folder exists it refuses, exits 3 and prints `stage: "knowledge"` with a `knowledge` object, read from the agent's own load-knowledge configuration. That object gives:
-   - the folder to build, `dir`;
-   - the root page, `root`, which is the agent's `KNOWLEDGE_PAGE`;
-   - the required pages, `required`;
-   - the walk limits, `maxDepth` and `maxPages`;
-   - the file layout, `files`.
-
-   Build that folder with the Notion MCP (`notion-fetch`, read-only), in the shape load-knowledge writes:
-   - `INDEX.md`: the root page as fetched.
-   - One file per page reached from the root by its child pages and page links, breadth first, within `maxDepth` levels and `maxPages` pages, named as `files.pages` says.
-   - `REQUIRED.md`: the `required` pages in full, in that order, each under `# <page title>` and separated by `---`. Keep the text as fetched, rule IDs included.
-
-   If a page is truncated or cannot be fetched, stop and say so. If `root` is null, the agent has no guidelines configured; stop and say so. Then run `local` again. It checks the folder, fingerprints it, and passes its paths into every prompt the way the agent passes load-knowledge's folder. With `--knowledge DIR` the folder is DIR instead.
+1. **Guidelines.** `local`'s own `load-knowledge` step already built the folder, or `blocked` names what to set; a rare `knowledge` stage names a folder problem to fix by hand. Run `local` again either way, or pass `--knowledge DIR`.
 2. **Seats.** Once the guidelines are in place, `local` prints `stage: "seats"`, `round: 1` and six tasks, plus `packet` (what every prompt starts with) and `target` (the shas under review). For each task, launch one `general-purpose` subagent with exactly this message, with the task's paths filled in:
 
    `Read <prompt> in full and follow it exactly. Write your JSON result to <output>. Reply with one line.`
@@ -99,4 +90,4 @@ Every run of this skill on a ticket writes one telemetry file, `.work/<id>-<slug
 
 ## Results
 
-With a ticket, the review goes to `.work/<id>-<slug>/pr-review/`, the ticket's working folder, and `trace/board.json` there records every board action with the Status before and after. With `--no-ticket`, a local repository's review goes to `<repo>/.work/<ticket>/pr-review/` (`<ticket>` is the branch without its type prefix) and a GitHub PR's review to `reviews/<date>-<branch>/` in the pr-reviewer package. `--output` overrides all three. Start the report with the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log), or `Ticket: none` for a `--no-ticket` run. Both modes write the agent's files there: `review.md`, `findings.md`, `conversation.md`, `pr.md`, `pr.patch`, `changed_files.txt` and `cost.md`, plus `previous-findings.md` for a re-review. `--local` adds `trace/`. The previous review's directory is what `--since` takes next time. If a run fails before exporting, show its error rather than an earlier review.
+With a ticket, the review goes to `.work/<id>-<slug>/pr-review/`, the ticket's working folder, and `trace/board.json` there records every board action with the Status before and after. With `--no-ticket`, a local repository's review goes to `<repo>/.work/<ticket>/pr-review/` (`<ticket>` is the branch without its type prefix) and a GitHub PR's review to `reviews/<date>-<branch>/` in the pr-reviewer package. `--output` overrides all three. A non-zero exit is a run status to relay (exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author): never retry or rerun it on needs-author, settle the open decisions the report names first. Start the report with the run status, the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log), or `Ticket: none` for a `--no-ticket` run. Both modes write the agent's files there: `review.md`, `findings.md`, `conversation.md`, `pr.md`, `pr.patch`, `changed_files.txt` and `cost.md`, plus `previous-findings.md` for a re-review. `--local` adds `trace/`. The previous review's directory is what `--since` takes next time. If a run fails before exporting, show its error rather than an earlier review.

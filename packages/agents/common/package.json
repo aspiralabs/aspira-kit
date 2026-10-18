@@ -6,6 +6,7 @@
   "license": "MIT",
   "exports": {
     "./tools/*": "./src/tools/*.ts",
+    "./lib/*.json": "./src/lib/*.json",
     "./lib/*": "./src/lib/*.ts"
   },
   "scripts": {

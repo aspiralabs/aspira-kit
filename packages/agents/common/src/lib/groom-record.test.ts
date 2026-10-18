@@ -52,7 +52,9 @@ const groomed: GroomRecord = {
   startedAt: '2026-10-11T09:00:00.000Z',
   open: 0,
   page: { id: 'page-1', url: 'https://app.notion.com/p/page-1' },
-  status: 'confirmed',
+  status: 'ready',
+  reasonCode: null,
+  reason: null,
 }
 
 describe('the Idea summary validator (T14)', () => {

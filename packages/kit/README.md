@@ -29,7 +29,7 @@ Installing needs a GitHub Packages token in `~/.npmrc`; see the [repo README](..
 | `kit next [<ticket>]` | Prints the ticket's Status and the Playbook step, command and owner that come next |
 | `kit cleanup [--yes] [--only <path>...]` | Lists every `.work/` folder and `.worktrees/<TYPE>-<ID>` ticket worktree with its card's live Status, and on confirmation deletes those whose card is Released or Dropped |
 | `kit worktree <ticket>` | Creates (or reuses) the ticket's worktree at `.worktrees/<TYPE>-<ID>` on its GIT-001 branch from `origin/main`, links `.env.local`, then installs and builds |
-| `kit playbook` | Prints the Playbook section of From Idea to Release as markdown, from the same table `kit next` reads |
+| `kit playbook` | Prints the Playbook section of From Idea to Release as markdown, from the same table `kit next` reads (`@aspiralabs/agent-common`'s `lib/playbook.json`, a dependency of the kit) |
 
 Every command takes `--cwd <path>` to run against another directory. `init` and `add` take `--dry-run`, which prints the plan and changes nothing. `init`, `doctor`, `next`, `cleanup` and `worktree` take `--app <dir>`, the app that owns `package.json` and `node_modules` when it is not the root (see [`--app`](#--app-a-repository-whose-app-is-not-the-root)); `doctor` and `next` read it from `aspira.json` once `init` has recorded it.
 

@@ -11,6 +11,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import type { PrChecks } from '@aspiralabs/agent-common/lib/pr-step'
 
 export type CommandResult = { code: number; stdout: string; stderr: string }
 /** Where a command runs: the checkout, and the environment whose PATH finds git and gh. */
@@ -57,12 +58,15 @@ export const GIT_ARGS = {
   show: (rev: string, path: string) => ['show', `${rev}:${path}`],
 } as const
 
+/** The F24 fields the shared PR check (agent-common's checkPr) reads: open, same repository, on the ticket's branch, based on main, at HEAD. */
+const PR_VIEW_FIELDS = 'url,state,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,baseRefName'
+
 export const GH_ARGS = {
   prList: (branch: string) => ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'url', '--jq', '.[0].url // empty'],
   prCreate: (input: PrCreateInput) => ['pr', 'create', '--draft', '--base', input.base, '--head', input.head, '--title', input.title, '--body-file', input.bodyFile],
   prEdit: (url: string, bodyFile: string) => ['pr', 'edit', url, '--body-file', bodyFile],
   prReady: (url: string) => ['pr', 'ready', url],
-  prView: (url: string) => ['pr', 'view', url, '--json', 'url', '--jq', '.url'],
+  prView: (url: string) => ['pr', 'view', url, '--json', PR_VIEW_FIELDS],
 } as const
 
 export type PrCreateInput = { base: string; head: string; title: string; bodyFile: string }
@@ -135,8 +139,18 @@ export const ghPrCreate = (options: SystemOptions, input: PrCreateInput) => run(
 export const ghPrEdit = (options: SystemOptions, url: string, bodyFile: string) => run('gh', GH_ARGS.prEdit(url, bodyFile), options)
 /** Mark a draft PR ready for review. */
 export const ghPrReady = (options: SystemOptions, url: string) => run('gh', GH_ARGS.prReady(url), options)
-/** A PR's URL as gh reads it back. */
+/** A PR's full F24 fields as gh reads them back. */
 export const ghPrView = (options: SystemOptions, url: string) => run('gh', GH_ARGS.prView(url), options)
+
+/** The boundary agent-common's shared `checkPr`/`prStep` run through (TEST-007): built from this
+ * module's own git/gh functions, so step8.ts calls the agent-common helper through the same
+ * boundary its tests already stand in for. */
+export const prChecks: PrChecks = {
+  ghPrView,
+  gitHead,
+  gitStatus,
+  gitRemoteUrl,
+}
 
 /** One changed path from `git status --porcelain=v1 -z`: untracked, or a change to a tracked file. */
 export type StatusEntry = { path: string; untracked: boolean }

@@ -9,6 +9,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { z } from 'zod'
 import { GAPS, TIME_BASES, TOOL_COUNT_BASES, USAGE_SCOPE_VALUES } from '@aspiralabs/agent-common/lib/telemetry'
+import { buildStopSchema } from '#src/build-status.ts'
 
 /** Where the driver keeps its files inside the ticket's working folder. */
 export const stateDirOf = (folder: string): string => join(folder, '.local', 'build-feature')
@@ -92,8 +93,8 @@ const runSchema = z.object({
   ended: z.string().nullable().default(null),
   /** The run id this run replaced with --force-run. */
   replaced: z.string().optional(),
-  /** The end stage, kept so a later --finish prints it again. */
-  end: z.object({ message: z.string(), stopped: z.boolean() }).optional(),
+  /** The end stage, kept so a later --finish prints it again; `reason` is why it ended (F20). */
+  end: z.object({ message: z.string(), stopped: z.boolean(), reason: buildStopSchema.optional() }).optional(),
   /** How each step ran (F2): 'local' (--local, in the session) or 'cloud' (each step skill's default mode). */
   mode: z.enum(['local', 'cloud']).default('local'),
   /** The ticket's worktree the run worked in (F50). */
@@ -115,6 +116,8 @@ const stepSchema = z.object({
   step: text,
   runId: text,
   command: text,
+  /** The command's launcher form (F44): the step's own script, so a resumed or re-read run can name it alongside the Playbook command. Optional: a run recorded before this field existed has none. */
+  launcher: z.array(z.string()).optional(),
   /** The status word read from the step's own export (or its report, for the pr-reviewer). */
   status: text,
   startedAt: text,
@@ -163,7 +166,7 @@ export type OverrideRecord = z.infer<typeof overrideSchema>
 /** A question the driver still has to ask in chat (F13), and what comes after the asks. */
 const queuedAskSchema = z.object({ step: text, runId: text, id: z.string().optional(), question: text })
 export type QueuedAsk = z.infer<typeof queuedAskSchema>
-const afterAsksSchema = z.object({ stop: z.string().nullable() })
+const afterAsksSchema = z.object({ stop: z.string().nullable(), reason: buildStopSchema.optional() })
 
 /** The one stage the session has to answer next. `stage` is the stage exactly as printed. */
 const pendingSchema = z.object({

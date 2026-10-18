@@ -549,6 +549,9 @@ export async function writeStepExport(folder: string, repo: string, step: string
     case 'pr-reviewer': {
       await put(join(folder, 'pr-review/findings.md'), findingsMarkdown(options.findings ?? []))
       await put(join(folder, 'pr-review/review.md'), '# Review\n')
+      // KIT-2 P23: step-results.ts now reads the pr-reviewer's status from its own trace file
+      // (RUN_RECORDS['pr-reviewer']), like every other step, instead of trusting the report alone.
+      await put(join(folder, 'pr-review/trace/review.json'), JSON.stringify({ mode: 'local', status, problems: [] }, null, 2))
       return
     }
     default:

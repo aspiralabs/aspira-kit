@@ -7,9 +7,11 @@ import { promisify } from 'node:util'
 import { DEFAULT_REQUIRED, MAX_DEPTH, MAX_PAGES } from '@aspiralabs/agent-common/lib/knowledge'
 import { expect, it } from 'vitest'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
+import { knowledgeConfig } from './local-knowledge.ts'
 import { runLocal, type LocalPending, type LocalResult } from './local.ts'
 import { renderDecisionsFile } from './plan.ts'
 import { planningInstructions, researchInstructions, researchSystem } from './prompts.ts'
+import { writeSnapshot } from './snapshot.test-helper.ts'
 
 const exec = promisify(execFile)
 const PACKAGE_DIR = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
@@ -56,35 +58,45 @@ function pending(result: LocalResult): LocalPending {
   return result
 }
 
-it('refuses to start without knowledge, and prints the knowledge stage before any model stage', async () => {
+it('ends blocked when it cannot load the knowledge, before any model stage, and refuses an incomplete folder', async () => {
   const f = await fixture()
-  await expect(runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }, { env: {} })).rejects.toThrow('KNOWLEDGE_PAGE')
-  const first = pending(await runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }, { env }))
-  expect(first.stage).toBe('knowledge')
-  expect(first.tasks).toEqual([])
+  const args = { specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }
+  // No KNOWLEDGE_PAGE and no NOTION_TOKEN: nothing to fetch with, so the run is blocked, never a session stage (F52).
+  const none = await runLocal(args, { env: {} })
+  expect(none).toMatchObject({ pending: false, status: 'blocked', stage: 'knowledge' })
+  expect(none.pending === false && none.status === 'blocked' ? none.reason : '').toMatch(/NOTION_TOKEN[\s\S]*KNOWLEDGE_PAGE/)
+  const first = await runLocal(args, { env })
+  expect(first).toMatchObject({ pending: false, status: 'blocked', stage: 'knowledge' })
+  expect(JSON.stringify(first)).toContain(join(f.repo, '.env.local'))
+  expect(JSON.stringify(first)).not.toMatch(/Notion MCP/i)
   await expect(readdir(join(f.work, 'outputs'))).rejects.toThrow()
-  await expect(runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir, finish: true }, { env })).rejects.toThrow('knowledge')
+  expect(await runLocal({ ...args, finish: true }, { env })).toMatchObject({ pending: false, status: 'blocked' })
   // A truncated required page is not knowledge either.
   await writeKnowledge(f.knowledge)
   await writeFile(join(f.knowledge, 'REQUIRED.md'), `${await readFile(join(f.knowledge, 'REQUIRED.md'), 'utf8')}\nTRUNCATED by the Notion API\n`)
-  const truncated = pending(await runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }, { env }))
-  expect(truncated.stage).toBe('knowledge')
-  expect(truncated.knowledge?.problems.join(' ')).toContain('REQUIRED.md')
+  await expect(runLocal(args, { env })).rejects.toThrow('REQUIRED.md')
+  await expect(readdir(join(f.work, 'outputs'))).rejects.toThrow()
 })
 
-it('lists the pages the agent\'s own knowledge configuration loads: index, required, then the topics they route to', async () => {
+it('reads the pages the agent\'s own knowledge configuration loads: index, required, then the topics they route to', async () => {
+  expect(knowledgeConfig(env)).toEqual({ page: ROOT, required: DEFAULT_REQUIRED, maxDepth: MAX_DEPTH, maxPages: MAX_PAGES })
+  expect(knowledgeConfig({ ...env, KNOWLEDGE_REQUIRED: 'Alpha, Beta' }).required).toEqual(['Alpha', 'Beta'])
+  // A folder whose required pages are missing is incomplete; a topic page the walk never reached is not (F47).
+  const missing = await fixture()
+  await writeKnowledge(missing.knowledge)
+  await expect(runLocal({ specPath: missing.specPath, repoPath: missing.repo, outputDir: missing.outputDir }, { env: { ...env, KNOWLEDGE_REQUIRED: 'Alpha, Beta' } })).rejects.toThrow('Alpha')
+  const noTopics = await fixture()
+  await writeKnowledge(noTopics.knowledge, false)
+  const research = pending(await runLocal({ specPath: noTopics.specPath, repoPath: noTopics.repo, outputDir: noTopics.outputDir }, { env }))
+  expect(research.stage).toBe('research')
+  expect(await readFile(research.tasks[0]!.prompt, 'utf8')).not.toContain('testing-standards.md')
   const f = await fixture()
-  const byDefault = pending(await runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }, { env }))
-  expect(byDefault.knowledge?.config).toEqual({ page: ROOT, required: DEFAULT_REQUIRED, maxDepth: MAX_DEPTH, maxPages: MAX_PAGES })
-  expect(byDefault.knowledge?.pages.map((page) => [page.role, page.title])).toEqual([['index', 'Engineering index (KNOWLEDGE_PAGE)'], ...DEFAULT_REQUIRED.map((title) => ['required', title])])
-  const custom = pending(await runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }, { env: { ...env, KNOWLEDGE_REQUIRED: 'Alpha, Beta' } }))
-  expect(custom.knowledge?.config.required).toEqual(['Alpha', 'Beta'])
-  await writeKnowledge(f.knowledge, false)
-  const topics = pending(await runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }, { env }))
-  expect(topics.stage).toBe('knowledge')
-  expect(topics.knowledge?.pages.map((page) => [page.role, page.url])).toEqual([['topic', TOPIC_A], ['topic', TOPIC_B]])
   await writeKnowledge(f.knowledge)
-  expect(pending(await runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }, { env })).stage).toBe('research')
+  const withTopics = pending(await runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir }, { env }))
+  expect(withTopics.stage).toBe('research')
+  const prompt = await readFile(withTopics.tasks[0]!.prompt, 'utf8')
+  expect(prompt).toContain(join(f.knowledge, 'testing-standards.md'))
+  expect(prompt).toContain(join(f.knowledge, 'api-design.md'))
 })
 
 it('writes prompt files from the live agent files, so editing the agent changes them', async () => {
@@ -153,7 +165,7 @@ it('validates outputs against the agent schemas, refuses a mid-run knowledge cha
 it('takes a --guidelines snapshot instead of Notion, and --finish exports a missing stage as incomplete', async () => {
   const f = await fixture()
   const snapshot = join(f.dir, 'REQUIRED.md')
-  await writeFile(snapshot, RULES)
+  await writeSnapshot(snapshot)
   const research = pending(await runLocal({ specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir, guidelinesPath: snapshot }, { env: {} }))
   expect(research.stage).toBe('research')
   await writeFile(research.tasks[0]!.output, JSON.stringify({ facts: [], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] }))
@@ -168,7 +180,7 @@ it('takes a --guidelines snapshot instead of Notion, and --finish exports a miss
 it('refuses research that leaves a required rule out, and runs the agent\'s correction pass on a failing plan', async () => {
   const f = await fixture()
   const snapshot = join(f.dir, 'REQUIRED.md')
-  await writeFile(snapshot, RULES)
+  await writeSnapshot(snapshot)
   const args = { specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir, guidelinesPath: snapshot }
   const research = pending(await runLocal(args, { env: {} }))
   await writeFile(research.tasks[0]!.output, JSON.stringify({ facts: [], checks: [], gaps: [], decisions: [] }))
@@ -190,7 +202,7 @@ it('refuses research that leaves a required rule out, and runs the agent\'s corr
 it('reads the option the author ticked in trace/decisions.md on the rerun and records it as theirs', async () => {
   const f = await fixture()
   const snapshot = join(f.dir, 'REQUIRED.md')
-  await writeFile(snapshot, RULES)
+  await writeSnapshot(snapshot)
   const args = { specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir, guidelinesPath: snapshot }
   const retention = { question: 'Keep saved items forever?', options: ['Keep forever', 'Expire after 30 days'], recommended: 'Keep forever', reasoning: 'nothing else expires', whyYours: 'storage cost' }
   const research = pending(await runLocal(args, { env: {} }))
