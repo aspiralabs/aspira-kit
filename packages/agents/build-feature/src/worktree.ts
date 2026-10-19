@@ -104,8 +104,8 @@ export type Prepared = { ok: true; worktree: string; branch: string; created: bo
 
 const errorOf = (result: CommandResult): string => tail((result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`).trim(), 20)
 
-/** Make the ticket's worktree (or reuse it), exclude .worktrees/, and run the install and build in a new one. */
-export async function prepareWorktree(input: { place: Place; id: string; title: string; type: TicketType; cardType: string; env: NodeJS.ProcessEnv }, sys: System = system): Promise<Prepared> {
+/** Make the ticket's worktree (or reuse it), exclude .worktrees/, and run the install and build in a new one, in the project's `app` directory from aspira.json when it names one (KIT-21). */
+export async function prepareWorktree(input: { place: Place; id: string; title: string; type: TicketType; cardType: string; env: NodeJS.ProcessEnv; app?: string }, sys: System = system): Promise<Prepared> {
   const { place, id, title, type, env } = input
   const path = worktreePath(type, id)
   const worktree = join(place.main, path)
@@ -126,8 +126,9 @@ export async function prepareWorktree(input: { place: Place; id: string; title: 
   }
   await excludeWorktrees(place)
   const ran: string[] = []
-  for (const { command, args } of await installCommands(worktree)) {
-    const result = await sys.projectCommand({ cwd: worktree, env }, command, args)
+  const installDir = join(worktree, input.app ?? '.')
+  for (const { command, args } of await installCommands(installDir)) {
+    const result = await sys.projectCommand({ cwd: installDir, env }, command, args)
     const line = shown(command, args)
     if (result.code !== 0) return fail(line, result, `the project's install and build failed in ${path}; the worktree is kept`)
     ran.push(line)

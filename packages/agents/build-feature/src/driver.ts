@@ -622,7 +622,7 @@ async function worktreeGate(ctx: Ctx, state: RunState): Promise<Out> {
 
 async function moveIntoWorktree(ctx: Ctx, state: RunState, place: Place, type: NonNullable<ReturnType<typeof ticketTypeOf>>, cardType: string): Promise<Out> {
   const card = state.card!
-  const prepared = await prepareWorktree({ place, id: ctx.input.id, title: card.title, type, cardType, env: ctx.input.env })
+  const prepared = await prepareWorktree({ place, id: ctx.input.id, title: card.title, type, cardType, env: ctx.input.env, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }) })
   if (!prepared.ok) return stop(ctx, state, prepared.message, { stopped: true, reason: { kind: 'worktree-command' }, failure: { action: 'worktree', command: prepared.command, exitCode: prepared.exitCode, output: prepared.output, message: prepared.message } })
   const { worktree, branch } = prepared
   const folder = await carryTicketFolder(ctx.folder, worktree)
