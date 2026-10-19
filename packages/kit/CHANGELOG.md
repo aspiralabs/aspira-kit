@@ -1,5 +1,11 @@
 # @aspiralabs/kit
 
+## 0.7.1
+
+### Patch Changes
+
+- @aspiralabs/agent-common@0.7.1
+
 ## 0.7.0
 
 ### Minor Changes
