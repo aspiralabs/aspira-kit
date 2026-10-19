@@ -50,7 +50,7 @@ configured_app() {
 # walking up from the working directory, then from this script's location), then this script's own package. $ASPIRA_KIT is never consulted.
 # Sets AGENT, AGENT_SOURCE (env | installed | package), AGENT_VERSION and PROJECT.
 resolve_agent() {
-  local here dir app_dir own
+  local here dir app_dir own skill_kit_version agents_version
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   AGENT="" AGENT_SOURCE="" PROJECT=""
   for dir in "${SPEC_WRITER_AGENT_DIR:-}"; do
@@ -87,6 +87,21 @@ resolve_agent() {
     *:*/node_modules/*) ;;
     *) echo "$NAME: running kit source at $AGENT, not the installed $PKG" >&2 ;;
   esac
+  # kit init pins the installed skill to the @aspiralabs/agents version it was copied from
+  # (.kit-version, packages/kit/src/skills.ts). An installed launcher whose pin no longer matches
+  # what is installed is blocked before anything starts; running from source (env or package) only
+  # warns, since kit development deliberately runs ahead of (or without) an installed pin (F8).
+  if [ -f "$here/../.kit-version" ]; then
+    skill_kit_version=$(tr -d '[:space:]' < "$here/../.kit-version")
+    agents_version=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$PROJECT/node_modules/@aspiralabs/agents/package.json" 2>/dev/null | head -n 1)
+    if [ -n "$agents_version" ] && [ "$skill_kit_version" != "$agents_version" ]; then
+      if [ "$AGENT_SOURCE" = installed ]; then
+        die "blocked: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; run kit init to update the skill"
+      else
+        echo "$NAME: mismatch: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; continuing from $AGENT_SOURCE" >&2
+      fi
+    fi
+  fi
 }
 agent_line() { printf 'agent: %s@%s (%s, %s)\n' "$PKG" "$AGENT_VERSION" "$AGENT_SOURCE" "$AGENT"; }
 json_string() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -123,16 +138,49 @@ agent_node() {  # agent_node SCRIPT ARG...: run an agent script with node, from 
   (cd "$AGENT" && exec node "${NODE_ARGS[@]}" "$AGENT/$script" "$@")
 }
 eve_bin() { find_up_module "$AGENT" eve/bin/eve.js || die "eve is not installed beside $AGENT; reinstall @aspiralabs/agents"; }
+# Prints "Run status: <status>" and, when the record carries one, its reason line, for the run
+# record at RECORD_FILE (RUN's saved repo and agent.json/node-args give ticket.ts record what it
+# needs): scripts/ticket.ts record maps the record's status word (old or new alike) onto one of the
+# five run statuses and this prints the record's own reason text first (F5, F7). Sets REPORT_EXIT
+# to the status's exit code (run-status.ts's exitCodeFor: 0 ready, 1 incomplete or blocked, 3 refused,
+# 5 needs-author), which the caller reports as its own.
+report_record() {
+  local record_file=$1 out status reason rc=0
+  resolve_agent
+  node_args
+  out=$( (cd "$AGENT" && node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" record --repo "$PROJECT" --file "$record_file") ) || rc=$?
+  status=$(printf '%s
+' "$out" | sed -n 's/^status=//p' | head -n 1)
+  [ -n "$status" ] || status=incomplete
+  reason=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).reason || '' } catch { '' }" "$record_file" 2>/dev/null)
+  printf 'Run status: %s
+' "$status"
+  [ -z "$reason" ] || printf '%s
+' "$reason"
+  REPORT_EXIT=$rc
+}
 absolute_file() {
   [ -f "$1" ] || die "no such file: $1"
   echo "$(cd "$(dirname "$1")" && pwd -P)/$(basename "$1")"
 }
+# --parent-run <run-id>:<nonce> marks a step of a build-feature run (KIT-19): ticket.ts and the local
+# driver check that it names the run's pending step, and the step writes and attaches no telemetry of
+# its own. A malformed value is refused here, before anything runs (exit 3, as ticket.ts refuses).
+check_parent_run() {
+  local pattern='^run-[0-9]{8}T[0-9]{6}Z(-[0-9]+)?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+  [ -n "$PARENT_RUN" ] || return 0
+  if [[ ! $PARENT_RUN =~ $pattern ]]; then
+    echo "$NAME: refused: --parent-run must be <run-id>:<nonce>, the build-feature run id and the nonce of its pending step" >&2
+    exit 3
+  fi
+}
 # The ticket argument (F1 of the ticket flow): a board ID such as NOM-4, a Notion page URL, nothing
 # (the one folder under .work/ that holds a ticket.md), or a spec path with --no-ticket. Sets
-# POSITIONAL, NO_TICKET, FORCE_PULL, VERIFY, GUIDELINES, REPO, OUT, FINISH, TAKE_RECOMMENDED and,
+# POSITIONAL, NO_TICKET, FORCE_PULL, VERIFY, GUIDELINES, REPO, OUT, FINISH, TAKE_RECOMMENDED, PARENT_RUN,
+# ATTACH (the --local verify step's telemetry attach result) and,
 # with --no-ticket, SPEC.
 parse() {
-  POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED="" SPEC=""
+  POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED="" SPEC="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
   while [ $# -gt 0 ]; do
     case $1 in
       --no-ticket) NO_TICKET=1; shift ;;
@@ -143,10 +191,14 @@ parse() {
       --output) [ $# -ge 2 ] || die "--output needs a path"; OUT=$2; shift 2 ;;
       --finish) FINISH=1; shift ;;
       --take-recommended) TAKE_RECOMMENDED=1; shift ;;
+      --parent-run) [ $# -ge 2 ] || die "--parent-run needs <run-id>:<nonce>"; PARENT_RUN=$2; shift 2 ;;
+      --attach) [ $# -ge 2 ] || die "--attach needs the telemetry attach result as JSON"; ATTACH=$2; shift 2 ;;
       -*) die "unknown option: $1" ;;
       *) [ -z "$POSITIONAL" ] || die "one ticket at a time (or one spec with --no-ticket)"; POSITIONAL=${1#@}; shift ;;
     esac
   done
+  check_parent_run
+  [ -z "$PARENT_RUN" ] || [ -z "$NO_TICKET" ] || die "--parent-run names a step of a build-feature run on a ticket; it does not go with --no-ticket"
   REPO=$(git -C "${REPO:-$PWD}" rev-parse --show-toplevel) || die "run inside a Git repo or pass --repo"
   [ -z "$GUIDELINES" ] || GUIDELINES=$(absolute_file "$GUIDELINES")
   if [ -n "$NO_TICKET" ]; then
@@ -160,11 +212,12 @@ parse() {
 }
 # The board step before a separate-process run: resolve the ticket, check its Status (a refusal exits 3
 # before anything is launched), pull its pages into .work/<id>-<slug>/ and claim it. Reads the key=value
-# lines of scripts/ticket.ts into T_FOLDER, T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS, T_INPUT.
+# lines of scripts/ticket.ts into T_FOLDER, T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS, T_INPUT,
+# and the run id and start time finish takes back into T_RUN_ID and T_RUN_STARTED (none with --parent-run).
 ticket_start() {
   local out code line key value
   out=$(mktemp "${TMPDIR:-/tmp}/spec-writer-ticket.XXXXXX")
-  agent_node scripts/ticket.ts start "$POSITIONAL" --repo "$REPO" ${FORCE_PULL:+--force-pull} > "$out"; code=$?
+  agent_node scripts/ticket.ts start "$POSITIONAL" --repo "$REPO" ${FORCE_PULL:+--force-pull} ${PARENT_RUN:+--parent-run "$PARENT_RUN"} > "$out"; code=$?
   if [ "$code" != 0 ]; then rm -f "$out"; exit "$code"; fi
   T_FOLDER="" T_ID="" T_TITLE="" T_URL="" T_BEFORE="" T_STATUS="" T_INPUT=""
   while IFS= read -r line; do
@@ -172,6 +225,7 @@ ticket_start() {
     case $key in
       folder) T_FOLDER=$value ;; id) T_ID=$value ;; title) T_TITLE=$value ;; url) T_URL=$value ;;
       before) T_BEFORE=$value ;; status) T_STATUS=$value ;; input) T_INPUT=$value ;;
+      run-id) T_RUN_ID=$value ;; run-started) T_RUN_STARTED=$value ;;
     esac
   done < "$out"
   rm -f "$out"
@@ -182,6 +236,7 @@ cmd_start() {
   [ -z "$FINISH" ] || die "--finish only applies to local"
   [ -z "$VERIFY" ] || die "--verify only applies to local"
   [ -z "$TAKE_RECOMMENDED" ] || die "--take-recommended only applies to local"
+  [ -z "$ATTACH" ] || die "--attach only applies to local --verify"
   local run prompt eve="" folder="" spec
   resolve_agent
   node_args
@@ -202,6 +257,7 @@ cmd_start() {
   run=$(mktemp -d "${TMPDIR:-/tmp}/spec-writer.XXXXXX")
   prompt="Write a spec from the idea at $spec for the local repository $REPO. Write results directly to $OUT. Use load-knowledge for the required guidelines, then call write-spec once. The ticket's board moves and pushes are made by the launcher around this run; do not call board yourself. Report status, spec.md, spec.draft.md, run-analysis.md and open author decisions."
   printf '%s\n' "$OUT" > "$run/output"
+  printf '%s\n' "$REPO" > "$run/repo"
   printf '%s\n' "$AGENT/agent/instructions.md" > "$run/instructions"
   printf '%s\n' "${NODE_ARGS[@]}" > "$run/node-args"
   agent_json > "$run/agent.json"
@@ -225,13 +281,16 @@ printf '%s\n' "$code" > "$RUN/exit"
 if [ -n "$FOLDER" ]; then
   [ ! -f "$OUTPUT/spec.md" ] || cp "$OUTPUT/spec.md" "$FOLDER/spec.md"
   status=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).status ?? 'incomplete' } catch { 'incomplete' }" "$OUTPUT/trace/review.json" 2>/dev/null || echo incomplete)
-  case $status in ready|needs-author) outcome=--ok ;; *) outcome=--failed ;; esac
-  [ -f "$FOLDER/spec.md" ] || outcome=--failed
-  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" "$outcome" --run-status "$status" --export "$OUTPUT" >> "$RUN/log" 2>&1
+  # The run's telemetry (KIT-19): the run id and start time ticket.ts start printed, or the build-feature
+  # step this run is (--parent-run), which writes none of its own.
+  telemetry=()
+  [ -z "$RUN_ID" ] || telemetry+=(--run-id "$RUN_ID" --run-started "$RUN_STARTED")
+  [ -z "$PARENT_RUN" ] || telemetry+=(--parent-run "$PARENT_RUN")
+  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" --run-status "$status" --export "$OUTPUT" ${telemetry[@]+"${telemetry[@]}"} >> "$RUN/log" 2>&1
 fi
 RUNNER
   chmod +x "$run/run.sh"
-  AGENT="$AGENT" EVE="$eve" SPEC="$spec" REPO="$REPO" GUIDELINES="$GUIDELINES" OUTPUT="$OUT" PROMPT="$prompt" RUN="$run" FOLDER="$folder" screen -dmS "spec-writer-$(basename "$run")" "$run/run.sh"
+  AGENT="$AGENT" EVE="$eve" SPEC="$spec" REPO="$REPO" GUIDELINES="$GUIDELINES" OUTPUT="$OUT" PROMPT="$prompt" RUN="$run" FOLDER="$folder" RUN_ID="$T_RUN_ID" RUN_STARTED="$T_RUN_STARTED" PARENT_RUN="$PARENT_RUN" screen -dmS "spec-writer-$(basename "$run")" "$run/run.sh"
   printf 'started\nrun: %s\nidea: %s\nrepo: %s\noutput: %s\ninstructions: %s\n' "$run" "$spec" "$REPO" "$OUT" "$AGENT/agent/instructions.md"
   agent_line
 }
@@ -249,6 +308,8 @@ cmd_local() {
   [ -z "$FORCE_PULL" ] || args+=(--force-pull)
   [ -z "$VERIFY" ] || args+=(--verify)
   [ -z "$FINISH" ] || args+=(--finish)
+  [ -z "$PARENT_RUN" ] || args+=(--parent-run "$PARENT_RUN")
+  [ -z "$ATTACH" ] || args+=(--attach "$ATTACH")
   [ -z "$TAKE_RECOMMENDED" ] || args+=(--take-recommended)
   resolve_agent
   agent_node scripts/local.ts "${args[@]}"
@@ -260,14 +321,33 @@ cmd_status() {
   if [ ! -f "$run/exit" ]; then
     printf 'running (%ss)\nlog: %s/log\n' "$elapsed" "$run"
     [ ! -f "$run/log" ] || tail -n 3 "$run/log"
-    return
+    exit 75
   fi
   output=$(cat "$run/output")
+  report_record "$output/trace/review.json"
   printf 'finished (%ss), exit %s\noutput: %s\n' "$elapsed" "$(cat "$run/exit")" "$output"
   [ ! -f "$run/agent" ] || cat "$run/agent"
-  tail -n 40 "$run/log"
+  [ ! -f "$run/log" ] || tail -n 40 "$run/log"
   [ ! -f "$run/instructions" ] || printf 'Instructions: %s\n' "$(cat "$run/instructions")"
   printf 'Spec: %s/spec.md (only if the review produced valid edits)\nDraft: %s/spec.draft.md\nDecisions: %s/trace/decisions.md\nRun analysis: %s/run-analysis.md\n' "$output" "$output" "$output" "$output"
+  exit "$REPORT_EXIT"
+}
+cmd_load_knowledge() {
+  local out=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --out) [ $# -ge 2 ] || die "--out needs a directory"; out=$2; shift 2 ;;
+      -*) die "unknown option: $1" ;;
+      *) die "unknown argument: $1" ;;
+    esac
+  done
+  [ -n "$out" ] || die "usage: spec-writer.sh load-knowledge --out DIR"
+  resolve_agent
+  node_args
+  command -v node >/dev/null || die "node is not installed"
+  local common
+  common=$(find_up_module "$AGENT" @aspiralabs/agent-common) || die "agent-common is not installed beside $AGENT; reinstall @aspiralabs/agents"
+  node "${NODE_ARGS[@]}" "$common/scripts/load-knowledge.ts" --out "$out"
 }
 cmd_wait() {
   local run=${1:?usage: spec-writer.sh wait RUN [--max SECONDS]} max=30 deadline
@@ -283,5 +363,6 @@ case ${1:-} in
   local) shift; cmd_local "$@" ;;
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
-  *) die "usage: spec-writer.sh start [TICKET | IDEA --no-ticket] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] | status RUN | wait RUN [--max SECONDS] | local [TICKET | IDEA --no-ticket] [--force-pull] [--verify] [--guidelines FILE] [--repo DIR] [--output DIR] [--finish] [--take-recommended]" ;;
+  load-knowledge) shift; cmd_load_knowledge "$@" ;;
+  *) die "usage: spec-writer.sh start [TICKET | IDEA --no-ticket] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--parent-run RUN:NONCE] | status RUN | wait RUN [--max SECONDS] | local [TICKET | IDEA --no-ticket] [--force-pull] [--verify] [--guidelines FILE] [--repo DIR] [--output DIR] [--finish] [--take-recommended] [--parent-run RUN:NONCE] [--attach JSON] | load-knowledge --out DIR" ;;
 esac

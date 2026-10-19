@@ -50,7 +50,7 @@ configured_app() {
 # walking up from the working directory, then from this script's location), then this script's own package. $ASPIRA_KIT is never consulted.
 # Sets AGENT, AGENT_SOURCE (env | installed | package), AGENT_VERSION and PROJECT.
 resolve_agent() {
-  local here dir app_dir own
+  local here dir app_dir own skill_kit_version agents_version
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   AGENT="" AGENT_SOURCE="" PROJECT=""
   for dir in "${GROOMER_AGENT_DIR:-}"; do
@@ -87,6 +87,21 @@ resolve_agent() {
     *:*/node_modules/*) ;;
     *) echo "$NAME: running kit source at $AGENT, not the installed $PKG" >&2 ;;
   esac
+  # kit init pins the installed skill to the @aspiralabs/agents version it was copied from
+  # (.kit-version, packages/kit/src/skills.ts). An installed launcher whose pin no longer matches
+  # what is installed is blocked before anything starts; running from source (env or package) only
+  # warns, since kit development deliberately runs ahead of (or without) an installed pin (F8).
+  if [ -f "$here/../.kit-version" ]; then
+    skill_kit_version=$(tr -d '[:space:]' < "$here/../.kit-version")
+    agents_version=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$PROJECT/node_modules/@aspiralabs/agents/package.json" 2>/dev/null | head -n 1)
+    if [ -n "$agents_version" ] && [ "$skill_kit_version" != "$agents_version" ]; then
+      if [ "$AGENT_SOURCE" = installed ]; then
+        die "blocked: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; run kit init to update the skill"
+      else
+        echo "$NAME: mismatch: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; continuing from $AGENT_SOURCE" >&2
+      fi
+    fi
+  fi
 }
 agent_line() { printf 'agent: %s@%s (%s, %s)\n' "$PKG" "$AGENT_VERSION" "$AGENT_SOURCE" "$AGENT"; }
 json_string() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -123,16 +138,48 @@ agent_node() {  # agent_node SCRIPT ARG...: run an agent script with node, from 
   (cd "$AGENT" && exec node "${NODE_ARGS[@]}" "$AGENT/$script" "$@")
 }
 eve_bin() { find_up_module "$AGENT" eve/bin/eve.js || die "eve is not installed beside $AGENT; reinstall @aspiralabs/agents"; }
+# Prints "Run status: <status>" and, when the record carries one, its reason line, for the run
+# record at RECORD_FILE (RUN's saved repo and agent.json/node-args give ticket.ts record what it
+# needs): scripts/ticket.ts record maps the record's status word (old or new alike) onto one of the
+# five run statuses and this prints the record's own reason text first (F5, F7). Sets REPORT_EXIT
+# to the status's exit code (run-status.ts's exitCodeFor: 0 ready, 1 incomplete or blocked, 3 refused,
+# 5 needs-author), which the caller reports as its own.
+report_record() {
+  local record_file=$1 out status reason rc=0
+  resolve_agent
+  node_args
+  out=$( (cd "$AGENT" && node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" record --repo "$PROJECT" --file "$record_file") ) || rc=$?
+  status=$(printf '%s
+' "$out" | sed -n 's/^status=//p' | head -n 1)
+  [ -n "$status" ] || status=incomplete
+  reason=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).reason || '' } catch { '' }" "$record_file" 2>/dev/null)
+  printf 'Run status: %s
+' "$status"
+  [ -z "$reason" ] || printf '%s
+' "$reason"
+  REPORT_EXIT=$rc
+}
 absolute_file() {
   [ -f "$1" ] || die "no such file: $1"
   echo "$(cd "$(dirname "$1")" && pwd -P)/$(basename "$1")"
 }
+# --parent-run <run-id>:<nonce> marks a step of a build-feature run (KIT-19): ticket.ts and the local
+# driver check that it names the run's pending step, and the step writes and attaches no telemetry of
+# its own. A malformed value is refused here, before anything runs (exit 3, as ticket.ts refuses).
+check_parent_run() {
+  local pattern='^run-[0-9]{8}T[0-9]{6}Z(-[0-9]+)?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+  [ -n "$PARENT_RUN" ] || return 0
+  if [[ ! $PARENT_RUN =~ $pattern ]]; then
+    echo "$NAME: refused: --parent-run must be <run-id>:<nonce>, the build-feature run id and the nonce of its pending step" >&2
+    exit 3
+  fi
+}
 # The ticket argument (F1 of the ticket flow): a board ID such as NOM-4, a Notion page URL, or nothing
 # (the one folder under .work/ that holds a ticket.md). The groomer writes to the card, so it has no
-# --no-ticket mode. Sets POSITIONAL, FORCE_PULL, FORCE_RUN, VERIFY, GUIDELINES, REPO, OUT, FINISH and
-# TAKE_RECOMMENDED.
+# --no-ticket mode. Sets POSITIONAL, FORCE_PULL, FORCE_RUN, VERIFY, GUIDELINES, REPO, OUT, FINISH,
+# TAKE_RECOMMENDED, PARENT_RUN and ATTACH (the --local verify step's telemetry attach result).
 parse() {
-  POSITIONAL="" FORCE_PULL="" FORCE_RUN="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED=""
+  POSITIONAL="" FORCE_PULL="" FORCE_RUN="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
   while [ $# -gt 0 ]; do
     case $1 in
       --no-ticket) die "the groomer writes to the card; it needs a Feature Board ticket" ;;
@@ -144,10 +191,13 @@ parse() {
       --output) [ $# -ge 2 ] || die "--output needs a path"; OUT=$2; shift 2 ;;
       --finish) FINISH=1; shift ;;
       --take-recommended) TAKE_RECOMMENDED=1; shift ;;
+      --parent-run) [ $# -ge 2 ] || die "--parent-run needs <run-id>:<nonce>"; PARENT_RUN=$2; shift 2 ;;
+      --attach) [ $# -ge 2 ] || die "--attach needs the telemetry attach result as JSON"; ATTACH=$2; shift 2 ;;
       -*) die "unknown option: $1" ;;
       *) [ -z "$POSITIONAL" ] || die "one ticket at a time"; POSITIONAL=${1#@}; shift ;;
     esac
   done
+  check_parent_run
   REPO=$(git -C "${REPO:-$PWD}" rev-parse --show-toplevel) || die "run inside a Git repo or pass --repo"
   [ -z "$GUIDELINES" ] || GUIDELINES=$(absolute_file "$GUIDELINES")
   if [ -n "$POSITIONAL" ] && [ -e "$POSITIONAL" ]; then
@@ -161,12 +211,13 @@ board_url() { sed -nE 's/.*"board"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$R
 # exits 3 before anything is launched), pull its pages into .work/<id>-<slug>/ (Grooming Decisions
 # included), put this run's marker on that page and make the start move. A board the integration
 # cannot read gets the BOARD-010 hint. Reads the key=value lines of scripts/ticket.ts into T_FOLDER,
-# T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS, T_INPUT.
+# T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS, T_INPUT, and the run id and start time finish takes back
+# into T_RUN_ID and T_RUN_STARTED (none with --parent-run).
 ticket_start() {
   local out err code=0 line key value board
   out=$(mktemp "${TMPDIR:-/tmp}/groomer-ticket.XXXXXX")
   err=$(mktemp "${TMPDIR:-/tmp}/groomer-ticket-err.XXXXXX")
-  agent_node scripts/ticket.ts start "$POSITIONAL" --repo "$REPO" ${FORCE_PULL:+--force-pull} ${FORCE_RUN:+--force-run} > "$out" 2> "$err" || code=$?
+  agent_node scripts/ticket.ts start "$POSITIONAL" --repo "$REPO" ${FORCE_PULL:+--force-pull} ${FORCE_RUN:+--force-run} ${PARENT_RUN:+--parent-run "$PARENT_RUN"} > "$out" 2> "$err" || code=$?
   cat "$err" >&2
   if [ "$code" != 0 ]; then
     if grep -Eq 'Notion [0-9]{3} \(' "$err"; then
@@ -182,6 +233,7 @@ ticket_start() {
     case $key in
       folder) T_FOLDER=$value ;; id) T_ID=$value ;; title) T_TITLE=$value ;; url) T_URL=$value ;;
       before) T_BEFORE=$value ;; status) T_STATUS=$value ;; input) T_INPUT=$value ;;
+      run-id) T_RUN_ID=$value ;; run-started) T_RUN_STARTED=$value ;;
     esac
   done < "$out"
   rm -f "$out"
@@ -192,6 +244,7 @@ cmd_start() {
   [ -z "$FINISH" ] || die "--finish only applies to local"
   [ -z "$VERIFY" ] || die "--verify only applies to local"
   [ -z "$TAKE_RECOMMENDED" ] || die "--take-recommended only applies to local"
+  [ -z "$ATTACH" ] || die "--attach only applies to local --verify"
   [ -z "$OUT" ] || die "--output: the groomer always writes to .work/<id>-<slug>/groom, where its finish step reads the record"
   local run prompt eve="" folder="" idea
   resolve_agent
@@ -209,6 +262,7 @@ cmd_start() {
   run=$(mktemp -d "${TMPDIR:-/tmp}/groomer.XXXXXX")
   prompt="Groom the Feature Board ticket $T_ID in the working folder $folder for the local repository $REPO. Use load-knowledge for the required guidelines, then call groom once with the folder, the repository and the guidelines path. The ticket's board moves, the Grooming Decisions page and the Idea summary are written by the launcher around this run; do not move the card or write Notion yourself. Report the run status, the questions of the round, $OUT/trace/groom.json and $OUT/run-analysis.md."
   printf '%s\n' "$OUT" > "$run/output"
+  printf '%s\n' "$REPO" > "$run/repo"
   printf '%s\n' "$AGENT/agent/instructions.md" > "$run/instructions"
   printf '%s\n' "${NODE_ARGS[@]}" > "$run/node-args"
   agent_json > "$run/agent.json"
@@ -231,15 +285,21 @@ printf '%s\n' "$code" > "$RUN/exit"
 # The board step after the run: the ticks merged, Grooming Decisions replaced, on a confirm the Idea
 # summary and the Shortlist move. The run status is the one groom.json records; the finish step is the
 # one writer of the final word, which it prints first as run-status=<word>.
-status=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).status ?? 'incomplete' } catch { 'incomplete' }" "$OUTPUT/trace/groom.json" 2>/dev/null || echo incomplete)
-case $status in needs-author|confirmed|stopped) outcome=--ok ;; *) outcome=--failed ;; esac
-finish=$(node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" "$outcome" --run-status "$status" --export "$OUTPUT" 2>&1)
+record_out=$(node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" record --repo "$REPO" --file "$OUTPUT/trace/groom.json" 2>&1) || true
+status=$(printf '%s\n' "$record_out" | sed -n 's/^status=//p' | head -n 1)
+[ -n "$status" ] || status=incomplete
+# The run's telemetry (KIT-19): the run id and start time ticket.ts start printed, or the build-feature
+# step this run is (--parent-run), which writes none of its own.
+telemetry=()
+[ -z "$RUN_ID" ] || telemetry+=(--run-id "$RUN_ID" --run-started "$RUN_STARTED")
+[ -z "$PARENT_RUN" ] || telemetry+=(--parent-run "$PARENT_RUN")
+finish=$(node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO" --folder "$FOLDER" --run-status "$status" --export "$OUTPUT" ${telemetry[@]+"${telemetry[@]}"} 2>&1)
 printf '%s\n' "$finish" >> "$RUN/log"
 recorded=$(printf '%s\n' "$finish" | sed -n 's/^run-status=//p' | head -n 1)
 printf '%s\n' "${recorded:-$status}" > "$RUN/status"
 RUNNER
   chmod +x "$run/run.sh"
-  AGENT="$AGENT" EVE="$eve" REPO="$REPO" GUIDELINES="$GUIDELINES" OUTPUT="$OUT" PROMPT="$prompt" RUN="$run" FOLDER="$folder" GROOMER_REPO="$REPO" GROOMER_FOLDER="$folder" screen -dmS "groomer-$(basename "$run")" "$run/run.sh"
+  AGENT="$AGENT" EVE="$eve" REPO="$REPO" GUIDELINES="$GUIDELINES" OUTPUT="$OUT" PROMPT="$prompt" RUN="$run" FOLDER="$folder" GROOMER_REPO="$REPO" GROOMER_FOLDER="$folder" RUN_ID="$T_RUN_ID" RUN_STARTED="$T_RUN_STARTED" PARENT_RUN="$PARENT_RUN" screen -dmS "groomer-$(basename "$run")" "$run/run.sh"
   printf 'started\nrun: %s\nidea: %s\nrepo: %s\noutput: %s\ninstructions: %s\n' "$run" "$idea" "$REPO" "$OUT" "$AGENT/agent/instructions.md"
   agent_line
 }
@@ -258,6 +318,8 @@ cmd_local() {
   [ -z "$FORCE_RUN" ] || args+=(--force-run)
   [ -z "$VERIFY" ] || args+=(--verify)
   [ -z "$FINISH" ] || args+=(--finish)
+  [ -z "$PARENT_RUN" ] || args+=(--parent-run "$PARENT_RUN")
+  [ -z "$ATTACH" ] || args+=(--attach "$ATTACH")
   [ -z "$TAKE_RECOMMENDED" ] || args+=(--take-recommended)
   resolve_agent
   agent_node scripts/local.ts "${args[@]}"
@@ -287,14 +349,33 @@ cmd_status() {
     printf 'running (%ss)\nlog: %s/log\n' "$elapsed" "$run"
     [ ! -f "$run/agent" ] || cat "$run/agent"
     [ ! -f "$run/log" ] || tail -n 3 "$run/log"
-  else
-    printf 'finished (%ss), exit %s\noutput: %s\n' "$elapsed" "$(cat "$run/exit")" "$output"
-    [ ! -f "$run/agent" ] || cat "$run/agent"
-    tail -n 40 "$run/log"
-    [ ! -f "$run/instructions" ] || printf 'Instructions: %s\n' "$(cat "$run/instructions")"
+    exit 75
   fi
+  report_record "$output/trace/groom.json"
+  printf 'finished (%ss), exit %s\noutput: %s\n' "$elapsed" "$(cat "$run/exit")" "$output"
+  [ ! -f "$run/agent" ] || cat "$run/agent"
+  [ ! -f "$run/log" ] || tail -n 40 "$run/log"
+  [ ! -f "$run/instructions" ] || printf 'Instructions: %s\n' "$(cat "$run/instructions")"
   groom_lines "$output"
   printf 'Decisions: %s/trace/decisions.md\nRun analysis: %s/run-analysis.md\n' "$output" "$output"
+  exit "$REPORT_EXIT"
+}
+cmd_load_knowledge() {
+  local out=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --out) [ $# -ge 2 ] || die "--out needs a directory"; out=$2; shift 2 ;;
+      -*) die "unknown option: $1" ;;
+      *) die "unknown argument: $1" ;;
+    esac
+  done
+  [ -n "$out" ] || die "usage: groomer.sh load-knowledge --out DIR"
+  resolve_agent
+  node_args
+  command -v node >/dev/null || die "node is not installed"
+  local common
+  common=$(find_up_module "$AGENT" @aspiralabs/agent-common) || die "agent-common is not installed beside $AGENT; reinstall @aspiralabs/agents"
+  node "${NODE_ARGS[@]}" "$common/scripts/load-knowledge.ts" --out "$out"
 }
 cmd_wait() {
   local run=${1:?usage: groomer.sh wait RUN [--max SECONDS]} max=30 deadline
@@ -310,5 +391,6 @@ case ${1:-} in
   local) shift; cmd_local "$@" ;;
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
-  *) die "usage: groomer.sh start [TICKET] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] | status RUN | wait RUN [--max SECONDS] | local [TICKET] [--force-pull] [--force-run] [--verify] [--guidelines FILE] [--repo DIR] [--finish] [--take-recommended]" ;;
+  load-knowledge) shift; cmd_load_knowledge "$@" ;;
+  *) die "usage: groomer.sh start [TICKET] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] [--parent-run RUN:NONCE] | status RUN | wait RUN [--max SECONDS] | local [TICKET] [--force-pull] [--force-run] [--verify] [--guidelines FILE] [--repo DIR] [--finish] [--take-recommended] [--parent-run RUN:NONCE] [--attach JSON] | load-knowledge --out DIR" ;;
 esac

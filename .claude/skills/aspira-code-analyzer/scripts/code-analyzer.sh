@@ -50,7 +50,7 @@ configured_app() {
 # walking up from the working directory, then from this script's location), then this script's own package. $ASPIRA_KIT is never consulted.
 # Sets AGENT, AGENT_SOURCE (env | installed | package), AGENT_VERSION and PROJECT.
 resolve_agent() {
-  local here dir app_dir own
+  local here dir app_dir own skill_kit_version agents_version
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   AGENT="" AGENT_SOURCE="" PROJECT=""
   for dir in "${CODE_ANALYZER_AGENT_DIR:-}" "${STATIC_ANALYSIS_AGENT_DIR:-}"; do
@@ -87,6 +87,21 @@ resolve_agent() {
     *:*/node_modules/*) ;;
     *) echo "$NAME: running kit source at $AGENT, not the installed $PKG" >&2 ;;
   esac
+  # kit init pins the installed skill to the @aspiralabs/agents version it was copied from
+  # (.kit-version, packages/kit/src/skills.ts). An installed launcher whose pin no longer matches
+  # what is installed is blocked before anything starts; running from source (env or package) only
+  # warns, since kit development deliberately runs ahead of (or without) an installed pin (F8).
+  if [ -f "$here/../.kit-version" ]; then
+    skill_kit_version=$(tr -d '[:space:]' < "$here/../.kit-version")
+    agents_version=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$PROJECT/node_modules/@aspiralabs/agents/package.json" 2>/dev/null | head -n 1)
+    if [ -n "$agents_version" ] && [ "$skill_kit_version" != "$agents_version" ]; then
+      if [ "$AGENT_SOURCE" = installed ]; then
+        die "blocked: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; run kit init to update the skill"
+      else
+        echo "$NAME: mismatch: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; continuing from $AGENT_SOURCE" >&2
+      fi
+    fi
+  fi
 }
 agent_line() { printf 'agent: %s@%s (%s, %s)\n' "$PKG" "$AGENT_VERSION" "$AGENT_SOURCE" "$AGENT"; }
 json_string() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -123,6 +138,27 @@ agent_node() {  # agent_node SCRIPT ARG...: run an agent script with node, from 
   (cd "$AGENT" && exec node "${NODE_ARGS[@]}" "$AGENT/$script" "$@")
 }
 eve_bin() { find_up_module "$AGENT" eve/bin/eve.js || die "eve is not installed beside $AGENT; reinstall @aspiralabs/agents"; }
+# Prints "Run status: <status>" and, when the record carries one, its reason line, for the run
+# record at RECORD_FILE (RUN's saved repo and agent.json/node-args give ticket.ts record what it
+# needs): scripts/ticket.ts record maps the record's status word (old or new alike) onto one of the
+# five run statuses and this prints the record's own reason text first (F5, F7). Sets REPORT_EXIT
+# to the status's exit code (run-status.ts's exitCodeFor: 0 ready, 1 incomplete or blocked, 3 refused,
+# 5 needs-author), which the caller reports as its own.
+report_record() {
+  local record_file=$1 out status reason rc=0
+  resolve_agent
+  node_args
+  out=$( (cd "$AGENT" && node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" record --repo "$PROJECT" --file "$record_file") ) || rc=$?
+  status=$(printf '%s
+' "$out" | sed -n 's/^status=//p' | head -n 1)
+  [ -n "$status" ] || status=incomplete
+  reason=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).reason || '' } catch { '' }" "$record_file" 2>/dev/null)
+  printf 'Run status: %s
+' "$status"
+  [ -z "$reason" ] || printf '%s
+' "$reason"
+  REPORT_EXIT=$rc
+}
 # owner/name from a GitHub URL, git@ URL or shorthand; empty when the source is not remote.
 remote_slug() {
   printf '%s' "$1" | sed -nE 's#^(https?://(www\.)?github\.com/|git@github\.com:)?([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/?$#\3/\4#p' | sed -E 's/\.git$//'
@@ -138,13 +174,25 @@ local_dir() {
 absolute_path() {
   case $1 in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac
 }
+# --parent-run <run-id>:<nonce> marks a step of a build-feature run (KIT-19): ticket.ts and the local
+# driver check that it names the run's pending step, and the step writes and attaches no telemetry of
+# its own. A malformed value is refused here, before anything runs (exit 3, as ticket.ts refuses).
+check_parent_run() {
+  local pattern='^run-[0-9]{8}T[0-9]{6}Z(-[0-9]+)?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+  [ -n "$PARENT_RUN" ] || return 0
+  if [[ ! $PARENT_RUN =~ $pattern ]]; then
+    echo "$NAME: refused: --parent-run must be <run-id>:<nonce>, the build-feature run id and the nonce of its pending step" >&2
+    exit 3
+  fi
+}
 # The board step before a separate-process run: resolve the ticket, check its Status (a refusal exits 3
 # before anything is launched) and pull its pages into .work/<id>-<slug>/. The analyzer claims nothing.
-# Reads the key=value lines of scripts/ticket.ts into T_FOLDER, T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS.
+# Reads the key=value lines of scripts/ticket.ts into T_FOLDER, T_ID, T_TITLE, T_URL, T_BEFORE, T_STATUS,
+# and the run id and start time finish takes back into T_RUN_ID and T_RUN_STARTED (none with --parent-run).
 ticket_start() {
   local ticket=$1 top=$2 out code line key value
   out=$(mktemp "${TMPDIR:-/tmp}/code-analyzer-ticket.XXXXXX")
-  agent_node scripts/ticket.ts start "$ticket" --repo "$top" ${FORCE_PULL:+--force-pull} > "$out"; code=$?
+  agent_node scripts/ticket.ts start "$ticket" --repo "$top" ${FORCE_PULL:+--force-pull} ${PARENT_RUN:+--parent-run "$PARENT_RUN"} > "$out"; code=$?
   if [ "$code" != 0 ]; then rm -f "$out"; exit "$code"; fi
   T_FOLDER="" T_ID="" T_TITLE="" T_URL="" T_BEFORE="" T_STATUS=""
   while IFS= read -r line; do
@@ -152,6 +200,7 @@ ticket_start() {
     case $key in
       folder) T_FOLDER=$value ;; id) T_ID=$value ;; title) T_TITLE=$value ;; url) T_URL=$value ;;
       before) T_BEFORE=$value ;; status) T_STATUS=$value ;;
+      run-id) T_RUN_ID=$value ;; run-started) T_RUN_STARTED=$value ;;
     esac
   done < "$out"
   rm -f "$out"
@@ -160,7 +209,7 @@ ticket_start() {
 # The repository root the ticket's working folder lives under: the git top of the working directory.
 repo_top() { git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$PWD"; }
 cmd_start() {
-  local source="" push="" ref="" out="" rounds="" warnings="" knowledge="" guidelines="" no_ticket="" app="" FORCE_PULL=""
+  local source="" push="" ref="" out="" rounds="" warnings="" knowledge="" guidelines="" no_ticket="" app="" FORCE_PULL="" PARENT_RUN="" T_RUN_ID="" T_RUN_STARTED=""
   while [ $# -gt 0 ]; do
     case $1 in
       --push) push=1; shift ;;
@@ -173,14 +222,18 @@ cmd_start() {
       --knowledge) [ $# -ge 2 ] || die "--knowledge needs a folder"; [ -d "$2" ] || die "--knowledge is a folder (REQUIRED.md, INDEX.md, pages): $2"; knowledge=$(cd "$2" && pwd -P); shift 2 ;;
       --guidelines) [ $# -ge 2 ] || die "--guidelines needs a file"; [ -f "$2" ] || die "--guidelines is a REQUIRED.md file: $2"; guidelines=$(absolute_path "$2"); shift 2 ;;
       --max-rounds) [ $# -ge 2 ] || die "--max-rounds needs a number"; rounds=$2; shift 2 ;;
+      --parent-run) [ $# -ge 2 ] || die "--parent-run needs <run-id>:<nonce>"; PARENT_RUN=$2; shift 2 ;;
+      --attach) die "--attach is for local --verify" ;;
       --local) die "--local runs in this session: use the local command, not start" ;;
       --verify) die "--verify is for local" ;;
       -*) die "unknown option: $1" ;;
       *) [ -z "$source" ] || die "one ticket at a time (or one repository with --no-ticket)"; source=${1#@}; shift ;;
     esac
   done
-  local run mode slug prompt eve="" ticket="" folder="" top=""
+  check_parent_run
+  local run mode slug prompt eve="" ticket="" folder="" top="" tid=""
   if [ -n "$no_ticket" ]; then
+    [ -z "$PARENT_RUN" ] || die "--parent-run names a step of a build-feature run on a ticket; it does not go with --no-ticket"
     [ -n "$source" ] || die "usage: code-analyzer.sh start <repo-path | github-url | owner/name> --no-ticket [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output DIR] [--max-rounds N] [--fix-warnings]"
     [ -z "$app" ] || die "--app goes with a ticket; with --no-ticket name the directory as the argument"
   else
@@ -211,6 +264,7 @@ cmd_start() {
     top=$(git -C "$source" rev-parse --show-toplevel)
     ticket_start "$ticket" "$top"
     folder=$T_FOLDER
+    tid=$T_ID
     printf 'ticket: %s %s (%s)\nstatus: %s -> %s\nfolder: %s\n' "$T_ID" "$T_TITLE" "$T_URL" "$T_BEFORE" "$T_STATUS" "$folder"
   fi
   [ "$mode" = local ] || eve=$(eve_bin)
@@ -225,6 +279,7 @@ cmd_start() {
   [ -z "$folder" ] || prompt="$prompt The ticket's board moves and pushes are made by the launcher around this run; do not call board yourself."
   prompt="$prompt Report the status, counts, edited files and the report path."
   printf '%s\n' "$out" > "$run/output"
+  printf '%s\n' "${top:-$source}" > "$run/repo"
   printf '%s\n' "${NODE_ARGS[@]}" > "$run/node-args"
   agent_json > "$run/agent.json"
   agent_line > "$run/agent"
@@ -240,6 +295,7 @@ if [ "$MODE" = local ]; then
   [ -z "$WARNINGS" ] || args+=(--fix-warnings)
   [ -z "$KNOWLEDGE" ] || args+=(--knowledge "$KNOWLEDGE")
   [ -z "$GUIDELINES" ] || args+=(--guidelines "$GUIDELINES")
+  [ -z "$TICKET_ID" ] || args+=(--ticket "$TICKET_ID")
   node "${NODE_ARGS[@]}" "$AGENT/scripts/static-analysis.ts" "${args[@]}" > "$RUN/log" 2>&1
 else
   node "${NODE_ARGS[@]}" "$EVE" invoke "$PROMPT" > "$RUN/log" 2>&1
@@ -250,12 +306,17 @@ printf '%s\n' "$code" > "$RUN/exit"
 [ ! -d "$OUTPUT" ] || cp "$RUN/agent.json" "$OUTPUT/agent-version.json"
 # The board step after the run: the analyzer pushes nothing and makes no move; the trace records the run.
 if [ -n "$FOLDER" ]; then
-  if [ "$code" = 0 ]; then outcome=--ok; status=clean; else outcome=--failed; status=partial; fi
-  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO_TOP" --folder "$FOLDER" "$outcome" --run-status "$status" --export "$OUTPUT" >> "$RUN/log" 2>&1
+  status=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).status ?? 'incomplete' } catch { 'incomplete' }" "$OUTPUT/rounds.json" 2>/dev/null || echo incomplete)
+  # The run's telemetry (KIT-19): the run id and start time ticket.ts start printed, or the build-feature
+  # step this run is (--parent-run), which writes none of its own.
+  telemetry=()
+  [ -z "$RUN_ID" ] || telemetry+=(--run-id "$RUN_ID" --run-started "$RUN_STARTED")
+  [ -z "$PARENT_RUN" ] || telemetry+=(--parent-run "$PARENT_RUN")
+  node "${NODE_ARGS[@]}" "$AGENT/scripts/ticket.ts" finish --repo "$REPO_TOP" --folder "$FOLDER" --run-status "$status" --export "$OUTPUT" ${telemetry[@]+"${telemetry[@]}"} >> "$RUN/log" 2>&1
 fi
 RUNNER
   chmod +x "$run/run.sh"
-  MODE="$mode" AGENT="$AGENT" EVE="$eve" SOURCE="$source" OUTPUT="$out" ROUNDS="$rounds" WARNINGS="$warnings" KNOWLEDGE="$knowledge" GUIDELINES="$guidelines" PROMPT="$prompt" RUN="$run" FOLDER="$folder" REPO_TOP="$top" screen -dmS "static-analysis-$(basename "$run")" "$run/run.sh"
+  MODE="$mode" AGENT="$AGENT" EVE="$eve" SOURCE="$source" OUTPUT="$out" ROUNDS="$rounds" WARNINGS="$warnings" KNOWLEDGE="$knowledge" GUIDELINES="$guidelines" PROMPT="$prompt" RUN="$run" FOLDER="$folder" REPO_TOP="$top" TICKET_ID="$tid" RUN_ID="$T_RUN_ID" RUN_STARTED="$T_RUN_STARTED" PARENT_RUN="$PARENT_RUN" screen -dmS "static-analysis-$(basename "$run")" "$run/run.sh"
   printf 'started\nrun: %s\nmode: %s\nsource: %s\noutput: %s\n' "$run" "$mode" "$source" "$out"
   agent_line
 }
@@ -263,7 +324,7 @@ RUNNER
 # With a ticket the driver prints the board stage first (the ticket's resolve and pull for the
 # session to perform), then the knowledge and fix stages, then the exported run with the board trace.
 cmd_local() {
-  local source="" args=() no_ticket="" app="" ticket="" top
+  local source="" args=() no_ticket="" app="" ticket="" top PARENT_RUN=""
   while [ $# -gt 0 ]; do
     case $1 in
       --local) shift ;;
@@ -272,11 +333,15 @@ cmd_local() {
       --no-fix|--fix-warnings|--finish|--force-pull|--verify) args+=("$1"); shift ;;
       --knowledge|--guidelines|--output) [ $# -ge 2 ] || die "$1 needs a path"; args+=("$1" "$(absolute_path "$2")"); shift 2 ;;
       --max-rounds) [ $# -ge 2 ] || die "--max-rounds needs a number"; args+=("$1" "$2"); shift 2 ;;
+      --parent-run) [ $# -ge 2 ] || die "--parent-run needs <run-id>:<nonce>"; PARENT_RUN=$2; args+=("$1" "$2"); shift 2 ;;
+      --attach) [ $# -ge 2 ] || die "--attach needs the telemetry attach result as JSON"; args+=("$1" "$2"); shift 2 ;;
       -*) die "unknown option: $1" ;;
       *) [ -z "$source" ] || die "one ticket at a time (or one repository with --no-ticket)"; source=${1#@}; shift ;;
     esac
   done
+  check_parent_run
   if [ -n "$no_ticket" ]; then
+    [ -z "$PARENT_RUN" ] || die "--parent-run names a step of a build-feature run on a ticket; it does not go with --no-ticket"
     [ -n "$source" ] || die "usage: code-analyzer.sh local <repo-path> --no-ticket [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish]"
     [ -z "$app" ] || die "--app goes with a ticket; with --no-ticket name the directory as the argument"
     [ -d "$source" ] || die "--local needs a local path; a GitHub repository is fixed in the eve sandbox (use start): $source"
@@ -294,18 +359,38 @@ cmd_local() {
   agent_node scripts/local.ts --repo "$top" ${args[@]+"${args[@]}"} "$source"
 }
 cmd_status() {
-  local run=${1:?usage: code-analyzer.sh status RUN} elapsed
+  local run=${1:?usage: code-analyzer.sh status RUN} elapsed output
   [ -f "$run/started" ] || die "not a run directory: $run"
   elapsed=$(( $(date +%s) - $(cat "$run/started") ))
   if [ ! -f "$run/exit" ]; then
     printf 'running (%ss)\nlog: %s/log\n' "$elapsed" "$run"
     [ ! -f "$run/log" ] || tail -n 3 "$run/log"
-    return
+    exit 75
   fi
-  printf 'finished (%ss), exit %s\noutput: %s\n' "$elapsed" "$(cat "$run/exit")" "$(cat "$run/output")"
+  output=$(cat "$run/output")
+  report_record "$output/rounds.json"
+  printf 'finished (%ss), exit %s\noutput: %s\n' "$elapsed" "$(cat "$run/exit")" "$output"
   [ ! -f "$run/agent" ] || cat "$run/agent"
-  tail -n 40 "$run/log"
-  printf 'Report: %s/report.md\nRemaining diagnostics: %s/diagnostics.json\n' "$(cat "$run/output")" "$(cat "$run/output")"
+  [ ! -f "$run/log" ] || tail -n 40 "$run/log"
+  printf 'Report: %s/report.md\nRemaining diagnostics: %s/diagnostics.json\n' "$output" "$output"
+  exit "$REPORT_EXIT"
+}
+cmd_load_knowledge() {
+  local out=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --out) [ $# -ge 2 ] || die "--out needs a directory"; out=$2; shift 2 ;;
+      -*) die "unknown option: $1" ;;
+      *) die "unknown argument: $1" ;;
+    esac
+  done
+  [ -n "$out" ] || die "usage: code-analyzer.sh load-knowledge --out DIR"
+  resolve_agent
+  node_args
+  command -v node >/dev/null || die "node is not installed"
+  local common
+  common=$(find_up_module "$AGENT" @aspiralabs/agent-common) || die "agent-common is not installed beside $AGENT; reinstall @aspiralabs/agents"
+  node "${NODE_ARGS[@]}" "$common/scripts/load-knowledge.ts" --out "$out"
 }
 cmd_wait() {
   local run=${1:?usage: code-analyzer.sh wait RUN [--max SECONDS]} max=30 deadline
@@ -321,5 +406,6 @@ case ${1:-} in
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
   local) shift; cmd_local "$@" ;;
-  *) die "usage: code-analyzer.sh start [TICKET [--app DIR] | SOURCE --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output DIR] [--max-rounds N] [--fix-warnings] | status RUN | wait RUN [--max SECONDS] | local [TICKET [--app DIR] | REPO-PATH --no-ticket] [--force-pull] [--verify] [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish]" ;;
+  load-knowledge) shift; cmd_load_knowledge "$@" ;;
+  *) die "usage: code-analyzer.sh start [TICKET [--app DIR] | SOURCE --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output DIR] [--max-rounds N] [--fix-warnings] [--parent-run RUN:NONCE] | status RUN | wait RUN [--max SECONDS] | local [TICKET [--app DIR] | REPO-PATH --no-ticket] [--force-pull] [--verify] [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish] [--parent-run RUN:NONCE] [--attach JSON] | load-knowledge --out DIR" ;;
 esac

@@ -1,7 +1,8 @@
 ---
 name: aspira-code-analyzer
 description: Run every static analyzer a repository uses (ESLint, tsc, Prettier, Biome, Ruff, mypy, gofmt, go vet, cargo clippy, RuboCop and the project's own lint/typecheck scripts), auto-fix, let the official code-analyzer fix the rest, and loop until clean. Works on a whole repository or one app inside it. By default it runs code-analyzer as a separate process; with --local the analyzers still run from the agent's code and this Claude Code session is the fix model. Use for /aspira-code-analyzer or requests to clean up lint and type errors across a repo with this agent.
-argument-hint: [<ticket ID | Notion URL> [--app DIR] | <repo-path | app-dir | github-url | owner/name> --no-ticket] [--local] [--force-pull] [--push]
+argument-hint: [<ticket ID | Notion URL> [--app DIR] | <repo-path | app-dir | github-url | owner/name> --no-ticket] [--local] [--force-pull] [--push] [--parent-run RUN:NONCE]
+disable-model-invocation: true
 ---
 
 # Static analysis
@@ -27,7 +28,7 @@ The analyzer runs only from `In Progress: Implementation` or `In Review: Impleme
 ## Default: run the agent
 
 ```bash
-<skill-dir>/scripts/code-analyzer.sh start [<ticket> [--app DIR] | <repo-path | app-dir | github-url | owner/name> --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output /absolute/dir] [--max-rounds N] [--fix-warnings]
+<skill-dir>/scripts/code-analyzer.sh start [<ticket> [--app DIR] | <repo-path | app-dir | github-url | owner/name> --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--push] [--ref BRANCH] [--output /absolute/dir] [--max-rounds N] [--fix-warnings] [--parent-run RUN:NONCE]
 ```
 
 With a ticket, the launcher does the board work itself, through the shared board module with `NOTION_TOKEN` from the project's `.env.local`: the ticket step before the agent starts (a refusal exits 3 and launches nothing) and the trace after it exits, appended to the run's log. A ticket run analyzes the local checkout; `--push` and `--ref` are for a remote repository with `--no-ticket`.
@@ -41,13 +42,13 @@ The launcher detaches the run and prints its run directory. Tell the user it sta
 ## `--local`: the session is the fix model
 
 ```bash
-<skill-dir>/scripts/code-analyzer.sh local [<ticket> [--app DIR] | <repo-path | app-dir> --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish]
+<skill-dir>/scripts/code-analyzer.sh local [<ticket> [--app DIR] | <repo-path | app-dir> --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish] [--parent-run RUN:NONCE] [--attach JSON]
 ```
 
 Each `local` call is one step and makes no model call. Pass the same ticket (or path) and options on every call. It prints JSON:
 
 0. **Board** (first, with a ticket). The board work for this session to perform with the Notion MCP, listed as data in `actions`. A `resolve` action names the ticket and the board: fetch the ticket and write `ticket.md` at `write` in exactly the `format` given. A `pull` action names a child page and the file to write it to as plain markdown. Perform every action, then call `local` again; the driver reads `ticket.md`, refuses when its Status is not one the analyzer runs from, and lists what is still missing until the folder is in sync. The analyzer lists no `set` or `move`: never move a card anywhere the stage does not list.
-1. **Knowledge.** The first call prints `stage: "knowledge"` with `refused`, the folder `dir`, the Notion index `page`, the `required` page titles, `maxDepth` and `maxPages`, all read from the agent's own configuration. Fetch them with the Notion MCP and write them into `dir` the way the agent's `load-knowledge` lays them out: `INDEX.md` is the index page; one markdown file per page linked below it, up to `maxDepth` levels and `maxPages` pages; `REQUIRED.md` is the `required` pages in order, each under its own `# <title>` heading. Or pass `--knowledge` with a folder already in that shape, or `--guidelines` with a `REQUIRED.md` snapshot. If `page` is null, ask the user for one of them; do not run without one. The driver refuses every step until the folder is complete, and refuses to continue if it changes mid-run.
+1. **Knowledge.** `local`'s own `load-knowledge` step already built the folder, or `blocked` names what to set; a rare `knowledge` stage names a folder problem to fix by hand. Run `local` again either way, or pass `--knowledge DIR`.
 2. **Fix stages.** A step prints `stage: "fix"`, `round`, `maxRounds`, `parallel`, `root`, `orchestrator` and `tasks: [{id, prompt, output, files, diagnostics}]`. Before printing it, the driver already ran the auto-fixes and the analyzers. For every task, launch one `general-purpose` subagent with exactly this message, at most `parallel` at a time, all in one message when they fit:
 
    `Read <prompt> in full and follow it exactly. Write your JSON result to <output>. Reply with one line.`
@@ -59,8 +60,21 @@ A task that comes back with an `error` wrote an output that failed the fixer's s
 
 `--no-fix` only detects and analyzes: no dependency install, no auto-fix, no fix stage. Use it for a read-only check; with `--output` outside the repository nothing is written there. The work directory is `<output>/.local/`; it is removed after export, and every prompt and output is kept in `calls.json`. A remote repository is refused: use `start`.
 
+## Run telemetry
+
+Every run of this skill on a ticket writes one telemetry file, `.work/<id>-<slug>/telemetry/<run-id>.json` (OpenTelemetry JSON: the run, its fix rounds and subagents, with timings, tokens, tool calls and cost where they are measured), and attaches it to the end of the ticket page when the Feature Board rules list it (BOARD-003). A telemetry failure is a notice beside the result: it never changes the run's status, the card's move or the exit code.
+
+- **Default.** The launcher does it all: `ticket.ts start` prints `run-id=` and `run-started=`, and the finish step after the agent exits writes the file from them and attaches it. Nothing to do here.
+- **`--local`.** The session reports its own usage, since only it sees its subagents:
+  1. Record the wall-clock start and end (ISO 8601) of every subagent you launch (every fix batch is its own entry), with the total tokens, tool uses and duration the Agent tool reports for it, and its model when you know it.
+  2. Every pending step on a ticket prints `sessionUsage` with a `file` and a `runId`. Before the call that exports the run (the call after the last fix round's outputs are written, or `--finish`), write that `file` (`.static-analysis/session-usage.json`, beside `board.json`; the analyzer's report folder gets no `trace/`) as JSON: `{"runId": "<runId>", "subagents": [{"label": "…", "startedAt": "…", "endedAt": "…", "totalTokens": 0, "toolUses": 0, "wallMs": 0, "model": "…"}]}`, one entry per subagent in launch order. `label` is a short name of your own (`research`, `lane A`), never the task's description or prompt text. Leave out a number you do not have; never guess one. Without the file the run's telemetry records the subagents as missing.
+  3. The export's `board.actions` then end with two telemetry actions. `read` (`target: "board-rules"`): fetch the Feature Board rules page with the Notion MCP (`notion-fetch`, read-only) and write it to `file` as plain markdown, one rule per line. `attach`: only when one line of the rules you saved contains every string of `onlyIf`, attach `file`, as `name`, in one file block at the end of the ticket page `page`: `notion-create-attachment` for a file of at most 200 KiB, otherwise `notion-create-file-upload`, then `notion-update-page`. Attach no other file, to no other page, and never edit or delete another block.
+  4. Pass the result to the verify step: `local <ticket> --verify --attach '{"blockId":"<the new block id>"}'`, or `--attach '{"error":"<why>"}'` when the rules do not allow it or the attach failed. A missing, refused or failed attach is a notice in the verify output, never a failed verify.
+- **`--parent-run <run-id>:<nonce>`** (a step of an `/aspira-build-feature` run, which prints it on the step's command). Skip all of the above: the run writes no usage report, reads no rules and attaches nothing; build-feature records the step in its own telemetry. Pass `--parent-run` unchanged on every call of the launcher, `start` or `local`, `--verify` included. A malformed value, or one that does not name the pending step of the build-feature run on the ticket, is refused (exit 3) naming `--parent-run`.
+- **`--no-ticket`** runs write no telemetry.
+
 ## Results
 
 `report.md`, `diagnostics.json`, `rounds.json`, `usage.json` and `calls.json` in the output directory, plus `guidelines/` (the rules the run was held to) and, for a remote run, `changes.patch`. A local path's output folder is added to that directory's `.gitignore` once, unless `--output` was given to `local`.
 
-Start the report with the ticket ID and title, the Status (unchanged), that no page was pushed, and the working folder, then report the run the way the agent's `agent/instructions.md` says (the `orchestrator` path the `local` step prints, read in full; in `--local` the finished step returns its text as `orchestrator.text`). Say which mode produced the run and which directory was analyzed. In `--local`, the fix model was this session, so say so.
+A non-zero exit is a run status to relay (exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author): never retry or rerun it on needs-author, settle the open decisions the report names first. Start the report with the run status, the ticket ID and title, the Status (unchanged), that no page was pushed, and the working folder, then report the run the way the agent's `agent/instructions.md` says (the `orchestrator` path the `local` step prints, read in full; in `--local` the finished step returns its text as `orchestrator.text`). Say which mode produced the run and which directory was analyzed. In `--local`, the fix model was this session, so say so.
