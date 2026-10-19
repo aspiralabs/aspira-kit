@@ -11,7 +11,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
-import { SLUG, branchFor, cleanup, kinds, ofKind, project, worktreeFor, type Project, type Result } from './driver.test-helper.ts'
+import { BOARD, REPOSITORY, SLUG, branchFor, cleanup, kinds, ofKind, project, worktreeFor, type Project, type Result } from './driver.test-helper.ts'
 
 const exec = promisify(execFile)
 afterEach(cleanup)
@@ -81,6 +81,11 @@ describe('F50: the run works the ticket in its own worktree', () => {
       workspace: [`${worktreeFor(workspace.h.main)} install`, `${worktreeFor(workspace.h.main)} build`],
       single: [`${worktreeFor(single.h.main)} install`],
     })
+  }, SLOW)
+
+  it('installs in the app directory aspira.json names, not the worktree root (KIT-21)', async () => {
+    const { h } = await fromMain({ status: 'Ready: Spec', aspira: { board: BOARD, repository: REPOSITORY, app: 'tools/app' }, mainFiles: { 'tools/app/pnpm-lock.yaml': 'lockfileVersion: 9.0\n', 'tools/app/package.json': JSON.stringify({ name: 'fixture' }) } })
+    expect(await h.pnpmCalls()).toEqual([`${join(worktreeFor(h.main), 'tools', 'app')} install`])
   }, SLOW)
 
   it('continues from inside the worktree: the ticket folder is there and the next stage is the step', async () => {

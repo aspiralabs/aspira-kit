@@ -7,7 +7,7 @@
 
 import { execFile } from 'node:child_process'
 import { constants, existsSync } from 'node:fs'
-import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { promisify } from 'node:util'
 import { z } from 'zod'
@@ -132,11 +132,29 @@ async function note(context: DriverContext, folder: string | null, build: () => 
   }
 }
 
+/**
+ * The folder a build-feature run already keeps for the ticket when no ticket.md names it yet (KIT-21):
+ * `.work/<id>` or `.work/<id>-*` holding a build-feature run state. A fresh ticket's first step runs
+ * before any ticket.md exists (build-feature resolves the card live), so its resolve stage must write
+ * into that folder, not a second one, for `--parent-run` to find the run.
+ */
+async function buildFeatureFolder(repo: string, ref: string): Promise<string | null> {
+  const work = join(repo, WORK_DIR)
+  if (!existsSync(work)) return null
+  const lower = ref.trim().toLowerCase()
+  const entries = (await readdir(work, { withFileTypes: true })).filter((entry) => entry.isDirectory() && (entry.name === lower || entry.name.startsWith(`${lower}-`))).sort((a, b) => a.name.localeCompare(b.name))
+  return entries.map((entry) => join(work, entry.name)).find((folder) => existsSync(join(folder, '.local', 'build-feature', 'state.json'))) ?? null
+}
+
 /** Before the agent runs: the board stage, or the ticket with its input file (F5, F6, F8). */
 export async function beforeRun(context: DriverContext, args: DriverTicketArgs): Promise<BeforeRun> {
   if (args.parentRun !== undefined && !parentRunSchema.safeParse(args.parentRun).success) throw new FlowRefused(PARENT_RUN_FORMAT)
-  const argument = await resolveArgument(context, args)
+  let argument = await resolveArgument(context, args)
   if (argument.kind === 'path') return { kind: 'none', path: argument.path, trace: noTicketTrace(context.skill) }
+  if (args.parentRun !== undefined && argument.kind === 'ticket' && argument.folder === undefined) {
+    const folder = await buildFeatureFolder(context.repo, argument.ref)
+    if (folder !== null) argument = { ...argument, folder }
+  }
   if (args.parentRun !== undefined) await checkParentRunArgument(argument.folder ?? null, args.parentRun, 'start')
   const config = (await readAspira(context.repo))!
   const folder = argument.folder ?? null

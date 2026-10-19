@@ -518,6 +518,16 @@ describe('hand-run telemetry', () => {
       await writeFile(join(folderOf(), '.local', 'build-feature', 'state.json'), JSON.stringify(state, null, 2))
     })
 
+    it('a fresh ticket with only the build-feature folder (no ticket.md yet) resolves into that folder instead of refusing (KIT-21)', async () => {
+      // A build-feature run on a ticket nobody ran a skill on by hand: `.work/nom-4/` holds its state and no ticket.md.
+      const fresh = join(repo, '.work', 'nom-4')
+      await mkdir(join(fresh, '.local', 'build-feature'), { recursive: true })
+      await writeFile(join(fresh, '.local', 'build-feature', 'state.json'), await readFile(join(folderOf(), '.local', 'build-feature', 'state.json'), 'utf8'))
+      await rm(folderOf(), { recursive: true, force: true })
+      const before = await beforeRun({ skill: 'spec-writer', repo, env: {} }, { positional: 'NOM-4', parentRun: `${PARENT_RUN}:${NONCE}` })
+      expect({ kind: before.kind, folder: before.kind === 'stage' ? before.stage.folder : null }).toEqual({ kind: 'stage', folder: fresh })
+    })
+
     it('the in-progress run\'s pending step prints no run-id line, writes no telemetry file and makes no upload', async () => {
       const run = await handStart('spec-writer', T0, ['--parent-run', `${PARENT_RUN}:${NONCE}`])
       const exportDir = await seedSpecWriterExport('2026-10-15T09:02:00.000Z')
