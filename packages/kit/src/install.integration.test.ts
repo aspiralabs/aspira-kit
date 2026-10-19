@@ -167,11 +167,11 @@ describe('an installed project', () => {
 
     const env: NodeJS.ProcessEnv = { ...process.env }
     for (const name of ['NOTION_TOKEN', 'NOTION_API_KEY']) delete env[name]
-    // The installed launcher runs the installed driver: its first stage is the run-start approval (F16).
+    // The installed launcher runs the installed driver: the invocation is the run-start approval (KIT-20), so its first stage is resolve.
     const first = spawnSync('bash', [launcher, 'local', 'DEMO-1', '--local'], { cwd: app, env, encoding: 'utf8' })
     expect(first.status, first.stderr).toBe(0)
     expect(first.stderr).not.toContain('running kit source')
-    expect((JSON.parse(first.stdout.slice(first.stdout.indexOf('{'))) as { stage: string }).stage).toBe('approval')
+    expect((JSON.parse(first.stdout.slice(first.stdout.indexOf('{'))) as { stage: string }).stage).toBe('resolve')
     // The step for a Status comes from the installed @aspiralabs/kit/playbook export the driver imports.
     const script = "const { nextStep, commandFor } = await import('@aspiralabs/kit/playbook'); process.stdout.write(commandFor(nextStep('Ready: Idea'), 'DEMO-1') ?? '')"
     const step = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: packageDir, env, encoding: 'utf8' })
