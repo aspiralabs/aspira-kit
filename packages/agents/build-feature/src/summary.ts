@@ -138,7 +138,7 @@ async function statusLines(input: RenderBuildSummaryInput, resume: string): Prom
     lines.push(`Failed: ${parts.join(', ')}${failure.message === undefined ? '' : `: ${await redact(failure.message, repo, { app })}`}`, '')
     if (failure.output !== undefined) lines.push(fence('text', await redact(tail(failure.output), repo, { app })), '')
   }
-  for (const approval of state.approvals) lines.push(`Run-start approval for ${approval.runId}: ${approval.name} (${approval.notionUserId}) at ${approval.at}, by "${approval.command}".`)
+  for (const approval of state.approvals) lines.push(`Run-start approval for ${approval.runId}: ${approval.name}${approval.notionUserId === undefined ? '' : ` (${approval.notionUserId})`} at ${approval.at}, by "${approval.command}".`)
   if (state.approvals.length > 0) lines.push('')
   if (run?.end?.stopped === true) lines.push(`Resume: ${resume}`)
   return lines.length === 0 ? NONE : lines

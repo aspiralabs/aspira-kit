@@ -40,12 +40,6 @@ describe('F20: the end stage carries build-feature\'s own run status, and the ex
     expect(endOf(await h.advance({}, await h.start()))).toEqual({ stage: 'end', status: 'blocked', code: 1 })
   }, SLOW)
 
-  it('a run-start approval that cannot be recorded ends needs-author (exit 5)', async () => {
-    const h = await project({ status: 'Ready: Plan' })
-    const end = await h.advance({ approval: async (stage) => h.answer(stage, { error: 'notion-get-self failed' }) }, await h.start())
-    expect(endOf(end)).toEqual({ stage: 'end', status: 'needs-author', code: 5 })
-  }, SLOW)
-
   it('a step that stops carries that step\'s own status: a blocked planner ends blocked (exit 1)', async () => {
     const h = await project({ status: 'Ready: Spec' })
     const planner = await h.advance({}, await h.start())

@@ -75,6 +75,8 @@ export type PrCreateInput = { base: string; head: string; title: string; bodyFil
 export const gitCurrentBranch = (options: SystemOptions) => run('git', GIT_ARGS.currentBranch, options)
 /** The commit HEAD points at. */
 export const gitHead = (options: SystemOptions) => run('git', GIT_ARGS.head, options)
+/** `git config user.name` as the checkout resolves it (the repo's config, else the user's). */
+export const gitUserName = (options: SystemOptions) => run('git', ['config', 'user.name'], options)
 /** origin's URL as configured. */
 export const gitRemoteUrl = (options: SystemOptions) => run('git', GIT_ARGS.remoteUrl, options)
 /** The working tree's changes, NUL-separated porcelain v1 with every untracked file listed. */
@@ -173,6 +175,7 @@ export function parseStatus(stdout: string): StatusEntry[] {
 export const system = {
   gitCurrentBranch,
   gitHead,
+  gitUserName,
   gitRemoteUrl,
   gitStatus,
   gitCommit,
