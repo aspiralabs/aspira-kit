@@ -1,5 +1,13 @@
 # @aspiralabs/groomer
 
+## 0.7.3
+
+### Patch Changes
+
+- a09d6de: The groomer grooms Bug cards as it grooms Features (KIT-22). Until the Diagnoser (KIT-9) exists, a Bug goes through the same path: `/aspira-groomer` and a `/aspira-build-feature` run on a Bug at Idea no longer refuse with "grooms Feature cards only". A Chore is still refused, and a card with no Type is still refused naming the Types it takes.
+- Updated dependencies [a09d6de]
+  - @aspiralabs/agent-common@0.7.3
+
 ## 0.7.2
 
 ### Patch Changes
