@@ -1,5 +1,14 @@
 # @aspiralabs/build-feature
 
+## 0.7.4
+
+### Patch Changes
+
+- Updated dependencies [d219f21]
+  - @aspiralabs/agent-common@0.7.4
+  - @aspiralabs/pr-reviewer@0.7.4
+  - @aspiralabs/kit@0.7.4
+
 ## 0.7.3
 
 ### Patch Changes
