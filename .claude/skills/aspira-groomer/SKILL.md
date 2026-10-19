@@ -1,7 +1,8 @@
 ---
 name: aspira-groomer
 description: Groom a Feature card's Idea in rounds before it reaches Ready: Idea, with the official groomer agent. It finds what the repository already has for the idea, asks the product decisions the Idea leaves open, records the answers on the card's Grooming Decisions page and, once the human confirms, writes the Decisions and Terms into the card's Idea and moves the card to Shortlist. By default it runs the groomer as a separate process; with --local the rounds run inside this Claude Code session, in chat. Use for /aspira-groomer or requests to groom an idea or a card.
-argument-hint: [<ticket ID | Notion URL>] [--local] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] [--take-recommended]
+argument-hint: [<ticket ID | Notion URL>] [--local] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] [--take-recommended] [--parent-run RUN:NONCE]
+disable-model-invocation: true
 ---
 
 # Groomer
@@ -26,7 +27,7 @@ Use `--local` to groom in this conversation; use the default to leave the questi
 ## Default: run the agent
 
 ```bash
-<skill-dir>/scripts/groomer.sh start [<ticket>] [--force-pull] [--force-run] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository]
+<skill-dir>/scripts/groomer.sh start [<ticket>] [--force-pull] [--force-run] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--parent-run RUN:NONCE]
 ```
 
 The launcher does the board work itself, through the shared board module with `NOTION_TOKEN` from the project's `.env.local`: the ticket step before the agent starts (a refusal exits 3 and launches nothing; a board the integration cannot read prints the board URL and the rule to check), and after the agent exits the finish step (the page's ticks, the page write, and on a confirm the Idea summary and the move), appended to the run's log and recorded in `groom/trace/board.json`. `--force-run` clears the marker another run left on the page; use it only when no other run is in progress. With `--guidelines` the launcher runs the agent's CLI on that snapshot; otherwise the agent loads the guidelines from Notion first and refuses to start without the required pages.
@@ -43,13 +44,13 @@ Both print the agent package and version, the log tail, and from `groom/trace/gr
 ## `--local`: the rounds in this session
 
 ```bash
-<skill-dir>/scripts/groomer.sh local [<ticket>] [--force-pull] [--force-run] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--verify] [--finish] [--take-recommended]
+<skill-dir>/scripts/groomer.sh local [<ticket>] [--force-pull] [--force-run] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--verify] [--finish] [--take-recommended] [--parent-run RUN:NONCE] [--attach JSON]
 ```
 
 Each call prints one JSON step and makes no model call. Do what the step says, then call `local` again with the same ticket. `--take-recommended` takes every open question whose branch is not an exit criterion (problem, who, done) as the agent's recommended option instead of waiting on the author; an exit-criterion question, and Confirm, are always asked in chat.
 
 1. **Board** (first). `stage: "board"` lists the board work for this session to perform with the Notion MCP, as data in `actions`: `resolve` (write `ticket.md` in the given `format`), `pull` (write the page to the named file as plain markdown), `mark` (append the run paragraph to Grooming Decisions, creating the page when the card has none) and `move`. Perform every action, update `ticket.md` as each `then` says, and call `local` again. Never move a card anywhere a stage does not list.
-2. **Knowledge.** The engineering guidelines are mandatory: without them the driver refuses to start and prints `stage: "knowledge"` with `knowledge.dir`, `knowledge.root`, `knowledge.required`, `maxDepth`, `maxPages` and any `problems`. Build that folder with the Notion MCP: `INDEX.md` (the `root` page), one file per linked page (kebab-case title, starting `<!-- <title> · <url> -->`), and `REQUIRED.md` (every `required` page in order, each as `# <page title>`, then `<!-- <url> -->`, then its full content, separated by `---`). If a page is truncated or cannot be fetched, stop and say so. With `--guidelines`, pass the same snapshot to every call.
+2. **Knowledge.** `local`'s own `load-knowledge` step already built the folder, or `blocked` names what to set; a rare `knowledge` stage names a folder problem to fix by hand. Run `local` again either way, or pass `--guidelines`.
 3. **Round.** `stage: "round"`, one task. Launch one `general-purpose` subagent with: `Read <prompt> in full and follow it exactly. Write your JSON result to <output>. Reply with one line.` A task that comes back with an `error` wrote a round the driver refused: send the error back once.
 4. **Answers.** `stage: "answers"`: print the `report` (round zero) and every question of `questions` in chat verbatim and in order, each with its options, the recommended one and why it is the human's to decide; ask the Confirm question last when `confirm` is true. Write the human's answers to the `answers` file exactly as the `note` says. The driver refuses an unknown id or an answer that is not one of the options, naming the file and the id; fix the file from the human's words, never by guessing.
 5. **Summary** (a confirm round). `stage: "summary"`, one task, launched the same way. The driver refuses a summary that does not match the record, naming the file and the reason.
@@ -58,6 +59,21 @@ Each call prints one JSON step and makes no model call. Do what the step says, t
 
 The working files are `groom.local/` (knowledge, prompts, answers, fetched pages) and `.local/groomer/`, kept between rounds and removed when a confirmed or stopped run verifies.
 
+## Run telemetry
+
+Every run of this skill on a ticket writes one telemetry file, `.work/<id>-<slug>/telemetry/<run-id>.json` (OpenTelemetry JSON: the run, its rounds and subagents, with timings, tokens, tool calls and cost where they are measured), and attaches it to the end of the ticket page when the Feature Board rules list it (BOARD-003). A telemetry failure is a notice beside the result: it never changes the run's status, the card's move or the exit code.
+
+- **Default.** The launcher does it all: `ticket.ts start` prints `run-id=` and `run-started=`, and the finish step after the agent exits writes the file from them and attaches it. Nothing to do here.
+- **`--local`.** The session reports its own usage, since only it sees its subagents:
+  1. Record the wall-clock start and end (ISO 8601) of every subagent you launch in the round, with the total tokens, tool uses and duration the Agent tool reports for it, and its model when you know it.
+  2. Every pending step on a ticket prints `sessionUsage` with a `file` and a `runId`. Before the call that ends the round (the one that prints the end-of-round `board` stage), write that `file` (`groom/trace/session-usage.json`) as JSON: `{"runId": "<runId>", "subagents": [{"label": "…", "startedAt": "…", "endedAt": "…", "totalTokens": 0, "toolUses": 0, "wallMs": 0, "model": "…"}]}`, one entry per subagent in launch order. `label` is a short name of your own (`research`, `lane A`), never the task's description or prompt text. Leave out a number you do not have; never guess one. Without the file the run's telemetry records the subagents as missing.
+  3. The export's `board.actions` then end with two telemetry actions. `read` (`target: "board-rules"`): fetch the Feature Board rules page with the Notion MCP (`notion-fetch`, read-only) and write it to `file` as plain markdown, one rule per line. `attach`: only when one line of the rules you saved contains every string of `onlyIf`, attach `file`, as `name`, in one file block at the end of the ticket page `page`: `notion-create-attachment` for a file of at most 200 KiB, otherwise `notion-create-file-upload`, then `notion-update-page`. Attach no other file, to no other page, and never edit or delete another block.
+  4. Pass the result to the verify step: `local <ticket> --verify --attach '{"blockId":"<the new block id>"}'`, or `--attach '{"error":"<why>"}'` when the rules do not allow it or the attach failed. A missing, refused or failed attach is a notice in the verify output, never a failed verify.
+- **`--parent-run <run-id>:<nonce>`** (a step of an `/aspira-build-feature` run, which prints it on the step's command). Skip all of the above: the run writes no usage report, reads no rules and attaches nothing; build-feature records the step in its own telemetry. Pass `--parent-run` unchanged on every call of the launcher, `start` or `local`, `--verify` included. A malformed value, or one that does not name the pending step of the build-feature run on the ticket, is refused (exit 3) naming `--parent-run`.
+- **`--no-ticket`** runs write no telemetry.
+
+Each round of the groomer is its own run: the round's end writes its file and the next round gets a new run id, so write the report once per round, with the `runId` that round's steps print, and pass `--attach` to that round's `--verify`.
+
 ## Reporting
 
-Start the report with the ticket ID and title, the Status before and after, the Grooming Decisions URL and the working folder. The rest of the report follows `agent/instructions.md`. Say which mode produced it.
+A non-zero exit is a run status to relay (exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author): never retry or rerun it on needs-author, answer the open questions the report names first. Start the report with the run status, the ticket ID and title, the Status before and after, the Grooming Decisions URL and the working folder. The rest of the report follows `agent/instructions.md`. Say which mode produced it.
