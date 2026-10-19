@@ -887,6 +887,9 @@ export type LocalBoardState = {
   /** The groomer: the round the last end stage was for, and when it asked the session to replace the page. */
   round?: number
   pushAskedAt?: string
+  /** The groomer: the round whose start asked the Grooming Decisions pull again (KIT-23), so each round reads the ticks made since the last, and each asked file's modified time before the pull (gone once the session wrote it). */
+  syncedRound?: number
+  roundPullBefore?: Record<string, string>
   /** The groomer: the start time in this run's `Run: <startedAt> local in progress` marker. */
   startedAt?: string
   /** The groomer: the Grooming Decisions URL ticket.md showed when the push was asked for (a different one is a new page), and the round the verify last recorded a push for. */
@@ -1047,9 +1050,35 @@ export async function localBoardStep(options: LocalBoardOptions): Promise<{ stag
   const gate = checkGate(options.skill, ticket)
   if (!gate.ok) throw new FlowRefused(gate.message)
   const plan = await pullPlan(options.skill, ticket, folder, state.previous, options.force === true)
+  // The groomer's overwrite pull (Grooming Decisions) is asked again at the start of every round after
+  // the first (KIT-23): the round that follows a verified one reads the ticks made on the page since,
+  // between rounds or between runs of a paused round, instead of the copy the last round rendered.
+  const nextRound = row.record !== undefined && state.round !== undefined && state.verifiedRound === state.round ? state.round + 1 : null
+  if (nextRound !== null && state.syncedRound !== nextRound) {
+    state.syncedRound = nextRound
+    state.roundPullBefore = {}
+    for (const item of plan) {
+      if (item.decision !== 'write' || !(row.pulls ?? []).some((pull) => pull.title === item.title)) continue
+      // The copy is pulled once its file changes, whatever the clock says: the last round rendered it moments ago.
+      state.roundPullBefore[item.file] = (await modifiedAt(item.file)) ?? ''
+      state.trace?.actions.push(entry('pull', `${item.title} -> ${item.file} (pulled over the local copy at the start of round ${nextRound}) by the session`, ticket.status, ticket.status))
+    }
+    await saveState(options.stateDir, state)
+  }
   // A file the session wrote since the sync was asked for is the pull, not a local edit.
   const pending: typeof plan = []
-  for (const item of plan) if (item.decision === 'keep' || state.syncAskedAt === null || !(await newerThan(item.file, state.syncAskedAt))) pending.push(item)
+  for (const item of plan) {
+    const before = state.roundPullBefore?.[item.file]
+    if (before !== undefined) {
+      if (((await modifiedAt(item.file)) ?? '') === before) pending.push(item)
+      else {
+        delete state.roundPullBefore![item.file]
+        await saveState(options.stateDir, state)
+      }
+      continue
+    }
+    if (item.decision === 'keep' || state.syncAskedAt === null || !(await newerThan(item.file, state.syncAskedAt))) pending.push(item)
+  }
   const conflict = conflictMessage(pending)
   if (conflict !== null) throw new FlowRefused(conflict)
   const pulls: BoardAction[] = []

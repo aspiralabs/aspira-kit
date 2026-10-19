@@ -152,10 +152,16 @@ async function baseRecord(folder: string, paths: Paths, n: number): Promise<Groo
   const ticket = await readTicketMd(folder)
   const page = ticket?.pages[GROOM_PAGE]
   let record = await readGroomRecord(folder)
+  const pulled = await readText(paths.decisions)
   if (record === undefined) {
-    const pulled = await readText(paths.decisions)
     const classified = pulled === null ? null : classifyRenderings(pulled)
     record = classified?.round == null ? { decisions: [], branches: seedBranches(), round: 0, startedAt: new Date().toISOString(), open: 0, page: {}, status: 'needs-author', reasonCode: null, reason: null } : rebuildGroomRecord(classified.kept).record
+  } else if (pulled !== null) {
+    // The page as the board stage pulled it at the start of this round (KIT-23): a tick made on it since
+    // the last round answers its question here, before the round would ask it again. The last round's own
+    // rendering carries no new tick, so merging it changes nothing.
+    const merged = mergePage({ record, answers: [], pageFile: paths.decisions, page: pulled })
+    if (merged.changedByPage) record = { ...record, decisions: merged.decisions, open: merged.decisions.filter((decision) => decision.decidedBy === 'open').length }
   }
   if (record.branches.length === 0) record = { ...record, branches: seedBranches() }
   if (record.page.url === undefined && page !== undefined) record = { ...record, page: { id: page.id, url: page.url } }

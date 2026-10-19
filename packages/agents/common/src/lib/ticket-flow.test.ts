@@ -1340,6 +1340,31 @@ describe('the groomer --local board stage (against a stub session)', () => {
     expect(existsSync(stateDir)).toBe(false)
   })
 
+  it('the round after a verified round asks the Grooming Decisions pull and the marker again, once, and records the pull in the trace (KIT-23)', async () => {
+    const client = fakeBoard('Grooming', {})
+    seedGroomPage(client, renderedPage(groomRecord([Q1])))
+    const ready = await localReady(client)
+    await localRound(client, groomRecord([Q1]), 1)
+    const first = await afterRun(ctxOf('groomer'), ready, { status: 'needs-author', exportDir: exportOf(), verifyCommand, round: 1 })
+    await perform(client, first.board.actions)
+    expect((await verifyRun(ctxOf('groomer'), { positional: 'NOM-4' }, exportOf)).verified).toBe(true)
+    // Between the rounds the human ticks an option on the page; the next round's board stage pulls it again.
+    tickOnPage(client, 'Only its owner')
+    const again = await beforeRun(ctxOf('groomer'), { positional: 'NOM-4' })
+    if (again.kind !== 'stage') throw new Error(`expected the round-2 board stage, got ${again.kind}`)
+    const kinds = again.stage.actions.map((action) => `${action.action}${field(action, 'title') === undefined ? '' : ` ${field(action, 'title')}`}`)
+    await perform(client, again.stage.actions)
+    const next = await beforeRun(ctxOf('groomer'), { positional: 'NOM-4' })
+    if (next.kind !== 'ticket') throw new Error(`expected the ticket after the round-2 pull, got ${next.kind}`)
+    const pulled = await readFile(decisionsPath(folderOf()), 'utf8')
+    expect({
+      kinds,
+      ticked: pulled.includes('- [x] Only its owner'),
+      traced: next.trace.actions.filter((action) => action.action === 'pull' && action.detail.includes('start of round 2')).length,
+      askedOnce: (await beforeRun(ctxOf('groomer'), { positional: 'NOM-4' })).kind,
+    }).toEqual({ kinds: [`pull ${GD}`, 'mark'], ticked: true, traced: 1, askedOnce: 'ticket' })
+  })
+
   it('the spec writer\'s verify still checks only that the pushed row exists', async () => {
     const client = fakeBoard('Ready: Idea')
     const ready = await localReady(client, 'spec-writer')

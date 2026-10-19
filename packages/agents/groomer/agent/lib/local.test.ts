@@ -277,4 +277,25 @@ describe('resuming after an interruption', () => {
     await writeJson(join(folder, '.local', 'groomer', 'board.json'), { round: 2 })
     expect(await runLocal(input, deps)).toMatchObject({ stage: 'round', round: 2, task: { output: roundFile(folder, 2) } })
   })
+
+  it('merges a tick made on the page between rounds into the next round\'s base, so the question is not asked again (KIT-23)', async () => {
+    const { folder, input } = await workspace()
+    const after = groomRecord(1, [confirmed('Q1', 'problem', 'A'), question('Q2', 'who')], SEEDED.map((id) => ({ id, state: id === 'problem' || id === 'who' ? ('visited' as const) : ('open' as const) })))
+    await writeJson(roundFile(folder, 1), { round: 1, searched: ['cart limit'], facts: [{ path: 'src/cart.ts', line: 1 }], questions: [question('Q1', 'problem'), question('Q2', 'who')], branches: [{ id: 'problem', state: 'visited' }, { id: 'who', state: 'visited' }] })
+    await writeJson(answersFile(folder, 1), [{ id: 'Q1', question: question('Q1', 'problem').question, answer: 'A' }])
+    await writeText(pageFile(folder, 1), firstPage)
+    await writeGroomRecord(folder, after)
+    // The board stage of round 2 pulled the page again: the human ticked B under Q2 since round 1 ended.
+    await writeText(decisionsFile(folder), tick(renderGroomPage(after, { date: '2026-10-11', notes: [] }), 'Q2', 'B'))
+    await writeJson(join(folder, '.local', 'groomer', 'board.json'), { round: 2 })
+    const step = await runLocal(input, deps)
+    const base = JSON.parse(await readFile(join(folder, 'groom.local', 'base-2.json'), 'utf8')) as { decisions: { id: string; decidedBy: string; answer: string | null }[]; open: number }
+    const prompt = step.stage === 'round' ? await readFile(step.task.prompt, 'utf8') : ''
+    expect({
+      stage: step.stage,
+      q2: base.decisions.find((decision) => decision.id === 'Q2'),
+      open: base.open,
+      asksNone: prompt.includes('Open questions to ask again with their ids: none'),
+    }).toMatchObject({ stage: 'round', q2: { decidedBy: 'author', answer: 'B' }, open: 0, asksNone: true })
+  })
 })
