@@ -64,8 +64,8 @@ export type Gate = {
   startFrom?: string[]
   /** false: the claim sets no Dev. */
   setsDev?: false
-  /** The card Type the skill runs on; any other Type, or none, is refused before the Status check. */
-  requiresType?: 'Feature'
+  /** The card Types the skill runs on; any other is refused before a model call (F4). */
+  types?: readonly string[]
   /** false: the skill refuses --no-ticket. */
   noTicket?: false
   /** Appended to the wrong-Status refusal: how a human reopens the skill's step. */
@@ -108,7 +108,7 @@ export const GATES: Record<Skill, Gate> = {
     success: 'Shortlist',
     startFrom: ['Idea'],
     setsDev: false,
-    requiresType: 'Feature',
+    types: ['Feature', 'Bug'],
     noTicket: false,
     reopen: GROOMER_REOPEN,
     pulls: [{ title: 'Grooming Decisions', file: 'groom/trace/decisions.md', overwrite: true }],
@@ -140,11 +140,9 @@ export function whoMoves(status: string): string {
 /** The child pages of a title the ticket has more than once, every one of them, the first first. */
 export type DuplicatePages = NonNullable<Ticket['duplicatePages']>
 
-/** The Type gate's refusals (F4). `name` is `<ID> <title>`; each ends with the sentence every gate refusal ends with. */
-export const TYPE_EMPTY_MESSAGE = (name: string): string => `${name} has no Type; set it to Feature to groom it. No model call was made.`
-export const TYPE_BUG_MESSAGE = (name: string, skill: Skill): string =>
-  `${name} is a Bug card; ${skill} grooms Feature cards only. Bugs are diagnosed by the Diagnoser (ticket KIT-9 (Diagnoser agent)). No model call was made.`
-export const TYPE_OTHER_MESSAGE = (name: string, skill: Skill, type: string): string => `${name} is a ${type} card; ${skill} grooms Feature cards only. No model call was made.`
+/** The Type gate's refusals (F4). `name` is `<ID> <title>`; each ends with the sentence every gate refusal ends with. A Bug card is groomed like a Feature until the Diagnoser (KIT-9) exists (KIT-22). */
+export const TYPE_EMPTY_MESSAGE = (name: string, types: readonly string[]): string => `${name} has no Type; set it to ${types.join(' or ')} to groom it. No model call was made.`
+export const TYPE_OTHER_MESSAGE = (name: string, skill: Skill, type: string, types: readonly string[]): string => `${name} is a ${type} card; ${skill} grooms ${types.join(' and ')} cards only. No model call was made.`
 
 /** The refusal when a pulled page's title is on more than one child page (F14): it names every one and picks none. */
 export const DUPLICATE_PAGES_MESSAGE = (id: string, title: string, urls: string[]): string =>
@@ -158,12 +156,11 @@ export type GateCheck =
 export function checkGate(skill: Skill, ticket: Pick<Ticket, 'id' | 'title' | 'status' | 'pr' | 'type'> & { duplicatePages?: DuplicatePages }): GateCheck {
   const gate = GATES[skill]
   const name = `${ticket.id} ${ticket.title}`.trim()
-  if (gate.requiresType !== undefined) {
+  if (gate.types !== undefined) {
     const type = (ticket.type ?? '').trim()
     // `<Type>` is the unfilled placeholder of the ticket.md format: the session never read the Type.
-    if (type === '' || type === '<Type>') return { ok: false, message: TYPE_EMPTY_MESSAGE(name) }
-    if (type === 'Bug') return { ok: false, message: TYPE_BUG_MESSAGE(name, skill) }
-    if (type !== gate.requiresType) return { ok: false, message: TYPE_OTHER_MESSAGE(name, skill, type) }
+    if (type === '' || type === '<Type>') return { ok: false, message: TYPE_EMPTY_MESSAGE(name, gate.types) }
+    if (!gate.types.includes(type)) return { ok: false, message: TYPE_OTHER_MESSAGE(name, skill, type, gate.types) }
   }
   for (const pull of gate.pulls ?? []) {
     const duplicate = ticket.duplicatePages?.find((entry) => entry.title === pull.title)

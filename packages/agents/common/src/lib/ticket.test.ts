@@ -287,19 +287,18 @@ describe('the gate table, groomer row', () => {
 })
 
 describe('the gate table, Type gate', () => {
-  const NO_TYPE = 'NOM-4 Explore pagination has no Type; set it to Feature to groom it. No model call was made.'
-  const BUG = 'NOM-4 Explore pagination is a Bug card; groomer grooms Feature cards only. Bugs are diagnosed by the Diagnoser (ticket KIT-9 (Diagnoser agent)). No model call was made.'
+  const NO_TYPE = 'NOM-4 Explore pagination has no Type; set it to Feature or Bug to groom it. No model call was made.'
 
   it('refuses a card with an empty Type, a blank one or the unfilled ticket.md placeholder', () => {
     for (const type of ['', '  ', '<Type>']) expect(checkGate('groomer', { ...ticket, status: 'Idea', type })).toEqual({ ok: false, message: NO_TYPE })
   })
 
-  it('refuses a Bug card in Idea, Grooming and Shortlist, the retry status included, pointing at the Diagnoser', () => {
-    for (const status of GROOMER_ACCEPTS) expect(checkGate('groomer', { ...ticket, status, type: 'Bug' })).toEqual({ ok: false, message: BUG })
+  it('grooms a Bug card as it grooms a Feature, in Idea, Grooming and Shortlist (KIT-22: the same path until the Diagnoser exists)', () => {
+    for (const status of GROOMER_ACCEPTS) expect(checkGate('groomer', { ...ticket, status, type: 'Bug' })).toEqual(checkGate('groomer', { ...ticket, status, type: 'Feature' }))
   })
 
   it('refuses a card of any other Type, naming it', () => {
-    expect(checkGate('groomer', { ...ticket, status: 'Idea', type: 'Chore' })).toEqual({ ok: false, message: 'NOM-4 Explore pagination is a Chore card; groomer grooms Feature cards only. No model call was made.' })
+    expect(checkGate('groomer', { ...ticket, status: 'Idea', type: 'Chore' })).toEqual({ ok: false, message: 'NOM-4 Explore pagination is a Chore card; groomer grooms Feature and Bug cards only. No model call was made.' })
   })
 })
 
