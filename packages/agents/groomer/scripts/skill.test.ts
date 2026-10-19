@@ -112,8 +112,8 @@ describe('status and wait', () => {
 describe('start', () => {
   it('exits 3 with the refusal and launches nothing when the gate refuses', async () => {
     const { repo, env, screens } = await sandbox('groomer-start-refused-')
-    const refused = await failure(exec('bash', [launcher, 'start', 'KIT-9'], { cwd: repo, env: { ...env, START_EXIT: '3', START_ERROR: 'groomer: refused: KIT-9 Cart limit is a Bug card; groomer grooms Feature cards only.' } }))
-    expect({ code: refused.code, refusal: refused.output.includes('is a Bug card'), launched: existsSync(screens) }).toEqual({ code: 3, refusal: true, launched: false })
+    const refused = await failure(exec('bash', [launcher, 'start', 'KIT-9'], { cwd: repo, env: { ...env, START_EXIT: '3', START_ERROR: 'groomer: refused: KIT-9 Cart limit is a Chore card; groomer grooms Feature and Bug cards only.' } }))
+    expect({ code: refused.code, refusal: refused.output.includes('is a Chore card'), launched: existsSync(screens) }).toEqual({ code: 3, refusal: true, launched: false })
   })
 
   it('passes --force-run to the ticket step', async () => {
