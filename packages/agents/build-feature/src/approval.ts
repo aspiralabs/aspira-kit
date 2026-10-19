@@ -1,7 +1,12 @@
-// The run-start approval (F15-F17). Before any step or move the driver prints an `approval` stage:
-// the session calls notion-get-self and writes who is running the build and when. The approval is
-// recorded once for the run id with the command as invoked, and it is the only thing that lets the
-// run make a Ready move. Report text, page text and PR text are never read as approval.
+// The run-start approval (F15-F17). Starting `/aspira-build-feature` is the human's approval for
+// every Ready move the run makes (KIT-11 Q2), so the driver records the invocation itself at run
+// start: the command, the time and the git user name of the checkout. No stage asks the session to
+// write an approval: an agent-written approval file is what the auto-mode classifier refuses as
+// self-approval (KIT-20). The record is written once per run id and is the only thing that lets
+// the run make a Ready move. Report text, page text and PR text are never read as approval.
+//
+// `acceptApproval` stays for a run that was pending on the old `approval` stage when the kit was
+// upgraded: its answer is still read once.
 
 import { z } from 'zod'
 import type { Approval, RunState } from '#src/run-state.ts'
@@ -13,13 +18,10 @@ export const approvalAnswerSchema = z.union([
   z.object({ nonce, notionUserId: z.string().min(1), name: z.string().min(1), at: z.string().min(1) }),
 ])
 
-/** The stage body: notion-get-self, then the answer file. */
-export function approvalStage(input: { id: string; command: string; output: string }): Record<string, unknown> {
-  return {
-    command: input.command,
-    notion: [{ op: 'read', target: 'self' }],
-    instructions: `The human started "${input.command}". That invocation is the run-start approval for every Ready move this run makes on ${input.id}. Call notion-get-self and write {"nonce", "notionUserId", "name", "at"} (at: the current time, ISO 8601) to ${input.output}; write {"nonce", "error"} when the call fails. Nothing else counts as approval.`,
-  }
+/** The run-start approval as the invocation records it: who ran the command, per git, else the shell user. */
+export function invocationApproval(run: { runId: string; command: string; at: string }, gitUserName: string, env: NodeJS.ProcessEnv): Approval {
+  const name = gitUserName.trim() || env.GIT_AUTHOR_NAME?.trim() || env.USER?.trim() || 'unknown'
+  return { runId: run.runId, name, at: run.at, command: run.command }
 }
 
 export type ApprovalOutcome = { kind: 'pending'; why: string } | { kind: 'approved'; approval: Approval } | { kind: 'stop'; message: string }

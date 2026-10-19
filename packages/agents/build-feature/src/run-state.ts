@@ -104,7 +104,8 @@ const runSchema = z.object({
 })
 export type RunRecord = z.infer<typeof runSchema>
 
-const approvalSchema = z.object({ runId: text, notionUserId: text, name: text, at: text, command: text })
+// `notionUserId` is only on records a session wrote before the driver recorded the invocation itself (KIT-20).
+const approvalSchema = z.object({ runId: text, notionUserId: text.optional(), name: text, at: text, command: text })
 export type Approval = z.infer<typeof approvalSchema>
 
 const moveSchema = z.object({ from: text, to: text, at: text, runId: text })

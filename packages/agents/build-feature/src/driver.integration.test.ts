@@ -15,7 +15,6 @@ import { reviewPhase } from '#src/review-loop.ts'
 import { releaseRowPhase, step10Phase } from '#src/step10.ts'
 import { step8Phase } from '#src/step8.ts'
 import {
-  APPROVER,
   BOARD_RULES_WITH_SUMMARY,
   BOARD_RULES_WITHOUT_SUMMARY,
   DECISIONS_FILE,
@@ -314,7 +313,7 @@ describe('T21 F14 F20: the driver never writes a step decisions file and never p
 })
 
 describe('T22 F15 F16: the run-start approval and the Ready moves it covers', () => {
-  it('asks for the approval first, then moves Shortlist to Ready: Idea without a question and runs the spec-writer', async () => {
+  it('records the invocation as the approval (no approval stage), then moves Shortlist to Ready: Idea without a question and runs the spec-writer', async () => {
     const h = await project({ status: 'Shortlist' })
     const first = await h.start()
     const move = await h.advance(returnOn('move'), first)
@@ -325,7 +324,7 @@ describe('T22 F15 F16: the run-start approval and the Ready moves it covers', ()
     }
     const step = await h.advance()
     expect({ first: first.stage?.stage, move: moveOf(moveStage), question: moveStage !== null && 'question' in moveStage, next: commandOf(step) }).toEqual({
-      first: 'approval',
+      first: 'resolve',
       move: { from: 'Shortlist', to: 'Ready: Idea' },
       question: false,
       next: '/aspira-spec-writer KIT-11 --local --take-recommended',
@@ -340,17 +339,12 @@ describe('T22 F15 F16: the run-start approval and the Ready moves it covers', ()
     const state = await h.state()
     const approvals = (state.approvals ?? []).filter((approval) => approval.runId === run)
     const summary = await h.summary()
+    // The git user of the checkout: the helper's git has no stored user.name, so the env's GIT_AUTHOR_NAME ('t') names the approver (KIT-20).
     expect({
       approvals: approvals.map(({ notionUserId, name, at, command }) => ({ notionUserId, name, at, command })),
       move: (state.moves ?? []).filter((move) => move.from === 'Shortlist' && move.to === 'Ready: Idea' && move.runId === run).length,
-      summary: [APPROVER.name, NOW, RESUME].every((text) => summary.includes(text)),
-    }).toEqual({ approvals: [{ notionUserId: APPROVER.notionUserId, name: APPROVER.name, at: APPROVER.at, command: RESUME }], move: 1, summary: true })
-  }, SLOW)
-
-  it('stops before any step or move when notion-get-self fails', async () => {
-    const h = await project({ status: 'Shortlist' })
-    const end = await h.advance({ approval: async (stage) => h.answer(stage, { error: 'notion-get-self failed: unauthorized' }) }, await h.start())
-    expect({ end: end.stage?.stage, noStepOrMove: noStepOrMove(h) }).toEqual({ end: 'end', noStepOrMove: true })
+      summary: [': t at ', NOW, RESUME].every((text) => summary.includes(text)),
+    }).toEqual({ approvals: [{ notionUserId: undefined, name: 't', at: NOW, command: RESUME }], move: 1, summary: true })
   }, SLOW)
 })
 

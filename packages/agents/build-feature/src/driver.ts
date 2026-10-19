@@ -47,7 +47,7 @@ import { encodeTrace, listsTelemetry, readAttached, recordAttached, releaseRunId
 import { readUsageSource, type PhaseUsage } from '@aspiralabs/agent-common/lib/telemetry-sources'
 import { slug } from '@aspiralabs/agent-common/lib/ticket'
 import { MODELS as REVIEWER_MODELS } from '@aspiralabs/pr-reviewer/models'
-import { acceptApproval, approvalFor, approvalStage, recordApproval } from '#src/approval.ts'
+import { acceptApproval, approvalFor, invocationApproval, recordApproval } from '#src/approval.ts'
 import { buildRunStatus, buildStopSchema, type BuildStop } from '#src/build-status.ts'
 import { addTaken, collectTakenDecisions, isDecisionStep, openDecisions, takenKeyOf } from '#src/decisions.ts'
 import { gatePhase } from '#src/gate.ts'
@@ -1081,7 +1081,7 @@ function refuseInProgress(input: DriverInput, state: RunState): void {
 }
 
 async function startRun(ctx: Ctx, state: RunState): Promise<Out> {
-  const { now, id } = ctx.input
+  const { now } = ctx.input
   refuseInProgress(ctx.input, state)
   const replaced = state.inProgress?.runId
   const runs = state.runs.map((run) => (run.runId === replaced ? { ...run, endedAt: now, ended: 'replaced' } : run))
@@ -1091,7 +1091,10 @@ async function startRun(ctx: Ctx, state: RunState): Promise<Out> {
   const started = replaced === undefined ? opened : (await writeRunTelemetry(ctx, opened, replaced, now, 'replaced')).state
   const aspira = await readAspira(ctx.input.repo)
   if (!aspira.ok) return stop(ctx, started, aspira.message, { stopped: true, reason: { kind: 'aspira-json' }, failure: { action: 'aspira.json', message: aspira.message } })
-  return pend({ ...ctx, aspira: aspira.aspira }, started, 'approval', (output) => approvalStage({ id, command: run.command, output }))
+  // The invocation is the run-start approval (KIT-11 Q2), recorded here and never asked of the session (KIT-20).
+  const user = await system.gitUserName({ cwd: ctx.input.repo, env: ctx.input.env })
+  const approved = recordApproval(started, invocationApproval({ runId: ctx.runId, command: run.command, at: now }, user.code === 0 ? user.stdout : '', ctx.input.env))
+  return requestResolve({ ...ctx, aspira: aspira.aspira }, approved, { purpose: 'start' })
 }
 
 /** Read the answer file of the pending stage: the parsed JSON, or null when there is none yet. */
