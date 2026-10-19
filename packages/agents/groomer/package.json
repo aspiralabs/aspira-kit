@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/groomer",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Groomer: interviews a Feature card's Idea in rounds, grounded in the repository, until no question is open, before it reaches Ready: Idea.",
   "type": "module",
   "scripts": {
