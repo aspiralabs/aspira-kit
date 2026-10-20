@@ -78,7 +78,7 @@ it('blocks UI planning without live kit evidence and preserves diagnostics', asy
   state.uiPlan = true
   const result = await runPlan({ ...await input(), uiRequired: true })
   expect(result.status).toBe('incomplete')
-  expect(result.problems).toContain('UI planning requires successful list_components and get_component MCP reads')
+  expect(result.problems).toContain('UI planning requires a successful list_components MCP read')
   expect(await readFile(join(result.dir, 'plan.reviewed.md'), 'utf8')).toContain('Status: **incomplete**')
 })
 
@@ -184,7 +184,7 @@ it('sends research and planning the exact default prompt bytes', async () => {
 
 it('needs UI kit reads only when the plan writes UI files', async () => {
   const result = await runPlan({ ...await input(), uiRequired: true })
-  expect(result.problems).not.toContain('UI planning requires successful list_components and get_component MCP reads')
+  expect(result.problems).not.toContain('UI planning requires a successful list_components MCP read')
   expect(result.status).toBe('ready')
 })
 

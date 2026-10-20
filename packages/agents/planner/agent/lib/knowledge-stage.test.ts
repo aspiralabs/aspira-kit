@@ -82,7 +82,7 @@ describe('the planner --local knowledge stage (T59)', () => {
     const first = pending(await runLocal(ws.input, deps))
     expect(notion.requests.length).toBeGreaterThan(0)
     expect(first.stage).not.toBe('knowledge')
-    for (const task of first.tasks) expect(await readFile(task.prompt, 'utf8')).not.toMatch(/Notion MCP/i)
+    for (const task of first.tasks) expect(await readFile(task.prompt, 'utf8')).not.toMatch(/Notion MCP[^.]*guideline|guideline[^.]*Notion MCP/i)
 
     const afterFirst = notion.requests.length
     // A later stage of the same run: the research output now exists, so the next call advances.
@@ -120,6 +120,6 @@ describe('the planner --local knowledge stage (T59)', () => {
     const ws = await workspace()
     const deps: FutureDeps = { env: {}, fetch, api: notion.api }
     const result = await runLocal(ws.input, deps)
-    expect(JSON.stringify(result)).not.toMatch(/Notion MCP/i)
+    expect(JSON.stringify(result)).not.toMatch(/Notion MCP[^.]*guideline|guideline[^.]*Notion MCP/i)
   })
 })

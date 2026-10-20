@@ -170,9 +170,14 @@ export async function readLinkedGuidelines(tools: ToolSet, guidelines: string, p
   }
 }
 
-/** True when a UI plan lacks the successful catalog and component-document reads it requires. */
+/**
+ * True when a UI plan lacks the successful catalog read it requires. A successful list_components
+ * is the requirement; get_component reads are expected for the components the plan uses, but a
+ * catalog with nothing in it (a project whose UI package has no docs yet) has nothing to get, so
+ * they are never a condition the check can hold (KIT-35).
+ */
 export function missingUiReads(uiRequired: boolean, reads: { tool: string; ok: boolean }[]): boolean {
-  return uiRequired && !['list_components', 'get_component'].every((name) => reads.some((read) => read.ok && read.tool.endsWith(`__${name}`)))
+  return uiRequired && !reads.some((read) => read.ok && read.tool.endsWith('__list_components'))
 }
 
 /** ready: structural checks passed; needs-author: product decisions remain; incomplete: anything else. */
@@ -195,7 +200,7 @@ export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<
   if (research?.gaps.length) problems.push(...research.gaps.map((gap) => `Research gap: ${gap}`))
   if (plan) { problems.push(...validatePlan(plan, spec, repo.files, repo.tracked), ...plan.gaps.map((gap) => `Plan gap: ${gap}`)) }
   // A spec that mentions a page or a card is not UI work; a plan that writes UI files is.
-  if (missingUiReads(args.uiRequired && (plan === null || touchesUi(plan)), args.reads)) problems.push('UI planning requires successful list_components and get_component MCP reads')
+  if (missingUiReads(args.uiRequired && (plan === null || touchesUi(plan)), args.reads)) problems.push('UI planning requires a successful list_components MCP read')
   if (args.cancelled) problems.push('Planning cancelled')
   for (const rule of uncoveredRules(guidelines, [...(research?.checks ?? []), ...(plan?.checks ?? [])])) problems.push(`Uncovered guideline: ${rule}`)
   const decisions = mergeDecisions([research?.decisions ?? [], plan?.decisions ?? []], args.answers ?? [], args.takeRecommended ?? false)

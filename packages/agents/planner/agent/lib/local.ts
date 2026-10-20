@@ -105,13 +105,13 @@ export function renderTaskPrompt(args: { id: PhaseId; system: string; prompt: st
   const mechanics = args.id === 'research'
     ? [
       `- The agent's repository tools (list_files, read_files, search) are read-only reads of the repository at ${args.repo}: use Read, Grep, Glob and non-mutating git commands there. The agent gives research ten tool steps; be as efficient: batch reads and searches.`,
-      `- The agent's guideline MCP topics are these files, fetched from Notion for this run: ${args.knowledge.join(', ') || 'none beyond the required guidelines in the Task'}. Read them with Read; do not read other Notion pages.`,
+      `- The agent's guideline MCP topics are these files, fetched from Notion for this run: ${args.knowledge.join(', ') || 'none beyond the required guidelines in the Task'}. Read them with Read. A Notion page the spec or the ticket names (a product doc the work mirrors, a decision page) you may read with the Notion MCP read tools (notion-fetch, notion-search), read-only, citing its title and the quoted line (KIT-35); any other Notion page stays out.`,
       '- The agent\'s Aspira UI tools (list_components, get_component) are the session\'s aspiralabs-ui MCP server. If it is not available, record that as a gap.',
       `- submit_research is your output file. Also write \`${args.reads ?? ''}\`: a JSON array with one {"tool", "ok"} entry per MCP call you made, tool named as the session names it (for example mcp__aspiralabs-ui__get_component), ok false when it failed. Write [] if you made none.`,
     ]
     : [
       // KIT-34: the agent plans without tools; the session's planning subagent may read, so a fact the packet lacks is checked rather than left as a plan gap.
-      `- The agent runs planning without tools. In this session you may use Read, Grep, Glob and non-mutating git commands, read-only, in the repository at ${args.repo}, to settle a fact the packet and research leave out (a path, a symbol, a signature, a caller) before you name it; a plan gap is only for evidence you could not read. Plan from the spec, guidelines, packet and research in the Task.`,
+      `- The agent runs planning without tools. In this session you may use Read, Grep, Glob and non-mutating git commands, read-only, in the repository at ${args.repo}, to settle a fact the packet and research leave out (a path, a symbol, a signature, a caller) before you name it, and the Notion MCP read tools (notion-fetch, notion-search) for a Notion page the spec or the ticket names, citing its title and the quoted line; a plan gap is only for evidence you could not read. Plan from the spec, guidelines, packet and research in the Task.`,
       `- If your plan creates or changes a UI file (.tsx, .jsx, .css, .scss, or anything under components/), call the session's aspiralabs-ui MCP server first: list_components, then get_component for each component the change uses. Write \`${args.reads ?? ''}\`: a JSON array with one {"tool", "ok"} entry per MCP call you made, tool named as the session names it (for example mcp__aspiralabs-ui__get_component), ok false when it failed. Write [] if you made none.`,
     ]
   return [
