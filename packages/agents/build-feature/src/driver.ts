@@ -94,7 +94,7 @@ export type DriverInput = {
   env: NodeJS.ProcessEnv
 }
 
-const aspiraSchema = z.looseObject({ board: z.string().optional(), repository: z.string().optional(), app: z.string().optional(), releases: z.string().optional(), models: z.unknown().optional() })
+const aspiraSchema = z.looseObject({ board: z.string().optional(), repository: z.string().optional(), app: z.string().optional(), releases: z.string().optional(), models: z.unknown().optional(), gates: z.array(z.object({ cwd: z.string().optional(), command: z.string().min(1) })).optional() })
 export type Aspira = z.infer<typeof aspiraSchema>
 
 /** What every handler works from. */

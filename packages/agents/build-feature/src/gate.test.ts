@@ -63,12 +63,19 @@ describe('gateCommandsIn: the gate commands a markdown file names', () => {
 describe('findGate: AGENTS.md first, then the package.json fallback', () => {
   it("takes the app's AGENTS.md before the repository's", async () => {
     const repo = await tree({ 'AGENTS.md': 'Run `pnpm check`.\n', 'apps/web/AGENTS.md': 'Run `pnpm test`.\n' })
-    expect(await findGate(repo, 'apps/web')).toEqual({ commands: ['pnpm test'], cwd: join(repo, 'apps/web'), source: 'apps/web/AGENTS.md' })
+    expect(await findGate(repo, 'apps/web')).toEqual({ commands: ['pnpm test'], cwds: [join(repo, 'apps/web')], cwd: join(repo, 'apps/web'), source: 'apps/web/AGENTS.md' })
   })
 
   it('falls through to the package.json scripts when AGENTS.md names no command', async () => {
     const repo = await tree({ 'AGENTS.md': '# Nothing to run\n', 'package.json': scripts({ test: 'vitest run' }), 'pnpm-lock.yaml': '' })
-    expect(await findGate(repo, '.')).toEqual({ commands: ['pnpm run test'], cwd: repo, source: 'package.json scripts' })
+    expect(await findGate(repo, '.')).toEqual({ commands: ['pnpm run test'], cwds: [repo], cwd: repo, source: 'package.json scripts' })
+  })
+
+  it('takes the gates aspira.json lists before either, each in its own directory (KIT-38)', async () => {
+    const repo = await tree({ 'AGENTS.md': 'Run `pnpm check`.\n' })
+    const gates = [{ cwd: 'tools/aspira', command: 'pnpm check' }, { cwd: 'instances/core/stack', command: 'npx vitest run' }, { command: 'pnpm lint' }]
+    expect(await findGate(repo, '.', gates)).toEqual({ commands: ['pnpm check', 'npx vitest run', 'pnpm lint'], cwds: [join(repo, 'tools/aspira'), join(repo, 'instances/core/stack'), repo], cwd: join(repo, 'tools/aspira'), source: 'aspira.json gates' })
+    expect(await findGate(repo, '.', [])).toMatchObject({ source: 'AGENTS.md' })
   })
 
   it('is null when there is neither', async () => {
@@ -96,7 +103,7 @@ describe('fallbackGate: the app package.json check, test and test:integration sc
 
   it('names the app package.json as the source and runs in the app', async () => {
     const repo = await tree({ 'apps/web/package.json': scripts({ test: 'vitest run' }) })
-    expect(await fallbackGate(repo, 'apps/web')).toEqual({ commands: ['npm run test'], cwd: join(repo, 'apps/web'), source: 'apps/web/package.json scripts' })
+    expect(await fallbackGate(repo, 'apps/web')).toEqual({ commands: ['npm run test'], cwds: [join(repo, 'apps/web')], cwd: join(repo, 'apps/web'), source: 'apps/web/package.json scripts' })
   })
 
   it.each([
