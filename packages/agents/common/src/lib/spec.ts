@@ -22,6 +22,9 @@ export function checkBusinessSpec(markdown: string): string[] {
   if (!text.match(/^## Intent\s*\n([\s\S]*?)(?=^## |$(?![\s\S]))/im)?.[1]?.trim()) errors.push('Missing or empty ## Intent')
   if (!items.length) errors.push('Features need unchecked F1:, F2: checklist items')
   if (new Set(items.map((item) => item.id)).size !== items.length) errors.push('Duplicate feature IDs')
-  if ((features.match(/^\s*[-*+]\s+.+$/gm) ?? []).length !== items.length) errors.push('Every feature must have an unchecked, unique F-number')
+  // A feature is a top-level bullet; an indented bullet beneath it is part of that feature (KIT-27). A
+  // top-level bullet without an unchecked F-number is named, so the writer sees which line to fix.
+  const stray = (features.match(/^[-*+]\s+.+$/gm) ?? []).filter((line) => !/^- \[ \] F\d+:\s+\S/.test(line))
+  if (stray.length > 0) errors.push(`Every feature must be a top-level "- [ ] F<n>: ..." item (detail may go in indented bullets beneath it); these lines are not: ${stray.map((line) => `"${line.slice(0, 80)}"`).join(', ')}`)
   return errors
 }
