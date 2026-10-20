@@ -17,3 +17,4 @@ jobs:
       # @aspiralabs/kit from its dist; nothing else needs a build before lint, typecheck or test.
       prepare: pnpm --filter @aspiralabs/ui --filter @aspiralabs/kit build
       test-shards: "[1, 2, 3, 4, 5, 6]"
+      runs-on: blacksmith-4vcpu-ubuntu-2404
