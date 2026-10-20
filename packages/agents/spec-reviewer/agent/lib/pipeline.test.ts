@@ -104,6 +104,18 @@ it('requires evidence to resolve a gap and lets another reviewer supply it', asy
   expect((await runPipeline({ ...input, spec }, unsupported)).status).toBe('incomplete')
 })
 
+it('lets the author resolve a gap with a cited answer in the spec, with the quote as evidence, and still blocks one without it (KIT-31)', async () => {
+  const spec = '# Feature\n## Intent\nSave.\n## Approach\nTextract synchronous AnalyzeID takes one page up to 10 MB (AWS Textract quotas page, "Synchronous operations").\n## Acceptance criteria\n### Features\n- [ ] F1: Save an item.\n'
+  const call: Call = async ({ phase }) => {
+    if (phase === 'synthesis') return { edits: [], dispositions: [], gapResolutions: [{ gapId: 'G1', status: 'author', evidence: ['spec Approach: "Textract synchronous AnalyzeID takes one page up to 10 MB (AWS Textract quotas page, \\"Synchronous operations\\")"'] }] }
+    return { ...review, findings: [], gaps: phase === 'research' ? ['AWS Textract limits not read'] : [] }
+  }
+  const result = await runPipeline({ ...input, spec }, call)
+  expect({ status: result.status, problems: result.problems }).toEqual({ status: 'ready', problems: [] })
+  const bare: Call = async (request) => request.phase === 'synthesis' ? { edits: [], dispositions: [], gapResolutions: [{ gapId: 'G1', status: 'author', evidence: [] }] } : call(request)
+  expect((await runPipeline({ ...input, spec }, bare)).status).toBe('incomplete')
+})
+
 it('lets every phase finish beyond the former time limits and records elapsed time', async () => {
   vi.useFakeTimers()
   try {
