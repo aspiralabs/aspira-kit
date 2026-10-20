@@ -164,5 +164,14 @@ export function analyzedApps(state: RunState, apps: readonly string[]): string[]
   return apps.filter((app) => since.some((step) => step.step === 'code-analyzer' && readRunStatus(step.status)?.status === 'ready' && appOf(step.command) === app))
 }
 
-/** The `--app <dir>` a code-analyzer command carries, '.' when it carries none. */
-const appOf = (command: string): string => (command.match(/--app\s+(\S+)/)?.[1] ?? '.').replace(/\/+$/, '') || '.'
+/** The `--app <dir>` a step command carries, or `fallback` ('.') when it carries none; a code-analyzer step's results live under that directory (KIT-40). */
+export const commandApp = (command: string, fallback = '.'): string => (command.match(/--app\s+(\S+)/)?.[1] ?? fallback).replace(/\/+$/, '') || '.'
+const appOf = (command: string): string => commandApp(command)
+
+/** The app directories the code-analyzer steps since the last build ran on, in order, from their `--app`; `[fallback]` when there were none (KIT-40). */
+export function analyzerStepApps(state: RunState, fallback = '.'): string[] {
+  const steps = state.steps.filter((step) => step.step === 'implementor' || step.step === 'code-analyzer')
+  const since = steps.slice(steps.map((step) => step.step).lastIndexOf('implementor') + 1)
+  const apps = [...new Set(since.filter((step) => step.step === 'code-analyzer').map((step) => commandApp(step.command, fallback)))]
+  return apps.length ? apps : [fallback]
+}

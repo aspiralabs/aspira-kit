@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import { analyzerApps, routeStatus, type RouteFacts } from '#src/route.ts'
 import { emptyRunState, type RunState } from '#src/run-state.ts'
-import { analyzedApps } from '#src/step-results.ts'
+import { analyzedApps, analyzerStepApps, commandApp } from '#src/step-results.ts'
 
 const facts: RouteFacts = { id: 'KIT-11', app: 'tools/aspira', specCovered: true, implementor: 'ready', analyzerReady: false, mode: 'local' }
 const step = (name: string, command: string, status: string): RunState['steps'][number] => ({ step: name, runId: 'run-1', command, status, startedAt: 'now', endedAt: 'now', usage: null })
@@ -47,5 +47,22 @@ describe('analyzedApps', () => {
       ],
     }
     expect(analyzedApps(state, ['instances/core/stack', 'instances/core/app', 'tools/aspira'])).toEqual(['instances/core/stack'])
+  })
+})
+
+describe('analyzerStepApps and commandApp (KIT-40)', () => {
+  it('lists the apps of the analyzer steps since the last build, or the fallback when there were none', () => {
+    const state: RunState = {
+      ...emptyRunState(),
+      steps: [
+        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app old/app --local', 'ready'),
+        step('implementor', '/aspira-implementor KIT-11 --local', 'ready'),
+        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app . --local', 'ready'),
+        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app pkgs/a/ --local', 'ready'),
+      ],
+    }
+    expect(analyzerStepApps(state, 'tools/aspira')).toEqual(['.', 'pkgs/a'])
+    expect(analyzerStepApps(emptyRunState(), 'tools/aspira')).toEqual(['tools/aspira'])
+    expect(commandApp('/aspira-code-analyzer KIT-11 --local', 'tools/aspira')).toBe('tools/aspira')
   })
 })
