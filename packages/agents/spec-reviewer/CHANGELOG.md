@@ -1,5 +1,11 @@
 # @aspiralabs/spec-reviewer
 
+## 0.8.15
+
+### Patch Changes
+
+- @aspiralabs/agent-common@0.8.15
+
 ## 0.8.14
 
 ### Patch Changes
