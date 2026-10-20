@@ -15,7 +15,7 @@ export { decisionSchema }
 // depending on this package); re-exported here unchanged so every existing import of './plan.ts' keeps working.
 export { planSchema, renderPlan, mergeDecisions, problemSeverity }
 export type { Plan }
-export const researchSchema = z.object({ facts: z.array(text), checks: z.array(z.object({ rule: text, evidence: text })), gaps: z.array(text), decisions: z.array(decisionSchema) })
+export const researchSchema = z.object({ facts: z.array(text), checks: z.array(z.object({ rule: text, evidence: text })), gaps: z.array(text), decisions: z.array(decisionSchema), notes: z.array(text).optional() })
 export type Research = z.infer<typeof researchSchema>
 
 function safePath(path: string) {

@@ -21,6 +21,8 @@ export const planSchema = z.object({
   tests: z.array(z.object({ id: z.string().regex(/^T\d+$/), kind: z.enum(['unit', 'integration']), path: text, featureIds: features, setup: text, action: text, assertions: z.array(text).min(1) })).min(1),
   checks: z.array(z.object({ rule: text, evidence: text })),
   decisions: z.array(decisionSchema), gaps: z.array(text),
+  /** What the implementer should re-verify (KIT-36): never a readiness problem, unlike a gap. */
+  notes: z.array(text).optional(),
 })
 export type Plan = z.infer<typeof planSchema>
 
@@ -67,6 +69,9 @@ export function renderPlan(plan: Plan, status: string, source: { specPath: strin
     lines.push(`### ${kind === 'unit' ? 'Unit' : 'Integration'} tests`, '')
     for (const test of plan.tests.filter((item) => item.kind === kind)) lines.push(`- [ ] **${test.id}** — \`${test.path}\` ${test.featureIds.map((id) => `[${id}]`).join(' ')}`, `  - Setup: ${test.setup}`, `  - Action: ${test.action}`, ...test.assertions.map((assertion) => `  - Assert: ${assertion}`), '')
   }
+  // Notes (KIT-36): what the implementer should re-verify; never a reason the plan is not ready.
+  const notes = plan.notes ?? []
+  if (notes.length) lines.push('## Notes', '', ...notes.map((note) => `- ${note}`), '')
   const open = decisions.filter((decision) => decision.decidedBy === 'open').length
   lines.push('## Author decisions', '', `${decisions.length} decision${decisions.length === 1 ? '' : 's'}: ${open} open · ${decisions.length - open} answered. Each has a recommended option; answer them in trace/decisions.md.`, '', ...(decisions.length ? decisions.map((decision) => `${renderDecision(decision).replace(/^## /, '### ')}\n`) : ['None.', '']), '## Readiness checks', '', ...(problems.length ? sortBySeverity(problems, problemSeverity).map((item) => `- **${problemSeverity(item)}** · ${item}`) : ['All structural checks passed; tasks and commands are instructions for the build agent and have not been executed.']), '', 'See trace/ for the source spec, guidelines, evidence, model activity and validation details.', '')
   return lines.join('\n')
