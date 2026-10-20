@@ -36,9 +36,9 @@ export type Prepared = Awaited<ReturnType<typeof prepareReview>>
 export const reviewContext = ({ repo, spec }: Prepared, catalog: string) =>
   `${repo.instructions}\n${repo.packet(spec)}\nAspira UI catalog (read in preparation): ${catalog}\nSnapshot gaps: ${repo.gaps.join('; ')}`
 
-/** Repository snapshot gaps block readiness in every mode. */
-export function applySnapshotGaps(result: PipelineResult, { repo }: Prepared) {
-  if (repo.gaps.length) { result.problems.push(...repo.gaps); result.status = 'incomplete' }
+/** Repository snapshot gaps (files not indexed for size) are notes in the evidence packet, never a problem: they used to end every run on a repository with one large tracked file incomplete (KIT-29). Kept so both callers stay as they are. */
+export function applySnapshotGaps(_result: PipelineResult, _prepared: Prepared) {
+  // Nothing to apply: the gaps are already in the packet's "Snapshot gaps" line.
 }
 
 /** The reviewed spec and the human-readable trace, identical across modes. */

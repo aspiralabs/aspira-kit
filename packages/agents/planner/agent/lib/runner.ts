@@ -176,7 +176,8 @@ export type PlanStatus = 'ready' | 'needs-author' | 'incomplete'
  */
 export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<PlanRepository, 'gaps' | 'files' | 'tracked'>; research: Research | null; plan: Plan | null; phaseErrors: { phase: string; error: string | null }[]; uiRequired: boolean; reads: { tool: string; ok: boolean }[]; cancelled: boolean; answers?: Answer[]; takeRecommended?: boolean }): { status: PlanStatus; problems: string[]; decisions: DecisionRecord[] } {
   const { spec, guidelines, repo, research, plan } = args
-  const problems = [...repo.gaps]
+  // Snapshot gaps (files not indexed for size) are notes in the evidence packet, never a problem (KIT-29).
+  const problems: string[] = []
   for (const phase of args.phaseErrors) if (phase.error) problems.push(`${phase.phase}: ${phase.error}`)
   if (!research) problems.push('Research unavailable')
   if (!plan) problems.push('No structured plan produced')
