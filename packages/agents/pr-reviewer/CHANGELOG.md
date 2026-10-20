@@ -1,5 +1,12 @@
 # @aspiralabs/pr-reviewer
 
+## 0.8.11
+
+### Patch Changes
+
+- Updated dependencies [db3dd67]
+  - @aspiralabs/agent-common@0.8.11
+
 ## 0.8.10
 
 ### Patch Changes
