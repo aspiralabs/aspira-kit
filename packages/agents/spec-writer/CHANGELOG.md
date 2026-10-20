@@ -1,5 +1,14 @@
 # @aspiralabs/spec-writer
 
+## 0.8.8
+
+### Patch Changes
+
+- 60c39c6: Under `--local`, the spec writer's and spec reviewer's research subagents may read Notion (the MCP's read tools) and public documentation (WebFetch, WebSearch) for a fact that lives outside the repository, citing the URL or page with the quoted line (KIT-33). Before, every subagent prompt limited them to repository reads, so a vendor limit, an infrastructure behaviour or a Notion decision was always an evidence gap only the author could close.
+- Updated dependencies [60c39c6]
+  - @aspiralabs/spec-reviewer@0.8.8
+  - @aspiralabs/agent-common@0.8.8
+
 ## 0.8.7
 
 ### Patch Changes
