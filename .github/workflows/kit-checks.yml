@@ -49,6 +49,7 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: id; nproc; free -g | head -2
       - run: pnpm build
       # Checks that need the full build output (smoke tests, packing), if the repo has any.
       - run: pnpm run --if-present test:build
