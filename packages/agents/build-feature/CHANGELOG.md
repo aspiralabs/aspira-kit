@@ -1,5 +1,14 @@
 # @aspiralabs/build-feature
 
+## 0.8.15
+
+### Patch Changes
+
+- bc71b35: build-feature judges each code-analyzer step by the export under that step's own `--app` directory, commits the fixes every analyzer step recorded and lists every app's result in the PR body (KIT-40). Before, the driver read aspira.json's `app` for every analyzer step, so on a multi-app repository a stale `.static-analysis/rounds.json` under that app ended a run whose per-app steps had all finished ready.
+  - @aspiralabs/kit@0.8.15
+  - @aspiralabs/agent-common@0.8.15
+  - @aspiralabs/pr-reviewer@0.8.15
+
 ## 0.8.14
 
 ### Patch Changes
