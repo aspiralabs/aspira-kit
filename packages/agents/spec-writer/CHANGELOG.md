@@ -1,5 +1,13 @@
 # @aspiralabs/spec-writer
 
+## 0.8.9
+
+### Patch Changes
+
+- Updated dependencies [26450eb]
+  - @aspiralabs/spec-reviewer@0.8.9
+  - @aspiralabs/agent-common@0.8.9
+
 ## 0.8.8
 
 ### Patch Changes

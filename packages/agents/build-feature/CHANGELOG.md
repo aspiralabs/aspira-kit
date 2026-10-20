@@ -1,5 +1,13 @@
 # @aspiralabs/build-feature
 
+## 0.8.9
+
+### Patch Changes
+
+- @aspiralabs/kit@0.8.9
+- @aspiralabs/agent-common@0.8.9
+- @aspiralabs/pr-reviewer@0.8.9
+
 ## 0.8.8
 
 ### Patch Changes

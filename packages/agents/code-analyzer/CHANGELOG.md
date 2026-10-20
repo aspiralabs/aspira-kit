@@ -1,5 +1,11 @@
 # @aspiralabs/code-analyzer
 
+## 0.8.9
+
+### Patch Changes
+
+- @aspiralabs/agent-common@0.8.9
+
 ## 0.8.8
 
 ### Patch Changes
