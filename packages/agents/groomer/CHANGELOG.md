@@ -1,5 +1,11 @@
 # @aspiralabs/groomer
 
+## 0.8.12
+
+### Patch Changes
+
+- @aspiralabs/agent-common@0.8.12
+
 ## 0.8.11
 
 ### Patch Changes
