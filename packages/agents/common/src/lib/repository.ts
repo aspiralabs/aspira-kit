@@ -99,6 +99,8 @@ export async function repository(root: string, signal?: AbortSignal) {
   const tracked = new Set(listed)
   const paths = listed.filter((p) => allowedPath(p)).sort()
   const files = new Map<string, string>()
+  // Files left out for size: named in every evidence packet so the model reads them directly when
+  // the work touches them, never a problem or a reason for an incomplete run (KIT-29).
   const gaps: string[] = []
   let bytes = 0
   for (const path of paths) {

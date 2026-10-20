@@ -48,8 +48,8 @@ export const writeContext = ({ repo, idea }: Prepared, catalog: string) =>
  * before export), so status is ready when nothing else is open; no decision is ever decidedBy
  * 'author' unless an author actually ticked it.
  */
-export function applySnapshotGaps(result: WriteResult, { repo, takeRecommended }: Prepared) {
-  if (repo.gaps.length) { result.problems.push(...repo.gaps); result.status = 'incomplete' }
+export function applySnapshotGaps(result: WriteResult, { takeRecommended }: Prepared) {
+  // Snapshot gaps (files not indexed for size) are notes in the evidence packet, never a problem: they used to end every run on a repository with one large tracked file incomplete (KIT-29).
   if (takeRecommended && result.status === 'needs-author') {
     result.authorDecisions = result.authorDecisions.map((decision) => (decision.decidedBy === 'open' ? takenDecision(decision.id, decision) : decision))
     result.status = result.authorDecisions.some((decision) => decision.decidedBy === 'open') ? 'needs-author' : 'ready'
