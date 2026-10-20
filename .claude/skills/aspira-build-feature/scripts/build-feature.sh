@@ -131,7 +131,7 @@ node_args() {
   local file
   for file in "$PROJECT/.env.local" "$AGENT/.env.local" "$AGENT/.env.development.local"; do [ ! -f "$file" ] || NODE_ARGS+=("--env-file=$file"); done
 }
-usage() { die "usage: build-feature.sh local <ID> [--local] [--run RUNID] [--force-run] [--finish]. With --local every step runs its skill with --local; without it every step runs its skill's cloud agent."; }
+usage() { die "usage: build-feature.sh local <ID> [--local] [--autonomous] [--run RUNID] [--force-run] [--finish]. With --local every step runs its skill with --local; without it every step runs its skill's cloud agent. --autonomous (with --local) skips the human gates: the groomer takes every question as recommended and confirms itself."; }
 cmd_local() {
   [ $# -ge 1 ] || usage
   local id=$1; shift
