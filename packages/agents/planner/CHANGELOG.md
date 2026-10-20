@@ -1,5 +1,12 @@
 # @aspiralabs/planner
 
+## 0.8.12
+
+### Patch Changes
+
+- c90f708: Planner (KIT-37): a plan gap about the Aspira UI catalog (an empty listing, a failed `get_component`) is a note, not a readiness problem, once the catalog listing itself succeeded; the planning prompt says so for a plan that adds no new component. Before, the one remaining gap on a project whose UI package has no documented components yet kept every plan incomplete.
+  - @aspiralabs/agent-common@0.8.12
+
 ## 0.8.11
 
 ### Patch Changes
