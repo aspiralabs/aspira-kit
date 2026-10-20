@@ -6,11 +6,11 @@
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { renderBuildSummary } from '#src/summary.ts'
 
 const temps: string[] = []
-afterEach(async () => {
+afterAll(async () => {
   for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true })
 })
 

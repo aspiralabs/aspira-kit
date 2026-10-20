@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 
 const exec = promisify(execFile)
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -19,7 +19,7 @@ const skill = join(root, 'skill/aspira-build-feature/SKILL.md')
 const agentsReadme = join(root, '..', 'README.md')
 
 const temps: string[] = []
-afterEach(async () => {
+afterAll(async () => {
   for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true })
 })
 

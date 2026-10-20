@@ -8,9 +8,10 @@
     "build": "pnpm -r --filter './packages/*' --filter './packages/agents/*' build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
-    "check": "pnpm build && pnpm typecheck && pnpm lint && pnpm test",
+    "check": "pnpm build && pnpm typecheck && pnpm lint && pnpm test && pnpm test:build",
     "changeset": "changeset",
-    "test": "pnpm --filter @aspiralabs/ui test && pnpm --filter @aspiralabs/kit test && env -u NOTION_TOKEN pnpm --filter @aspiralabs/build-feature test && node packages/ui/scripts/mcp-smoke.mjs && pnpm -r --filter \"./packages/*\" --filter \"./packages/agents/*\" exec pnpm pack --pack-destination \"$PWD/.packs\"",
+    "test": "env -u NOTION_TOKEN -u NOTION_API_KEY pnpm -r --filter @aspiralabs/ui --filter @aspiralabs/kit --filter @aspiralabs/build-feature test",
+    "test:build": "node packages/ui/scripts/mcp-smoke.mjs && pnpm -r --filter \"./packages/*\" --filter \"./packages/agents/*\" exec pnpm pack --pack-destination \"$PWD/.packs\"",
     "changeset:version": "changeset version && pnpm install --lockfile-only",
     "changeset:publish": "changeset publish"
   },

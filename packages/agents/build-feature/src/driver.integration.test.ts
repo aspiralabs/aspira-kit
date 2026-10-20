@@ -8,7 +8,7 @@
 import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { PHASES } from '#src/driver.ts'
 import { gatePhase } from '#src/gate.ts'
 import { reviewPhase } from '#src/review-loop.ts'
@@ -36,7 +36,7 @@ import {
   type Stage,
 } from './driver.test-helper.ts'
 
-afterEach(cleanup)
+afterAll(cleanup)
 
 const SLOW = 120_000
 const returnOn = (...names: string[]) => Object.fromEntries(names.map((name) => [name, async () => 'return' as const]))

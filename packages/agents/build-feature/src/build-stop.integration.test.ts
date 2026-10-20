@@ -10,11 +10,11 @@
 
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { parseNextAction, writeProgressNote } from '@aspiralabs/agent-common/lib/progress-note'
 import { APPROVER, cleanup, ID, project, RESUME, TITLE, writeStepExport, type Project, type Result } from '#src/driver.test-helper.ts'
 
-afterEach(cleanup)
+afterAll(cleanup)
 
 const SLOW = 120_000
 

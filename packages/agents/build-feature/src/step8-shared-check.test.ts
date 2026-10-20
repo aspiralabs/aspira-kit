@@ -15,7 +15,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import type { PhaseContext } from '#src/driver.ts'
 import { emptyRunState, type RunState } from '#src/run-state.ts'
 import { step8Phase } from '#src/step8.ts'
@@ -60,7 +60,7 @@ fi
 `
 
 const temps: string[] = []
-afterEach(async () => {
+afterAll(async () => {
   for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true })
 })
 

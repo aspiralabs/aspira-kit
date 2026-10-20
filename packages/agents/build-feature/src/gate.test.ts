@@ -9,12 +9,12 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { changedGateScripts, credentialNames, fallbackGate, findGate, gateCommandsIn, withoutCredentials } from '#src/gate.ts'
 import { packageManagerOf } from '#src/system.ts'
 
 const temps: string[] = []
-afterEach(async () => {
+afterAll(async () => {
   for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true })
 })
 

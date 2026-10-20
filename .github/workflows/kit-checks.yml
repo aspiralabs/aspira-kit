@@ -3,6 +3,11 @@
 #   jobs:
 #     checks:
 #       uses: aspiralabs/aspira-kit/.github/workflows/kit-checks.yml@main
+#
+# Every gate is its own job, so nothing waits on anything it does not need: build,
+# lint, typecheck and each test shard run side by side on their own runners. The
+# last job is named `checks`, so the status a branch protection requires stays
+# "checks / checks".
 name: kit-checks
 on:
   workflow_call:
@@ -15,8 +20,20 @@ on:
         # workflow uses it to run these gates on the changesets version branch.
         type: string
         default: ""
+      prepare:
+        # What lint, typecheck and test need built before they run. The default
+        # builds everything; a repo that knows its narrower needs names them, or
+        # passes "" for none.
+        type: string
+        default: pnpm build
+      test-shards:
+        # The test shard numbers, as a JSON array: '[1, 2, 3, 4]' runs `pnpm test`
+        # on four runners, each with `--shard=<n>/4` (vitest). '[1]' is one
+        # runner with no shard flag.
+        type: string
+        default: "[1]"
 jobs:
-  checks:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,8 +45,64 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # build first: apps/docs typechecks against @aspiralabs/ui's dist
       - run: pnpm build
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test
+      # Checks that need the full build output (smoke tests, packing), if the repo has any.
+      - run: pnpm run --if-present test:build
+
+  static:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: [lint, typecheck]
+    name: ${{ matrix.gate }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - if: inputs.prepare != ''
+        run: ${{ inputs.prepare }}
+      - run: pnpm ${{ matrix.gate }}
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(inputs.test-shards) }}
+    name: test ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - if: inputs.prepare != ''
+        run: ${{ inputs.prepare }}
+      - env:
+          SHARDS: ${{ inputs.test-shards }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          total=$(jq length <<<"$SHARDS")
+          if [ "$total" -gt 1 ]; then pnpm test --shard="$SHARD/$total" --passWithNoTests; else pnpm test; fi
+
+  checks:
+    needs: [build, static, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do [ "$result" = success ] || exit 1; done
