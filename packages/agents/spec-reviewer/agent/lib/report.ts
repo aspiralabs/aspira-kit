@@ -31,6 +31,25 @@ export function renderFindings(findings: readonly Finding[], synthesis: Synthesi
   return ['# Findings', '', findingsHeader(countBySeverity(ordered, (finding) => finding.severity)), '', 'Ordered by severity, then by the order the reviewers confirmed them. The plain-English line comes first; the evidence under it is what was checked (REV-022).', '', ...(body.length ? [body.join('\n\n')] : ['No findings.']), ...authorSection, ''].join('\n')
 }
 
+/**
+ * The candidate with every decided author decision written into its `## Decisions` section (KIT-36):
+ * the author's answers and the ones taken as recommended, in the `- **Q<n> — <question>** Answer:
+ * <answer>. Why: <reasoning>.` form the planner's settled-decisions rule reads, so a later step
+ * never raises them again. A spec with no decided decision is returned as is; an existing
+ * `## Decisions` section gains the items at its end.
+ */
+export function withSettledDecisions(candidate: string, decisions: readonly DecisionRecord[]): string {
+  const decided = decisions.filter((decision) => decision.decidedBy !== 'open' && decision.answer !== null)
+  if (!decided.length) return candidate
+  const clean = (text: string) => text.replace(/\s+/g, ' ').trim().replace(/\.+$/, '')
+  const items = decided.map((decision, index) => `- **Q${index + 1} — ${clean(decision.question)}** Answer: ${clean(decision.answer ?? '')}. Why: ${clean(decision.reasoning)}${decision.decidedBy === 'agent' ? ' (taken as recommended)' : ''}.`)
+  const section = candidate.match(/^## Decisions[ \t]*$([\s\S]*?)(?=^#{1,2} |(?![\s\S]))/m)
+  if (section === null) return `${candidate.replace(/\s*$/, '')}\n\n## Decisions\n\n${items.join('\n')}\n`
+  const end = section.index! + section[0].length
+  const body = section[0].replace(/\s*$/, '')
+  return `${candidate.slice(0, section.index!)}${body}\n${items.join('\n')}\n\n${candidate.slice(end).replace(/^\s*/, '')}`
+}
+
 /** The findings section a non-ready reviewed spec carries above the candidate: what to read before the spec itself. */
 export function renderFindingsSection(findings: readonly Finding[]): string {
   const ordered = orderedFindings(findings)

@@ -6,7 +6,7 @@ import { runAnalysis } from './run-analysis.ts'
 import { connectReadTools } from './mcp.ts'
 import { modelSession, reviewModelCall, reviewModels } from './models.ts'
 import { runPipeline, type PipelineResult } from './pipeline.ts'
-import { readAnswers, renderDecisionsFile, renderFindings, renderFindingsSection } from './report.ts'
+import { readAnswers, renderDecisionsFile, renderFindings, renderFindingsSection, withSettledDecisions } from './report.ts'
 import { repository } from './repository.ts'
 import { systemPrompt } from './review.ts'
 
@@ -72,8 +72,10 @@ export function reviewFiles(result: PipelineResult, { spec, guidelines }: Prepar
   }
   // A ready candidate is the spec the planner takes, so it carries nothing but the spec. A candidate
   // that still needs the author or has problems carries the findings, sorted, above it.
-  if (result.candidate !== null) files['spec.reviewed.md'] = result.status === 'ready' ? result.candidate
-    : `> Review status: **${result.status}**. Not ready for implementation; resolve trace/decisions.md and trace/checks.md first. Original status metadata below has not been approved by this review.\n\n${renderFindingsSection(result.findings)}\n\n---\n\n${result.candidate}`
+  // The decided author decisions go into the spec's ## Decisions (KIT-36), so the planner reads them as settled instead of raising them again.
+  const candidate = result.candidate === null ? null : withSettledDecisions(result.candidate, result.authorDecisions)
+  if (candidate !== null) files['spec.reviewed.md'] = result.status === 'ready' ? candidate
+    : `> Review status: **${result.status}**. Not ready for implementation; resolve trace/decisions.md and trace/checks.md first. Original status metadata below has not been approved by this review.\n\n${renderFindingsSection(result.findings)}\n\n---\n\n${candidate}`
   return files
 }
 
@@ -97,8 +99,9 @@ export async function runReview(input: RunInput, options: { signal?: AbortSignal
   const call = session.record(reviewModelCall(session, models, tools, componentTool))
   try {
     const result = await runPipeline({ spec, guidelines, context: reviewContext(prepared, JSON.stringify(catalog)), uiRequired, answers, takeRecommended: input.takeRecommended ?? false }, call, options)
-    if (uiRequired && !['list_components', 'get_component'].every((name) => mcp.reads.some((read) => read.ok && read.tool.endsWith(`__${name}`)))) {
-      result.problems.push('UI review requires successful list_components and get_component MCP reads')
+    // A successful catalog listing is the requirement (KIT-35): a catalog with nothing in it has nothing to get_component.
+    if (uiRequired && !mcp.reads.some((read) => read.ok && read.tool.endsWith('__list_components'))) {
+      result.problems.push('UI review requires a successful list_components MCP read')
       result.status = 'incomplete'
     }
     applySnapshotGaps(result, prepared)
