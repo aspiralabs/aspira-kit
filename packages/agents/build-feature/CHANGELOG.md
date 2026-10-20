@@ -1,5 +1,15 @@
 # @aspiralabs/build-feature
 
+## 0.8.5
+
+### Patch Changes
+
+- 4818573: Tests no longer depend on each other. build-feature's tests run concurrently within a file (each builds its own fixture, and temp folders are removed once per file), and the kit's install test does its one `kit init` in setup instead of in its first test. The reusable `kit-checks` workflow now runs build, lint, typecheck and each test shard as separate parallel jobs; a product keeps today's behaviour by default and can pass `prepare` and `test-shards` to narrow the pre-build and shard its tests.
+- Updated dependencies [4818573]
+  - @aspiralabs/kit@0.8.5
+  - @aspiralabs/agent-common@0.8.5
+  - @aspiralabs/pr-reviewer@0.8.5
+
 ## 0.8.4
 
 ### Patch Changes
