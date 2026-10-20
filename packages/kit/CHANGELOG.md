@@ -1,5 +1,12 @@
 # @aspiralabs/kit
 
+## 0.8.3
+
+### Patch Changes
+
+- Updated dependencies [e9e31fa]
+  - @aspiralabs/agent-common@0.8.3
+
 ## 0.8.2
 
 ### Patch Changes
