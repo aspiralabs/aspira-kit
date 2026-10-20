@@ -1,5 +1,13 @@
 # @aspiralabs/groomer
 
+## 0.8.2
+
+### Patch Changes
+
+- bcb410e: The Idea summary validator accepts an `_Avoid_:` line written indented under its term, as a markdown continuation (KIT-26); before, it refused the summary with "unexpected block in Terms". The summary prompts now say each `_Avoid_:` goes on its own unindented line right after its term.
+- Updated dependencies [bcb410e]
+  - @aspiralabs/agent-common@0.8.2
+
 ## 0.8.1
 
 ### Patch Changes

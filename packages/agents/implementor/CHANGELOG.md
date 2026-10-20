@@ -1,5 +1,12 @@
 # @aspiralabs/implementor
 
+## 0.8.2
+
+### Patch Changes
+
+- Updated dependencies [bcb410e]
+  - @aspiralabs/agent-common@0.8.2
+
 ## 0.8.1
 
 ### Patch Changes

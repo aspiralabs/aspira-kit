@@ -1,5 +1,13 @@
 # @aspiralabs/spec-writer
 
+## 0.8.2
+
+### Patch Changes
+
+- Updated dependencies [bcb410e]
+  - @aspiralabs/agent-common@0.8.2
+  - @aspiralabs/spec-reviewer@0.8.2
+
 ## 0.8.1
 
 ### Patch Changes
