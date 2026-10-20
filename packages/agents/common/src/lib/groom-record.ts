@@ -226,7 +226,8 @@ export function validateIdeaSummary(summary: string, record: GroomRecord): IdeaS
   const terms = lines.indexOf('### Terms')
   if (terms === -1) return refuse('the summary has no ### Terms heading')
   const decisionLines = lines.slice(2, terms)
-  const confirmed = new Map(record.decisions.filter((decision) => decision.decidedBy === 'author').map((decision) => [decision.id, decision]))
+  // A Confirm confirms every decided question: the author's answers and the ones taken as recommended (KIT-25). Only an open one is not a decision.
+  const confirmed = new Map(record.decisions.filter((decision) => decision.decidedBy !== 'open').map((decision) => [decision.id, decision]))
   const listed = new Set<string>()
   for (const line of decisionLines) {
     const parsed = parseDecisionsList(line)
