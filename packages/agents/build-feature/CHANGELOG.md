@@ -1,5 +1,14 @@
 # @aspiralabs/build-feature
 
+## 0.8.2
+
+### Patch Changes
+
+- Updated dependencies [bcb410e]
+  - @aspiralabs/agent-common@0.8.2
+  - @aspiralabs/pr-reviewer@0.8.2
+  - @aspiralabs/kit@0.8.2
+
 ## 0.8.1
 
 ### Patch Changes
