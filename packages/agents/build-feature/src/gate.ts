@@ -34,7 +34,19 @@ export const NO_GATE = 'no project gate found'
 export const FALLBACK_SCRIPTS = ['check', 'test', 'test:integration'] as const
 
 /** A command as the gate lists it: what to run, where, and where it was named. */
-export type Gate = { commands: string[]; cwd: string; source: string }
+/** The gate: each command and the directory it runs in (KIT-38: a multi-app repository runs each where it belongs); `cwd` is the first one, kept for older readers. */
+export type Gate = { commands: string[]; cwds: string[]; cwd: string; source: string }
+
+/** The gates aspira.json lists (KIT-38): `{ cwd, command }` each, cwd relative to the repository and '.' by default. */
+export type ConfiguredGate = { cwd?: string; command: string }
+
+/** The gate aspira.json configures, when it lists any; it wins over AGENTS.md and the package.json fallback. */
+export function configuredGate(repo: string, gates: readonly ConfiguredGate[] | undefined): Gate | null {
+  const entries = (gates ?? []).filter((gate) => gate.command.trim() !== '')
+  if (entries.length === 0) return null
+  const cwds = entries.map((gate) => join(repo, gate.cwd?.trim() || '.'))
+  return { commands: entries.map((gate) => gate.command.trim()), cwds, cwd: cwds[0]!, source: 'aspira.json gates' }
+}
 
 const resultSchema = z.object({ command: z.string().min(1), exitCode: z.number().int(), output: z.string().default('') })
 const answerSchema = z.object({ nonce: z.string(), results: z.array(resultSchema) })
@@ -127,17 +139,20 @@ export async function fallbackGate(repo: string, app: string): Promise<Gate | nu
   const present = FALLBACK_SCRIPTS.filter((name) => scripts[name] !== undefined)
   if (present.length === 0) return null
   const manager = packageManagerOf([appDir, repo])
-  return { commands: present.map((name) => `${manager} run ${name}`), cwd: appDir, source: `${app === '.' ? '' : `${app}/`}package.json scripts` }
+  const commands = present.map((name) => `${manager} run ${name}`)
+  return { commands, cwds: commands.map(() => appDir), cwd: appDir, source: `${app === '.' ? '' : `${app}/`}package.json scripts` }
 }
 
-/** The gate the project's AGENTS.md names (the app's first, then the repository's), else the fallback, else null. */
-export async function findGate(repo: string, app: string): Promise<Gate | null> {
+/** The gate aspira.json configures, else the one the project's AGENTS.md names (the app's first, then the repository's), else the fallback, else null. */
+export async function findGate(repo: string, app: string, gates?: readonly ConfiguredGate[]): Promise<Gate | null> {
+  const configured = configuredGate(repo, gates)
+  if (configured !== null) return configured
   const files = [...new Set([join(repo, app, 'AGENTS.md'), join(repo, 'AGENTS.md')])]
   for (const file of files) {
     const text = await readFile(file, 'utf8').catch(() => null)
     if (text === null) continue
     const commands = gateCommandsIn(text)
-    if (commands.length > 0) return { commands, cwd: dirname(file), source: file.slice(repo.length + 1) }
+    if (commands.length > 0) return { commands, cwds: commands.map(() => dirname(file)), cwd: dirname(file), source: file.slice(repo.length + 1) }
   }
   return fallbackGate(repo, app)
 }
@@ -285,7 +300,7 @@ export async function gateStage(context: PhaseContext, state: RunState): Promise
   const recorded = gateRecordOf(state)
   if (recorded !== null && recorded.key === key && recorded.status !== 'failed') return { kind: 'done', state }
   const app = context.aspira.app ?? '.'
-  const gate = await findGate(context.repo, app)
+  const gate = await findGate(context.repo, app, context.aspira.gates)
   if (gate === null) {
     const record: GateRecord = { key, status: 'none', source: null, commands: [], results: [], dirtyBefore: await dirtyTracked(context) }
     return { kind: 'done', state: withRecord(state, record) }
@@ -304,8 +319,9 @@ export async function gateStage(context: PhaseContext, state: RunState): Promise
       run: gate.commands.map((command) => withoutCredentials(command, unset)),
       unset,
       cwd: gate.cwd,
+      cwds: gate.cwds,
       source: gate.source,
-      instructions: `Run each line of "run", in order and exactly as written, in ${gate.cwd}: each is the command at the same index in "commands" (the project gate ${gate.source} names) with every credential in "unset" removed from its environment, so project code never runs with this session's credentials. Change nothing to make them pass. Write {"nonce", "results": [{"command", "exitCode", "output"}]} to the output file, one result per command you ran, "command" being its "commands" entry, with output the last 40 lines it printed. Stop at the first command that fails.`,
+      instructions: `Run each line of "run", in order and exactly as written, in the directory at the same index in "cwds" (${[...new Set(gate.cwds)].join(', ')}): each is the command at the same index in "commands" (the project gate ${gate.source} names) with every credential in "unset" removed from its environment, so project code never runs with this session's credentials. Change nothing to make them pass. Write {"nonce", "results": [{"command", "exitCode", "output"}]} to the output file, one result per command you ran, "command" being its "commands" entry, with output the last 40 lines it printed. Stop at the first command that fails.`,
     },
     data: { key, commands: gate.commands, source: gate.source },
   }
