@@ -1,5 +1,11 @@
 # @aspiralabs/pr-reviewer
 
+## 0.8.13
+
+### Patch Changes
+
+- @aspiralabs/agent-common@0.8.13
+
 ## 0.8.12
 
 ### Patch Changes
