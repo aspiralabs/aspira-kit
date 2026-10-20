@@ -120,7 +120,7 @@ export function roundPrompt(prepared: PreparedGroom, n: number, facts: readonly 
 export function summaryPrompt(prepared: PreparedGroom): string {
   return [
     `Compose the Idea summary for ${prepared.ticket.id}. It holds exactly: the paragraph "${GROOMER_MARKER_PREFIX}${today()}"; "### Decisions" with one line per confirmed decision, "- **Q<n> — <question>** Answer: <answer>. Why: <reasoning>." (answer and reasoning exactly as recorded), with " **ADR candidate**" appended where the decision passes the ADR test; "### Terms" with "- **Term**: definition" entries or the one line "None introduced.". Nothing else.`,
-    fence('GROOM RECORD', JSON.stringify(prepared.answered.decisions.filter((decision) => decision.decidedBy === 'author'), null, 2)),
+    fence('GROOM RECORD (every decided question: the author\'s and the ones taken as recommended, all confirmed)', JSON.stringify(prepared.answered.decisions.filter((decision) => decision.decidedBy !== 'open'), null, 2)),
     prepared.idea.trim() === '' ? 'The idea is title-only.' : fence('IDEA', prepared.idea),
   ].join('\n\n')
 }

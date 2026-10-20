@@ -176,7 +176,7 @@ it('without the flag, both Q1 and Q2 stay open and are asked in chat (regression
   expect(answers.questions.map((q) => q.id).sort()).toEqual(['Q1', 'Q2'])
 })
 
-it('lists only the author\'s decisions in the Idea summary prompt input, not the agent\'s', async () => {
+it('lists every decided question in the Idea summary prompt input, the agent-taken ones included (KIT-25)', async () => {
   const ws = await workspace()
   // Round 1 confirmed Q1 (an exit-criterion branch) and visited every branch; round 2 asks Q2 on an ordinary branch.
   const previous = groomRecord(1, [confirmed('Q1', 'problem', 'A')])
@@ -198,7 +198,7 @@ it('lists only the author\'s decisions in the Idea summary prompt input, not the
     throw new Error(`expected the summary stage, got a refusal: ${error instanceof Error ? error.message : String(error)}`)
   }
   if (summary.stage !== 'summary') throw new Error(`expected the summary stage, got ${JSON.stringify(summary)}`)
+  // The Confirm confirmed Q2 too (KIT-25): the summary lists the author's Q1 and the agent-taken Q2.
   const prompt = await readFile(summary.task.prompt, 'utf8')
-  expect(prompt).toContain('(Q1)')
-  expect(prompt).not.toContain('(Q1, Q2)')
+  expect(prompt).toContain('(Q1, Q2)')
 })

@@ -116,7 +116,12 @@ describe('a groomer decision the agent took to keep going (T5)', () => {
     expect(rebuilt.decisions.find((decision) => decision.id === 'Q2')?.decidedBy).toBe('agent')
   })
 
-  it('refuses an Idea summary that lists the agent-taken Q2 as a confirmed decision', () => {
-    expect(validateIdeaSummary(summary, record)).toEqual({ ok: false, reason: 'Q2 is not a confirmed decision in groom.json' })
+  it('accepts an Idea summary that lists the agent-taken Q2 beside the author\'s Q1: the Confirm confirmed both (KIT-25)', () => {
+    expect(validateIdeaSummary(summary, record)).toEqual({ ok: true })
+  })
+
+  it('refuses an Idea summary that leaves the agent-taken Q2 out: it is a confirmed decision too (KIT-25)', () => {
+    const withoutQ2 = summary.split('\n').filter((line) => !line.startsWith('- **Q2')).join('\n')
+    expect(validateIdeaSummary(withoutQ2, record)).toEqual({ ok: false, reason: 'confirmed decisions missing from the summary: Q2' })
   })
 })
