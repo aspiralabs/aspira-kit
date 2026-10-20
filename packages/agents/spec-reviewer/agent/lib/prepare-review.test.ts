@@ -33,6 +33,11 @@ describe('stripReviewHeader', () => {
   it('removes the review callout, the findings and the rule above the candidate, and leaves any other text alone', () => {
     expect({ stripped: stripReviewHeader(`${HEADER}${SPEC}`), plain: stripReviewHeader(SPEC) }).toEqual({ stripped: SPEC, plain: SPEC })
   })
+
+  it('removes the spec writer\'s own header too, so "author decisions pending" never reaches the planner (KIT-34)', () => {
+    const writer = '> Spec writer status: **needs-author**. Not ready for planning; resolve trace/decisions.md and trace/checks.md first.\n\n## Review findings (1)\n\n- R1\n\n---\n\n'
+    expect(stripReviewHeader(`${writer}${SPEC}`)).toBe(SPEC)
+  })
 })
 
 describe('prepareReview on a rerun', () => {

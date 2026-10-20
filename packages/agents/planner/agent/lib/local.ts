@@ -109,7 +109,11 @@ export function renderTaskPrompt(args: { id: PhaseId; system: string; prompt: st
       '- The agent\'s Aspira UI tools (list_components, get_component) are the session\'s aspiralabs-ui MCP server. If it is not available, record that as a gap.',
       `- submit_research is your output file. Also write \`${args.reads ?? ''}\`: a JSON array with one {"tool", "ok"} entry per MCP call you made, tool named as the session names it (for example mcp__aspiralabs-ui__get_component), ok false when it failed. Write [] if you made none.`,
     ]
-    : ['- The agent runs planning without tools: do not read files or call tools. Plan from the spec, guidelines, packet and research in the Task.']
+    : [
+      // KIT-34: the agent plans without tools; the session's planning subagent may read, so a fact the packet lacks is checked rather than left as a plan gap.
+      `- The agent runs planning without tools. In this session you may use Read, Grep, Glob and non-mutating git commands, read-only, in the repository at ${args.repo}, to settle a fact the packet and research leave out (a path, a symbol, a signature, a caller) before you name it; a plan gap is only for evidence you could not read. Plan from the spec, guidelines, packet and research in the Task.`,
+      `- If your plan creates or changes a UI file (.tsx, .jsx, .css, .scss, or anything under components/), call the session's aspiralabs-ui MCP server first: list_components, then get_component for each component the change uses. Write \`${args.reads ?? ''}\`: a JSON array with one {"tool", "ok"} entry per MCP call you made, tool named as the session names it (for example mcp__aspiralabs-ui__get_component), ok false when it failed. Write [] if you made none.`,
+    ]
   return [
     `# Aspira planner: ${args.id} (--local)`, '',
     `You are the \`${args.id}\` phase of the Aspira planner, running as a subagent of a Claude Code session instead of inside the planner agent. The System and Task sections below are the exact prompt the agent sends. Follow them.`, '',
@@ -183,7 +187,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   // check: what the agent refuses beyond the schema, such as research that leaves a required rule out.
   const resolvePhase = async <T>(id: PhaseId, prompt: string, schema: z.ZodType<T>, check: (value: T) => string | undefined = () => undefined): Promise<{ value?: T; task?: LocalTask }> => {
     const output = join(work, 'outputs', `${id}.json`)
-    const readsFile = id === 'research' ? join(work, 'outputs', 'research.reads.json') : null
+    // Each phase records its own MCP reads (KIT-34): planning may make the UI catalog reads research did not.
+    const readsFile = join(work, 'outputs', `${id}.reads.json`)
     const raw = await readFile(output, 'utf8').catch(() => null)
     let error: string | undefined
     if (raw !== null) {
@@ -255,9 +260,12 @@ async function withoutWorkDir(prepared: PreparedPlan, repoPath: string, work: st
 
 async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; prompts: AgentPrompts; knowledge: KnowledgeRecord; state: State; calls: Call[]; research: Research | null; plan: Plan | null; work: string; facts: ReviewFactsResult }): Promise<LocalDone> {
   const { input, prepared, prompts, knowledge, state, calls, research, plan, work, facts } = args
-  const readsText = await readFile(join(work, 'outputs', 'research.reads.json'), 'utf8').catch(() => '[]')
-  const parsedReads = readsSchema.safeParse(safeJson(readsText))
-  const reads = parsedReads.success ? parsedReads.data : []
+  // The UI catalog check sees every phase's reads (KIT-34): research's, and planning's when it made them.
+  const reads = (await Promise.all(['research', 'planning'].map(async (phase) => {
+    const text = await readFile(join(work, 'outputs', `${phase}.reads.json`), 'utf8').catch(() => '[]')
+    const parsed = readsSchema.safeParse(safeJson(text))
+    return parsed.success ? parsed.data : []
+  }))).flat()
   const phaseErrors = calls.filter((call) => call.error !== undefined).map((call) => ({ phase: call.phase, error: call.error ?? null }))
   // The previous plan's trace/decisions.md, with the options the author ticked, is read before the export replaces it.
   const answers = await readAnswers(prepared.dir)

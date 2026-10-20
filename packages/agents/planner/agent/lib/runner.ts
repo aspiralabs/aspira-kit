@@ -95,14 +95,25 @@ export function researchPrompt(context: string, instructions: string = researchI
   return `${context}\n\n${instructions}${factsBlock}`
 }
 
+/**
+ * The decisions research already raised, as a rule for planning (KIT-34): the same question under
+ * other words is not raised again, and the plan builds the recommended option, so research and
+ * planning never take opposite answers to one question.
+ */
+export function raisedDecisionsSection(research: Pick<Research, 'decisions'>): string {
+  if (!research.decisions.length) return ''
+  const lines = research.decisions.map((decision) => `- ${decision.question} (recommended: ${decision.recommended})`)
+  return `\n\nDECISIONS RESEARCH ALREADY RAISED:\n${lines.join('\n')}\nDo not raise any of these again, under these or other words; plan the recommended option of each, and say so in the task that depends on it. Raise only a product question none of them covers.`
+}
+
 /** The planning phase's user prompt, over the submitted research. */
 export function planningPrompt(context: string, research: Research, instructions: string = planningInstructions, pages: GuidelinePage[] = []): string {
-  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}\n\n${instructions}`
+  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}${raisedDecisionsSection(research)}\n\n${instructions}`
 }
 
 /** The planning prompt for a correction pass: the previous plan and the checks it failed. */
 export function repairPrompt(context: string, research: Research, plan: Plan, issues: string[], instructions: string = repairInstructions, pages: GuidelinePage[] = []): string {
-  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}\n\nPREVIOUS PLAN:\n${JSON.stringify(plan)}\n\nPLAN CHECKS:\n${issues.map((issue) => `- ${issue}`).join('\n')}\n\n${instructions}`
+  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}${raisedDecisionsSection(research)}\n\nPREVIOUS PLAN:\n${JSON.stringify(plan)}\n\nPLAN CHECKS:\n${issues.map((issue) => `- ${issue}`).join('\n')}\n\n${instructions}`
 }
 
 /** The rule IDs the required guidelines define. */

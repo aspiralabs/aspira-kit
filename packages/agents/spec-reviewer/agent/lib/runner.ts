@@ -21,7 +21,9 @@ export const reportDirFor = (input: Pick<RunInput, 'specPath' | 'outputDir'>) =>
  * so a rerun on the answered file reviews the spec itself (KIT-30). Any other text is returned as is.
  */
 export function stripReviewHeader(text: string): string {
-  if (!text.startsWith('> Review status: ')) return text
+  // The spec writer's own header ("> Spec writer status:") has the same shape (KIT-34): a reviewed
+  // spec must not carry "author decisions pending" into the planner after the review settled them.
+  if (!text.startsWith('> Review status: ') && !text.startsWith('> Spec writer status: ')) return text
   const rule = '\n---\n\n'
   const at = text.indexOf(rule)
   return at === -1 ? text : text.slice(at + rule.length)
