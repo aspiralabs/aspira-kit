@@ -58,7 +58,7 @@ import { acceptResolution, cardDifferences, resolveStage, resolveWithToken, type
 import { assertNever, launcherFor, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, STEPS, type EndRoute, type Mode, type PhaseName, type StepName } from '#src/route.ts'
 import { reviewPhase } from '#src/review-loop.ts'
 import { readRunState, stateDirOf, writeRunState, type Card, type Failure, type Pending, type PhaseRecord, type RunState, type Usage } from '#src/run-state.ts'
-import { analyzerReady, readImplementorStatus, readSpecCoverage, readStepResult, readStepUsage, stepReportSchema, stepResultTable } from '#src/step-results.ts'
+import { analyzedApps, analyzerReady, readImplementorApps, readImplementorStatus, readSpecCoverage, readStepResult, readStepUsage, stepReportSchema, stepResultTable } from '#src/step-results.ts'
 import { releaseRowPhase, step10Phase } from '#src/step10.ts'
 import { step8Phase } from '#src/step8.ts'
 import { renderBuildSummary } from '#src/summary.ts'
@@ -755,6 +755,8 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
     specCovered: await readSpecCoverage(ctx.folder, state),
     implementor: await readImplementorStatus(ctx.folder),
     analyzerReady: analyzerReady(state),
+    apps: await readImplementorApps(ctx.folder),
+    analyzed: analyzedApps(state, await readImplementorApps(ctx.folder)),
     mode: ctx.mode,
     autonomous: ctx.autonomous,
   }

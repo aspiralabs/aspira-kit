@@ -70,6 +70,10 @@ export type RouteFacts = {
   implementor: string | null
   /** The code-analyzer finished ready after the last build. */
   analyzerReady: boolean
+  /** The app directories the build changed, each analyzed on its own (KIT-39); absent or empty: `app` alone. */
+  apps?: string[]
+  /** Which of `apps` the analyzer has finished ready since the last build. */
+  analyzed?: string[]
   /** How each step runs. Default 'local'. */
   mode?: Mode
   /** --autonomous (KIT-24): the groomer runs with --autonomous under --local. */
@@ -125,6 +129,9 @@ export function stepCommand(status: string, facts: Pick<RouteFacts, 'id' | 'app'
   return { kind: 'step', step, command: localCommand, launcher: launcherFor(localCommand, mode) }
 }
 
+/** The app directories the analyzer runs on: the ones the build changed, else aspira.json's app (KIT-39). */
+export const analyzerApps = (facts: Pick<RouteFacts, 'app' | 'apps'>): string[] => (facts.apps?.length ? facts.apps : [facts.app])
+
 /** What the run does for a live Status. */
 export function routeStatus(status: string, facts: RouteFacts): Route {
   const row = nextStep(status)
@@ -150,7 +157,12 @@ export function routeStatus(status: string, facts: RouteFacts): Route {
       if (facts.implementor !== 'ready') return stepCommand('Ready: Plan', facts)
       return {
         kind: 'sequence',
-        items: [{ kind: 'phase', phase: 'gate' }, { ...stepCommand(named, facts), done: facts.analyzerReady }, { kind: 'phase', phase: 'step8' }],
+        // One analyzer step per app directory the build changed (KIT-39), each done when its own run ended ready.
+        items: [
+          { kind: 'phase', phase: 'gate' },
+          ...analyzerApps(facts).map((app) => ({ ...stepCommand(named, { ...facts, app }), done: facts.apps?.length ? (facts.analyzed ?? []).includes(app) : facts.analyzerReady })),
+          { kind: 'phase', phase: 'step8' },
+        ],
         then: { kind: 'end', reason: 'unsettled', message: `${facts.id} is still in In Progress: Implementation after Step 8; resolve it again` },
       }
     }
