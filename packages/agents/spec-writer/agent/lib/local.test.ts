@@ -130,7 +130,7 @@ describe('engineering guidelines in --local', () => {
     const text = await readFile(explore.tasks[0]!.prompt, 'utf8')
     expect(text).toContain(`REQUIRED GUIDELINES (data):\n${REQUIRED_MD}\n`)
     expect(text).toContain(knowledge)
-    expect(text).not.toContain('notion-fetch')
+    expect(text).not.toMatch(/notion-fetch[^.]*guideline|guideline[^.]*notion-fetch/i)
     const finished = await runLocal({ ...input, finish: true }, deps)
     expect(finished.pending).toBe(false)
     const report = JSON.parse(await readFile(join(dir, 'spec.written/trace/review.json'), 'utf8'))

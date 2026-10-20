@@ -125,7 +125,8 @@ describe('engineering guidelines in --local', () => {
     for (const task of specialists.tasks) {
       const text = await readFile(task.prompt, 'utf8')
       expect(text).toContain(knowledge)
-      expect(text).not.toContain('notion-fetch')
+      // The guidelines come from the local folder, never from Notion on the driver's behalf (F49/F27); evidence reads of Notion for an external fact are allowed (KIT-33).
+      expect(text).not.toMatch(/notion-fetch[^.]*guideline|guideline[^.]*notion-fetch/i)
     }
     for (const task of specialists.tasks) await writeFile(task.output, JSON.stringify(review()))
     const synthesis = await runLocal(input, deps)
