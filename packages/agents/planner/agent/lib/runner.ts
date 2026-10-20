@@ -198,9 +198,16 @@ export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<
   if (!research) problems.push('Research unavailable')
   if (!plan) problems.push('No structured plan produced')
   if (research?.gaps.length) problems.push(...research.gaps.map((gap) => `Research gap: ${gap}`))
-  if (plan) { problems.push(...validatePlan(plan, spec, repo.files, repo.tracked), ...plan.gaps.map((gap) => `Plan gap: ${gap}`)) }
   // A spec that mentions a page or a card is not UI work; a plan that writes UI files is.
-  if (missingUiReads(args.uiRequired && (plan === null || touchesUi(plan)), args.reads)) problems.push('UI planning requires a successful list_components MCP read')
+  const catalogMissing = missingUiReads(args.uiRequired && (plan === null || touchesUi(plan)), args.reads)
+  if (plan) {
+    // A gap about the UI catalog (an empty listing, a failed get_component) is a note once the listing itself succeeded (KIT-37): there is nothing more to read.
+    const catalogGap = (gap: string) => /list_components|get_component|ui catalog|component docs|aspiralabs-ui|@aspiralabs\/ui/i.test(gap)
+    const [notes, gaps] = catalogMissing ? [[], plan.gaps] : [plan.gaps.filter(catalogGap), plan.gaps.filter((gap) => !catalogGap(gap))]
+    if (notes.length) plan.notes = [...(plan.notes ?? []), ...notes.filter((note) => !(plan.notes ?? []).includes(note))]
+    problems.push(...validatePlan(plan, spec, repo.files, repo.tracked), ...gaps.map((gap) => `Plan gap: ${gap}`))
+  }
+  if (catalogMissing) problems.push('UI planning requires a successful list_components MCP read')
   if (args.cancelled) problems.push('Planning cancelled')
   for (const rule of uncoveredRules(guidelines, [...(research?.checks ?? []), ...(plan?.checks ?? [])])) problems.push(`Uncovered guideline: ${rule}`)
   const decisions = mergeDecisions([research?.decisions ?? [], plan?.decisions ?? []], args.answers ?? [], args.takeRecommended ?? false)
