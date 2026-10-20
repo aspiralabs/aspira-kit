@@ -5,15 +5,27 @@
 // (an injected confirmation reader, or none for no terminal). Assertions read the logged lines, the
 // exit code and the filesystem and git state.
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup } from './cleanup.js'
 import { lookupTicket, type TicketLookup, type TicketLookupResult } from './ticket-lookup.js'
 
 const kit = dirname(dirname(fileURLToPath(import.meta.url)))
+
+// The one folder T31 cannot remove: node:fs's rmSync fails on it with a real EACCES error. A read-only
+// .work/ cannot stand in, because root (some CI runners run as root) deletes it anyway.
+const failRemoval = vi.hoisted(() => ({ path: '' }))
+vi.mock('node:fs', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs')>()
+  const rmSync: typeof fs.rmSync = (path, options) => {
+    if (path === failRemoval.path) throw Object.assign(new Error(`EACCES: permission denied, rmdir '${String(path)}'`), { code: 'EACCES', syscall: 'rmdir', path })
+    fs.rmSync(path, options)
+  }
+  return { ...fs, rmSync }
+})
 const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6'
 
 type Ask = (prompt: string) => Promise<string | null>
@@ -22,11 +34,10 @@ type Cards = Record<string, TicketLookupResult>
 
 const startCwd = process.cwd()
 const temporary: string[] = []
-const readOnly: string[] = []
 
 afterEach(() => {
   process.chdir(startCwd)
-  for (const dir of readOnly.splice(0)) if (existsSync(dir)) chmodSync(dir, 0o755)
+  failRemoval.path = ''
   for (const dir of temporary.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
@@ -385,9 +396,7 @@ describe('kit cleanup never loses work', () => {
     git(repo.root, 'worktree', 'lock', locked)
     const other = worktree(repo, 'FEATURE-KIT-4', 'feat/kit-4-x')
     const folder = workFolder(repo.root, 'kit-1-a', { id: 'KIT-1' })
-    const work = join(repo.root, '.work')
-    readOnly.push(work)
-    chmodSync(work, 0o555)
+    failRemoval.path = folder
     const cards = { 'KIT-1': card('KIT-1', 'Released'), 'KIT-3': card('KIT-3', 'Released'), 'KIT-4': card('KIT-4', 'Released') }
     const { code, lines } = await run(repo.root, cards, { yes: true })
     const failedWith = (path: string, reason: RegExp) => about(lines, path).some((line) => /\bfailed\b/.test(line) && reason.test(line))

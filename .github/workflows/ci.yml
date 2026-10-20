@@ -16,4 +16,5 @@ jobs:
       # apps/docs typechecks against @aspiralabs/ui's dist, and the kit's install test packs
       # @aspiralabs/kit from its dist; nothing else needs a build before lint, typecheck or test.
       prepare: pnpm --filter @aspiralabs/ui --filter @aspiralabs/kit build
-      test-shards: "[1, 2, 3, 4]"
+      test-shards: "[1, 2, 3, 4, 5, 6]"
+      runs-on: starsling-ubuntu-24.04

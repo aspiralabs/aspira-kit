@@ -32,9 +32,13 @@ on:
         # runner with no shard flag.
         type: string
         default: "[1]"
+      runs-on:
+        # The runner label for every job, e.g. a Blacksmith label.
+        type: string
+        default: ubuntu-latest
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,7 +54,7 @@ jobs:
       - run: pnpm run --if-present test:build
 
   static:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     strategy:
       fail-fast: false
       matrix:
@@ -71,7 +75,7 @@ jobs:
       - run: pnpm ${{ matrix.gate }}
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     strategy:
       fail-fast: false
       matrix:
@@ -99,7 +103,7 @@ jobs:
   checks:
     needs: [build, static, test]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     steps:
       - env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
