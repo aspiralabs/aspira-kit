@@ -1,5 +1,14 @@
 # @aspiralabs/spec-writer
 
+## 0.8.3
+
+### Patch Changes
+
+- e9e31fa: A feature in a spec's Features list may carry its detail in indented bullets beneath it (KIT-27). The business-spec check counted every bullet, indented ones included, as a feature and failed a spec whose features had sub-bullets with "Every feature must have an unchecked, unique F-number", naming no line. It now holds only top-level bullets to the `- [ ] F<n>:` form and names the lines that are not. The spec writer's draft prompt and the review pipeline's contract say so.
+- Updated dependencies [e9e31fa]
+  - @aspiralabs/agent-common@0.8.3
+  - @aspiralabs/spec-reviewer@0.8.3
+
 ## 0.8.2
 
 ### Patch Changes
