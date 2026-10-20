@@ -146,3 +146,23 @@ export function analyzerReady(state: RunState): boolean {
   const last = state.steps.filter((step) => step.step === 'implementor' || step.step === 'code-analyzer').at(-1)
   return last?.step === 'code-analyzer' && readRunStatus(last.status)?.status === 'ready'
 }
+
+/** The app directories the implementor's record says it changed (`apps` in implementation-local.json), '.' for the root; none when the record has none (KIT-39). */
+export async function readImplementorApps(folder: string): Promise<string[]> {
+  const json = await readJson(join(folder, 'plan.review/trace/implementation-local.json'))
+  if (!json.ok) return []
+  const parsed = z.object({ apps: z.array(z.string()).optional() }).safeParse(json.value)
+  if (!parsed.success) return []
+  return [...new Set((parsed.data.apps ?? []).map((app) => app.trim().replace(/\/+$/, '') || '.'))]
+}
+
+/** Which of `apps` the code analyzer finished ready since the last build, by the `--app <dir>` its step command carried (KIT-39). */
+export function analyzedApps(state: RunState, apps: readonly string[]): string[] {
+  const steps = state.steps.filter((step) => step.step === 'implementor' || step.step === 'code-analyzer')
+  const lastBuild = steps.map((step) => step.step).lastIndexOf('implementor')
+  const since = steps.slice(lastBuild + 1)
+  return apps.filter((app) => since.some((step) => step.step === 'code-analyzer' && readRunStatus(step.status)?.status === 'ready' && appOf(step.command) === app))
+}
+
+/** The `--app <dir>` a code-analyzer command carries, '.' when it carries none. */
+const appOf = (command: string): string => (command.match(/--app\s+(\S+)/)?.[1] ?? '.').replace(/\/+$/, '') || '.'
