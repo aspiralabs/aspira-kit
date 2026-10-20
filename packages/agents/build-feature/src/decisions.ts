@@ -20,7 +20,7 @@ type Source = {
   /** The list of decisions in that file, or a reason it is not one. */
   list: (json: unknown) => { ok: true; items: unknown[] } | { ok: false; reason: string }
   /** One item: a taken decision, an ask, or nothing (an open or author decision). */
-  item: (raw: unknown, index: number) => { kind: 'taken'; decision: DecisionRecord } | { kind: 'ask'; id?: string; question: string } | { kind: 'skip' }
+  item: (raw: unknown, index: number) => { kind: 'taken'; decision: DecisionRecord } | { kind: 'ask'; id?: string; question: string; recommended?: string } | { kind: 'skip' }
 }
 
 const field =
@@ -35,8 +35,8 @@ const field =
 
 const recordMeta = z.object({ id: z.string().min(1), decidedBy: z.enum(['open', 'author', 'agent']), answer: z.string().nullable() })
 
-/** A quoted, one-line rendering of an item that failed the schema, for the ask stage. */
-function quote(raw: unknown, reason: string): { id?: string; question: string } {
+/** A quoted, one-line rendering of an item that failed the schema, for the ask stage; `recommended` is what --autonomous answers it with (KIT-24). */
+function quote(raw: unknown, reason: string): { id?: string; question: string; recommended?: string } {
   const value = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   const id = typeof value.id === 'string' ? value.id : undefined
   const question = typeof value.question === 'string' ? value.question : JSON.stringify(raw)
@@ -46,7 +46,7 @@ function quote(raw: unknown, reason: string): { id?: string; question: string } 
   if (options.length > 0) parts.push(`Options: ${options.join(' | ')}`)
   if (recommended !== null) parts.push(`Recommended: ${recommended}`)
   parts.push(`(The agent's decision did not meet the decision rule: ${reason}. Answer it here.)`)
-  return { ...(id === undefined ? {} : { id }), question: parts.join('\n') }
+  return { ...(id === undefined ? {} : { id }), question: parts.join('\n'), ...(recommended === null ? {} : { recommended }) }
 }
 
 const issues = (error: z.ZodError) => error.issues.map((issue) => `${issue.path.join('.') || 'decision'}: ${issue.message}`).join('; ')
@@ -101,7 +101,7 @@ export function takeDecisions(step: DecisionStep, runId: string, items: readonly
   items.forEach((raw, index) => {
     const outcome = item(raw, index)
     if (outcome.kind === 'taken') taken.push({ key: takenKeyOf(step, runId, outcome.decision.id), step, runId, decision: outcome.decision })
-    else if (outcome.kind === 'ask') asks.push({ step, runId, ...(outcome.id === undefined ? {} : { id: outcome.id }), question: outcome.question })
+    else if (outcome.kind === 'ask') asks.push({ step, runId, ...(outcome.id === undefined ? {} : { id: outcome.id }), question: outcome.question, ...(outcome.recommended === undefined ? {} : { recommended: outcome.recommended }) })
   })
   return { taken, asks }
 }

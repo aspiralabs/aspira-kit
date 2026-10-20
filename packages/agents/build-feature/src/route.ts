@@ -26,12 +26,14 @@ export const TAKE_RECOMMENDED: readonly StepName[] = ['groomer', 'spec-writer', 
 export const MODES = ['local', 'cloud'] as const
 export type Mode = (typeof MODES)[number]
 
-/** The command that resumes a run: `/aspira-build-feature <ID>`, with --local in local mode. */
-export const RESUME = (id: string, mode: Mode = 'local'): string => `/aspira-build-feature ${id}${mode === 'local' ? ' --local' : ''}`
+/** The command that resumes a run: `/aspira-build-feature <ID>`, with --local in local mode and --autonomous when the run skips the human gates (KIT-24). */
+export const RESUME = (id: string, mode: Mode = 'local', autonomous = false): string => `/aspira-build-feature ${id}${mode === 'local' ? ' --local' : ''}${autonomous ? ' --autonomous' : ''}`
 
 /** The line the Build Summary gives the mode. */
-export const modeLine = (mode: Mode): string =>
-  mode === 'local' ? 'Mode: --local (every step ran its skill with --local in this session)' : "Mode: cloud (every step ran its skill's default mode: the step's own agent, started and waited on)"
+export const modeLine = (mode: Mode, autonomous = false): string =>
+  mode === 'local'
+    ? `Mode: --local (every step ran its skill with --local in this session)${autonomous ? ' and --autonomous (no human gate: the groomer took every question as recommended and confirmed itself; an ask with a recommended option was answered with it)' : ''}`
+    : "Mode: cloud (every step ran its skill's default mode: the step's own agent, started and waited on)"
 
 /** The later-phase modules, in run order. */
 export const PHASES = ['gate', 'step8', 'step10', 'review', 'release-row'] as const
@@ -70,6 +72,8 @@ export type RouteFacts = {
   analyzerReady: boolean
   /** How each step runs. Default 'local'. */
   mode?: Mode
+  /** --autonomous (KIT-24): the groomer runs with --autonomous under --local. */
+  autonomous?: boolean
 }
 
 /** The end of an exhaustive switch over a union (TS-008). */
@@ -104,7 +108,7 @@ export function launcherFor(command: string, mode: Mode): string[] {
  * A row's command as the run invokes it: ID filled, <app-dir> filled; under --local the row's
  * --local and --take-recommended where it applies, in cloud mode the same command without --local.
  */
-export function stepCommand(status: string, facts: Pick<RouteFacts, 'id' | 'app' | 'mode'>): StepRoute {
+export function stepCommand(status: string, facts: Pick<RouteFacts, 'id' | 'app' | 'mode' | 'autonomous'>): StepRoute {
   const row = nextStep(status)
   const filled = row === null ? null : commandFor(row, facts.id)
   if (filled === null) throw new Error(`the Playbook row for ${status} has no command`)
@@ -115,7 +119,9 @@ export function stepCommand(status: string, facts: Pick<RouteFacts, 'id' | 'app'
     const cloudCommand = command.split(' ').filter((word) => word !== '--local').join(' ')
     return { kind: 'step', step, command: cloudCommand, launcher: launcherFor(cloudCommand, mode) }
   }
-  const localCommand = TAKE_RECOMMENDED.includes(step) ? `${command} --take-recommended` : command
+  const taken = TAKE_RECOMMENDED.includes(step) ? `${command} --take-recommended` : command
+  // --autonomous (KIT-24): only the groomer has a chat gate of its own (exit-criterion questions and Confirm).
+  const localCommand = facts.autonomous === true && step === 'groomer' ? `${taken} --autonomous` : taken
   return { kind: 'step', step, command: localCommand, launcher: launcherFor(localCommand, mode) }
 }
 

@@ -179,7 +179,7 @@ check_parent_run() {
 # --no-ticket mode. Sets POSITIONAL, FORCE_PULL, FORCE_RUN, VERIFY, GUIDELINES, REPO, OUT, FINISH,
 # TAKE_RECOMMENDED, PARENT_RUN and ATTACH (the --local verify step's telemetry attach result).
 parse() {
-  POSITIONAL="" FORCE_PULL="" FORCE_RUN="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
+  POSITIONAL="" FORCE_PULL="" FORCE_RUN="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED="" AUTONOMOUS="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
   while [ $# -gt 0 ]; do
     case $1 in
       --no-ticket) die "the groomer writes to the card; it needs a Feature Board ticket" ;;
@@ -191,6 +191,7 @@ parse() {
       --output) [ $# -ge 2 ] || die "--output needs a path"; OUT=$2; shift 2 ;;
       --finish) FINISH=1; shift ;;
       --take-recommended) TAKE_RECOMMENDED=1; shift ;;
+      --autonomous) AUTONOMOUS=1; shift ;;
       --parent-run) [ $# -ge 2 ] || die "--parent-run needs <run-id>:<nonce>"; PARENT_RUN=$2; shift 2 ;;
       --attach) [ $# -ge 2 ] || die "--attach needs the telemetry attach result as JSON"; ATTACH=$2; shift 2 ;;
       -*) die "unknown option: $1" ;;
@@ -244,6 +245,7 @@ cmd_start() {
   [ -z "$FINISH" ] || die "--finish only applies to local"
   [ -z "$VERIFY" ] || die "--verify only applies to local"
   [ -z "$TAKE_RECOMMENDED" ] || die "--take-recommended only applies to local"
+  [ -z "$AUTONOMOUS" ] || die "--autonomous only applies to local"
   [ -z "$ATTACH" ] || die "--attach only applies to local --verify"
   [ -z "$OUT" ] || die "--output: the groomer always writes to .work/<id>-<slug>/groom, where its finish step reads the record"
   local run prompt eve="" folder="" idea
@@ -321,6 +323,7 @@ cmd_local() {
   [ -z "$PARENT_RUN" ] || args+=(--parent-run "$PARENT_RUN")
   [ -z "$ATTACH" ] || args+=(--attach "$ATTACH")
   [ -z "$TAKE_RECOMMENDED" ] || args+=(--take-recommended)
+  [ -z "$AUTONOMOUS" ] || args+=(--autonomous)
   resolve_agent
   agent_node scripts/local.ts "${args[@]}"
 }
@@ -392,5 +395,5 @@ case ${1:-} in
   status) shift; cmd_status "$@" ;;
   wait|watch) shift; cmd_wait "$@" ;;
   load-knowledge) shift; cmd_load_knowledge "$@" ;;
-  *) die "usage: groomer.sh start [TICKET] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] [--parent-run RUN:NONCE] | status RUN | wait RUN [--max SECONDS] | local [TICKET] [--force-pull] [--force-run] [--verify] [--guidelines FILE] [--repo DIR] [--finish] [--take-recommended] [--parent-run RUN:NONCE] [--attach JSON] | load-knowledge --out DIR" ;;
+  *) die "usage: groomer.sh start [TICKET] [--force-pull] [--force-run] [--guidelines FILE] [--repo DIR] [--parent-run RUN:NONCE] | status RUN | wait RUN [--max SECONDS] | local [TICKET] [--force-pull] [--force-run] [--verify] [--guidelines FILE] [--repo DIR] [--finish] [--take-recommended] [--autonomous] [--parent-run RUN:NONCE] [--attach JSON] | load-knowledge --out DIR" ;;
 esac

@@ -17,7 +17,7 @@ import { groomPaths } from '../agent/lib/paths.ts'
 // board actions). `--verify` follows every board stage; the round state is kept until a confirmed
 // or stopped round verifies, or `--verify --finish`. `--finish` alone exports the round as
 // incomplete. Every step names the agent package that ran.
-const usage = 'Usage: pnpm run groom:local --repo <absolute-repo> [--ticket ID | URL] [--guidelines FILE] [--force-pull] [--force-run] [--verify] [--finish] [--parent-run RUN:NONCE] [--attach JSON]'
+const usage = 'Usage: pnpm run groom:local --repo <absolute-repo> [--ticket ID | URL] [--guidelines FILE] [--force-pull] [--force-run] [--verify] [--finish] [--take-recommended] [--autonomous] [--parent-run RUN:NONCE] [--attach JSON]'
 const SKILL = 'groomer' as const
 
 /** The session usage report of a --local round: <export>/trace/session-usage.json (KIT-19, F9). */
@@ -29,7 +29,7 @@ let driverArgs: DriverTicketArgs = {}
 try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { repo: { type: 'string' }, ticket: { type: 'string' }, guidelines: { type: 'string' }, 'force-pull': { type: 'boolean' }, 'force-run': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' }, 'parent-run': { type: 'string' }, attach: { type: 'string' } },
+    options: { repo: { type: 'string' }, ticket: { type: 'string' }, guidelines: { type: 'string' }, 'force-pull': { type: 'boolean' }, 'force-run': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' }, autonomous: { type: 'boolean' }, 'parent-run': { type: 'string' }, attach: { type: 'string' } },
   })
   if (values.repo === undefined || positionals.length > 0) throw new UsageError(usage)
   const repo = values.repo
@@ -51,7 +51,7 @@ try {
     if (before.kind === 'stage') console.log(JSON.stringify({ ...before.stage, agent }, null, 2))
     else if (before.kind === 'none') throw new FlowRefused('the groomer writes to the card; it needs a Feature Board ticket')
     else {
-      const step = await runLocal({ folder: before.folder, repoPath: repo, ...(values.guidelines === undefined ? {} : { guidelinesPath: values.guidelines }), finish: values.finish === true, takeRecommended: values['take-recommended'] === true })
+      const step = await runLocal({ folder: before.folder, repoPath: repo, ...(values.guidelines === undefined ? {} : { guidelinesPath: values.guidelines }), finish: values.finish === true, takeRecommended: values['take-recommended'] === true, autonomous: values.autonomous === true })
       // No guidelines and no NOTION_TOKEN to fetch them with: the run ends blocked (exit 1, F52),
       // through the same handler every driver's errors go through, so the note says what to set.
       if (!step.pending && step.status === 'blocked') throw new KnowledgePrerequisiteError(step.reason)

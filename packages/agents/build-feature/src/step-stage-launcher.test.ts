@@ -52,7 +52,7 @@ async function seedReadySpecRun(): Promise<{ repo: string; folder: string; runId
 describe('T30 F44: the step stage tells the subagent to run the launcher, not the slash command', () => {
   it("names the step's own SKILL.md and runs the launcher form, never the bare slash command, for the planner's Ready: Spec step", async () => {
     const { repo, runId } = await seedReadySpecRun()
-    const input: DriverInput = { id: 'KIT-2', repo, run: runId, forceRun: false, finish: false, mode: 'local', now: NOW, env: {} }
+    const input: DriverInput = { id: 'KIT-2', repo, run: runId, forceRun: false, finish: false, mode: 'local', autonomous: false, now: NOW, env: {} }
     const stage = await nextStage(input)
     const promptPath = typeof stage.prompt === 'string' ? stage.prompt : ''
     const prompt = promptPath === '' ? '' : await readFile(promptPath, 'utf8')
@@ -65,7 +65,7 @@ describe('T30 F44: the step stage tells the subagent to run the launcher, not th
 
   it('records both the Playbook command and the launcher command on the printed step stage', async () => {
     const { repo, runId } = await seedReadySpecRun()
-    const input: DriverInput = { id: 'KIT-2', repo, run: runId, forceRun: false, finish: false, mode: 'local', now: NOW, env: {} }
+    const input: DriverInput = { id: 'KIT-2', repo, run: runId, forceRun: false, finish: false, mode: 'local', autonomous: false, now: NOW, env: {} }
     const stage = await nextStage(input)
     // The printed stage carries --parent-run <runId>:<nonce> (KIT-19 F6); the forms themselves are what this test pins.
     const bare = (text: unknown) => String(text).replace(/ --parent-run \S+$/, '')
@@ -77,7 +77,7 @@ describe('T30 F44: the step stage tells the subagent to run the launcher, not th
 
   it('persists both forms in the run state, not only in the printed stage', async () => {
     const { repo, folder, runId } = await seedReadySpecRun()
-    const input: DriverInput = { id: 'KIT-2', repo, run: runId, forceRun: false, finish: false, mode: 'local', now: NOW, env: {} }
+    const input: DriverInput = { id: 'KIT-2', repo, run: runId, forceRun: false, finish: false, mode: 'local', autonomous: false, now: NOW, env: {} }
     await nextStage(input)
     const persisted = JSON.parse(await readFile(join(stateDirOf(folder), 'state.json'), 'utf8')) as { pending: { stage: { command?: string; launcher?: string[] } } | null }
     expect({ command: persisted.pending?.stage.command, launcher: persisted.pending?.stage.launcher }).toEqual({
