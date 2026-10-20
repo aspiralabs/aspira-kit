@@ -586,6 +586,43 @@ describe('T44 F46: the run touches only the ticket, its pages, the board rules (
   }, SLOW)
 })
 
+describe('KIT-24: --autonomous skips the human gates', () => {
+  const runOf = async (h: Project) => ((await h.state()).runs ?? []).at(-1) ?? {}
+
+  it('is refused without --local, naming the --local form', async () => {
+    const h = await project({ status: 'Ready: Idea', mode: 'cloud' })
+    const result = await h.start(['--autonomous'])
+    expect({ code: result.code, named: /--autonomous only applies with --local/.test(result.text) && result.text.includes('/aspira-build-feature KIT-11 --local --autonomous') }).toEqual({ code: 1, named: true })
+  }, SLOW)
+
+  it('passes --autonomous to the groomer step only, records it on the run, and carries it in the resume command', async () => {
+    const h = await project({ status: 'Idea' })
+    const groomer = await h.advance({}, await h.start(['--autonomous']))
+    const run = await runOf(h)
+    expect({ command: commandOf(groomer), autonomous: run.autonomous, resume: run.command }).toEqual({ command: '/aspira-groomer KIT-11 --local --take-recommended --autonomous', autonomous: true, resume: '/aspira-build-feature KIT-11 --local --autonomous' })
+    await h.report(groomer.stage!, 'confirmed', { card: { status: 'Shortlist' } })
+    const move = await h.advance(returnOn('move'))
+    const moveStage = move.stage
+    if (moveStage?.stage === 'move') {
+      h.card.status = String(moveStage.to)
+      await h.answer(moveStage, { done: true })
+    }
+    const spec = await h.advance()
+    expect(commandOf(spec)).toBe('/aspira-spec-writer KIT-11 --local --take-recommended')
+  }, SLOW)
+
+  it('answers an ask that carries a recommended option with it, recorded under asked in chat, and prints no ask stage', async () => {
+    const h = await project({ status: 'Ready: Idea' })
+    const step = await h.advance({}, await h.start(['--autonomous']))
+    await h.report(step.stage!, 'ready', { decisions: [{ ...taken('D1', 'Which cache should the summary use?'), recommended: 'Option C', answer: 'Option C' }] })
+    const next = await h.advance(returnOn('move'))
+    await h.stop()
+    const summary = await h.summary()
+    const asked = summary.search(/asked in chat/i)
+    expect({ next: next.stage?.stage, asks: ofKind(h.stages, 'ask').length, asked: asked >= 0 && summary.indexOf('Option C (the recommended option, taken under --autonomous)', asked) > asked, mode: summary.includes('--autonomous') }).toEqual({ next: 'move', asks: 0, asked: true, mode: true })
+  }, SLOW)
+})
+
 describe('F2 (Q10 revised): two modes', () => {
   const open = (id: string, question: string): DecisionFixture => ({ ...taken(id, question), decidedBy: 'open', answer: null })
   const runOf = async (h: Project) => ((await h.state()).runs ?? []).at(-1) ?? {}

@@ -97,6 +97,8 @@ const runSchema = z.object({
   end: z.object({ message: z.string(), stopped: z.boolean(), reason: buildStopSchema.optional() }).optional(),
   /** How each step ran (F2): 'local' (--local, in the session) or 'cloud' (each step skill's default mode). */
   mode: z.enum(['local', 'cloud']).default('local'),
+  /** KIT-24: `--autonomous`, with --local: the groomer takes every question as recommended and confirms itself, and an ask with a recommended option is answered with it. */
+  autonomous: z.boolean().default(false),
   /** The ticket's worktree the run worked in (F50). */
   worktree: z.string().optional(),
   /** KIT-19: the run's telemetry file was written (once; a later --finish never rewrites it), where, and the file block it was attached as. */
@@ -165,7 +167,7 @@ const overrideSchema = z.object({ key: text, step: text, runId: text, from: z.st
 export type OverrideRecord = z.infer<typeof overrideSchema>
 
 /** A question the driver still has to ask in chat (F13), and what comes after the asks. */
-const queuedAskSchema = z.object({ step: text, runId: text, id: z.string().optional(), question: text })
+const queuedAskSchema = z.object({ step: text, runId: text, id: z.string().optional(), question: text, recommended: z.string().optional() })
 export type QueuedAsk = z.infer<typeof queuedAskSchema>
 const afterAsksSchema = z.object({ stop: z.string().nullable(), reason: buildStopSchema.optional() })
 

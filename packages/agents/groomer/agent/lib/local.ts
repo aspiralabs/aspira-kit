@@ -35,7 +35,7 @@ export const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../
 /** The agent's instructions: the authority every prompt file points the session at. */
 export const orchestratorFile = (agentDir: string = PACKAGE_DIR) => join(agentDir, 'agent', 'instructions.md')
 
-export type LocalInput = { folder: string; repoPath: string; guidelinesPath?: string; finish?: boolean; takeRecommended?: boolean }
+export type LocalInput = { folder: string; repoPath: string; guidelinesPath?: string; finish?: boolean; takeRecommended?: boolean; autonomous?: boolean }
 
 /** Seams for tests: the agent package whose files and env are read, and the knowledge walk's own fetch/API base. */
 export type LocalDeps = { agentDir?: string; env?: Env; fetch?: (url: string, init?: RequestInit) => Promise<Response>; api?: string }
@@ -202,12 +202,13 @@ async function readRound(paths: Paths, n: number, base: GroomRecord, repo: strin
 /**
  * --take-recommended (F10): every open question whose branch is not an exit criterion (rounds.ts
  * EXIT_CRITERIA) is taken as the agent's recommended option instead of waiting on the author; an
- * exit-criterion question, and Confirm, are always asked in chat. A no-op without the flag.
+ * exit-criterion question, and Confirm, are always asked in chat. A no-op without the flag. With
+ * `all` (--autonomous, KIT-24) the exit-criterion questions are taken too: nothing is asked in chat.
  */
-function applyTakeRecommended(record: GroomRecord, take: boolean): GroomRecord {
+function applyTakeRecommended(record: GroomRecord, take: boolean, all = false): GroomRecord {
   if (!take) return record
   const decisions = record.decisions.map((decision) =>
-    decision.decidedBy === 'open' && !(EXIT_CRITERIA as readonly string[]).includes(decision.branch) ? (takenDecision(decision.id, decision) as GroomDecision) : decision,
+    decision.decidedBy === 'open' && (all || !(EXIT_CRITERIA as readonly string[]).includes(decision.branch)) ? (takenDecision(decision.id, decision) as GroomDecision) : decision,
   )
   return { ...record, decisions, open: decisions.filter((decision) => decision.decidedBy === 'open').length }
 }
@@ -351,10 +352,20 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   }
   files.round = 'valid'
   const { round } = read
-  const applied = applyTakeRecommended(read.applied, input.takeRecommended === true)
+  const autonomous = input.autonomous === true
+  const applied = applyTakeRecommended(read.applied, input.takeRecommended === true || autonomous, autonomous)
 
   const answersFile = paths.answers(n)
-  const rawAnswers = await readText(answersFile)
+  let rawAnswers = await readText(answersFile)
+  if (rawAnswers === null && autonomous && input.finish !== true) {
+    // --autonomous (KIT-24): no chat round. Every open question was taken above, so the one answer
+    // left is Confirm, given once every branch is visited; until then the round ends with no answer
+    // and the next round goes on visiting branches.
+    const confirm = frontier(applied, idea).length === 0 && applied.decisions.every((decision) => decision.decidedBy !== 'open') && allBranchesVisited(applied)
+    rawAnswers = JSON.stringify(confirm ? [CONFIRM_ANSWER] : [])
+    await mkdir(dirname(answersFile), { recursive: true })
+    await writeFile(answersFile, rawAnswers)
+  }
   if (rawAnswers === null) {
     if (input.finish === true) return unfinished('no answers were written')
     const ask = frontier(applied, idea)

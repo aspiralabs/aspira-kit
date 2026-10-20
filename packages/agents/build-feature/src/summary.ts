@@ -121,7 +121,7 @@ async function statusLines(input: RenderBuildSummaryInput, resume: string): Prom
   else if (run !== undefined) lines.push(`Run ${run.runId} is in progress.`, '')
   const card = state.card ?? null
   if (card !== null) lines.push(`Card: ${card.status} (${card.url})`, '')
-  if (run !== undefined) lines.push(modeLine(run.mode), ...(run.worktree === undefined ? [] : [`Worktree: ${run.worktree}`]), '')
+  if (run !== undefined) lines.push(modeLine(run.mode, run.autonomous), ...(run.worktree === undefined ? [] : [`Worktree: ${run.worktree}`]), '')
   const gate = gateSummaryLines(state)
   if (gate.length > 0) lines.push(...gate, '')
   const remaining = orderedRemaining(state.remaining)

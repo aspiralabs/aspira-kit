@@ -30,7 +30,7 @@ const step = (name: string, startedAt: string, endedAt: string, usage: { tokens:
 /** A run state as the driver records it; every collection empty unless the test fills it. */
 function runState(fill: Record<string, unknown> = {}) {
   return {
-    runs: [{ runId: RUN, command: '/aspira-build-feature KIT-11 --local', startedAt: '2026-10-12T09:00:00.000Z', endedAt: '2026-10-12T12:00:00.000Z', ended: 'stopped', mode: 'local' as const }],
+    runs: [{ runId: RUN, command: '/aspira-build-feature KIT-11 --local', startedAt: '2026-10-12T09:00:00.000Z', endedAt: '2026-10-12T12:00:00.000Z', ended: 'stopped', mode: 'local' as const, autonomous: false }],
     inProgress: null,
     approvals: [{ runId: RUN, notionUserId: 'user-1', name: 'Ada Approver', at: '2026-10-12T09:00:00.000Z', command: '/aspira-build-feature KIT-11 --local' }],
     moves: [],

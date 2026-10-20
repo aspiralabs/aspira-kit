@@ -141,6 +141,34 @@ it('with --take-recommended, takes Q2 (an ordinary branch) as the agent\'s recom
   expect(block(page, 'Q2')).toContain('Taken by the agent')
 })
 
+it('with --autonomous, takes Q1 (an exit-criterion branch) too, prints no answers stage, and ends the round with nothing to answer while branches are still open (KIT-24)', async () => {
+  const { folder, input } = await roundOneAsked()
+  const autonomous: LocalInput = { ...input, autonomous: true }
+  // No answers stage: the driver writes an empty answers file itself and goes on to fetch the page.
+  const fetch = await runLocal(autonomous, deps)
+  expect(fetch).toMatchObject({ stage: 'board' })
+  expect(JSON.parse(await readFile(answersFile(folder, 1), 'utf8'))).toEqual([])
+  await writeText(pageFile(folder, 1), firstPage)
+  const board = await runLocal(autonomous, deps)
+  expect(board).toMatchObject({ stage: 'board', runStatus: 'needs-author', open: 0 })
+  const record = await readGroomRecord(folder)
+  expect(record?.decisions.map((decision) => [decision.id, decision.decidedBy, decision.answer])).toEqual([
+    ['Q1', 'agent', 'A'],
+    ['Q2', 'agent', 'A'],
+  ])
+})
+
+it('with --autonomous, confirms itself once every branch is visited and nothing is open: the answers file holds CONFIRM and the next stage is the Idea summary (KIT-24)', async () => {
+  const ws = await workspace()
+  const previous = groomRecord(1, [confirmed('Q1', 'problem', 'A')])
+  await writeGroomRecord(ws.folder, previous)
+  await writeText(pageFile(ws.folder, 2), renderGroomPage(previous, { date: '2026-10-11', notes: [] }))
+  await writeJson(join(ws.folder, '.local', 'groomer', 'board.json'), { round: 2 })
+  await writeJson(roundFile(ws.folder, 2), { round: 2, searched: ['cart limit'], facts: [], questions: [question('Q2', 'done')], branches: [] })
+  const step = await runLocal({ ...ws.input, autonomous: true }, deps)
+  expect({ stage: step.stage, answers: JSON.parse(await readFile(answersFile(ws.folder, 2), 'utf8')) }).toEqual({ stage: 'summary', answers: [{ id: 'CONFIRM', question: 'Grooming is complete', answer: 'Confirm' }] })
+})
+
 it('without the flag, both Q1 and Q2 stay open and are asked in chat (regression)', async () => {
   const { input } = await roundOneAsked()
   const answers = await runLocal(input, deps)

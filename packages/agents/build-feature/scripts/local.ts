@@ -20,10 +20,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       run: { type: 'string' },
       'force-run': { type: 'boolean', default: false },
       finish: { type: 'boolean', default: false },
+      autonomous: { type: 'boolean', default: false },
     },
   })
   const [id] = positionals
-  if (id === undefined || !/^[A-Za-z]+-\d+$/.test(id)) throw new Refusal('Usage: local.ts <ID> [--local] [--run <runId>] [--force-run] [--finish]; <ID> is the Feature Board ticket ID, for example KIT-11.')
+  if (id === undefined || !/^[A-Za-z]+-\d+$/.test(id)) throw new Refusal('Usage: local.ts <ID> [--local] [--autonomous] [--run <runId>] [--force-run] [--finish]; <ID> is the Feature Board ticket ID, for example KIT-11.')
   const now = process.env.BUILD_FEATURE_NOW !== undefined && process.env.BUILD_FEATURE_NOW !== '' ? process.env.BUILD_FEATURE_NOW : new Date().toISOString()
   const stage = await nextStage({
     id: id.toUpperCase(),
@@ -32,6 +33,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     forceRun: values['force-run'],
     finish: values.finish,
     mode: values.local ? 'local' : 'cloud',
+    autonomous: values.autonomous,
     now,
     env: process.env,
   })
