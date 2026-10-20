@@ -28,6 +28,7 @@ export { PR_URL } from '@aspiralabs/agent-common/lib/pr-step'
 import { tail } from '@aspiralabs/agent-common/lib/redact'
 import { ticketBranch } from '@aspiralabs/agent-common/lib/ticket-branch'
 import { addTaken, collectTakenDecisions } from '#src/decisions.ts'
+import { analyzerStepApps } from '#src/step-results.ts'
 import type { Phase, PhaseContext, PhaseResult } from '#src/driver.ts'
 import { gateRecordOf } from '#src/gate.ts'
 import { renderPrBody } from '#src/pr-body.ts'
@@ -116,17 +117,22 @@ async function changedPaths(sys: System, options: SystemOptions): Promise<Outcom
  */
 export async function commitAnalyzerChanges(context: PhaseContext, state: RunState, sys: System = system): Promise<Outcome<RunState>> {
   const options = optionsOf(context)
-  const app = context.aspira.app ?? '.'
+  // One analyzer result per app the analyzer steps ran on (KIT-39), aspira.json's app when there were none.
+  const apps = analyzerStepApps(state, context.aspira.app ?? '.')
   const key = analyzerKey(state)
   let next = state
   if (key !== null && recordOf(state).committedFor !== key) {
-    const edited = await editedFiles(context.repo, app)
-    if (!edited.ok) return edited
+    const edited: string[] = []
+    for (const app of apps) {
+      const result = await editedFiles(context.repo, app)
+      if (!result.ok) return result
+      edited.push(...result.value)
+    }
     const changed = await changedPaths(sys, options)
     if (!changed.ok) return changed
     const before = new Set(gateRecordOf(state)?.dirtyBefore ?? [])
-    const gitignore = app === '.' || app === '' ? '.gitignore' : `${app.replace(/\/+$/, '')}/.gitignore`
-    const analyzer = new Set([...edited.value, gitignore])
+    const gitignores = apps.map((app) => (app === '.' || app === '' ? '.gitignore' : `${app.replace(/\/+$/, '')}/.gitignore`))
+    const analyzer = new Set([...edited, ...gitignores])
     const paths = changed.value.filter((entry) => analyzer.has(entry.path) || (!entry.untracked && !before.has(entry.path))).map((entry) => entry.path)
     let commit: string | null = null
     if (paths.length > 0) {
@@ -214,7 +220,8 @@ export async function writePrBody(context: PhaseContext, state: RunState): Promi
   const file = join(context.dir, 'pr-body.md')
   await mkdir(context.dir, { recursive: true })
   const app = context.aspira.app
-  await writeFile(file, await renderPrBody({ ticket: { id: context.id, title: context.card.title, url: context.card.url }, state, repo: context.repo, folder: context.folder, ...(app === undefined ? {} : { app }) }))
+  const apps = analyzerStepApps(state, app ?? '.')
+  await writeFile(file, await renderPrBody({ ticket: { id: context.id, title: context.card.title, url: context.card.url }, state, repo: context.repo, folder: context.folder, apps, ...(app === undefined ? {} : { app }) }))
   return file
 }
 

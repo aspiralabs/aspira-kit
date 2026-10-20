@@ -461,6 +461,10 @@ export type StepReportOptions = {
   rawDecisions?: unknown
   /** code-analyzer: the files it edited (written to the working tree). Default ['src/app.ts']. */
   edited?: string[]
+  /** code-analyzer: the app directory its export lands under (its --app). Default '.'. */
+  app?: string
+  /** implementor: the app directories its record says it changed (KIT-39). */
+  apps?: string[]
   /** pr-reviewer: the findings of this review. */
   findings?: Parameters<typeof findingsMarkdown>[0]
   /** spec-writer: whether spec.written/ holds the current spec.md. Default true. */
@@ -536,16 +540,17 @@ export async function writeStepExport(folder: string, repo: string, step: string
     case 'implementor': {
       const assumptions = decisions.map(({ question, options: choices, recommended, reasoning, whyYours }) => ({ question, options: choices, recommended, reasoning, whyYours }))
       const exported = status === 'complete' ? 'complete' : 'incomplete'
-      await put(join(folder, 'plan.review/trace/implementation-local.json'), JSON.stringify({ mode: 'local', status: exported, verification: { status: options.verification ?? (status === 'complete' ? 'done' : status), assumptions: options.rawDecisions === undefined ? assumptions : options.rawDecisions } }, null, 2))
+      await put(join(folder, 'plan.review/trace/implementation-local.json'), JSON.stringify({ mode: 'local', status: exported, ...(options.apps === undefined ? {} : { apps: options.apps }), verification: { status: options.verification ?? (status === 'complete' ? 'done' : status), assumptions: options.rawDecisions === undefined ? assumptions : options.rawDecisions } }, null, 2))
       await put(join(folder, DECISIONS_FILE.implementor!), decisionsMarkdown(decisions.map((decision, index) => ({ ...decision, id: `A${index + 1}` }))))
       return
     }
     case 'code-analyzer': {
       const edited = options.edited ?? ['src/app.ts']
       for (const path of edited) await put(join(repo, path), `export const app = 2 // analyzer fix in ${path}\n`)
-      await put(join(repo, '.static-analysis/diagnostics.json'), JSON.stringify({ status, remaining: [], initial: [] }, null, 2))
-      await put(join(repo, '.static-analysis/rounds.json'), JSON.stringify({ mode: 'local', status, editedFiles: edited, rounds: [] }, null, 2))
-      await put(join(repo, '.static-analysis/report.md'), `# Static analysis\n\nStatus: ${status}\n`)
+      const out = join(repo, options.app ?? '.', '.static-analysis')
+      await put(join(out, 'diagnostics.json'), JSON.stringify({ status, remaining: [], initial: [] }, null, 2))
+      await put(join(out, 'rounds.json'), JSON.stringify({ mode: 'local', status, editedFiles: edited, rounds: [] }, null, 2))
+      await put(join(out, 'report.md'), `# Static analysis\n\nStatus: ${status}\n`)
       return
     }
     case 'pr-reviewer': {

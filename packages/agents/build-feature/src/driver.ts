@@ -58,7 +58,7 @@ import { acceptResolution, cardDifferences, resolveStage, resolveWithToken, type
 import { assertNever, launcherFor, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, STEPS, type EndRoute, type Mode, type PhaseName, type StepName } from '#src/route.ts'
 import { reviewPhase } from '#src/review-loop.ts'
 import { readRunState, stateDirOf, writeRunState, type Card, type Failure, type Pending, type PhaseRecord, type RunState, type Usage } from '#src/run-state.ts'
-import { analyzedApps, analyzerReady, readImplementorApps, readImplementorStatus, readSpecCoverage, readStepResult, readStepUsage, stepReportSchema, stepResultTable } from '#src/step-results.ts'
+import { analyzedApps, analyzerReady, commandApp, readImplementorApps, readImplementorStatus, readSpecCoverage, readStepResult, readStepUsage, stepReportSchema, stepResultTable } from '#src/step-results.ts'
 import { releaseRowPhase, step10Phase } from '#src/step10.ts'
 import { step8Phase } from '#src/step8.ts'
 import { renderBuildSummary } from '#src/summary.ts'
@@ -941,9 +941,9 @@ function phaseRecord(group: PhaseUsage): PhaseRecord {
  * the gap that kept it out (missing, empty, invalid, stale). --local reads no usage file. Never
  * throws and never changes the step's result (OBS-002).
  */
-async function withCloudUsage(ctx: Ctx, step: StepName, usage: Usage, interval: { start: string; end: string }): Promise<Usage> {
+async function withCloudUsage(ctx: Ctx, step: StepName, usage: Usage, interval: { start: string; end: string }, app: string): Promise<Usage> {
   if (ctx.mode !== 'cloud') return usage
-  const source = stepResultTable[step].usage({ folder: ctx.folder, repo: ctx.input.repo, app: ctx.aspira?.app ?? '.' })
+  const source = stepResultTable[step].usage({ folder: ctx.folder, repo: ctx.input.repo, app })
   if (source === null) return usage
   const base = usage ?? { tokens: null, wallMs: null }
   try {
@@ -965,9 +965,11 @@ async function acceptStep(ctx: Ctx, state: RunState, pending: Pending, answer: u
     return stop(ctx, state, message, { stopped: true, reason: { kind: 'unexpected-error' }, failure: { action: step, command, message } })
   }
   const report = parsed.data
-  const result = await readStepResult(step, report, { folder: ctx.folder, repo: ctx.input.repo, app: ctx.aspira?.app ?? '.' })
+  // A code-analyzer step's result is under the directory its own --app named, not aspira.json's app (KIT-40).
+  const app = step === 'code-analyzer' ? commandApp(command, ctx.aspira?.app ?? '.') : (ctx.aspira?.app ?? '.')
+  const result = await readStepResult(step, report, { folder: ctx.folder, repo: ctx.input.repo, app })
   // A malformed usage is recorded as not measured and never stops the run (KIT-19 F9, F22).
-  const usage = await withCloudUsage(ctx, step, readStepUsage(report.usage), { start: pending.startedAt, end: ctx.input.now })
+  const usage = await withCloudUsage(ctx, step, readStepUsage(report.usage), { start: pending.startedAt, end: ctx.input.now }, app)
   const record = {
     step,
     runId: ctx.runId,

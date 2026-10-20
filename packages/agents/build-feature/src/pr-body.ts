@@ -30,8 +30,10 @@ export type RenderPrBodyInput = {
   repo: string
   /** The ticket's working folder (`.work/<id>-<slug>/`), to read `plan.review/implementation.md` from. Omitted before the implementor has a folder to read; the body then has no Evidence. */
   folder?: string
-  /** The app directory (aspira.json `app`), to scope redaction and to read its own `.static-analysis/rounds.json`. */
+  /** The app directory (aspira.json `app`), to scope redaction; also the one app whose `.static-analysis/rounds.json` is read when `apps` is not given. */
   app?: string
+  /** The app directories the code-analyzer ran on (KIT-39), each with its own `.static-analysis/rounds.json`. Default: `app` alone. */
+  apps?: string[]
 }
 
 const SAME_SESSION_NOTICE = "This build's steps and its reviews all ran in the same session: no separate review pass followed."
@@ -66,9 +68,10 @@ async function analyzerOf(repo: string, app: string | undefined): Promise<{ app:
 
 /** The PR body for this run state: Summary, Evidence and Merge Danger (from `folder`'s implementation.md and the branch diff, when `folder` is given), then the decisions taken for you after Ready: Plan, the run-mode notice, and a link to the Build Summary. */
 export async function renderPrBody(input: RenderPrBodyInput): Promise<string> {
-  const { ticket, state, repo, folder, app } = input
+  const { ticket, state, repo, folder, app, apps } = input
   const implementationMd = folder === undefined ? '' : await readFile(join(folder, 'plan.review/implementation.md'), 'utf8').catch(() => '')
-  const [changed, analyzers] = await Promise.all([changedFiles(repo), analyzerOf(repo, app)])
+  const [changed, ...results] = await Promise.all([changedFiles(repo), ...(apps ?? [app]).map((dir) => analyzerOf(repo, dir))])
+  const analyzers = results.flat()
   const taken = orderedTaken(state.takenKeys).map((entry) => ({ key: entry.key, decision: { question: entry.decision.question, answer: entry.decision.answer, recommended: entry.decision.recommended } }))
   const notice = (state.runs.at(-1)?.mode ?? 'local') === 'local' ? SAME_SESSION_NOTICE : CLOUD_NOTICE
   const footer = `See this ticket's **Build Summary** page for the full report: ${ticket.url}`
