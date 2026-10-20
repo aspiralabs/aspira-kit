@@ -1,5 +1,20 @@
 # @aspiralabs/agents
 
+## 0.8.0
+
+### Patch Changes
+
+- Updated dependencies [d9ffa72]
+  - @aspiralabs/build-feature@0.8.0
+  - @aspiralabs/groomer@0.8.0
+  - @aspiralabs/agent-common@0.8.0
+  - @aspiralabs/spec-writer@0.8.0
+  - @aspiralabs/spec-reviewer@0.8.0
+  - @aspiralabs/planner@0.8.0
+  - @aspiralabs/implementor@0.8.0
+  - @aspiralabs/code-analyzer@0.8.0
+  - @aspiralabs/pr-reviewer@0.8.0
+
 ## 0.7.4
 
 ### Patch Changes
