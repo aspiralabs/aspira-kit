@@ -120,6 +120,11 @@ describe('a groomer decision the agent took to keep going (T5)', () => {
     expect(validateIdeaSummary(summary, record)).toEqual({ ok: true })
   })
 
+  it('accepts an _Avoid_ line written indented under its term, as a markdown continuation (KIT-26)', () => {
+    const withTerms = summary.replace('None introduced.', '- **PDF**: a file the extractor reads page by page\n  _Avoid_: encrypted PDF, password-protected PDF')
+    expect(validateIdeaSummary(withTerms, record)).toEqual({ ok: true })
+  })
+
   it('refuses an Idea summary that leaves the agent-taken Q2 out: it is a confirmed decision too (KIT-25)', () => {
     const withoutQ2 = summary.split('\n').filter((line) => !line.startsWith('- **Q2')).join('\n')
     expect(validateIdeaSummary(withoutQ2, record)).toEqual({ ok: false, reason: 'confirmed decisions missing from the summary: Q2' })
