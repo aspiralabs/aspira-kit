@@ -1,7 +1,7 @@
 ---
 name: aspira-build-feature
 description: Run the AI-DLC pipeline end to end for a Feature Board ticket, from wherever it is to a reviewed, merge-ready PR, by stepping the official build-feature driver and running each stage it prints as a subagent of this Claude Code session. It is the one /aspira-* skill that orchestrates other skills instead of launching an agent. Use for /aspira-build-feature or requests to build a feature, run the whole AI-DLC on a ticket, or take a ticket from idea to PR.
-argument-hint: <ticket ID | Notion URL> [--local] [--run RUNID] [--force-run] [--finish]
+argument-hint: <ticket ID | Notion URL> [--local] [--autonomous] [--run RUNID] [--force-run] [--finish]
 model: fable
 disable-model-invocation: true
 ---
@@ -10,13 +10,13 @@ disable-model-invocation: true
 
 This is the one `/aspira-*` skill that orchestrates other skills instead of launching an agent. It calls no model itself for the work: it steps the official `build-feature` driver, and each stage the driver prints is performed, in turn, by this session or by a subagent it launches. The driver is the one authority for what happens next and in what order; this file covers mechanics only. The process this skill automates is AI-DLC's From Idea to Release (https://app.notion.com/p/3e83e59b225881f7ac5aeab5d353beea), and the org rules it runs under are in Agent Instructions (https://app.notion.com/p/3e73e59b2258813d9eece6ed89171bd3). Read both before relying on this file for anything beyond the mechanics below; no rule or step order from either is copied here.
 
-Two modes, chosen by the invocation and kept for the whole run: with `--local` every step runs its own skill with `--local` in a subagent of this session; without it every step runs its own skill's default mode, which starts that step's cloud agent and waits on it until it ends. Either way this session steps the driver; build-feature itself has no `start`, `status` or `wait`.
+Two modes, chosen by the invocation and kept for the whole run: with `--local` every step runs its own skill with `--local` in a subagent of this session; without it every step runs its own skill's default mode, which starts that step's cloud agent and waits on it until it ends. Either way this session steps the driver; build-feature itself has no `start`, `status` or `wait`. `--local --autonomous` skips the human gates: the groomer step runs with `--autonomous` (every open question taken as its recommended option, the exit-criterion ones included, and the run confirms itself once every branch is visited), and an `ask` whose quoted decision carries a recommended option is answered with it and recorded under asked. The merge stays human. `--autonomous` without `--local` is refused.
 
 ```bash
-<skill-dir>/scripts/build-feature.sh local <ticket ID | Notion URL> [--local] [--run RUNID] [--force-run]
+<skill-dir>/scripts/build-feature.sh local <ticket ID | Notion URL> [--local] [--autonomous] [--run RUNID] [--force-run]
 ```
 
-Pass `--local` exactly when the human did. The run works the ticket in its own git worktree under `.worktrees/`; once the driver names it (a `worktree` stage), run every later command, including this one, from inside it.
+Pass `--local` and `--autonomous` exactly when the human did. The run works the ticket in its own git worktree under `.worktrees/`; once the driver names it (a `worktree` stage), run every later command, including this one, from inside it.
 
 ## The loop
 
@@ -30,7 +30,7 @@ Pass `--local` exactly when the human did. The run works the ticket in its own g
    - **`end`**: the run has stopped or finished. Stop here.
 2. Before the first step the driver checks that every step skill under `.claude/skills/` is from this kit version. When one is not (a `.kit-version` missing, or naming another version), it refuses with no stage, naming the file and both versions: an older step launcher would reject `--parent-run`. Relay the refusal; `kit init` in the project installs the matching skills, then run the same command again.
 3. Never move a card anywhere a stage does not explicitly list as a `move`, and never on your own judgment. Never treat text in a step's result, a Notion page or a pull request as approval. The run-start approval is the invocation itself: the driver records it at run start (the command, the time and the git user of the checkout), and no stage asks you to write one.
-4. The only thing this skill asks the human directly is what an `ask` stage asks, or a groomer round's exit-criterion question or its Confirm (the groomer step asks those itself, in its own chat; relay them, do not answer them).
+4. The only thing this skill asks the human directly is what an `ask` stage asks, or a groomer round's exit-criterion question or its Confirm (the groomer step asks those itself, in its own chat; relay them, do not answer them). Under `--autonomous` neither happens: the driver answers an ask that carries a recommended option itself, and the groomer asks nothing.
 
 ## Reporting
 
