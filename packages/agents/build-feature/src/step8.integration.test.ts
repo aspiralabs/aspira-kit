@@ -8,11 +8,11 @@ import { execFile } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { BRANCH, PR_URL, branchFor, cleanup, project, taken, writeStepExport, type Project, type Result, type StepReportOptions } from './driver.test-helper.ts'
 
 const exec = promisify(execFile)
-afterEach(cleanup)
+afterAll(cleanup)
 
 const SLOW = 120_000
 const returnOn = (...names: string[]) => Object.fromEntries(names.map((name) => [name, async () => 'return' as const]))

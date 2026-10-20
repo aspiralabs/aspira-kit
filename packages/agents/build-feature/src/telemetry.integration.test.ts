@@ -25,11 +25,11 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { PACKAGE, PR_URL, SLUG, cleanup, ofKind, project, worktreeFor, writeStepExport, type Handler, type Project, type Result, type Stage, type StepReportOptions } from './driver.test-helper.ts'
 
-afterEach(cleanup)
+afterAll(cleanup)
 
 const SLOW = 240_000
 

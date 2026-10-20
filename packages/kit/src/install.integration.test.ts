@@ -17,12 +17,15 @@ import { initNext } from './stacks/next.js'
 const kit = dirname(dirname(fileURLToPath(import.meta.url)))
 const repo = dirname(dirname(kit))
 const PACKAGES = ['common', 'spec-reviewer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'groomer', 'build-feature', 'meta']
+const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6'
 const run = (cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) => execFileSync(cmd, args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
 let scratch: string
 let app: string
+/** What the one kit init in beforeAll logged. */
+const initLines: string[] = []
 
-beforeAll(() => {
+beforeAll(async () => {
   scratch = realpathSync(mkdtempSync(join(tmpdir(), 'kit-install-')))
   const tarballs = join(scratch, 'tarballs')
   mkdirSync(tarballs)
@@ -54,27 +57,27 @@ beforeAll(() => {
   writeFileSync(join(app, 'pnpm-workspace.yaml'), `${builds}\noverrides:\n${Object.entries(overrides).map(([name, spec]) => `  '${name}': '${spec}'\n`).join('')}`)
   run('pnpm', ['install', '--ignore-scripts', '--config.confirmModulesPurge=false'], app)
   run('git', ['init', '-q', app], scratch)
+  writeAspira({ projectRoot: app, board: BOARD, dryRun: false, log: () => {} })
+  // kit init's install step adds the registry packages; here it is a no-op, the tarballs are already installed.
+  const bin = join(scratch, 'bin')
+  mkdirSync(bin)
+  writeFileSync(join(bin, 'pnpm'), '#!/bin/bash\n[ "$1" = add ] && exit 0\nexec /usr/bin/env pnpm "$@"\n', { mode: 0o755 })
+  const path = process.env.PATH
+  process.env.PATH = `${bin}:${path}`
+  try {
+    await initNext({ projectRoot: app, dryRun: false, log: (line) => initLines.push(line) })
+  } finally {
+    process.env.PATH = path
+  }
 })
 
 describe('an installed project', () => {
-  it('has every agent under node_modules and kit init writes the eight agent skills from them and the three kit-owned skills', async () => {
+  it('has every agent under node_modules and kit init writes the eight agent skills from them and the three kit-owned skills', () => {
     expect(JSON.parse(readFileSync(join(app, 'node_modules', '@aspiralabs', 'agents', 'package.json'), 'utf8'))).toMatchObject({ name: '@aspiralabs/agents' })
-    // kit init's install step adds the registry packages; here it is a no-op, the tarballs are already installed.
-    const bin = join(scratch, 'bin')
-    mkdirSync(bin)
-    writeFileSync(join(bin, 'pnpm'), '#!/bin/bash\n[ "$1" = add ] && exit 0\nexec /usr/bin/env pnpm "$@"\n', { mode: 0o755 })
-    const lines: string[] = []
-    const path = process.env.PATH
-    process.env.PATH = `${bin}:${path}`
-    try {
-      await initNext({ projectRoot: app, dryRun: false, log: (line) => lines.push(line) })
-    } finally {
-      process.env.PATH = path
-    }
-    const written = lines.filter((l) => l.startsWith('write  .claude/skills/aspira-'))
+    const written = initLines.filter((l) => l.startsWith('write  .claude/skills/aspira-'))
     expect(written.filter((l) => AGENTS.some((agent) => l.startsWith(`write  .claude/skills/aspira-${agent} `))).length).toBe(8)
     expect(written.filter((l) => /^write {2}\.claude\/skills\/aspira-(cleanup|next|worktree) /.test(l)).length).toBe(3)
-    expect(lines.some((l) => l.startsWith('write  .claude/skills/aspira-groomer'))).toBe(true)
+    expect(initLines.some((l) => l.startsWith('write  .claude/skills/aspira-groomer'))).toBe(true)
     const version = (JSON.parse(readFileSync(join(repo, 'packages/agents/meta/package.json'), 'utf8')) as { version: string }).version
     for (const agent of AGENTS) {
       expect(existsSync(join(skillDir(app, agent), 'SKILL.md'))).toBe(true)
@@ -90,15 +93,18 @@ describe('an installed project', () => {
   })
 
   it('kit init --board writes aspira.json, and kit doctor fails without it', () => {
+    // A project of its own: the shared app already has its aspira.json from beforeAll.
+    const project = mkdtempSync(join(scratch, 'board-'))
+    writeFileSync(join(project, 'package.json'), '{ "name": "board-app", "private": true }\n')
     const before: string[] = []
-    doctor(app, (line) => before.push(line))
+    doctor(project, (line) => before.push(line))
     expect(before).toContain('FAIL aspira.json is missing; run kit init --board <Feature Board URL>')
     const lines: string[] = []
-    writeAspira({ projectRoot: app, board: 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6', dryRun: false, log: (line) => lines.push(line) })
+    writeAspira({ projectRoot: project, board: BOARD, dryRun: false, log: (line) => lines.push(line) })
     expect(lines[0]).toContain('write  ')
-    expect(JSON.parse(readFileSync(join(app, 'aspira.json'), 'utf8'))).toEqual({ board: 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6' })
+    expect(JSON.parse(readFileSync(join(project, 'aspira.json'), 'utf8'))).toEqual({ board: BOARD })
     const after: string[] = []
-    doctor(app, (line) => after.push(line))
+    doctor(project, (line) => after.push(line))
     expect(after).toContain('ok   aspira.json names the Feature Board')
   })
 

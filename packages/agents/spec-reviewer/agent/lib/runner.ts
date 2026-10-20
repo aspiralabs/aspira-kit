@@ -15,17 +15,35 @@ export type RunInput = { specPath: string; repoPath: string; guidelinesPath: str
 /** The report directory: the explicit output directory, else spec.reviewed/ beside the spec. */
 export const reportDirFor = (input: Pick<RunInput, 'specPath' | 'outputDir'>) => resolve(input.outputDir ?? resolve(dirname(input.specPath), 'spec.reviewed'))
 
+/**
+ * The spec without the review header a needs-author or incomplete spec.reviewed.md carries above the
+ * candidate (the "> Review status:" callout, the findings and the `---` rule that reviewFiles writes),
+ * so a rerun on the answered file reviews the spec itself (KIT-30). Any other text is returned as is.
+ */
+export function stripReviewHeader(text: string): string {
+  if (!text.startsWith('> Review status: ')) return text
+  const rule = '\n---\n\n'
+  const at = text.indexOf(rule)
+  return at === -1 ? text : text.slice(at + rule.length)
+}
+
 /** Inputs every review mode shares: the eve/CLI runner and the in-session --local replay. */
 export async function prepareReview(input: RunInput, signal: AbortSignal) {
   const dir = reportDirFor(input)
-  for (const source of [input.specPath, input.guidelinesPath]) {
+  // The guidelines never live in the report directory. The spec may be the previous run's own
+  // spec.reviewed.md there (KIT-30): a rerun after needs-author or incomplete reads the answered spec
+  // the Playbook names, into memory, before anything below is written; spec.original.md keeps it.
+  const inside = (source: string) => {
     const path = relative(dir, resolve(source))
-    if (!path || (!path.startsWith('../') && path !== '..')) throw new Error('Output directory must not contain the source spec or guidelines')
+    return !path || (!path.startsWith('../') && path !== '..')
   }
+  if (inside(input.guidelinesPath)) throw new Error('Output directory must not contain the guidelines')
+  if (inside(input.specPath) && resolve(input.specPath) !== resolve(dir, 'spec.reviewed.md')) throw new Error('Output directory must not contain the source spec (only its own spec.reviewed.md, on a rerun)')
   // The previous run's trace/decisions.md, with the options the author ticked, is read before the run replaces it.
-  const [spec, guidelines, repo, answers] = await Promise.all([
+  const [raw, guidelines, repo, answers] = await Promise.all([
     readFile(resolve(input.specPath), 'utf8'), readFile(resolve(input.guidelinesPath), 'utf8'), repository(input.repoPath, signal), readAnswers(dir),
   ])
+  const spec = stripReviewHeader(raw)
   if (!guidelines.trim()) throw new Error('Required guidelines snapshot is empty')
   if (/TRUNCATED by the Notion API/i.test(guidelines)) throw new Error('Required guidelines snapshot is truncated')
   const uiRequired = input.uiRequired ?? /\b(?:UI|screen|page|card|button|mobile|component|navigation)\b/i.test(spec)

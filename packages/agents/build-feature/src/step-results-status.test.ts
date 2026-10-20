@@ -11,25 +11,26 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { routeStatus, type RouteFacts } from '#src/route.ts'
 import { emptyRunState, type RunState } from '#src/run-state.ts'
 import { readStepResult, type ResultPaths, type StepReport } from '#src/step-results.ts'
 
 const NOW = '2026-10-15T00:00:00.000Z'
 
-let dir: string
-let paths: ResultPaths
+const temps: string[] = []
+afterAll(async () => {
+  for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true })
+})
 
-beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'build-feature-step-results-status-'))
-  paths = { folder: join(dir, 'folder'), repo: dir, app: '.' }
+/** A temp ticket folder of this test's own. */
+async function fixture(): Promise<ResultPaths> {
+  const dir = await mkdtemp(join(tmpdir(), 'build-feature-step-results-status-'))
+  temps.push(dir)
+  const paths = { folder: join(dir, 'folder'), repo: dir, app: '.' }
   await mkdir(paths.folder, { recursive: true })
-})
-
-afterEach(async () => {
-  await rm(dir, { recursive: true, force: true })
-})
+  return paths
+}
 
 /** A step report with NOTION_TOKEN unset, as the session would write one (run with env -u NOTION_TOKEN -u NOTION_API_KEY). */
 const report = (step: string, status: string): StepReport => ({ nonce: 'n1', step, status, resultLine: `${step}: ${status}`, usage: null })
@@ -41,6 +42,7 @@ async function writeJson(path: string, value: unknown): Promise<void> {
 
 describe("T28 F7: readStepResult continues on the new word ready, keeping each step's stop words", () => {
   it('the implementor continues on ready and on the pre-upgrade complete, and stops on refused', async () => {
+    const paths = await fixture()
     const file = join(paths.folder, 'plan.review/trace/implementation-local.json')
     await writeJson(file, { status: 'ready' })
     const ready = await readStepResult('implementor', report('implementor', 'ready'), paths)
@@ -51,6 +53,7 @@ describe("T28 F7: readStepResult continues on the new word ready, keeping each s
   })
 
   it('the code-analyzer continues on ready, as it already does on the pre-upgrade clean', async () => {
+    const paths = await fixture()
     const file = join(paths.repo, paths.app, '.static-analysis/rounds.json')
     await writeJson(file, { status: 'ready' })
     const ready = await readStepResult('code-analyzer', report('code-analyzer', 'ready'), paths)
@@ -60,6 +63,7 @@ describe("T28 F7: readStepResult continues on the new word ready, keeping each s
   })
 
   it('the pr-reviewer is read from pr-review/trace/review.json: ready continues, needs-author stops', async () => {
+    const paths = await fixture()
     const file = join(paths.folder, 'pr-review/trace/review.json')
     await writeJson(file, { status: 'ready' })
     const ready = await readStepResult('pr-reviewer', report('pr-reviewer', 'complete'), paths)

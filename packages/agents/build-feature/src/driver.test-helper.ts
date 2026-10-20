@@ -181,6 +181,8 @@ type ProjectOptions = {
   rules?: string
 }
 
+// Removed once per file (afterAll), never per test: tests in a file run concurrently, so one
+// test's cleanup must not delete a fixture another test is still using.
 const temps: string[] = []
 export async function cleanup(): Promise<void> {
   for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true })

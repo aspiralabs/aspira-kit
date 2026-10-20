@@ -10,11 +10,11 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { BOARD, REPOSITORY, SLUG, branchFor, cleanup, kinds, ofKind, project, worktreeFor, type Project, type Result } from './driver.test-helper.ts'
 
 const exec = promisify(execFile)
-afterEach(cleanup)
+afterAll(cleanup)
 
 const SLOW = 120_000
 // The step command without its trailing --parent-run <run>:<nonce> (KIT-19), which these tests do not pin.

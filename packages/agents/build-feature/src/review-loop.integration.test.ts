@@ -9,12 +9,12 @@ import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { BOARD, BRANCH, PR_URL, RELEASES, REPOSITORY, cleanup, ofKind, project, writeStepExport, type Project, type Result } from './driver.test-helper.ts'
 
 const exec = promisify(execFile)
-afterEach(cleanup)
+afterAll(cleanup)
 
 const SLOW = 180_000
 const high = (n: number, file = 'src/a.ts') => [{ id: `H${n}`, severity: 'high' as const, title: `Review ${n} found the retry never stops`, file }]
