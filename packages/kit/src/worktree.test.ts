@@ -2,10 +2,10 @@
 // worktrees `kit worktree` adds. The board is the one boundary replaced, through the injected
 // TicketLookup; install and build run the real npm on a package with no dependencies.
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { ResolvedTicket } from './next.js'
 import type { TicketLookup, TicketLookupResult } from './ticket-lookup.js'
 import { worktree } from './worktree.js'
@@ -14,7 +14,6 @@ const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6'
 const MARKER = 'built.marker'
 
 const made: string[] = []
-const readOnly: string[] = []
 const npmEnv = { npm_config_audit: 'false', npm_config_fund: 'false', npm_config_update_notifier: 'false', npm_config_offline: 'true' }
 const savedEnv = new Map<string, string | undefined>()
 
@@ -24,10 +23,6 @@ beforeAll(() => {
     savedEnv.set(key, process.env[key])
     process.env[key] = value
   }
-})
-
-afterEach(() => {
-  for (const dir of readOnly.splice(0)) chmodSync(dir, 0o755)
 })
 
 afterAll(() => {
@@ -335,14 +330,13 @@ describe('kit worktree: the worktree folder already there', () => {
 
   it('T49 reports git worktree add failing with git\'s message and goes no further', async () => {
     const { main } = fixture()
-    const dir = join(main, '.worktrees')
-    mkdirSync(dir)
-    chmodSync(dir, 0o555)
-    readOnly.push(dir)
+    // A file where the .worktrees folder goes: git cannot create the worktree under it, even as root
+    // (some CI runners run as root, which ignores a read-only folder).
+    writeFileSync(join(main, '.worktrees'), 'not a folder\n')
     const result = await run(main, 'KIT-13', feature())
     expect(result.code).toBe(1)
     expect(result.lines.some((line) => line.includes('git worktree add') && /fail/i.test(line))).toBe(true)
-    expect(result.out).toMatch(/Permission denied|could not create/i)
+    expect(result.out).toMatch(/could not create|Not a directory/i)
     expect(lineWith(result.lines, '.env.local')).toBeUndefined()
     expect(lineWith(result.lines, 'npm install')).toBeUndefined()
     expect(lineWith(result.lines, 'npm run build')).toBeUndefined()

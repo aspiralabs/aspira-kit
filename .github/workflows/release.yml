@@ -19,7 +19,7 @@ permissions:
   packages: write
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: starsling-ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,11 +64,12 @@ jobs:
       ref: changeset-release/main
       prepare: pnpm --filter @aspiralabs/ui --filter @aspiralabs/kit build
       test-shards: "[1, 2, 3, 4, 5, 6]"
+      runs-on: starsling-ubuntu-24.04
 
   version-pr-status:
     needs: [release, version-pr-checks]
     if: always() && needs.release.outputs.hasChangesets == 'true' && needs.release.outputs.published != 'true'
-    runs-on: ubuntu-latest
+    runs-on: starsling-ubuntu-24.04
     permissions:
       statuses: write
     steps:
