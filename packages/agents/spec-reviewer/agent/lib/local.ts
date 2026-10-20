@@ -48,7 +48,7 @@ export const orchestratorFile = (agentDir: string = PACKAGE_DIR) => join(agentDi
 /** Where the run loads the Notion pages when no --guidelines snapshot is given. */
 export const knowledgeDirFor = (reportDir: string) => join(workDirFor(reportDir), 'knowledge')
 
-const readOnly = (repo: string) => `Read-only tools only: Read, Grep, Glob and non-mutating git commands, in the repository at ${repo}.`
+const readOnly = (repo: string) => `Read-only tools only: Read, Grep, Glob and non-mutating git commands, in the repository at ${repo}; for a fact that lives outside it (a vendor limit, an infrastructure behaviour, a decision on a Notion page) the Notion MCP read tools (notion-fetch, notion-search) and WebFetch or WebSearch on public documentation, never a write. Cite every such source as a URL or a Notion page title with the quoted line (KIT-33); an external source you could not open stays a gap.`
 const phaseNotes: Record<string, (repo: string) => string> = {
   research: () => 'The agent runs this phase without tools, over the source packet in the task. You may open a file to confirm a fact in the packet, but do not start the specialists\' work.',
   synthesis: () => 'The agent runs this phase without tools, over the review record in the task.',

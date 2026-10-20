@@ -59,7 +59,7 @@ const schemaFor = (phase: string): z.ZodType => {
 }
 const systemFor = (phase: string) => (phase === 'explore' || phase === 'draft' ? writerSystemPrompt : reviewSystemPrompt)
 
-const readOnly = (repo: string) => `Read-only tools only: Read, Grep, Glob and non-mutating git commands, in the repository at ${repo}.`
+const readOnly = (repo: string) => `Read-only tools only: Read, Grep, Glob and non-mutating git commands, in the repository at ${repo}; for a fact that lives outside it (a vendor limit, an infrastructure behaviour, a decision on a Notion page) the Notion MCP read tools (notion-fetch, notion-search) and WebFetch or WebSearch on public documentation, never a write. Cite every such source as a URL or a Notion page title with the quoted line (KIT-33); an external source you could not open stays a gap.`
 const uiCatalog = 'The agent preloads the Aspira UI catalog (list_components) for UI work; here, call list_components and get_component through the aspiralabs-ui MCP and record each read in uiEvidence. If that MCP is not available in this session, record it as a gap.'
 const phaseNotes: Record<string, (repo: string) => string> = {
   explore: (repo) => `${readOnly(repo)} The agent gives this phase ${EXPLORE_MAX_STEPS} tool rounds; be as efficient: batch reads and searches. ${uiCatalog}`,
