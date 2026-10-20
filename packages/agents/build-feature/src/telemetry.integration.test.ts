@@ -22,201 +22,38 @@
 // aspira.segment, aspira.not_measured, aspira.gap, aspira.partial, aspira.usage_scope,
 // aspira.tokens.input, aspira.tokens.output, aspira.tokens.total, aspira.cost_usd, and a model attribute.
 
-import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { PACKAGE, PR_URL, SLUG, cleanup, ofKind, project, worktreeFor, writeStepExport, type Handler, type Project, type Result, type Stage, type StepReportOptions } from './driver.test-helper.ts'
+import { PR_URL, SLUG, cleanup, ofKind, project, worktreeFor, writeStepExport, type Result, type Stage } from './driver.test-helper.ts'
+import {
+  SLOW,
+  VERSION,
+  kitVersions,
+  RULES_WITH_TELEMETRY,
+  at,
+  SOURCE,
+  high,
+  attr,
+  numberAttr,
+  notMeasured,
+  statusOf,
+  durationOf,
+  tree,
+  telemetryDir,
+  telemetryFiles,
+  readTrace,
+  reportUsage,
+  summaryWith,
+  gatePasses,
+  stopWith,
+  toReview,
+  put,
+} from './telemetry.integration.shared.ts'
 
 afterAll(cleanup)
-
-const SLOW = 240_000
-
-/** This package's version, the one every step skill's .kit-version must name. */
-const VERSION = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8'))).version
-const STEP_SKILLS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer']
-/** The .kit-version file kit init leaves in every step skill, as committed files. */
-const kitVersions = (version = VERSION): Record<string, string> => Object.fromEntries(STEP_SKILLS.map((step) => [`.claude/skills/aspira-${step}/.kit-version`, `${version}\n`]))
-
-/** The Feature Board rules page with BOARD-003 naming the run telemetry file block (the 2026-10-15 amendment). */
-const RULES_WITH_TELEMETRY =
-  '# Feature Board\n\n**BOARD-003 — MUST** push outputs as child pages under fixed titles: Spec, Spec Reviewed, Spec Review Decisions, Plan, Implementation, PR Review, Grooming Decisions, Build Summary. Every /aspira-* run on the ticket may also append one run telemetry file block, holding its <run-id>.json, at the end of the ticket page body.\n'
-
-const at = (time: string) => `2026-10-12T${time}.000Z`
-const SOURCE = { 'src/a.ts': 'export const a = 1\n', 'src/a.test.ts': "import { a } from './a.ts'\n", 'src/b.ts': 'export const b = 1\n' }
-const high = (n: number) => [{ id: `H${n}`, severity: 'high' as const, title: `Review ${n} found the retry never stops`, file: 'src/a.ts' }]
-
-// ---------------------------------------------------------------------------------------------
-// The OTLP file, read through zod.
-// ---------------------------------------------------------------------------------------------
-
-const valueSchema = z.looseObject({
-  stringValue: z.string().optional(),
-  intValue: z.union([z.string(), z.number()]).optional(),
-  doubleValue: z.number().optional(),
-  boolValue: z.boolean().optional(),
-  arrayValue: z.looseObject({ values: z.array(z.looseObject({ stringValue: z.string().optional() })).default([]) }).optional(),
-})
-const spanSchema = z.looseObject({
-  traceId: z.string(),
-  spanId: z.string(),
-  parentSpanId: z.string().optional(),
-  name: z.string(),
-  startTimeUnixNano: z.string(),
-  endTimeUnixNano: z.string(),
-  attributes: z.array(z.object({ key: z.string(), value: valueSchema })).default([]),
-  status: z.looseObject({ code: z.union([z.number(), z.string()]).optional(), message: z.string().optional() }).optional(),
-})
-type Span = z.infer<typeof spanSchema>
-const traceSchema = z.object({ resourceSpans: z.array(z.object({ scopeSpans: z.array(z.object({ spans: z.array(spanSchema) })) })) })
-
-type Value = string | number | boolean | string[] | undefined
-
-function valueOf(value: z.infer<typeof valueSchema>): Value {
-  if (value.stringValue !== undefined) return value.stringValue
-  if (value.intValue !== undefined) return Number(value.intValue)
-  if (value.doubleValue !== undefined) return value.doubleValue
-  if (value.boolValue !== undefined) return value.boolValue
-  if (value.arrayValue !== undefined) return value.arrayValue.values.flatMap((item) => (item.stringValue === undefined ? [] : [item.stringValue]))
-  return undefined
-}
-
-const attr = (span: Span | undefined, key: string): Value => {
-  const found = span?.attributes.find((attribute) => attribute.key === key)
-  return found === undefined ? undefined : valueOf(found.value)
-}
-const numberAttr = (span: Span | undefined, key: string): number | undefined => {
-  const value = attr(span, key)
-  return typeof value === 'number' ? value : undefined
-}
-const notMeasured = (span: Span | undefined): string[] => {
-  const value = attr(span, 'aspira.not_measured')
-  return Array.isArray(value) ? value : []
-}
-/** The OTLP status code by name (the JSON encoding writes the enum number, or its name). */
-function statusOf(span: Span | undefined): string {
-  const code = span?.status?.code
-  if (code === 1 || code === 'STATUS_CODE_OK') return 'OK'
-  if (code === 2 || code === 'STATUS_CODE_ERROR') return 'ERROR'
-  return 'UNSET'
-}
-const durationOf = (span: Span | undefined): number | undefined => (span === undefined ? undefined : Number((BigInt(span.endTimeUnixNano) - BigInt(span.startTimeUnixNano)) / 1_000_000n))
-
-/** The spans of one run's telemetry file, with the tree around them; empty when there is no file. */
-function tree(spans: readonly Span[]) {
-  const parentOf = (span: Span) => (span.parentSpanId === undefined || span.parentSpanId === '' ? undefined : spans.find((candidate) => candidate.spanId === span.parentSpanId))
-  const childrenOf = (span: Span | undefined) => (span === undefined ? [] : spans.filter((candidate) => candidate.parentSpanId === span.spanId))
-  const subtree = (span: Span | undefined): Span[] => (span === undefined ? [] : [span, ...childrenOf(span).flatMap((child) => subtree(child))])
-  const root = spans.find((span) => parentOf(span) === undefined)
-  const steps = childrenOf(root)
-    .filter((span) => STEP_SKILLS.includes(span.name))
-    .sort((a, b) => (BigInt(a.startTimeUnixNano) < BigInt(b.startTimeUnixNano) ? -1 : 1))
-  const orchestration = childrenOf(root).find((span) => attr(span, 'aspira.orchestration.duration_ms') !== undefined)
-  /** The sum of one self attribute over a span and all its descendants. */
-  const sum = (span: Span | undefined, key: string) => Math.round(subtree(span).reduce((total, each) => total + (numberAttr(each, key) ?? 0), 0) * 1e6) / 1e6
-  return { spans, root, steps, orchestration, parentOf, childrenOf, subtree, sum, step: (name: string) => steps.find((span) => span.name === name) }
-}
-
-const telemetryDir = (folder: string) => join(folder, 'telemetry')
-const telemetryFiles = async (folder: string): Promise<string[]> => (existsSync(telemetryDir(folder)) ? (await readdir(telemetryDir(folder))).sort() : [])
-
-async function readTrace(folder: string, runId: string | undefined) {
-  const raw = await readFile(join(telemetryDir(folder), `${runId}.json`), 'utf8').catch(() => null)
-  if (raw === null) return tree([])
-  const parsed = traceSchema.parse(JSON.parse(raw))
-  return tree(parsed.resourceSpans.flatMap((resource) => resource.scopeSpans.flatMap((scope) => scope.spans)))
-}
-
-/** Every value under a `command` key anywhere in a parsed JSON value. */
-function commandValues(value: unknown): string[] {
-  if (Array.isArray(value)) return value.flatMap((item) => commandValues(item))
-  if (value === null || typeof value !== 'object') return []
-  return Object.entries(value).flatMap(([key, item]) => [...(key === 'command' && typeof item === 'string' ? [item] : []), ...commandValues(item)])
-}
-
-// ---------------------------------------------------------------------------------------------
-// The session's side.
-// ---------------------------------------------------------------------------------------------
-
-/** Report a step as the step would leave it, with a step report whose usage is `usage` as given (any shape). */
-async function reportUsage(h: Project, stage: Stage | null | undefined, status: string, usage: unknown, options: StepReportOptions = {}) {
-  await h.report(stage, status, options)
-  const step = String(stage?.step)
-  await h.answer(stage, { step, status, resultLine: `${step}: ${status}`, usage })
-}
-
-/** Answer the summary stages with these board rules; the push is answered at `endAt` when given. */
-function summaryWith(h: Project, rules: string, endAt?: string): Handler {
-  return async (stage) => {
-    if (typeof stage.rules === 'string') {
-      await mkdir(dirname(stage.rules), { recursive: true })
-      await writeFile(stage.rules, rules)
-      await h.answer(stage, {})
-      return
-    }
-    if (endAt !== undefined) h.setNow(endAt)
-    await h.answer(stage, { pushed: stage.push !== null && stage.push !== undefined })
-  }
-}
-
-/** Answer every gate command as passing. */
-const gatePasses = (h: Project): Handler => async (stage) => {
-  await h.answer(stage, { results: ((stage.commands ?? []) as string[]).map((command) => ({ command, exitCode: 0, output: 'ok' })) })
-}
-
-/** End the run with --finish (after the pending answer was taken) and answer the summary stages. */
-async function stopWith(h: Project, handlers: Partial<Record<string, Handler>> = {}): Promise<Result> {
-  return h.advance(handlers, await h.finish())
-}
-
-/** Answer Step 10 when it is asked for and return the next stage (the first review). */
-async function toReview(h: Project, from?: Result): Promise<Result> {
-  let result = await h.advance({}, from)
-  while (result.stage?.stage === 'step10') {
-    await h.answer(result.stage, { docs: [], docsToPropagate: 'none' })
-    result = await h.advance()
-  }
-  return result
-}
-
-async function put(path: string, content: string, mtime?: string) {
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, content)
-  if (mtime !== undefined) await utimes(path, new Date(mtime), new Date(mtime))
-}
-
-/** A trace/usage.json as the cloud agents write it: { scope, turns: UsageEntry[] }, with the text fields a turn carries. */
-const usageJson = (turns: { phase: string; model: string; input: number; output: number; cost: number | string | null; tools: number }[]) =>
-  JSON.stringify({
-    scope: 'Direct writer and review calls only; excludes eve router.',
-    turns: turns.map((turn, index) => ({
-      phase: turn.phase,
-      model: turn.model,
-      turn: index + 1,
-      startedMs: index * 1000,
-      durationMs: 900,
-      status: 'completed',
-      usage: { inputTokens: turn.input, outputTokens: turn.output, totalTokens: turn.input + turn.output },
-      ...(turn.cost === null ? {} : { providerMetadata: { gateway: { cost: turn.cost } } }),
-      messages: [{ role: 'user', content: 'Explore the repository for the idea' }],
-      text: 'the model said this',
-      toolCalls: Array.from({ length: turn.tools }, (_, call) => ({ toolName: 'read', input: { path: `/Users/x/src/${call}.ts` } })),
-      toolResults: [],
-    })),
-  })
-
-/** pr-reviewer's usage.jsonl lines (UsageLine). */
-const usageLines = (lines: { agent: string; input: number; output: number; startedAt: string; at: string }[]) =>
-  `${lines
-    .map((line, index) =>
-      JSON.stringify({ agent: line.agent, sessionId: `session-${index}`, turnId: `turn-${index}`, stepIndex: index, at: line.at, startedAt: line.startedAt, durationMs: 30000, inputTokens: line.input, outputTokens: line.output, cacheReadTokens: 5, cacheWriteTokens: 1, costUsd: 0.001 }),
-    )
-    .join('\n')}\n`
-
-// ---------------------------------------------------------------------------------------------
-// T23: one file per build-feature run, steps + orchestration adding up, fixes under a segment.
-// ---------------------------------------------------------------------------------------------
 
 describe('KIT-19 T23 F6 F7 F8 F14: one telemetry file for a build-feature run with a review, a fix and a second review', () => {
   // 09:00 start, Step 10 answered at 09:05 (review 1 printed), review 1 reported at 09:15 (fix printed),
@@ -299,42 +136,6 @@ describe('KIT-19 T23 F6 F7 F8 F14: one telemetry file for a build-feature run wi
 // T24: --parent-run on the printed step command only.
 // ---------------------------------------------------------------------------------------------
 
-describe('KIT-19 T24 F6: every printed step command carries --parent-run <runId>:<nonce>, and nothing stored does', () => {
-  it.each(['local', 'cloud'] as const)('ends the %s step command and the command in its prompt with --parent-run', async (mode) => {
-    const h = await project({ status: 'Ready: Spec', mode, files: kitVersions() })
-    const step = await h.advance({}, await h.start())
-    const suffix = ` --parent-run ${String(step.stage?.runId)}:${String(step.stage?.nonce)}`
-    const prompt = await readFile(String(step.stage?.prompt), 'utf8').catch(() => '')
-    expect({
-      stage: step.stage?.stage,
-      command: String(step.stage?.command).endsWith(suffix),
-      // KIT-2 (F44): the prompt names the launcher form, not the slash command; the launcher line carries the suffix.
-      prompt: prompt.split('\n').some((line) => line.includes('/scripts/planner.sh') && line.endsWith(suffix)),
-    }).toEqual({ stage: 'step', command: true, prompt: true })
-  }, SLOW)
-
-  it.each(['local', 'cloud'] as const)('keeps --parent-run and the nonce out of every command in state.json and out of build-summary.md (%s)', async (mode) => {
-    const h = await project({ status: 'Ready: Spec', mode, files: kitVersions() })
-    const step = await h.advance({}, await h.start())
-    const nonce = String(step.stage?.nonce)
-    await h.report(step.stage, 'ready')
-    await h.next()
-    await stopWith(h)
-    const commands = commandValues(await h.state())
-    const summary = await h.summary()
-    expect({
-      printed: String(step.stage?.command).includes('--parent-run'),
-      commands: commands.length > 0,
-      stored: commands.filter((command) => command.includes('--parent-run') || command.includes(nonce)),
-      summary: summary.includes('--parent-run') || summary.includes(nonce),
-    }).toEqual({ printed: true, commands: true, stored: [], summary: false })
-  }, SLOW)
-})
-
-// ---------------------------------------------------------------------------------------------
-// T25: the step skills must be from the driver's kit version.
-// ---------------------------------------------------------------------------------------------
-
 describe('KIT-19 T25 F6 F22: a run refuses before its first step when the step skills are from another kit version', () => {
   it('exits 1 naming both versions, with no step stage and no step record, when a step skill is from kit 0.0.1', async () => {
     const h = await project({ status: 'Ready: Spec', files: kitVersions() })
@@ -360,140 +161,6 @@ describe('KIT-19 T25 F6 F22: a run refuses before its first step when the step s
 
 // ---------------------------------------------------------------------------------------------
 // T26: cloud steps read their agent's usage file when the step is accepted.
-// ---------------------------------------------------------------------------------------------
-
-describe('KIT-19 T26 F10 F11 F12: cloud step spans carry the numbers of their own usage file', () => {
-  it('gives the spec-writer step span the summed tokens and gateway cost of its trace/usage.json, partial with a usage scope', async () => {
-    const h = await project({ status: 'Ready: Idea', mode: 'cloud', files: kitVersions() })
-    h.setNow(at('09:00:00'))
-    const step = await h.advance({}, await h.start())
-    h.setNow(at('09:10:00'))
-    await reportUsage(h, step.stage, 'ready', null)
-    await put(
-      join(h.folder, 'spec.written/trace/usage.json'),
-      usageJson([
-        { phase: 'explore', model: 'anthropic/claude-opus-5.5', input: 1000, output: 200, cost: 0.02, tools: 2 },
-        { phase: 'explore', model: 'anthropic/claude-opus-5.5', input: 500, output: 100, cost: '0.01', tools: 1 },
-        { phase: 'draft', model: 'anthropic/claude-sonnet-5', input: 2000, output: 800, cost: 0.03, tools: 0 },
-      ]),
-      at('09:05:00'),
-    )
-    await h.next()
-    await stopWith(h)
-    const trace = await readTrace(h.folder, h.runId)
-    const span = trace.step('spec-writer')
-    expect({
-      input: trace.sum(span, 'aspira.tokens.input'),
-      output: trace.sum(span, 'aspira.tokens.output'),
-      cost: trace.sum(span, 'aspira.cost_usd'),
-      partial: attr(span, 'aspira.partial'),
-      scoped: trace.subtree(span).some((each) => typeof attr(each, 'aspira.usage_scope') === 'string'),
-    }).toEqual({ input: 3500, output: 1100, cost: 0.06, partial: true, scoped: true })
-  }, SLOW)
-
-  it('gives the code-analyzer step span the summed tokens and cost of its .static-analysis/usage.json', async () => {
-    const h = await project({ status: 'In Progress: Implementation', mode: 'cloud', files: kitVersions() })
-    await writeStepExport(h.folder, h.repo, 'implementor', 'complete')
-    h.setNow(at('09:00:00'))
-    const step = await h.advance({ gate: gatePasses(h) }, await h.start())
-    h.setNow(at('09:10:00'))
-    await reportUsage(h, step.stage, 'clean', null)
-    const turn = (round: number, input: number, output: number, cost: number) => ({ round, batch: 1, model: 'anthropic/claude-sonnet-5', turn: round, startedMs: round * 1000, durationMs: 900, status: 'completed', usage: { inputTokens: input, outputTokens: output, totalTokens: input + output }, providerMetadata: { gateway: { cost } }, text: 'fixed it', toolCalls: [] })
-    await put(join(h.repo, '.static-analysis/usage.json'), JSON.stringify({ scope: 'fix calls', model: 'anthropic/claude-sonnet-5', turns: [turn(1, 400, 50, 0.004), turn(2, 600, 70, 0.006)] }), at('09:05:00'))
-    await h.next()
-    await stopWith(h)
-    const trace = await readTrace(h.folder, h.runId)
-    const span = trace.step('code-analyzer')
-    expect({ stage: step.stage?.step, input: trace.sum(span, 'aspira.tokens.input'), output: trace.sum(span, 'aspira.tokens.output'), cost: trace.sum(span, 'aspira.cost_usd') }).toEqual({ stage: 'code-analyzer', input: 1000, output: 120, cost: 0.01 })
-  }, SLOW)
-
-  it('gives each pr-reviewer step span its own review’s usage.jsonl numbers and the model from pr-reviewer’s model map', async () => {
-    const h = await project({ status: 'In Review: Implementation', mode: 'cloud', pr: PR_URL, existingPr: PR_URL, pushed: true, files: { ...SOURCE, ...kitVersions() } })
-    await writeStepExport(h.folder, h.repo, 'implementor', 'complete')
-    const usage = join(h.folder, 'pr-review/usage.jsonl')
-    h.setNow(at('09:00:00'))
-    const first = await h.advance({}, await h.start())
-    h.setNow(at('09:05:00'))
-    const review = await toReview(h, first)
-    h.setNow(at('09:15:00'))
-    await reportUsage(h, review.stage, 'complete', null, { findings: high(1) })
-    await put(
-      usage,
-      usageLines([
-        { agent: 'ava', input: 100, output: 10, startedAt: at('09:06:00'), at: at('09:06:30') },
-        { agent: 'quinn', input: 200, output: 20, startedAt: at('09:07:00'), at: at('09:07:30') },
-      ]),
-      at('09:14:00'),
-    )
-    const fixStage = await h.advance()
-    h.setNow(at('09:20:00'))
-    await h.write('src/a.ts', 'export const a = 2\n')
-    await h.answer(fixStage.stage, { decisions: [], usage: { tokens: 400, wallMs: 300000 } })
-    const second = await h.advance()
-    h.setNow(at('09:30:00'))
-    await reportUsage(h, second.stage, 'complete', null, { findings: [] })
-    await put(
-      usage,
-      usageLines([
-        { agent: 'ava', input: 1000, output: 100, startedAt: at('09:21:00'), at: at('09:21:30') },
-        { agent: 'quinn', input: 2000, output: 200, startedAt: at('09:22:00'), at: at('09:22:30') },
-      ]),
-      at('09:29:00'),
-    )
-    await h.advance()
-    const trace = await readTrace(h.folder, h.runId)
-    const reviews = trace.steps.filter((span) => span.name === 'pr-reviewer')
-    const models = (span: Span | undefined) => trace.subtree(span).flatMap((each) => each.attributes.filter((attribute) => attribute.key.includes('model')).map((attribute) => valueOf(attribute.value)))
-    expect({
-      inputs: reviews.map((span) => trace.sum(span, 'aspira.tokens.input')),
-      outputs: reviews.map((span) => trace.sum(span, 'aspira.tokens.output')),
-      models: reviews.map((span) => ['anthropic/claude-opus-5.5', 'openai/gpt-6-luna'].every((model) => models(span).includes(model))),
-    }).toEqual({ inputs: [300, 3000], outputs: [30, 300], models: [true, true] })
-  }, SLOW)
-
-  it('gives the implementor span a duration and lists its tokens, tool calls and cost as not measured', async () => {
-    const h = await project({ status: 'Ready: Plan', mode: 'cloud', files: kitVersions() })
-    h.setNow(at('09:00:00'))
-    const step = await h.advance({}, await h.start())
-    h.setNow(at('09:10:00'))
-    await reportUsage(h, step.stage, 'complete', null)
-    await h.next()
-    await stopWith(h)
-    const trace = await readTrace(h.folder, h.runId)
-    const span = trace.step('implementor')
-    const missing = notMeasured(span)
-    expect({ duration: durationOf(span), tokens: missing.some((key) => key.includes('tokens')), toolCalls: missing.some((key) => key.includes('tool')), cost: missing.some((key) => key.includes('cost')) }).toEqual({
-      duration: 600_000,
-      tokens: true,
-      toolCalls: true,
-      cost: true,
-    })
-  }, SLOW)
-
-  it('times a planner span only, with gap stale when its usage.json was written before the step and gap missing when there is none', async () => {
-    const outcomes = []
-    for (const variant of ['stale', 'missing'] as const) {
-      const h = await project({ status: 'Ready: Spec', mode: 'cloud', files: kitVersions() })
-      h.setNow(at('09:00:00'))
-      const step = await h.advance({}, await h.start())
-      h.setNow(at('09:10:00'))
-      await reportUsage(h, step.stage, 'ready', null)
-      if (variant === 'stale') await put(join(h.folder, 'plan.review/trace/usage.json'), usageJson([{ phase: 'plan', model: 'anthropic/claude-opus-5.5', input: 900, output: 90, cost: 0.02, tools: 1 }]), at('08:00:00'))
-      await h.next()
-      await stopWith(h)
-      const trace = await readTrace(h.folder, h.runId)
-      const span = trace.step('planner')
-      outcomes.push({ gap: attr(span, 'aspira.gap'), duration: durationOf(span), tokens: trace.sum(span, 'aspira.tokens.input') })
-    }
-    expect(outcomes).toEqual([
-      { gap: 'stale', duration: 600_000, tokens: 0 },
-      { gap: 'missing', duration: 600_000, tokens: 0 },
-    ])
-  }, SLOW)
-})
-
-// ---------------------------------------------------------------------------------------------
-// T27: state and step reports written before this change.
 // ---------------------------------------------------------------------------------------------
 
 describe('KIT-19 T27 F9 F22: an earlier run state and step reports in three shapes', () => {
