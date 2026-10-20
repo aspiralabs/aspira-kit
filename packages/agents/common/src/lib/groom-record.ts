@@ -245,7 +245,9 @@ export function validateIdeaSummary(summary: string, record: GroomRecord): IdeaS
   const termLines = lines.slice(terms + 1)
   if (termLines.length === 0) return refuse('### Terms needs entries or "None introduced."')
   if (termLines.length === 1 && termLines[0] === 'None introduced.') return { ok: true }
-  for (const line of termLines) {
+  for (const raw of termLines) {
+    // An `_Avoid_:` line written indented under its term (a markdown continuation) is the same line (KIT-26).
+    const line = raw.trimStart()
     if (/^_Avoid_: /.test(line)) continue
     if (!/^- \*\*[^*]+\*\*: \S/.test(line)) return refuse(`unexpected block in Terms: ${line}`)
     if (/\[[^\]]*\]\([^)]*\)|https?:\/\/|<mention|`/.test(line)) return refuse(`a Terms entry carries a link, URL, mention or code: ${line.slice(0, 80)}`)
