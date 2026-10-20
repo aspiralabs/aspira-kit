@@ -1,5 +1,15 @@
 # @aspiralabs/build-feature
 
+## 0.8.6
+
+### Patch Changes
+
+- 0f7a1dd: The slowest build-feature test files are split by describe block so CI shards finish together, and two kit tests (`kit worktree` T49, `kit cleanup` T31) no longer depend on running as a non-root user. The reusable `kit-checks` workflow takes a `runs-on` input for the runner label (default `ubuntu-latest`).
+- Updated dependencies [0f7a1dd]
+  - @aspiralabs/kit@0.8.6
+  - @aspiralabs/agent-common@0.8.6
+  - @aspiralabs/pr-reviewer@0.8.6
+
 ## 0.8.5
 
 ### Patch Changes
