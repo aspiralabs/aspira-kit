@@ -65,7 +65,7 @@ export function reviewFiles(result: PipelineResult, { spec, guidelines }: Prepar
     'spec.original.md': spec,
     'trace/guidelines.md': guidelines,
     'trace/decisions.md': renderDecisionsFile(result.status, result.authorDecisions, result.synthesis),
-    'trace/findings.md': renderFindings(result.findings, result.synthesis),
+    'trace/findings.md': renderFindings(result.findings, result.synthesis, result.gaps),
     'trace/checks.md': `# Checks\n\nStatus: ${result.status}\n\n${result.problems.map((p) => `- ${p}`).join('\n')}\n\n${result.reviews.map((r) => `## ${r.phase}\n\n${r.output.checks.map((c) => `- ${c.rule}: ${c.evidence}`).join('\n')}`).join('\n\n')}`,
   }
   // A ready candidate is the spec the planner takes, so it carries nothing but the spec. A candidate

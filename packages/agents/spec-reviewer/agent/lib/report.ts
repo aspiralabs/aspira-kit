@@ -19,11 +19,16 @@ export function renderFinding(finding: Finding, disposition?: Pick<Synthesis['di
 }
 
 /** trace/findings.md: a header whose count equals the entries below it, then every finding, sorted. Nothing is dropped. */
-export function renderFindings(findings: readonly Finding[], synthesis: Synthesis | null): string {
+export function renderFindings(findings: readonly Finding[], synthesis: Synthesis | null, gaps: readonly { id: string; source: string; text: string }[] = []): string {
   const ordered = orderedFindings(findings)
   const dispositions = new Map((synthesis?.dispositions ?? []).map((d) => [d.findingId, d]))
   const body = ordered.map((finding) => renderFinding(finding, dispositions.get(finding.id)))
-  return ['# Findings', '', findingsHeader(countBySeverity(ordered, (finding) => finding.severity)), '', 'Ordered by severity, then by the order the reviewers confirmed them. The plain-English line comes first; the evidence under it is what was checked (REV-022).', '', ...(body.length ? [body.join('\n\n')] : ['No findings.']), ''].join('\n')
+  // Gaps the author closed with a cited answer in the spec (KIT-31): the review could not verify them itself, so the human approving the spec sees them here.
+  const byAuthor = (synthesis?.gapResolutions ?? []).filter((resolution) => resolution.status === 'author')
+  const authorSection = byAuthor.length
+    ? ['', '## Evidence gaps resolved by the author', '', 'The review could not reach these sources (the web, Notion, a cloud account); the author answered each in the spec, naming the source. Check them when approving the spec.', '', ...byAuthor.map((resolution) => `- ${resolution.gapId} (${gaps.find((gap) => gap.id === resolution.gapId)?.text ?? 'gap'}): ${resolution.evidence.join('; ')}`)]
+    : []
+  return ['# Findings', '', findingsHeader(countBySeverity(ordered, (finding) => finding.severity)), '', 'Ordered by severity, then by the order the reviewers confirmed them. The plain-English line comes first; the evidence under it is what was checked (REV-022).', '', ...(body.length ? [body.join('\n\n')] : ['No findings.']), ...authorSection, ''].join('\n')
 }
 
 /** The findings section a non-ready reviewed spec carries above the candidate: what to read before the spec itself. */

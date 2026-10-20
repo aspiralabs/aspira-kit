@@ -17,7 +17,8 @@ export type Review = z.infer<typeof reviewSchema>
 export type Finding = Review['findings'][number] & { id: string }
 export const synthesisSchema = z.object({
   edits: z.array(z.object({ id: z.string().min(1), before: z.string().min(1), after: z.string() })),
-  gapResolutions: z.array(z.object({ gapId: z.string(), status: z.enum(['resolved', 'unresolved', 'not-applicable']), evidence: z.array(z.string().min(1)) })).default([]),
+  // `author` (KIT-31): the spec itself answers the gap with the source named and the fact quoted; the evidence is that quote. It does not block readiness and is reported to the human approving the spec.
+  gapResolutions: z.array(z.object({ gapId: z.string(), status: z.enum(['resolved', 'unresolved', 'not-applicable', 'author']), evidence: z.array(z.string().min(1)) })).default([]),
   dispositions: z.array(z.object({
     findingId: z.string(), status: z.enum(['applied', 'rejected', 'duplicate', 'author']),
     reason: z.string().min(1), evidence, editIds: z.array(z.string()), duplicateOf: z.string().nullable(),
