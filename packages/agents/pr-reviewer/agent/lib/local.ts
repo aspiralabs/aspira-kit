@@ -727,7 +727,7 @@ async function exportReview(args: {
   const cost = [
     `# Cost: ${state.label}`,
     '',
-    'This review ran with `--local`, in a Claude Code session: every seat and Quinn ran as a subagent of that session, on its model and its usage. No model call went through the Vercel AI Gateway, so there is no itemized cost, no cache-read share and no `usage.jsonl`.',
+    'This review ran in a Claude Code session (the default mode, without `--cloud`): every seat and Quinn ran as a subagent of that session, on its model and its usage. No model call went through the Vercel AI Gateway, so there is no itemized cost, no cache-read share and no `usage.jsonl`.',
     '',
     `Model turns: ${plan.calls.filter((call) => call.error === undefined).length} of ${plan.calls.length}, over ${plan.rounds} round${plan.rounds === 1 ? '' : 's'} of ${state.maxRounds}${plan.settled ? ' (ended by the stopping rule: a round with no dispute and no new finding)' : ''}. Wall clock from the first local step (${state.startedAt}) to export: ${(totalMs / 1000).toFixed(1)}s, including the time the session spent between steps.`,
     '',
@@ -738,7 +738,7 @@ async function exportReview(args: {
     '',
     `Packet: ${state.packet.chars.toLocaleString('en-US')} characters, about ${state.packet.tokens.toLocaleString('en-US')} tokens, at the start of every prompt: the index of ${state.packet.files} changed file${state.packet.files === 1 ? '' : 's'} (${Object.entries(state.packet.areas).sort(([a], [b]) => a.localeCompare(b)).map(([area, count]) => `${area} ${count}`).join(', ')}), no hunks and no file bodies.`,
     '',
-    state.maxCost === null ? 'Budget: none.' : `Budget: $${state.maxCost.toFixed(2)} (--max-cost). Not enforced in --local, where no cost is itemized.`,
+    state.maxCost === null ? 'Budget: none.' : `Budget: $${state.maxCost.toFixed(2)} (--max-cost). Not enforced in the session, where no cost is itemized.`,
     '',
     renderCallsPerRound(perRound, plan.rounds),
   ].join('\n')

@@ -439,7 +439,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   else if (control === 'CONFIRM') {
     if (open === 0 && allBranchesVisited(applied) && !merged.changedByPage) status = 'ready'
     else notes.push(open > 0 ? `Confirm was ticked but ${open} question(s) are open; it is re-offered when they are answered` : 'a tick on Grooming Decisions changed a decision during this round; Confirm is re-offered')
-  } else if (merged.confirmTicked) notes.push('Confirm is ticked on Grooming Decisions; in --local it is asked in chat, at the end of the next round')
+  } else if (merged.confirmTicked) notes.push('Confirm is ticked on Grooming Decisions; in the session it is asked in chat, at the end of the next round')
   const reason = status === 'ready' ? null
     : reasonCode === 'paused' ? 'Stop grooming was ticked on the Grooming Decisions page'
       : `${open} decision${open === 1 ? '' : 's'} still open on the Grooming Decisions page`

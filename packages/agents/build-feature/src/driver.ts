@@ -4,7 +4,7 @@
 // gate, step10, fix, release-row, summary, telemetry or end. The session performs the stage and calls again.
 //
 // Modes (F2, Q10 revised; KIT-51): by default every step stage runs its step skill in this
-// session; without it every step stage runs the step skill's default mode, which starts that step's
+// session; with --cloud every step stage runs the step skill with --cloud, which starts that step's
 // cloud agent and waits on it. The mode is recorded on the run and in the Build Summary.
 //
 // One worktree per ticket (F50): once the card (and its Type) is resolved at run start, before any
