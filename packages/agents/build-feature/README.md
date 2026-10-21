@@ -1,6 +1,6 @@
 # @aspiralabs/build-feature
 
-`/aspira-build-feature <ID> [--local]` takes a Feature Board ticket from wherever it is on the board to a reviewed, merge-ready pull request. It runs each AI-DLC step's own `/aspira-*` skill in its own subagent, one at a time, reads each step's result, and picks the next step from the card's Status. With `--local` each step skill runs with `--local` in the session; without it each runs its default cloud-agent mode and the run waits on it. The run works the ticket in its own git worktree, `.worktrees/<TYPE>-<ID>` on `<feat|fix|chore>/<id>-<slug>`, and never removes it. The merge stays human.
+`/aspira-build-feature <ID> [--cloud]` takes a Feature Board ticket from wherever it is on the board to a reviewed, merge-ready pull request. It runs each AI-DLC step's own `/aspira-*` skill in its own subagent, one at a time, reads each step's result, and picks the next step from the card's Status. By default each step skill runs in the session; with `--cloud` each runs with `--cloud`, its cloud-agent mode, and the run waits on it (KIT-51). The run works the ticket in its own git worktree, `.worktrees/<TYPE>-<ID>` on `<feat|fix|chore>/<id>-<slug>`, and never removes it. The merge stays human.
 
 It is the one `/aspira-*` skill that orchestrates other skills instead of launching an agent: the package holds a skill and its driver, and no eve agent.
 

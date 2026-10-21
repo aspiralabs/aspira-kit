@@ -1,4 +1,4 @@
-// The build-feature driver at seam S1: `scripts/local.ts <ID> --local`, as `build-feature.sh local`
+// The build-feature driver at seam S1: `scripts/local.ts <ID>`, as `build-feature.sh local`
 // runs it, observed through the one JSON stage each call prints and the files it writes under
 // `.work/<id>-<slug>/` (build-summary.md, .local/build-feature/state.json and pr-body.md). Only the
 // boundaries are stood in for (TEST-007): the Notion answers the session would write, git's remote,
@@ -28,7 +28,7 @@ describe('T22 F15 F16: the run-start approval and the Ready moves it covers', ()
       first: 'resolve',
       move: { from: 'Shortlist', to: 'Ready: Idea' },
       question: false,
-      next: '/aspira-spec-writer KIT-11 --local --take-recommended',
+      next: '/aspira-spec-writer KIT-11 --take-recommended',
     })
   }, SLOW)
 
@@ -99,7 +99,7 @@ describe('T24 F19: an override ticked after a finished run', () => {
     await h.advance({ overrides: async (stage) => h.pull(stage, overridden()) }, await h.start())
     h.card.status = 'In Progress: Plan'
     const next = await h.advance({ overrides: async (stage) => h.pull(stage, overridden()) }, await h.start())
-    expect(commandOf(next)).toBe('/aspira-planner KIT-11 --local --take-recommended')
+    expect(commandOf(next)).toBe('/aspira-planner KIT-11 --take-recommended')
   }, SLOW)
 })
 

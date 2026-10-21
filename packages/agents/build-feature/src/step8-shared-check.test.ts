@@ -93,7 +93,7 @@ function contextFor(repo: string, env: NodeJS.ProcessEnv): PhaseContext {
     now: '2026-10-15T00:00:00.000Z',
     aspira: { repository: 'aspiralabs/kit', app: '.' },
     card: { id: ID, title: TITLE, url: 'https://app.notion.com/p/kit-2-x', status: 'In Progress: Implementation', pr: null, dev: null, type: 'Feature' },
-    resume: '/aspira-build-feature KIT-2 --local',
+    resume: '/aspira-build-feature KIT-2',
     env,
     mode: 'local',
   }

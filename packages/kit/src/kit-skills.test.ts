@@ -10,7 +10,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { installSkills } from './skills.js'
 
 const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6'
-const RUN_LINE = 'run      /aspira-planner KIT-12 --local'
+const RUN_LINE = 'run      /aspira-planner KIT-12'
 
 const made: string[] = []
 

@@ -1,4 +1,4 @@
-// The build-feature driver at seam S1: `scripts/local.ts <ID> --local`, as `build-feature.sh local`
+// The build-feature driver at seam S1: `scripts/local.ts <ID>`, as `build-feature.sh local`
 // runs it, observed through the one JSON stage each call prints and the files it writes under
 // `.work/<id>-<slug>/` (build-summary.md, .local/build-feature/state.json and pr-body.md). Only the
 // boundaries are stood in for (TEST-007): the Notion answers the session would write, git's remote,
@@ -19,7 +19,7 @@ describe('T12 F1: the live Status picks the step', () => {
     const spec = await project({ status: 'Ready: Spec' })
     const fromIdea = await idea.advance({}, await idea.start())
     const fromSpec = await spec.advance({}, await spec.start())
-    expect([commandOf(fromIdea), commandOf(fromSpec)]).toEqual(['/aspira-spec-writer KIT-11 --local --take-recommended', '/aspira-planner KIT-11 --local --take-recommended'])
+    expect([commandOf(fromIdea), commandOf(fromSpec)]).toEqual(['/aspira-spec-writer KIT-11 --take-recommended', '/aspira-planner KIT-11 --take-recommended'])
   }, SLOW)
 
   it('re-resolves the card with a new nonce after a step report, then follows the re-resolved Status', async () => {
@@ -99,7 +99,7 @@ describe('T16 F5: In Review: Spec and the rows with no command', () => {
     const movesBefore = ofKind(h.stages, 'move').length
     await h.report(step.stage!, 'ready')
     const after = await h.advance(returnOn('move'))
-    expect({ command: commandOf(step), movesBefore, move: moveOf(after.stage) }).toEqual({ command: '/aspira-spec-writer KIT-11 --local --take-recommended', movesBefore: 0, move: { from: 'In Review: Spec', to: 'Ready: Spec' } })
+    expect({ command: commandOf(step), movesBefore, move: moveOf(after.stage) }).toEqual({ command: '/aspira-spec-writer KIT-11 --take-recommended', movesBefore: 0, move: { from: 'In Review: Spec', to: 'Ready: Spec' } })
   }, SLOW)
 
   it('prints a Ready move, not a step, in Shortlist and In Review: Plan', async () => {
@@ -139,7 +139,7 @@ describe('T17 F6 F7: one step at a time, one result per step', () => {
 describe('T18 F8: the groomer runs from Idea and a needs-author result stops the run', () => {
   it('runs the groomer with --take-recommended from Idea', async () => {
     const h = await project({ status: 'Idea' })
-    expect(commandOf(await h.advance({}, await h.start()))).toBe('/aspira-groomer KIT-11 --local --take-recommended')
+    expect(commandOf(await h.advance({}, await h.start()))).toBe('/aspira-groomer KIT-11 --take-recommended')
   }, SLOW)
 
   it('stops after a needs-author groom with no move, writes build-summary.md and ends on the resume command', async () => {

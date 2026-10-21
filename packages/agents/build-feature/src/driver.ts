@@ -3,7 +3,7 @@
 // exactly one next stage as JSON: resolve, approval, overrides, worktree, step, ask, move, set-pr,
 // gate, step10, fix, release-row, summary, telemetry or end. The session performs the stage and calls again.
 //
-// Modes (F2, Q10 revised): with --local every step stage runs its step skill with --local in this
+// Modes (F2, Q10 revised; KIT-51): by default every step stage runs its step skill in this
 // session; without it every step stage runs the step skill's default mode, which starts that step's
 // cloud agent and waits on it. The mode is recorded on the run and in the Build Summary.
 //
@@ -88,9 +88,9 @@ export type DriverInput = {
   run?: string
   forceRun: boolean
   finish: boolean
-  /** 'local' with --local, else 'cloud' (F2). A continuing call keeps the mode its run started with. */
+  /** 'local' by default, 'cloud' with --cloud (F2, KIT-51). A continuing call keeps the mode its run started with. */
   mode: Mode
-  /** --autonomous (KIT-24): no human gate. Only with --local; a continuing call keeps what its run started with. */
+  /** --autonomous (KIT-24): no human gate. Not with --cloud; a continuing call keeps what its run started with. */
   autonomous: boolean
   now: string
   env: NodeJS.ProcessEnv
@@ -809,7 +809,7 @@ const STATUS_WORDS: Readonly<Record<StepName, string>> = {
 async function cloudImplementorBlocked(ctx: Ctx): Promise<string | null> {
   const ignored = await system.gitCheckIgnore({ cwd: ctx.input.repo, env: ctx.input.env }, '.work/')
   if (ignored.code !== 0) return null
-  return `In cloud mode the implementor runs as a separate process that clones the repository from GitHub, and it cannot read .work/ (gitignored here, \`${shown('git', ['check-ignore', '--no-index', '.work/'])}\`), where ${ctx.input.id}'s plan is. It would refuse the ticket, so the run stops before it. Build this step with --local: ${RESUME(ctx.input.id, 'local')}`
+  return `In cloud mode the implementor runs as a separate process that clones the repository from GitHub, and it cannot read .work/ (gitignored here, \`${shown('git', ['check-ignore', '--no-index', '.work/'])}\`), where ${ctx.input.id}'s plan is. It would refuse the ticket, so the run stops before it. Build this step in this session, without --cloud: ${RESUME(ctx.input.id, 'local')}`
 }
 
 /** The option every printed step command ends with: the build-feature run and the step stage's nonce (KIT-19 F6). */
@@ -848,7 +848,7 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
     if (blocked !== null) return stop(ctx, started, blocked, { stopped: true, reason: { kind: 'cloud-implementor' }, failure: { action: step, command: routed, message: blocked } })
   }
   await checkKitVersion(ctx.input.repo)
-  // The engineering guidelines once per ticket and the run packet (KIT-48) go to the --local launchers only:
+  // The engineering guidelines once per ticket and the run packet (KIT-48) go to the in-session launchers only:
   // a cloud launcher's `start` refuses --guidelines, --knowledge and --packet, and its agent loads its own.
   const shared = ctx.mode === 'local' ? await ensureKnowledge(started, { env: ctx.input.env, repo: ctx.input.repo, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }), folder: ctx.folder, now: ctx.input.now }) : { state: started, knowledge: null, note: null }
   const state = shared.note === null ? shared.state : { ...shared.state, phases: { ...shared.state.phases, knowledgeNote: shared.note } }
@@ -898,7 +898,7 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
     '',
     ...(ctx.mode === 'cloud'
       ? [
-          "This run is in cloud mode: the first line above starts the step's cloud agent (`start`). Let it start, then run the second line (`wait`) again and again until it ends; waiting does not stop the agent. Do not stop after `start`, do not run the step yourself, and never retry a failed run. When it has ended, read its result exactly as for --local.",
+          "This run is in cloud mode: the first line above starts the step's cloud agent (`start`). Let it start, then run the second line (`wait`) again and again until it ends; waiting does not stop the agent. Do not stop after `start`, do not run the step yourself, and never retry a failed run. When it has ended, read its result exactly as for a step run in this session.",
           '',
         ]
       : []),
@@ -953,7 +953,7 @@ function phaseRecord(group: PhaseUsage): PhaseRecord {
 /**
  * Cloud mode only: the step agent's own usage file (stepResultTable's usage column), read right after
  * the status word for the step's interval and reduced to phase groups stored on the step record, or
- * the gap that kept it out (missing, empty, invalid, stale). --local reads no usage file. Never
+ * the gap that kept it out (missing, empty, invalid, stale). The default mode reads no usage file. Never
  * throws and never changes the step's result (OBS-002).
  */
 async function withCloudUsage(ctx: Ctx, step: StepName, usage: Usage, interval: { start: string; end: string }, app: string): Promise<Usage> {
@@ -1203,8 +1203,8 @@ export async function nextStage(input: DriverInput): Promise<Stage> {
   const base = { input, folder: initialFolder, dir: stateDirOf(initialFolder), aspira: null }
 
   if (input.run === undefined && !input.finish) {
-    // --autonomous rides on --local: the cloud step agents take neither --take-recommended nor --autonomous (KIT-24).
-    if (input.autonomous && input.mode !== 'local') throw new Refusal(`--autonomous only applies with --local: ${RESUME(input.id, 'local', true)}`)
+    // --autonomous rides on the default mode: the cloud step agents take neither --take-recommended nor --autonomous (KIT-24).
+    if (input.autonomous && input.mode !== 'local') throw new Refusal(`--autonomous does not apply with --cloud; run it in this session: ${RESUME(input.id, 'local', true)}`)
     refuseInProgress(input, state)
     const ctx: Ctx = { ...base, runId: await reserveNewRunId(initialFolder, state, input.now), mode: input.mode, autonomous: input.autonomous, resume: RESUME(input.id, input.mode, input.autonomous) }
     return save(ctx, await startRun(ctx, state))

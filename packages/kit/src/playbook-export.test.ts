@@ -8,7 +8,7 @@ import { PLAYBOOK_STEPS, commandFor, nextStep } from '@aspiralabs/kit/playbook'
 
 describe('the @aspiralabs/kit/playbook export', () => {
   it('resolves nextStep, commandFor and PLAYBOOK_STEPS by the package name', () => {
-    expect(commandFor(nextStep('Ready: Spec')!, 'KIT-11')).toBe('/aspira-planner KIT-11 --local')
+    expect(commandFor(nextStep('Ready: Spec')!, 'KIT-11')).toBe('/aspira-planner KIT-11')
     expect(nextStep('Shortlist')?.command).toBeNull()
     expect(nextStep('Nonsense')).toBeNull()
   })

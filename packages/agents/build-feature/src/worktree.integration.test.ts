@@ -108,7 +108,7 @@ describe('F50: the run works the ticket in its own worktree', () => {
       inProgress: ((await h.state()).inProgress as { runId?: string } | null)?.runId === step.stage?.runId,
       mainLock: mainState.inProgress,
       mainEnded: mainState.runs.at(-1)?.ended,
-    }).toEqual({ spec: true, folder: true, command: '/aspira-planner KIT-11 --local --take-recommended', inProgress: true, mainLock: null, mainEnded: 'moved' })
+    }).toEqual({ spec: true, folder: true, command: '/aspira-planner KIT-11 --take-recommended', inProgress: true, mainLock: null, mainEnded: 'moved' })
   }, SLOW)
 
   it('reuses an existing worktree: from the main checkout it only says to continue there, and adds no worktree', async () => {
@@ -126,7 +126,7 @@ describe('F50: the run works the ticket in its own worktree', () => {
       adds: (await h.gitCalls()).filter((args) => args[0] === 'worktree' && args[1] === 'add').length,
       spec: existsSync(join(h.folder, 'spec.md')),
       command: commandOf(step),
-    }).toEqual({ stage: 'worktree', worktree, adds: 0, spec: true, command: '/aspira-planner KIT-11 --local --take-recommended' })
+    }).toEqual({ stage: 'worktree', worktree, adds: 0, spec: true, command: '/aspira-planner KIT-11 --take-recommended' })
   }, SLOW)
 
   it('stops naming the missing Type before any worktree or step when the card has no Type', async () => {

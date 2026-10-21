@@ -227,7 +227,8 @@ parse() {
       --knowledge) [ "$mode" = local ] || die "--knowledge is for local; the agent loads the guidelines itself"; [ $# -ge 2 ] || die "--knowledge needs a path"; KNOWLEDGE=$(absolute_path "$2"); shift 2 ;;
       --no-comment) NO_COMMENT=1; shift ;;
       --yes) YES=1; shift ;;
-      --local) shift ;;
+      --local) [ "$mode" = local ] || die "--local runs in this session: use the local command, not start"; shift ;;
+      --cloud) [ "$mode" = start ] || die "--cloud runs the separate agent: use the start command, not local"; shift ;;
       --finish) [ "$mode" = local ] || die "--finish is for local"; FINISH=1; shift ;;
       --parent-run) [ $# -ge 2 ] || die "--parent-run needs <run-id>:<nonce>"; PARENT_RUN=$2; shift 2 ;;
       --attach) [ $# -ge 2 ] || die "--attach needs the telemetry attach result as JSON"; [ "$mode" = local ] || die "--attach is for local"; ATTACH=$2; shift 2 ;;

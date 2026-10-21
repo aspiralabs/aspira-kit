@@ -1,7 +1,7 @@
 ---
 name: aspira-planner
-description: Turn a reviewed business spec into concrete implementation tasks and unit/integration test checklists by calling the Aspira planner agent. By default it runs the planner as a separate process; with --local the same pipeline runs inside this Claude Code session. Use for /aspira-planner or requests to generate an implementation plan with this agent.
-argument-hint: [<ticket ID | Notion URL> | <spec.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended] [--parent-run RUN:NONCE]
+description: Turn a reviewed business spec into concrete implementation tasks and unit/integration test checklists by calling the Aspira planner agent. By default the pipeline runs inside this Claude Code session; with --cloud it runs the planner as a separate process. Use for /aspira-planner or requests to generate an implementation plan with this agent.
+argument-hint: [<ticket ID | Notion URL> | <spec.md> --no-ticket] [--cloud] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended] [--parent-run RUN:NONCE]
 disable-model-invocation: true
 ---
 
@@ -17,23 +17,13 @@ The first argument is the Feature Board ticket: an ID such as `NOM-4` (any case)
 
 The planner runs only from `Ready: Spec`, or from its own `In Progress: Plan` (a retry after a failure, which makes no start move). Any other Status is refused before any model call: the refusal names the ticket, its Status, the Status the planner needs and who makes that move. On start it sets Dev and moves the card to `In Progress: Plan`; on success it puts the plan on the ticket as the child page `Plan` and moves the card to `In Review: Plan`; on failure or an incomplete plan the card stays `In Progress: Plan`. It never moves a card to a Ready column. A local file newer than its ticket page is not overwritten unless `--force-pull` is given; the run stops and names the file.
 
-## Default: the agent as a separate process
-
-```bash
-<skill-dir>/scripts/planner.sh start [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output] [--parent-run RUN:NONCE]
-```
-
-The launcher makes the board moves itself, through the shared board module with `NOTION_TOKEN` from the project's `.env.local`: the ticket step before the agent starts (a refusal exits 3 and launches nothing), and the push and the success move after it exits, appended to the run's log and recorded in `trace/board.json`. With a complete guidelines snapshot, the launcher uses the direct CLI. Otherwise it uses the eve entry point, which loads the engineering rules from Notion with `load-knowledge` (integration credentials and the loader's Docker sandbox). It also needs screen and the agent environment.
-
-The helper detaches the run and prints its run/log directory. Tell the user where results will go. Check with `status <run-dir>` or `wait <run-dir> --max 30`; `watch` is a bounded alias for `wait`. The polling wait returns control without stopping the detached agent; keep checking until it finishes or the user cancels. Report launch errors as they are.
-
-## --local: the same pipeline in this session
+## Default: the same pipeline in this session
 
 ```bash
 <skill-dir>/scripts/planner.sh local [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output] [--finish] [--verify] [--take-recommended] [--parent-run RUN:NONCE] [--attach JSON]
 ```
 
-Each call is one synchronous step that makes no model call and launches nothing. `--take-recommended` takes every decision still open after the author's ticks as the agent's recommended option instead of waiting on the author. It prints JSON: the next stage, or the exported plan once `pending` is `false`. The driver assembles every prompt from the agent's own files when the step runs, so nothing here restates them. `--local` is not independent of this session: every phase runs on this session's model, and no cost is itemized.
+Each call is one synchronous step that makes no model call and launches nothing. `--take-recommended` takes every decision still open after the author's ticks as the agent's recommended option instead of waiting on the author. It prints JSON: the next stage, or the exported plan once `pending` is `false`. The driver assembles every prompt from the agent's own files when the step runs, so nothing here restates them. This default mode is not independent of this session: every phase runs on this session's model, and no cost is itemized.
 
 The engineering rules come first, and the driver refuses to start any model stage without them: `local` runs `load-knowledge` itself, once per run, with `NOTION_TOKEN` from the environment, the app's `.env.local` or the project's `.env.local`, loading exactly the pages the agent's own knowledge configuration names (`KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`). This session never fetches guidelines; with no token the run ends `blocked`. `--guidelines` takes only a `REQUIRED.md` that `load-knowledge` wrote, still where it wrote it; any other file, a `trace/` copy included, is refused.
 
@@ -47,12 +37,24 @@ The engineering rules come first, and the driver refuses to start any model stag
 
 The work directory is `<output>.local/`. It is deleted after export; every prompt and output is kept in `trace/calls.json`, the rules used in `trace/knowledge.json` and `trace/knowledge/`, and every board action with the Status before and after in `trace/board.json`.
 
+## `--cloud`: the agent as a separate process
+
+`--local` is still accepted and means the default, the section above.
+
+```bash
+<skill-dir>/scripts/planner.sh start [<ticket> | <spec.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output] [--parent-run RUN:NONCE]
+```
+
+The launcher makes the board moves itself, through the shared board module with `NOTION_TOKEN` from the project's `.env.local`: the ticket step before the agent starts (a refusal exits 3 and launches nothing), and the push and the success move after it exits, appended to the run's log and recorded in `trace/board.json`. With a complete guidelines snapshot, the launcher uses the direct CLI. Otherwise it uses the eve entry point, which loads the engineering rules from Notion with `load-knowledge` (integration credentials and the loader's Docker sandbox). It also needs screen and the agent environment.
+
+The helper detaches the run and prints its run/log directory. Tell the user where results will go. Check with `status <run-dir>` or `wait <run-dir> --max 30`; `watch` is a bounded alias for `wait`. The polling wait returns control without stopping the detached agent; keep checking until it finishes or the user cancels. Report launch errors as they are.
+
 ## Run telemetry
 
 Every run of this skill on a ticket writes one telemetry file, `.work/<id>-<slug>/telemetry/<run-id>.json` (OpenTelemetry JSON: the run, its phases and subagents, with timings, tokens, tool calls and cost where they are measured), and attaches it to the end of the ticket page when the Feature Board rules list it (BOARD-003). A telemetry failure is a notice beside the result: it never changes the run's status, the card's move or the exit code.
 
-- **Default.** The launcher does it all: `ticket.ts start` prints `run-id=` and `run-started=`, and the finish step after the agent exits writes the file from them and attaches it. Nothing to do here.
-- **`--local`.** The session reports its own usage, since only it sees its subagents:
+- **`--cloud`.** The launcher does it all: `ticket.ts start` prints `run-id=` and `run-started=`, and the finish step after the agent exits writes the file from them and attaches it. Nothing to do here.
+- **Default.** The session reports its own usage, since only it sees its subagents:
   1. Record the wall-clock start and end (ISO 8601) of every subagent you launch, with the total tokens, tool uses and duration the Agent tool reports for it, and its model when you know it.
   2. Every pending step on a ticket prints `sessionUsage` with a `file` and a `runId`. Before the call that exports the run (the call after the planning output is written, or `--finish`), write that `file` (`plan.review/trace/session-usage.json`) as JSON: `{"runId": "<runId>", "subagents": [{"label": "…", "startedAt": "…", "endedAt": "…", "totalTokens": 0, "toolUses": 0, "wallMs": 0, "model": "…"}]}`, one entry per subagent in launch order. `label` is a short name of your own (`research`, `lane A`), never the task's description or prompt text. Leave out a number you do not have; never guess one. Without the file the run's telemetry records the subagents as missing.
   3. The export's `board.actions` then end with two telemetry actions. `read` (`target: "board-rules"`): fetch the Feature Board rules page with the Notion MCP (`notion-fetch`, read-only) and write it to `file` as plain markdown, one rule per line. `attach`: only when one line of the rules you saved contains every string of `onlyIf`, attach `file`, as `name`, in one file block at the end of the ticket page `page`: `notion-create-attachment` for a file of at most 200 KiB, otherwise `notion-create-file-upload`, then `notion-update-page`. Attach no other file, to no other page, and never edit or delete another block.
@@ -65,7 +67,7 @@ Every run of this skill on a ticket writes one telemetry file, `.work/<id>-<slug
 The output is `plan.review/` in the ticket's working folder (with `--no-ticket`: beside the input spec; for `spec.reviewed/spec.reviewed.md`, a sibling of `spec.reviewed/`). An explicit `--output` overrides that location.
 
 - `plan.reviewed.md`: file-level tasks, dependencies, unit/integration checklists and verification commands. Omitted if no structured plan was produced.
-- `run-analysis.md`: reported cost and wall time per agent/turn, plus totals (`--local`: wall time only).
+- `run-analysis.md`: reported cost and wall time per agent/turn, plus totals (in this session: wall time only).
 - `trace/`: original spec, guidelines, research, structured plan, validation results, prompts, outputs, tool activity, the board actions, and prior reports under `history/`.
 
 A non-zero exit is a run status to relay (exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author): never retry or rerun it on needs-author, settle the open decisions the report names first. Start the report with the run status, the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log), then report as `agent/instructions.md` says, linking the plan and run analysis. If the run fails before export, show its log and do not present a previous report as current.

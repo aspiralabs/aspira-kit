@@ -225,6 +225,7 @@ cmd_start() {
       --parent-run) [ $# -ge 2 ] || die "--parent-run needs <run-id>:<nonce>"; PARENT_RUN=$2; shift 2 ;;
       --attach) die "--attach is for local --verify" ;;
       --local) die "--local runs in this session: use the local command, not start" ;;
+      --cloud) shift ;;
       --verify) die "--verify is for local" ;;
       -*) die "unknown option: $1" ;;
       *) [ -z "$source" ] || die "one ticket at a time (or one repository with --no-ticket)"; source=${1#@}; shift ;;
@@ -328,6 +329,7 @@ cmd_local() {
   while [ $# -gt 0 ]; do
     case $1 in
       --local) shift ;;
+      --cloud) die "--cloud runs the separate agent: use the start command, not local" ;;
       --no-ticket) no_ticket=1; shift ;;
       --app) [ $# -ge 2 ] || die "--app needs a directory"; app=$2; shift 2 ;;
       --no-fix|--fix-warnings|--finish|--force-pull|--verify) args+=("$1"); shift ;;
@@ -344,7 +346,7 @@ cmd_local() {
     [ -z "$PARENT_RUN" ] || die "--parent-run names a step of a build-feature run on a ticket; it does not go with --no-ticket"
     [ -n "$source" ] || die "usage: code-analyzer.sh local <repo-path> --no-ticket [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish]"
     [ -z "$app" ] || die "--app goes with a ticket; with --no-ticket name the directory as the argument"
-    [ -d "$source" ] || die "--local needs a local path; a GitHub repository is fixed in the eve sandbox (use start): $source"
+    [ -d "$source" ] || die "a run in this session needs a local path; a GitHub repository is fixed in the eve sandbox (--cloud): $source"
   else
     [ -z "$source" ] || [ ! -e "$source" ] || die "$source is a file path, not a ticket; pass --no-ticket to run on a path with no board"
     ticket=$source

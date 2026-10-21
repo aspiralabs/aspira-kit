@@ -23,15 +23,15 @@ describe('routeStatus after the build', () => {
     if (route.kind !== 'sequence') throw new Error(route.kind)
     const steps = route.items.flatMap((item) => (item.kind === 'step' ? [{ command: item.command, done: item.done }] : []))
     expect(steps).toEqual([
-      { command: '/aspira-code-analyzer KIT-11 --app instances/core/stack --local', done: true },
-      { command: '/aspira-code-analyzer KIT-11 --app instances/core/app --local', done: false },
+      { command: '/aspira-code-analyzer KIT-11 --app instances/core/stack', done: true },
+      { command: '/aspira-code-analyzer KIT-11 --app instances/core/app', done: false },
     ])
   })
 
   it('falls back to the one aspira.json app with the old readiness when the build names no app', () => {
     const route = routeStatus('In Progress: Implementation', { ...facts, analyzerReady: true })
     if (route.kind !== 'sequence') throw new Error(route.kind)
-    expect(route.items.flatMap((item) => (item.kind === 'step' ? [{ command: item.command, done: item.done }] : []))).toEqual([{ command: '/aspira-code-analyzer KIT-11 --app tools/aspira --local', done: true }])
+    expect(route.items.flatMap((item) => (item.kind === 'step' ? [{ command: item.command, done: item.done }] : []))).toEqual([{ command: '/aspira-code-analyzer KIT-11 --app tools/aspira', done: true }])
   })
 })
 
@@ -40,10 +40,10 @@ describe('analyzedApps', () => {
     const state: RunState = {
       ...emptyRunState(),
       steps: [
-        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app instances/core/app --local', 'ready'),
-        step('implementor', '/aspira-implementor KIT-11 --local', 'ready'),
-        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app instances/core/stack --local', 'ready'),
-        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app tools/aspira --local', 'incomplete'),
+        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app instances/core/app', 'ready'),
+        step('implementor', '/aspira-implementor KIT-11', 'ready'),
+        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app instances/core/stack', 'ready'),
+        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app tools/aspira', 'incomplete'),
       ],
     }
     expect(analyzedApps(state, ['instances/core/stack', 'instances/core/app', 'tools/aspira'])).toEqual(['instances/core/stack'])
@@ -55,14 +55,14 @@ describe('analyzerStepApps and commandApp (KIT-40)', () => {
     const state: RunState = {
       ...emptyRunState(),
       steps: [
-        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app old/app --local', 'ready'),
-        step('implementor', '/aspira-implementor KIT-11 --local', 'ready'),
-        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app . --local', 'ready'),
-        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app pkgs/a/ --local', 'ready'),
+        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app old/app', 'ready'),
+        step('implementor', '/aspira-implementor KIT-11', 'ready'),
+        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app .', 'ready'),
+        step('code-analyzer', '/aspira-code-analyzer KIT-11 --app pkgs/a/', 'ready'),
       ],
     }
     expect(analyzerStepApps(state, 'tools/aspira')).toEqual(['.', 'pkgs/a'])
     expect(analyzerStepApps(emptyRunState(), 'tools/aspira')).toEqual(['tools/aspira'])
-    expect(commandApp('/aspira-code-analyzer KIT-11 --local', 'tools/aspira')).toBe('tools/aspira')
+    expect(commandApp('/aspira-code-analyzer KIT-11', 'tools/aspira')).toBe('tools/aspira')
   })
 })

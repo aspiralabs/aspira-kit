@@ -21,10 +21,10 @@ const ticketMd = (id: string, title: string, status: string, url = 'https://www.
 describe('the Playbook module', () => {
   it('has a row for every Feature Board Status, with the ticket form of each command', () => {
     for (const status of STATUSES) expect(nextStep(status), status).not.toBeNull()
-    expect(nextStep('ready: spec')?.command).toBe('/aspira-planner <ID> --local')
+    expect(nextStep('ready: spec')?.command).toBe('/aspira-planner <ID>')
     expect(nextStep('Nope')).toBeNull()
-    for (const row of PLAYBOOK) if (row.command !== null) expect(row.command).toMatch(/^\/aspira-[a-z-]+ <ID>( --app <app-dir>)? --local$/)
-    expect(commandFor(nextStep('In Review: Implementation')!, 'NOM-4')).toBe('/aspira-pr-reviewer NOM-4 --local')
+    for (const row of PLAYBOOK) if (row.command !== null) expect(row.command).toMatch(/^\/aspira-[a-z-]+ <ID>( --app <app-dir>)?$/)
+    expect(commandFor(nextStep('In Review: Implementation')!, 'NOM-4')).toBe('/aspira-pr-reviewer NOM-4')
     expect(commandFor(nextStep('Released')!, 'NOM-4')).toBeNull()
   })
 
@@ -74,20 +74,20 @@ describe('Step 1, Step 12 and the intro name the kit-owned commands', () => {
   it('keeps the Status table rows as they were before KIT-13', () => {
     // Copied from playbook.ts:9-24 before this change: the statuses and command of every row (plus KIT-2's, merged after).
     const before = [
-      { statuses: ['Idea', 'Grooming'], command: '/aspira-groomer <ID> --local' },
+      { statuses: ['Idea', 'Grooming'], command: '/aspira-groomer <ID>' },
       { statuses: ['Shortlist'], command: null },
-      { statuses: ['Ready: Idea'], command: '/aspira-spec-writer <ID> --local' },
-      { statuses: ['In Progress: Spec'], command: '/aspira-spec-writer <ID> --local' },
+      { statuses: ['Ready: Idea'], command: '/aspira-spec-writer <ID>' },
+      { statuses: ['In Progress: Spec'], command: '/aspira-spec-writer <ID>' },
       // KIT-48: the spec writer reruns from In Review: Spec; there is no spec-reviewer skill.
-      { statuses: ['In Review: Spec'], command: '/aspira-spec-writer <ID> --local' },
-      { statuses: ['Ready: Spec'], command: '/aspira-planner <ID> --local' },
-      { statuses: ['In Progress: Plan'], command: '/aspira-planner <ID> --local' },
+      { statuses: ['In Review: Spec'], command: '/aspira-spec-writer <ID>' },
+      { statuses: ['Ready: Spec'], command: '/aspira-planner <ID>' },
+      { statuses: ['In Progress: Plan'], command: '/aspira-planner <ID>' },
       { statuses: ['In Review: Plan'], command: null },
-      { statuses: ['Ready: Plan'], command: '/aspira-implementor <ID> --local' },
-      { statuses: ['In Progress: Implementation'], command: '/aspira-code-analyzer <ID> --app <app-dir> --local' },
+      { statuses: ['Ready: Plan'], command: '/aspira-implementor <ID>' },
+      { statuses: ['In Progress: Implementation'], command: '/aspira-code-analyzer <ID> --app <app-dir>' },
       // KIT-2's row (Step 8, after the code analyzer), which KIT-13 left as it was.
       { statuses: ['In Progress: Implementation, after Step 7'], command: null },
-      { statuses: ['In Review: Implementation'], command: '/aspira-pr-reviewer <ID> --local' },
+      { statuses: ['In Review: Implementation'], command: '/aspira-pr-reviewer <ID>' },
       { statuses: ['Ready: Implementation'], command: null },
       { statuses: ['Released'], command: null },
       { statuses: ['Dropped'], command: null },
@@ -124,8 +124,8 @@ describe('kit next', () => {
     writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: BOARD }))
     const shown = (status: string) => run('NOM-4', resolver(status)).lines.slice(2)
     expect({ idea: shown('Idea'), grooming: shown('Grooming'), shortlist: shown('Shortlist') }).toEqual({
-      idea: ['next     Step 1: groom the idea with the groomer, then move the card to Ready: Idea', 'run      /aspira-groomer NOM-4 --local', 'who      you, with an agent'],
-      grooming: ['next     Step 1: groom the idea with the groomer, then move the card to Ready: Idea', 'run      /aspira-groomer NOM-4 --local', 'who      you, with an agent'],
+      idea: ['next     Step 1: groom the idea with the groomer, then move the card to Ready: Idea', 'run      /aspira-groomer NOM-4', 'who      you, with an agent'],
+      grooming: ['next     Step 1: groom the idea with the groomer, then move the card to Ready: Idea', 'run      /aspira-groomer NOM-4', 'who      you, with an agent'],
       shortlist: ['next     Approve the groomed idea: move the card to Ready: Idea', 'run      by hand, on the board', 'who      you'],
     })
   })
@@ -144,7 +144,7 @@ describe('kit next', () => {
     const offline = run(undefined, () => null)
     expect(offline.code).toBe(0)
     expect(offline.lines[1]).toBe('status   In Review: Spec (as pulled into the working folder; the board did not answer)')
-    expect(offline.lines[3]).toBe('run      /aspira-spec-writer NOM-4 --local')
+    expect(offline.lines[3]).toBe('run      /aspira-spec-writer NOM-4')
     mkdirSync(join(root, '.work', 'nom-5-find-cooks'), { recursive: true })
     writeFileSync(join(root, '.work', 'nom-5-find-cooks', 'ticket.md'), ticketMd('NOM-5', 'Find cooks', 'Ready: Idea', 'https://www.notion.so/5'))
     expect(run(undefined, resolver('Ready: Spec')).lines[0]).toContain('2 folders under .work/ hold a ticket.md')

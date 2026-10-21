@@ -201,7 +201,7 @@ describe('T51: a block that cannot be trusted refuses cleanly, naming the file, 
     expect(result).toMatchObject({ recovered: false })
     if (!result.recovered) {
       expect(result.reason).toMatch(/the plan page was edited after planning/i)
-      expect(result.reason).toMatch(/\/aspira-planner KIT-2 --local/)
+      expect(result.reason).toMatch(/\/aspira-planner KIT-2/)
     }
     await assertNothingWritten(folder)
   })

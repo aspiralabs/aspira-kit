@@ -120,7 +120,7 @@ export async function recoverPlan(args: { pageMarkdown: string; truncated: boole
   const pageTextSha256 = typeof raw.pageTextSha256 === 'string' ? raw.pageTextSha256 : null
   if (pageTextSha256 === null) return refused(`The Plan page's (${args.pageUrl}) block has no recorded page-text hash yet; cannot rebuild ${NAMED_FILES}.`)
   if (pageTextHash(args.pageMarkdown) !== pageTextSha256) {
-    return refused(`The Plan page was edited after planning (its prose no longer matches the hash recorded at the push); recovery is refused. Next action: Step 5, \`/aspira-planner KIT-2 --local\`.`)
+    return refused(`The Plan page was edited after planning (its prose no longer matches the hash recorded at the push); recovery is refused. Next action: Step 5, \`/aspira-planner KIT-2\`.`)
   }
 
   const review: PlanBlockReview & { recoveredFrom: string } = {

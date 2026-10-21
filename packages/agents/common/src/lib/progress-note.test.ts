@@ -41,7 +41,7 @@ afterEach(async () => {
 const STEP5: NextAction = {
   step: 'Step 5: plan',
   do: [],
-  run: ['/aspira-planner KIT-2 --local'],
+  run: ['/aspira-planner KIT-2'],
   session: '.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 (read .claude/skills/aspira-planner/SKILL.md first)',
 }
 
@@ -139,7 +139,7 @@ describe('nextAction: run-status templates (T11)', () => {
   it('an implementor refused for plan-drift names Step 5 with the planner command', () => {
     const action = nextAction({ kind: 'run', id: 'KIT-2', skill: 'implementor', runStatus: 'refused', reasonCode: 'plan-drift', reason: INJECTION_REASON })
     expect(action.step).toContain('Step 5')
-    expect(allRunText(action)).toContain('/aspira-planner KIT-2 --local')
+    expect(allRunText(action)).toContain('/aspira-planner KIT-2')
   })
 
   it('an incomplete spec-writer names rerunning the stage', () => {
@@ -185,7 +185,7 @@ describe('nextAction: the Playbook template (T12)', () => {
   const action = nextAction({ kind: 'playbook', id: 'KIT-2', boardStatus: 'Ready: Spec' })
 
   it('the Run line is the Playbook slash command with the ticket ID filled in', () => {
-    expect(action.run).toEqual(['/aspira-planner KIT-2 --local'])
+    expect(action.run).toEqual(['/aspira-planner KIT-2'])
   })
 
   it('the Session line is the launcher form and tells the session to read the skill’s SKILL.md first, never naming the Skill tool', () => {

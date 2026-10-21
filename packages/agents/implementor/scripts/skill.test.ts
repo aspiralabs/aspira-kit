@@ -146,7 +146,9 @@ it('steps --local synchronously with absolute paths, without screen or a gateway
   expect(await captured()).toEqual([...prefix, join(root, 'scripts/local.ts'), '--repo', dir, '--no-ticket', join(dir, 'specs/x.md'), '--guidelines', join(dir, 'rules.md'), '--max-parallel', '2', '--work', join(dir, 'out'), '--finish'])
   await exec('bash', [launcher, 'start', 'specs/x.md', '--no-ticket', '--local', '--serial'], { cwd: dir, env: local })
   expect(await captured()).toEqual([...prefix, join(root, 'scripts/local.ts'), '--repo', dir, '--no-ticket', join(dir, 'specs/x.md'), '--serial'])
-  await expect(exec('bash', [launcher, 'local', 'specs/x.md', '--no-ticket', '--repo', 'aspiralabs/nomnomzz'], { cwd: dir, env: local })).rejects.toThrow('--local builds a local checkout')
+  // KIT-51: --cloud on the local command is the opposite mode; refused, never silently run in the session.
+  await expect(exec('bash', [launcher, 'local', 'specs/x.md', '--no-ticket', '--cloud'], { cwd: dir, env: local })).rejects.toThrow('--cloud runs the separate agent')
+  await expect(exec('bash', [launcher, 'local', 'specs/x.md', '--no-ticket', '--repo', 'aspiralabs/nomnomzz'], { cwd: dir, env: local })).rejects.toThrow('the default mode builds a local checkout')
   // The ticket form: the ID or a URL as --ticket, nothing for the one working folder, --force-pull and --verify with it.
   await exec('bash', [launcher, 'local', 'NOM-4'], { cwd: dir, env: local })
   expect(await captured()).toEqual([...prefix, join(root, 'scripts/local.ts'), '--repo', dir, '--ticket', 'NOM-4'])

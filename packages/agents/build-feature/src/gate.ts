@@ -13,7 +13,7 @@
 // package.json (check, test, test:integration, any script a gate command names, and their npm
 // pre/post hooks) differ from origin/main, the gate first prints an `ask` stage naming them with
 // the diff: the human answers "run" to go on (recorded against those exact script bodies), and any
-// other answer stops the run. Under --local the implementor ran in this session, so they just run.
+// other answer stops the run. In the default mode the implementor ran in this session, so they just run.
 //
 // The gate runs once per build: its record is keyed to the implementor's export, so a restart, the
 // analyzer and Step 8 do not run it again. When it finishes it also records which tracked paths

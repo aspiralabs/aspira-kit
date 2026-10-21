@@ -1,4 +1,4 @@
-// The build-feature driver at seam S1: `scripts/local.ts <ID> --local`, as `build-feature.sh local`
+// The build-feature driver at seam S1: `scripts/local.ts <ID>`, as `build-feature.sh local`
 // runs it, observed through the one JSON stage each call prints and the files it writes under
 // `.work/<id>-<slug>/` (build-summary.md, .local/build-feature/state.json and pr-body.md). Only the
 // boundaries are stood in for (TEST-007): the Notion answers the session would write, git's remote,
@@ -20,17 +20,17 @@ afterAll(cleanup)
 describe('KIT-24: --autonomous skips the human gates', () => {
   const runOf = async (h: Project) => ((await h.state()).runs ?? []).at(-1) ?? {}
 
-  it('is refused without --local, naming the --local form', async () => {
+  it('is refused with --cloud, naming the in-session form', async () => {
     const h = await project({ status: 'Ready: Idea', mode: 'cloud' })
     const result = await h.start(['--autonomous'])
-    expect({ code: result.code, named: /--autonomous only applies with --local/.test(result.text) && result.text.includes('/aspira-build-feature KIT-11 --local --autonomous') }).toEqual({ code: 1, named: true })
+    expect({ code: result.code, named: /--autonomous does not apply with --cloud/.test(result.text) && result.text.includes('/aspira-build-feature KIT-11 --autonomous') }).toEqual({ code: 1, named: true })
   }, SLOW)
 
   it('passes --autonomous to the groomer step only, records it on the run, and carries it in the resume command', async () => {
     const h = await project({ status: 'Idea' })
     const groomer = await h.advance({}, await h.start(['--autonomous']))
     const run = await runOf(h)
-    expect({ command: commandOf(groomer), autonomous: run.autonomous, resume: run.command }).toEqual({ command: '/aspira-groomer KIT-11 --local --take-recommended --autonomous', autonomous: true, resume: '/aspira-build-feature KIT-11 --local --autonomous' })
+    expect({ command: commandOf(groomer), autonomous: run.autonomous, resume: run.command }).toEqual({ command: '/aspira-groomer KIT-11 --take-recommended --autonomous', autonomous: true, resume: '/aspira-build-feature KIT-11 --autonomous' })
     await h.report(groomer.stage!, 'confirmed', { card: { status: 'Shortlist' } })
     const move = await h.advance(returnOn('move'))
     const moveStage = move.stage
@@ -39,7 +39,7 @@ describe('KIT-24: --autonomous skips the human gates', () => {
       await h.answer(moveStage, { done: true })
     }
     const spec = await h.advance()
-    expect(commandOf(spec)).toBe('/aspira-spec-writer KIT-11 --local --take-recommended')
+    expect(commandOf(spec)).toBe('/aspira-spec-writer KIT-11 --take-recommended')
   }, SLOW)
 
   it('answers an ask that carries a recommended option with it, recorded under asked in chat, and prints no ask stage', async () => {
@@ -58,25 +58,25 @@ describe('F2 (Q10 revised): two modes', () => {
   const open = (id: string, question: string): DecisionFixture => ({ ...taken(id, question), decidedBy: 'open', answer: null })
   const runOf = async (h: Project) => ((await h.state()).runs ?? []).at(-1) ?? {}
 
-  it('runs each step skill with --local and --take-recommended under --local, and records the mode', async () => {
+  it('runs each step skill in this session with --take-recommended by default, and records the mode', async () => {
     const h = await project({ status: 'Ready: Spec' })
     const step = await h.advance({}, await h.start())
-    expect({ command: commandOf(step), mode: (await runOf(h)).mode }).toEqual({ command: '/aspira-planner KIT-11 --local --take-recommended', mode: 'local' })
+    expect({ command: commandOf(step), mode: (await runOf(h)).mode }).toEqual({ command: '/aspira-planner KIT-11 --take-recommended', mode: 'local' })
   }, SLOW)
 
-  it("runs each step skill's default cloud mode without --local, passing no --take-recommended, and does not refuse", async () => {
+  it("runs each step skill with --cloud under --cloud, passing no --take-recommended, and does not refuse", async () => {
     const idea = await project({ status: 'Ready: Idea', mode: 'cloud' })
     const spec = await project({ status: 'Ready: Spec', mode: 'cloud' })
     const fromIdea = await idea.advance({}, await idea.start())
     const fromSpec = await spec.advance({}, await spec.start())
     expect({ codes: [fromIdea.code, fromSpec.code], commands: [commandOf(fromIdea), commandOf(fromSpec)], mode: (await runOf(spec)).mode }).toEqual({
       codes: [0, 0],
-      commands: ['/aspira-spec-writer KIT-11', '/aspira-planner KIT-11'],
+      commands: ['/aspira-spec-writer KIT-11 --cloud', '/aspira-planner KIT-11 --cloud'],
       mode: 'cloud',
     })
   }, SLOW)
 
-  it('tells the step subagent to let the skill start the cloud agent and wait until it ends, then report as for --local', async () => {
+  it('tells the step subagent to let the skill start the cloud agent and wait until it ends, then report as for a step in this session', async () => {
     const h = await project({ status: 'Ready: Spec', mode: 'cloud' })
     const step = await h.advance({}, await h.start())
     const prompt = await readFile(String(step.stage?.prompt), 'utf8')
@@ -98,7 +98,7 @@ describe('F2 (Q10 revised): two modes', () => {
     })
   }, SLOW)
 
-  it('stops before the cloud implementor when .work/ is gitignored, naming the limit and the --local command', async () => {
+  it('stops before the cloud implementor when .work/ is gitignored, naming the limit and the in-session command', async () => {
     const h = await project({ status: 'Ready: Plan', mode: 'cloud', files: { '.gitignore': '.work/\n' } })
     const end = await h.advance({}, await h.start())
     const text = await told(h, end)
@@ -113,7 +113,7 @@ describe('F2 (Q10 revised): two modes', () => {
 
   it('runs the cloud implementor when .work/ is not gitignored', async () => {
     const h = await project({ status: 'Ready: Plan', mode: 'cloud' })
-    expect(commandOf(await h.advance({}, await h.start()))).toBe('/aspira-implementor KIT-11')
+    expect(commandOf(await h.advance({}, await h.start()))).toBe('/aspira-implementor KIT-11 --cloud')
   }, SLOW)
 
   it('records the mode in the Build Summary', async () => {
@@ -124,7 +124,7 @@ describe('F2 (Q10 revised): two modes', () => {
       await h.stop()
       outcomes.push((await h.summary()).split('\n').find((line) => /^Mode:/.test(line)) ?? '')
     }
-    expect(outcomes.map((line) => [/--local/.test(line), /cloud/i.test(line)])).toEqual([
+    expect(outcomes.map((line) => [/in this session/.test(line), /--cloud/.test(line)])).toEqual([
       [true, false],
       [false, true],
     ])
