@@ -1,5 +1,12 @@
 # @aspiralabs/spec-reviewer
 
+## 0.9.1
+
+### Patch Changes
+
+- Updated dependencies [1fcdff8]
+  - @aspiralabs/agent-common@0.9.1
+
 ## 0.9.0
 
 ### Minor Changes
