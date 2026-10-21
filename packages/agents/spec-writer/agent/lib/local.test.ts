@@ -42,7 +42,7 @@ it('runs explore, draft and the review one stage at a time in the session, then 
   expect(drafting.stage).toBe('draft')
   const draftPrompt = await readFile(drafting.tasks[0]!.prompt, 'utf8')
   expect(draftPrompt).toContain('src/items.ts:4: newest first')
-  expect(draftPrompt).not.toContain('notion-fetch')
+  expect(draftPrompt).toContain('notion-fetch') // KIT-53: the draft may read Notion when the exploration lacks a fact
   await writeFile(drafting.tasks[0]!.output, '{"spec": 42}')
   const retry = await pending(input)
   expect(retry.tasks[0]).toMatchObject({ phase: 'draft' })

@@ -61,7 +61,7 @@ describe('--local with areas', () => {
     if (!draft.pending) throw new Error('expected pending')
     expect(draft.tasks.map((task) => [task.phase, task.model])).toEqual([['draft', 'opus']])
     const prompt = await readFile(draft.tasks[0]!.prompt, 'utf8')
-    expect(prompt).toContain('at most five Read calls')
+    expect(prompt).toContain('your head start')
     expect(prompt).toContain('explore:tools/aspira: fact')
   })
 })
