@@ -97,7 +97,7 @@ export function writeFiles(result: WriteResult, { idea, spec, guidelines, mode }
   const { exploration, draft, review } = result
   const files: Record<string, string> = {
     'trace/guidelines.md': guidelines,
-    'trace/checks.md': `# Checks\n\nStatus: ${result.status}\n\n${list(result.problems)}\n\n${mode === 'write' ? `## Draft contract\n\n${draft ? list(result.draftContract) : 'No draft.'}\n\n` : ''}${review?.reviews.map((r) => `## ${r.phase}\n\n${r.output.checks.map((c) => `- ${c.rule}: ${c.evidence}`).join('\n')}`).join('\n\n') ?? ''}`,
+    'trace/checks.md': `# Checks\n\nStatus: ${result.status}\n\n${list(result.problems)}\n\n## Evidence gaps left open\n\n${list((review?.openGaps ?? []).map((gap) => `${gap.id} (${gap.source}): ${gap.text}`))}\n\n${mode === 'write' ? `## Draft contract\n\n${draft ? list(result.draftContract) : 'No draft.'}\n\n` : ''}${review?.reviews.map((r) => `## ${r.phase}\n\n${r.output.checks.map((c) => `- ${c.rule}: ${c.evidence}`).join('\n')}`).join('\n\n') ?? ''}`,
     // The review half renders through the spec reviewer's own code: sorted findings, checkbox decisions.
     'trace/findings.md': review ? renderFindings(review.findings, review.synthesis, review.gaps) : '# Findings\n\nNo review findings: the review did not run.\n',
     'trace/decisions.md': renderDecisionsFile(result.status, result.authorDecisions, review?.synthesis ?? null),

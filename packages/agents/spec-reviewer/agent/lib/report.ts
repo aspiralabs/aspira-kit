@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseTickedDecisions, renderDecisions, type Answer, type DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
 import { countBySeverity, findingsHeader, sortBySeverity } from '@aspiralabs/agent-common/lib/severity'
-import type { Finding, Synthesis } from './review.ts'
+import { openGapsOf, type Finding, type Gap, type Synthesis } from './review.ts'
 
 /** The findings in the order a human reads them: critical first; within a severity, the order they were confirmed. */
 export const orderedFindings = (findings: readonly Finding[]): Finding[] => sortBySeverity(findings, (finding) => finding.severity)
@@ -19,7 +19,7 @@ export function renderFinding(finding: Finding, disposition?: Pick<Synthesis['di
 }
 
 /** trace/findings.md: a header whose count equals the entries below it, then every finding, sorted. Nothing is dropped. */
-export function renderFindings(findings: readonly Finding[], synthesis: Synthesis | null, gaps: readonly { id: string; source: string; text: string }[] = []): string {
+export function renderFindings(findings: readonly Finding[], synthesis: Synthesis | null, gaps: readonly Gap[] = []): string {
   const ordered = orderedFindings(findings)
   const dispositions = new Map((synthesis?.dispositions ?? []).map((d) => [d.findingId, d]))
   const body = ordered.map((finding) => renderFinding(finding, dispositions.get(finding.id)))
@@ -28,7 +28,12 @@ export function renderFindings(findings: readonly Finding[], synthesis: Synthesi
   const authorSection = byAuthor.length
     ? ['', '## Evidence gaps resolved by the author', '', 'The review could not reach these sources (the web, Notion, a cloud account); the author answered each in the spec, naming the source. Check them when approving the spec.', '', ...byAuthor.map((resolution) => `- ${resolution.gapId} (${gaps.find((gap) => gap.id === resolution.gapId)?.text ?? 'gap'}): ${resolution.evidence.join('; ')}`)]
     : []
-  return ['# Findings', '', findingsHeader(countBySeverity(ordered, (finding) => finding.severity)), '', 'Ordered by severity, then by the order the reviewers confirmed them. The plain-English line comes first; the evidence under it is what was checked (REV-022).', '', ...(body.length ? [body.join('\n\n')] : ['No findings.']), ...authorSection, ''].join('\n')
+  // Gaps nobody closed (KIT-53): listed for the approver, never a failure.
+  const open = openGapsOf(gaps, synthesis)
+  const openSection = open.length
+    ? ['', '## Evidence gaps left open', '', 'The review could not verify these: the source was not in its packet or not reachable, and no reviewer closed them. They do not block the spec. Check them when approving it, and answer any that matters in the spec with the source named, which the next review reads as the author\'s evidence.', '', ...open.map((gap) => `- ${gap.id} (${gap.source}): ${gap.text}`)]
+    : []
+  return ['# Findings', '', findingsHeader(countBySeverity(ordered, (finding) => finding.severity)), '', 'Ordered by severity, then by the order the reviewers confirmed them. The plain-English line comes first; the evidence under it is what was checked (REV-022).', '', ...(body.length ? [body.join('\n\n')] : ['No findings.']), ...authorSection, ...openSection, ''].join('\n')
 }
 
 /**
