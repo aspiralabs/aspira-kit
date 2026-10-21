@@ -297,7 +297,7 @@ it('runs the plan in waves: worker briefs from the procedure, schema checks with
   expect(unchecked.tasks[0]!.retry).toBe(false)
   const dependenciesAdded = [{ name: 'left-pad', version: '1.3.0', app: 'root', scope: 'runtime', native: true, approval: 'not listed' }, { name: 'msw', version: '2.0.0', app: 'root', scope: 'dev', native: false, approval: 'Trial' }]
   const notesRewritten = [{ file: join(work, 'handoff-notes.md'), action: 'rewritten' }]
-  await writeFile(join(work, 'implementation.md'), '# Implementation\n\n## Dependencies added\n\n- `left-pad`\n\n## Mid-build notes\n\n- handoff-notes.md: rewritten\n\n## Proposed Slop Repo entries\n\nNone: no bugs were found and fixed\n')
+  await writeFile(join(work, 'implementation.md'), '# Implementation\n\n## What it fixed\n\nScope: web.\n\n1. Members could not see their badge count.\n   - Before: no badge.\n   - Now: the header shows it.\n\n## Dependencies added\n\n- `left-pad`\n\n## Mid-build notes\n\n- handoff-notes.md: rewritten\n\n## Proposed Slop Repo entries\n\nNone: no bugs were found and fixed\n')
   // A notes file that still names a missing symbol, or carries no header, is not rewritten.
   await writeFile(verify.tasks[0]!.output, JSON.stringify({ ...claimed, dependenciesAdded, notesRewritten, slopEntries: [{ rule: 'x', area: 'Nowhere', whatWentWrong: 'y', source: 'z' }] }))
   const stale = staged(await step())
@@ -317,7 +317,7 @@ it('runs the plan in waves: worker briefs from the procedure, schema checks with
   expect(decisions).toContain('## A1 — Round the badge count?')
   expect(decisions).toContain('- [x] Show 99+ _(recommended, taken by the agent: the header has room for three characters)_\n- [ ] Show the exact count')
   const log = await readFile(join(work, 'implementation.md'), 'utf8')
-  for (const section of ['## Dependencies added', '## Mid-build notes', '## Proposed Slop Repo entries']) expect(log).toContain(section)
+  for (const section of ['## What it fixed', '## Dependencies added', '## Mid-build notes', '## Proposed Slop Repo entries']) expect(log).toContain(section)
   const exported = JSON.parse(await readFile(done.export!, 'utf8'))
   expect(exported.knowledge.source).toBe('notion')
   expect(exported.knowledge.pages.map((p: { title: string }) => p.title)).toEqual(expect.arrayContaining(['Agent Instructions', 'Review Verification', 'Common Patterns', 'Testing Standards']))

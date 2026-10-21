@@ -10,7 +10,7 @@ export default defineTool({
   inputSchema: z.object({
     pullRequest: z.boolean().describe('Also open a draft pull request. True only when the request asked for a pull request.'),
     title: z.string().min(1).describe('Pull request title, e.g. "feat: <feature>".'),
-    body: z.string().min(1).describe('Pull request body: status, feature table, deviations and blockers from implementation.md.'),
+    body: z.string().min(1).describe('Pull request body: first the `## What it fixed` section of implementation.md, verbatim (the plain-English summary that becomes the release notes), then status, feature table, deviations and blockers from implementation.md.'),
   }),
   async execute({ pullRequest, title, body }, ctx) {
     const state = checkout.get()

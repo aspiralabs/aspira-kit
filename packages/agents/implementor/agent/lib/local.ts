@@ -246,7 +246,7 @@ async function branchBase(repo: string, main: string, startCommit: string): Prom
 }
 
 /** The sections of the progress log the final verification must write, and the one that may not be empty. */
-export const LOG_SECTIONS = ['## Dependencies added', '## Mid-build notes', '## Proposed Slop Repo entries'] as const
+export const LOG_SECTIONS = ['## What it fixed', '## Dependencies added', '## Mid-build notes', '## Proposed Slop Repo entries'] as const
 function sectionBody(log: string, heading: string): string | null {
   const at = log.indexOf(`\n${heading}`)
   if (at < 0 && !log.startsWith(heading)) return null
@@ -756,6 +756,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
         const body = sectionBody(log, heading)
         if (body === null) problems.push(`${logFile} has no \`${heading}\` section.`)
         else if (body === '' && heading === '## Proposed Slop Repo entries') problems.push(`${logFile}: \`${heading}\` is empty; it lists entries or says None with the reason.`)
+        else if (body === '' && heading === '## What it fixed') problems.push(`${logFile}: \`${heading}\` is empty; it is the plain-English summary the PR description and the release page carry (section 6, step 7).`)
       }
     }
     const listed = new Set(value.features.map((f) => f.id))

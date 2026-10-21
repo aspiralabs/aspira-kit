@@ -145,7 +145,7 @@ async function writeOrchestratorOutputs(folder: string, commit: string): Promise
       2,
     ),
   )
-  await writeFile(join(folder, 'plan.review/implementation.md'), '## Dependencies added\n\nNone.\n\n## Mid-build notes\n\nNone.\n\n## Proposed Slop Repo entries\n\nNone: no bugs were found and fixed.\n')
+  await writeFile(join(folder, 'plan.review/implementation.md'), '## What it fixed\n\nScope: web.\n\n1. Nobody could tell where a run stopped.\n   - Before: the card went quiet.\n   - Now: progress.md names the next action.\n\n## Dependencies added\n\nNone.\n\n## Mid-build notes\n\nNone.\n\n## Proposed Slop Repo entries\n\nNone: no bugs were found and fixed.\n')
 }
 
 /**
