@@ -76,8 +76,7 @@ export function exitCodeFor(status: RunStatus): number {
 /** Where each skill's run record lives, relative to its working folder (`folder`), except the code analyzer's, which is per app under the repository root (`repo`/`app`). */
 export const RUN_RECORDS: Record<Skill, (args: { folder: string; repo?: string; app?: string }) => string> = {
   groomer: ({ folder }) => join(folder, 'groom', 'trace', 'groom.json'),
-  'spec-writer': ({ folder }) => join(folder, 'spec.written', 'trace', 'review.json'),
-  'spec-reviewer': ({ folder }) => join(folder, 'spec.reviewed', 'trace', 'review.json'),
+  'spec-writer': ({ folder }) => join(folder, 'spec.reviewed', 'trace', 'review.json'),
   planner: ({ folder }) => join(folder, 'plan.review', 'trace', 'review.json'),
   implementor: ({ folder }) => join(folder, 'plan.review', 'trace', 'implementation-local.json'),
   'code-analyzer': ({ repo, app }) => join(repo ?? '', app ?? '', '.static-analysis', 'rounds.json'),

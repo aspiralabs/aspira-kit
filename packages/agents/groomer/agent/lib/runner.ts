@@ -105,7 +105,7 @@ export function roundPrompt(prepared: PreparedGroom, n: number, facts: readonly 
   const { answered } = prepared
   const asked = frontier(answered, prepared.idea).map((decision) => decision.id)
   return [
-    `Compose round ${n} for ${prepared.ticket.id} "${prepared.ticket.title}".`,
+    `Compose round ${n} for ${prepared.ticket.id} "${prepared.ticket.title}".${n === 1 ? ' This is the one consolidated round (KIT-48): ask every question the idea needs across every branch now, each with its recommended answer, and close every branch with nothing to decide; a dependent question is asked in this same round, worded on the recommended answer it depends on.' : ''}`,
     `Every question follows the rule: ${DECISION_RULE}. Each names its branch and at least one recorded file:line fact.`,
     `Open questions that stay on the frontier, to ask again with their ids: ${asked.join(', ') || 'none'}. New questions take ids from ${nextQuestionId(answered)} on; a follow-up of Q<n> is Q<n>.<m>.`,
     `Branches: ${answered.branches.map((branch) => `${branch.id}=${branch.state}`).join(', ')}.`,

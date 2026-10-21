@@ -33,7 +33,6 @@ type Launcher = {
 const LAUNCHERS: Launcher[] = [
   { name: 'groomer', envVar: 'GROOMER_AGENT_DIR', skillDir: 'packages/agents/groomer/skill/aspira-groomer', args: ['local', 'KIT-2'] },
   { name: 'spec-writer', envVar: 'SPEC_WRITER_AGENT_DIR', skillDir: 'packages/agents/spec-writer/skill/aspira-spec-writer', args: ['local', 'KIT-2'] },
-  { name: 'spec-reviewer', envVar: 'SPEC_REVIEWER_AGENT_DIR', skillDir: 'packages/agents/spec-reviewer/skill/aspira-spec-reviewer', args: ['local', 'KIT-2'] },
   { name: 'planner', envVar: 'PLANNER_AGENT_DIR', skillDir: 'packages/agents/planner/skill/aspira-planner', args: ['local', 'KIT-2'] },
   { name: 'implementor', envVar: 'IMPLEMENTOR_AGENT_DIR', skillDir: 'packages/agents/implementor/skill/aspira-implementor', args: ['local', 'KIT-2'] },
   { name: 'code-analyzer', envVar: 'CODE_ANALYZER_AGENT_DIR', skillDir: 'packages/agents/code-analyzer/skill/aspira-code-analyzer', args: ['local', 'KIT-2'] },

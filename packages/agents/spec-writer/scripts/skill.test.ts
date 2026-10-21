@@ -55,7 +55,7 @@ it('routes the skill to the official CLI or the Notion-loading eve entry point w
   await writeFile(join(bin, 'screen'), '#!/bin/bash\nexec "$3"\n', { mode: 0o755 })
   const direct = await exec('bash', [launcher, 'start', `@${idea}`, '--no-ticket', '--guidelines', guidelines], { cwd: repo, env })
   const args = (await calls())[0]!
-  expect(command(args)).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/write.ts'), idea, repo, guidelines, join(repo, 'spec.written')])
+  expect(command(args)).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/write.ts'), idea, repo, guidelines, join(repo, 'spec.reviewed')])
   // A path without --no-ticket is refused, naming the flag.
   await expect(exec('bash', [launcher, 'start', idea, '--guidelines', guidelines], { cwd: repo, env })).rejects.toThrow('is a file path, not a ticket; pass --no-ticket')
   expect(envArgs(args)[0]).toBe(`--env-file=${join(repo, '.env.local')}`)
@@ -66,8 +66,8 @@ it('routes the skill to the official CLI or the Notion-loading eve entry point w
   expect(JSON.parse(await readFile(join(run, 'agent.json'), 'utf8'))).toEqual({ name: '@aspiralabs/spec-writer', version: expect.stringMatching(/^\d+\.\d+\.\d+/), path: root, source: 'package', installed: false })
   const status = await exec('bash', [launcher, 'status', run], { cwd: repo, env })
   expect(status.stdout).toContain('agent: @aspiralabs/spec-writer@')
-  expect(status.stdout).toContain('spec.written/spec.md')
-  expect(status.stdout).toContain('spec.written/spec.draft.md')
+  expect(status.stdout).toContain('spec.reviewed/spec.reviewed.md')
+  expect(status.stdout).toContain('spec.reviewed/spec.draft.md')
   await reset()
   await exec('bash', [launcher, 'start', idea, '--no-ticket'], { cwd: repo, env })
   const viaEve = command((await calls())[0]!)
@@ -92,13 +92,13 @@ it('start with a ticket runs the board step first, writes from the pulled idea, 
   expect(command(board!)).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/ticket.ts'), 'start', 'NOM-4', '--repo', repo, '--force-pull'])
   expect(out.stdout).toContain('ticket: NOM-4 Explore pagination (https://www.notion.so/nom-4)')
   expect(out.stdout).toContain('status: Ready: Idea -> In Progress: Spec')
-  expect(out.stdout).toContain(`output: ${join(folder, 'spec.written')}`)
+  expect(out.stdout).toContain(`output: ${join(folder, 'spec.reviewed')}`)
   expect(command(run!).slice(3, 5)).toEqual([eve, 'invoke'])
   expect(command(run!)[5]).toContain(idea)
   expect(command(run!)[5]).toContain('do not call board yourself')
   expect(status![0]).toBe('-p')
   // finish takes only the run status read from the trace: no --ok/--failed, the status alone decides the pushes and moves (F7, F53).
-  expect(command(finish!)).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--run-status', '{}', '--export', join(folder, 'spec.written')])
+  expect(command(finish!)).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/ticket.ts'), 'finish', '--repo', repo, '--folder', folder, '--run-status', '{}', '--export', join(folder, 'spec.reviewed')])
   // A refusal from the board step (exit 3) stops the launcher before anything is launched.
   await writeFile(join(bin, 'node'), '#!/bin/bash\necho "spec-writer: refused: NOM-4 is Grooming" >&2\nexit 3\n', { mode: 0o755 })
   await expect(exec('bash', [launcher, 'start', 'NOM-4'], { cwd: repo, env: ticketEnv })).rejects.toMatchObject({ code: 3, stderr: expect.stringContaining('refused') })
@@ -111,11 +111,11 @@ it('steps a --local run synchronously; the driver, not the launcher, decides whe
   // No screen and no gateway key: a local step makes no model calls.
   const local = { ...env, AI_GATEWAY_API_KEY: '' }
   await exec('bash', [launcher, 'local', `@${idea}`, '--no-ticket'], { cwd: repo, env: local })
-  expect(command(await captured())).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/local.ts'), '--repo', repo, '--no-ticket', idea, '--output', join(repo, 'spec.written')])
+  expect(command(await captured())).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/local.ts'), '--repo', repo, '--no-ticket', idea, '--output', join(repo, 'spec.reviewed')])
   const snapshot = join(repo, 'required rules.md')
   await writeFile(snapshot, 'REV-001 Check the spec')
   await exec('bash', [launcher, 'local', idea, '--no-ticket', '--guidelines', snapshot, '--finish'], { cwd: repo, env: local })
-  expect(command(await captured())).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/local.ts'), '--repo', repo, '--no-ticket', idea, '--output', join(repo, 'spec.written'), '--guidelines', snapshot, '--finish'])
+  expect(command(await captured())).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/local.ts'), '--repo', repo, '--no-ticket', idea, '--output', join(repo, 'spec.reviewed'), '--guidelines', snapshot, '--finish'])
   // The ticket form: the ID, a URL, or nothing, handed to the driver as --ticket; --force-pull and --verify go with it.
   await reset()
   await exec('bash', [launcher, 'local', 'NOM-4'], { cwd: repo, env: local })
@@ -152,7 +152,7 @@ it('resolves the agent in order: SPEC_WRITER_AGENT_DIR, the package installed un
   const copy = join(app, '.claude/skills/aspira-spec-writer/scripts/spec-writer.sh')
   await cp(launcher, copy)
   const fromApp = await exec('bash', [copy, 'local', idea, '--no-ticket'], { cwd: app, env: { ...env, ASPIRA_KIT: join(dir, 'stale-kit') } })
-  expect(command(await captured())).toEqual(['--import', join(store, 'amaro/dist/register-strip.mjs'), '--experimental-strip-types', join(installed, 'scripts/local.ts'), '--repo', app, '--no-ticket', idea, '--output', join(app, 'spec.written')])
+  expect(command(await captured())).toEqual(['--import', join(store, 'amaro/dist/register-strip.mjs'), '--experimental-strip-types', join(installed, 'scripts/local.ts'), '--repo', app, '--no-ticket', idea, '--output', join(app, 'spec.reviewed')])
   expect(envArgs(await captured())).toEqual([`--env-file=${join(app, '.env.local')}`])
   expect(fromApp.stderr).not.toContain('kit source')
   const elsewhere = join(dir, 'elsewhere')

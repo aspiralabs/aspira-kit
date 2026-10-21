@@ -180,7 +180,7 @@ export async function beforeRun(context: DriverContext, args: DriverTicketArgs):
     return { kind: 'stage', stage: step.stage }
   }
   await reserveLocalRun(stateDir, step.ready.folder, args.parentRun)
-  const input = GATES[context.skill].input === undefined ? null : inputFileFor(context.skill, step.ready.folder)
+  const input = GATES[context.skill].input === undefined ? null : inputFileFor(context.skill, step.ready.folder, step.ready.statusBefore)
   const ticket = step.ready.ticket
   return { kind: 'ticket', argument: { ...argument, folder: step.ready.folder }, folder: step.ready.folder, input, statusBefore: step.ready.statusBefore, ticket: { id: ticket.id, title: ticket.title, url: ticket.url, status: ticket.status, ...(ticket.pr === undefined ? {} : { pr: ticket.pr }) }, trace: step.ready.trace }
 }

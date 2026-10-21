@@ -21,7 +21,7 @@
       "statuses": [
         "Ready: Idea"
       ],
-      "step": "Step 2: write the spec",
+      "step": "Step 2: write and review the spec",
       "command": "/aspira-spec-writer <ID> --local",
       "who": "agent"
     },
@@ -37,8 +37,8 @@
       "statuses": [
         "In Review: Spec"
       ],
-      "step": "Step 3: debate the spec, answer its decisions, then Step 4: approve it",
-      "command": "/aspira-spec-reviewer <ID> --local",
+      "step": "Step 3: answer the spec's decisions and rerun the spec writer to settle them, then Step 4: approve it",
+      "command": "/aspira-spec-writer <ID> --local",
       "who": "agent, then you"
     },
     {

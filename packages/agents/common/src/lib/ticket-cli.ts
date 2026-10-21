@@ -117,7 +117,7 @@ export async function ticketCli(
       if (argument.kind === 'path') throw new UsageError(usage(skill))
       if (parentRun !== undefined) await checkParentRunArgument(argument.folder ?? null, parentRun, 'start')
       const started = await startFlow({ skill, repo, argument, board: config.board, force: values['force-pull'] === true, forceRun: values['force-run'] === true, dev: values.dev, client: board, env })
-      const input = inputOf(skill, started.folder)
+      const input = inputOf(skill, started.folder, started.trace.statusBefore ?? undefined)
       for (const [key, value] of Object.entries({ folder: started.folder, id: started.ticket.id, title: started.ticket.title, url: started.ticket.url, before: started.trace.statusBefore, status: started.ticket.status, pr: started.ticket.pr, input, pulled: started.pulled.join(' '), kept: started.kept.join(' ') })) io.out(line(key, value))
       // The run id is reserved once the gate passed, so a refused start reserves none (KIT-19, F1, F13).
       if (parentRun === undefined) {
@@ -211,10 +211,10 @@ async function writeCloudTelemetry(args: { skill: Skill; folder: string; status:
   return { telemetry: written.file === null ? null : { runId: run.data.runId, file: written.file }, notice: written.notice }
 }
 
-function inputOf(skill: Skill, folder: string): string {
+function inputOf(skill: Skill, folder: string, statusBefore?: string): string {
   if (GATES[skill].input === undefined) return ''
   try {
-    return inputFileFor(skill, folder)
+    return inputFileFor(skill, folder, statusBefore)
   } catch {
     return ''
   }

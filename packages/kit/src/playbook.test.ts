@@ -78,7 +78,8 @@ describe('Step 1, Step 12 and the intro name the kit-owned commands', () => {
       { statuses: ['Shortlist'], command: null },
       { statuses: ['Ready: Idea'], command: '/aspira-spec-writer <ID> --local' },
       { statuses: ['In Progress: Spec'], command: '/aspira-spec-writer <ID> --local' },
-      { statuses: ['In Review: Spec'], command: '/aspira-spec-reviewer <ID> --local' },
+      // KIT-48: the spec writer reruns from In Review: Spec; there is no spec-reviewer skill.
+      { statuses: ['In Review: Spec'], command: '/aspira-spec-writer <ID> --local' },
       { statuses: ['Ready: Spec'], command: '/aspira-planner <ID> --local' },
       { statuses: ['In Progress: Plan'], command: '/aspira-planner <ID> --local' },
       { statuses: ['In Review: Plan'], command: null },
@@ -143,7 +144,7 @@ describe('kit next', () => {
     const offline = run(undefined, () => null)
     expect(offline.code).toBe(0)
     expect(offline.lines[1]).toBe('status   In Review: Spec (as pulled into the working folder; the board did not answer)')
-    expect(offline.lines[3]).toBe('run      /aspira-spec-reviewer NOM-4 --local')
+    expect(offline.lines[3]).toBe('run      /aspira-spec-writer NOM-4 --local')
     mkdirSync(join(root, '.work', 'nom-5-find-cooks'), { recursive: true })
     writeFileSync(join(root, '.work', 'nom-5-find-cooks', 'ticket.md'), ticketMd('NOM-5', 'Find cooks', 'Ready: Idea', 'https://www.notion.so/5'))
     expect(run(undefined, resolver('Ready: Spec')).lines[0]).toContain('2 folders under .work/ hold a ticket.md')

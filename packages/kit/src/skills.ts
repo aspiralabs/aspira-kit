@@ -15,7 +15,9 @@ import { appRoot } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 
 /** The agents a project gets through @aspiralabs/agents, each with a /aspira-<agent> skill. */
-export const AGENTS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'build-feature'] as const
+export const AGENTS = ['groomer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'build-feature'] as const
+/** Skills an earlier kit installed that no longer exist: `kit init` removes their folders (spec-reviewer folded into spec-writer, KIT-48). */
+export const RETIRED_SKILLS = ['spec-reviewer'] as const
 export type Agent = (typeof AGENTS)[number]
 
 /** The skills @aspiralabs/kit ships itself, each a /aspira-<name> launcher for `kit <name>`. */
@@ -161,6 +163,12 @@ export function installSkills(opts: InstallSkillsOptions): Agent[] {
   if (version === undefined) {
     opts.log(`skip   .claude/skills/aspira-* (${AGENTS_PACKAGE} is not installed${opts.app ? ` in ${opts.app}` : ''}; run the install step, then kit init again)`)
     return [...AGENTS]
+  }
+  for (const retired of RETIRED_SKILLS) {
+    const target = join(opts.projectRoot, '.claude', 'skills', `aspira-${retired}`)
+    if (!existsSync(target)) continue
+    opts.log(`remove ${relative(opts.projectRoot, target)} (retired)`)
+    if (!opts.dryRun) rmSync(target, { recursive: true, force: true })
   }
   for (const agent of AGENTS) {
     const pkg = agentPackageDir(app, agent)

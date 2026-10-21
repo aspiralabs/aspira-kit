@@ -18,7 +18,6 @@ export const BACKWARD_MOVES_SKILL_MAY_MAKE: readonly { from: string; to: string 
 export const DECISION_OWNERS: Readonly<Record<string, { page: string; review: string; rerun: string }>> = {
   groomer: { page: 'Grooming Decisions', review: 'Shortlist', rerun: 'Grooming' },
   'spec-writer': { page: 'Spec Review Decisions', review: 'In Review: Spec', rerun: 'In Progress: Spec' },
-  'spec-reviewer': { page: 'Spec Review Decisions', review: 'In Review: Spec', rerun: 'In Progress: Spec' },
   planner: { page: 'Plan', review: 'In Review: Plan', rerun: 'In Progress: Plan' },
   implementor: { page: 'Implementation', review: 'In Review: Implementation', rerun: 'In Progress: Implementation' },
 }

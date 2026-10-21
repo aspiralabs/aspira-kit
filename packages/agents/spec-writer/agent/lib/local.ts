@@ -4,11 +4,12 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 import { openDecisions } from '@aspiralabs/agent-common/lib/decisions'
+import type { SessionModel } from '@aspiralabs/agent-common/lib/session-model'
 import type { Call } from '@aspiralabs/spec-reviewer/lib/pipeline'
 import { lenses, reviewSchema, synthesisSchema, systemPrompt as reviewSystemPrompt } from '@aspiralabs/spec-reviewer/lib/review'
 import { writeArtifacts } from './artifacts.ts'
 import { knowledgeConfig, knowledgeSource, loadKnowledge, snapshotKnowledge, type Env, type Knowledge } from './local-knowledge.ts'
-import { EXPLORE_MAX_STEPS, applySnapshotGaps, prepareWrite, reportDirFor, summary, writeContext, writeFiles, type RunInput } from './runner.ts'
+import { EXPLORE_MAX_STEPS, applySnapshotGaps, prepareWrite, reportDirFor, specSha256, summary, writeContext, writeFiles, type RunInput } from './runner.ts'
 import { draftSchema, exploreSchema, writePipeline, writerSystemPrompt } from './writer.ts'
 
 // --local: the same pipeline with the Claude Code session as the model, as in spec-reviewer. Each
@@ -27,14 +28,18 @@ export type LocalInput = Omit<RunInput, 'guidelinesPath'> & { guidelinesPath?: s
 /** Seams for tests: the agent package whose files and env are read, and the knowledge walk's own fetch/API base (never set outside tests). */
 export type LocalDeps = { agentDir?: string; env?: Env; fetch?: (url: string, init?: RequestInit) => Promise<Response>; api?: string }
 
-/** A phase for the session to run: prompt and output are file paths. */
-export type LocalTask = { phase: string; prompt: string; output: string; error?: string }
+/** A phase for the session to run: prompt and output are file paths; `model` the session model it runs on (KIT-48). */
+export type LocalTask = { phase: string; prompt: string; output: string; model: SessionModel; error?: string }
+
+/** Explorers and specialists on Sonnet, the draft, research and reconciliation on Opus (KIT-48). */
+export const modelForPhase = (phase: string): SessionModel => (phase === 'explore' || phase.startsWith('explore:') || (phase in lenses) ? 'sonnet' : 'opus')
 type LocalCall = { phase: string; prompt: string; output?: unknown; error?: string }
 
 const STAGES = ['explore', 'draft', 'research', 'specialists', 'reconciliation'] as const
 const STAGE_OF: Record<string, number> = { explore: 0, draft: 1, research: 2, synthesis: 4 }
-const stageOf = (phase: string) => STAGE_OF[phase] ?? 3
+const stageOf = (phase: string) => (phase.startsWith('explore:') ? 0 : (STAGE_OF[phase] ?? 3))
 const PHASE_ORDER = ['explore', 'draft', 'research', ...Object.keys(lenses), 'synthesis']
+const orderOf = (phase: string) => (phase.startsWith('explore:') ? 0 : PHASE_ORDER.indexOf(phase))
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 // spec-reviewer's reviewModelCall gives each specialist this many tool rounds.
 const SPECIALIST_STEPS = 6
@@ -52,23 +57,27 @@ export const orchestratorFile = (agentDir: string = PACKAGE_DIR) => join(agentDi
 export const knowledgeDirFor = (reportDir: string) => join(workDirFor(reportDir), 'knowledge')
 
 const schemaFor = (phase: string): z.ZodType => {
-  if (phase === 'explore') return exploreSchema
+  if (phase === 'explore' || phase.startsWith('explore:')) return exploreSchema
   if (phase === 'draft') return draftSchema
   if (phase === 'synthesis') return synthesisSchema
   return reviewSchema
 }
-const systemFor = (phase: string) => (phase === 'explore' || phase === 'draft' ? writerSystemPrompt : reviewSystemPrompt)
+const systemFor = (phase: string) => (phase === 'explore' || phase.startsWith('explore:') || phase === 'draft' ? writerSystemPrompt : reviewSystemPrompt)
 
 const readOnly = (repo: string) => `Read-only tools only: Read, Grep, Glob and non-mutating git commands, in the repository at ${repo}; for a fact that lives outside it (a vendor limit, an infrastructure behaviour, a decision on a Notion page) the Notion MCP read tools (notion-fetch, notion-search) and WebFetch or WebSearch on public documentation, never a write. Cite every such source as a URL or a Notion page title with the quoted line (KIT-33); an external source you could not open stays a gap.`
 const uiCatalog = 'The agent preloads the Aspira UI catalog (list_components) for UI work; here, call list_components and get_component through the aspiralabs-ui MCP and record each read in uiEvidence. If that MCP is not available in this session, record it as a gap.'
+// Draft, research and reconciliation are held to the packet (KIT-48): the exploration and the source
+// packet in the task are the evidence; a handful of confirming reads at most, never a re-exploration.
+const heldToPacket = 'Do not explore the repository again: no Grep, Glob or directory listing, and at most five Read calls, each only to confirm a fact the task already names (a path, a symbol, a line). The session records your tool calls; a phase that re-explores shows in the run telemetry.'
 const phaseNotes: Record<string, (repo: string) => string> = {
   explore: (repo) => `${readOnly(repo)} The agent gives this phase ${EXPLORE_MAX_STEPS} tool rounds; be as efficient: batch reads and searches. ${uiCatalog}`,
-  draft: () => 'The agent runs this phase without tools, over the idea and exploration in the task.',
-  research: () => 'The agent runs this phase without tools, over the source packet in the task. You may open a file to confirm a fact in the packet, but do not start the specialists\' work.',
-  synthesis: () => 'The agent runs this phase without tools, over the review record in the task.',
+  draft: () => `The agent runs this phase without tools, over the idea and exploration in the task. ${heldToPacket}`,
+  research: () => `The agent runs this phase without tools, over the source packet in the task. ${heldToPacket} Do not start the specialists' work.`,
+  synthesis: () => `The agent runs this phase without tools, over the review record in the task. ${heldToPacket}`,
   ui: (repo) => `${readOnly(repo)} The agent makes get_component this phase's first tool call. ${uiCatalog}`,
 }
 const specialistNote = (repo: string) => `${readOnly(repo)} The agent gives this phase ${SPECIALIST_STEPS} tool rounds; be as efficient: batch reads and searches.`
+const noteFor = (phase: string): ((repo: string) => string) => (phase.startsWith('explore:') ? phaseNotes.explore! : (phaseNotes[phase] ?? specialistNote))
 
 /** Tool phases with a --guidelines snapshot read the topic pages from the folder load-knowledge wrote it in, never from Notion (F49). */
 export const snapshotNote = (file: string) => `Engineering guidelines: the REQUIRED GUIDELINES in the task are ${file}, a load-knowledge snapshot. The topic pages they route to are the files beside it in ${dirname(file)}, indexed by ${join(dirname(file), 'INDEX.md')}; they stand in for the agent's read-only guideline tools (list_guidelines, read_guideline). Open the pages that apply with Read; record a page that is not there as a gap. Do not edit them.`
@@ -77,14 +86,14 @@ export const snapshotNote = (file: string) => `Engineering guidelines: the REQUI
 export const folderNote = (dir: string) => `Engineering guidelines: the REQUIRED GUIDELINES in the task are ${join(dir, 'REQUIRED.md')}. The topic pages they route to are files in ${dir}, indexed by ${join(dir, 'INDEX.md')}, one file per page; they stand in for the agent's read-only guideline tools (list_guidelines, read_guideline). Open the pages that apply with Read. Do not edit them.`
 
 /** The file a phase subagent reads: the agent's system prompt and task prompt verbatim, then the output contract. */
-export function renderPhasePrompt(phase: string, prompt: string, output: string, repo: string, knowledge?: Pick<Knowledge, 'source' | 'path'>): string {
-  const role = stageOf(phase) < 2 ? 'the spec writer' : 'the spec review that the spec writer runs on its draft'
+export function renderPhasePrompt(phase: string, prompt: string, output: string, repo: string, knowledge?: Pick<Knowledge, 'source' | 'path'>, mode: 'write' | 'review' = 'write'): string {
+  const role = mode === 'review' ? 'the spec review of the answered spec (the one spec step, rerun from In Review: Spec)' : stageOf(phase) < 2 ? 'the spec writer' : 'the spec review that the spec writer runs on its draft'
   const guidelines = knowledge?.source === 'snapshot' ? snapshotNote(knowledge.path) : folderNote(knowledge?.path ?? 'the knowledge folder')
   return [
     `# Aspira spec writer: ${phase} (--local)`, '',
     `You are the \`${phase}\` phase of ${role}, running as a subagent of a Claude Code session instead of inside spec-writer. The System and Task sections below are the exact prompt the agent sends. Follow them.`, '',
     '- Do not edit, create or delete any file in the repository or in Notion. The only file you write is your output file.',
-    `- ${(phaseNotes[phase] ?? specialistNote)(repo)}`,
+    `- ${noteFor(phase)(repo)}`,
     ...(['draft', 'research', 'synthesis'].includes(phase) ? [] : [`- ${guidelines}`]),
     `- Finish by writing ONE JSON object to \`${output}\` that validates against the output schema at the end. No markdown fences and no prose in that file. Then reply with one line: \`done\`, or what stopped you.`, '',
     '## System', '', systemFor(phase), '',
@@ -127,11 +136,11 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   const knowledge = await resolveKnowledge(input, saved, reportDir, deps)
 
   const prepared = await prepareWrite({ ...input, guidelinesPath: knowledge.requiredFile }, new AbortController().signal)
-  const { dir, idea, guidelines, repo, uiRequired, answers } = prepared
+  const { dir, mode, idea, spec, guidelines, repo, uiRequired, answers } = prepared
   const repoRoot = resolve(input.repoPath)
   const context = writeContext(prepared, 'not preloaded in --local mode; the explore and ui phases read it through the aspiralabs-ui MCP in the session')
-  const fingerprint = createHash('sha256').update(JSON.stringify([idea, guidelines, context, uiRequired, knowledge.digest])).digest('hex')
-  if (saved && saved.fingerprint !== fingerprint) throw new Error(`The idea, guidelines or repository changed since this local run started. Delete ${work} to start over.`)
+  const fingerprint = createHash('sha256').update(JSON.stringify([mode, idea, spec ?? null, guidelines, context, uiRequired, knowledge.digest])).digest('hex')
+  if (saved && saved.fingerprint !== fingerprint) throw new Error(`The ${mode === 'review' ? 'spec' : 'idea'}, guidelines or repository changed since this local run started. Delete ${work} to start over.`)
   await mkdir(join(work, 'prompts'), { recursive: true })
   await mkdir(join(work, 'outputs'), { recursive: true })
   const state: State = saved ?? { fingerprint, startedAt: new Date().toISOString(), knowledge: { source: knowledge.source, path: knowledge.path } }
@@ -142,7 +151,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   const call: Call = async ({ phase, prompt }) => {
     // A later stage's prompt depends on the earlier stage's outputs; never write it early.
     if (tasks.some((task) => stageOf(task.phase) < stageOf(phase))) throw new Error('waiting for an earlier phase')
-    const output = join(work, 'outputs', `${phase}.json`)
+    const output = join(work, 'outputs', `${phase.replaceAll('/', '_').replaceAll(':', '-')}.json`)
     const raw = await readFile(output, 'utf8').catch(() => null)
     let error: string | undefined
     if (raw !== null) {
@@ -157,15 +166,15 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
       calls.push({ phase, prompt, error: reason })
       throw new Error(reason)
     }
-    const promptFile = join(work, 'prompts', `${phase}.md`)
-    await writeFile(promptFile, renderPhasePrompt(phase, prompt, output, repoRoot, knowledge))
-    tasks.push({ phase, prompt: promptFile, output, ...(error ? { error } : {}) })
+    const promptFile = join(work, 'prompts', `${phase.replaceAll('/', '_').replaceAll(':', '-')}.md`)
+    await writeFile(promptFile, renderPhasePrompt(phase, prompt, output, repoRoot, knowledge, mode))
+    tasks.push({ phase, prompt: promptFile, output, model: modelForPhase(phase), ...(error ? { error } : {}) })
     throw new Error('pending in the session')
   }
 
-  const result = await writePipeline({ idea, guidelines, context, uiRequired, answers }, call)
+  const result = await writePipeline({ idea, guidelines, context, uiRequired, answers, areas: prepared.areas, ...(spec === undefined ? {} : { spec }) }, call)
   if (tasks.length) {
-    tasks.sort((a, b) => PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase))
+    tasks.sort((a, b) => orderOf(a.phase) - orderOf(b.phase))
     return { pending: true as const, status: 'pending', stage: STAGES[stageOf(tasks[0]!.phase)], workDir: work, orchestrator, tasks }
   }
 
@@ -186,9 +195,11 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     : result.status === 'needs-author' ? `${openCount} decision${openCount === 1 ? '' : 's'} open: ${join(dir, 'trace', 'decisions.md')}`
       : (result.problems[0] ?? null)
   const reasonCode = null
-  const report = { ...result, review: result.review && { ...result.review, candidate: undefined }, spec: undefined, mode: 'local', input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, models: { all: 'Claude Code session subagents' }, knowledge, startedAt: state.startedAt, totalMs, dir, reason, reasonCode }
+  const files = writeFiles(result, prepared)
+  // `mode: 'local'` is the run mode every trace reader expects; the write/review mode is `specMode`.
+  const report = { ...result, review: result.review && { ...result.review, candidate: undefined }, spec: undefined, mode: 'local', specMode: result.mode, input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, specSha256: specSha256(files), models: { all: 'Claude Code session subagents' }, knowledge, startedAt: state.startedAt, totalMs, dir, reason, reasonCode }
   await writeArtifacts(dir, {
-    ...writeFiles(result, prepared),
+    ...files,
     'trace/calls.json': JSON.stringify({ mode: 'local', system: { writer: writerSystemPrompt, review: reviewSystemPrompt }, knowledge, calls }, null, 2),
     'run-analysis.md': analysis,
     'trace/review.json': JSON.stringify(report, null, 2),

@@ -59,7 +59,7 @@ Pass the same ticket (or source) and options to every call.
 
 0. **Board.** With a ticket, the first call prints `stage: "board"`: the board work for this session to perform with the Notion MCP, listed as data in `actions`. A `resolve` action names the ticket and the board: fetch the ticket and write `ticket.md` at `write` in exactly the `format` given. A `pull` action names a child page and the file to write it to as plain markdown. Perform every action, then run `local` again; the driver reads `ticket.md`, refuses when its Status is not `In Review: Implementation` or its PR is unset, and lists what is still missing until the folder is in sync. The reviewer lists no `move` action, and the session makes none. Never move a card anywhere the stage does not list.
 1. **Guidelines.** `local`'s own `load-knowledge` step already built the folder, or `blocked` names what to set; a rare `knowledge` stage names a folder problem to fix by hand. Run `local` again either way, or pass `--knowledge DIR`.
-2. **Seats.** Once the guidelines are in place, `local` prints `stage: "seats"`, `round: 1` and six tasks, plus `packet` (what every prompt starts with) and `target` (the shas under review). For each task, launch one `general-purpose` subagent with exactly this message, with the task's paths filled in:
+2. **Seats.** Once the guidelines are in place, `local` prints `stage: "seats"`, `round: 1` and six tasks, plus `packet` (what every prompt starts with) and `target` (the shas under review). For each task, launch one `general-purpose` subagent, model `<task.model>` (KIT-48), with exactly this message, with the task's paths filled in:
 
    `Read <prompt> in full and follow it exactly. Write your JSON result to <output>. Reply with one line.`
 

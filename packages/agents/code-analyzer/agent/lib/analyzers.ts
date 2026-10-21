@@ -1,4 +1,5 @@
 import { dirname } from 'node:path'
+import { shellQuote } from './executor.ts'
 import { black, cargoFmt, colonLines, eslintJson, githubAnnotations, gofmt, mypy, prettier, pyright, rubocopJson, ruffFormat, ruffJson, script, tsc, type Parser } from './parsers.ts'
 
 export type Ecosystem = 'js' | 'python' | 'go' | 'rust' | 'ruby'
@@ -11,6 +12,10 @@ export type Analyzer = {
   check: string
   /** Whole-tree auto-fix command, or null when the tool has none. */
   fix: string | null
+  /** The same fix on the given cwd-relative files only (a ticket run's scope, KIT-48); null when the tool fixes the whole tree or nothing. */
+  fixFiles?: ((files: string[]) => string) | null
+  /** The files the tool handles, a regex on the file name; the scoped fix runs only on scope files it matches. */
+  exts?: RegExp
   parse: Parser
   /** Binary probed with `command -v`; null when nothing beyond the package manager is needed. */
   requires: string | null
@@ -30,6 +35,10 @@ const under = (files: string[], dir: string) => (dir ? `${dir}/` : '')
 const dirOf = (file: string) => (dirname(file) === '.' ? '' : dirname(file))
 const hasNodeModules = (path: string) => path.split('/').includes('node_modules')
 const MAX_DIRS = 20
+const quoted = (files: string[]) => files.map(shellQuote).join(' ')
+const JS = /\.(?:[cm]?[jt]sx?)$/
+const PRETTIER = /\.(?:[cm]?[jt]sx?|json|jsonc|json5|css|scss|less|md|mdx|ya?ml|html|vue|graphql|gql|hbs)$/
+const PY = /\.pyi?$/
 
 type Pm = { name: NonNullable<Detection['packageManager']>; exec: string; run: (s: string) => string; install: string }
 function packageManager(files: Set<string>, rootPkg: { packageManager?: string } | null): Pm {
@@ -69,9 +78,9 @@ export async function detect(files: string[], read: (path: string) => Promise<st
     const eslintDirs = files.filter((f) => ESLINT_CONFIG.test(f) && !hasNodeModules(f)).map(dirOf)
     const eslintRoots = eslintDirs.includes('') ? [''] : [...new Set(eslintDirs)].slice(0, MAX_DIRS)
     if (lintScript) analyzers.push({ id: 'script:lint', tool: 'lint', ecosystem: 'js', cwd: '', check: pm.run(lintScript), fix: null, parse: script('lint'), requires: null, install: [] })
-    else for (const dir of eslintRoots) analyzers.push({ id: `eslint:${dir || '.'}`, tool: 'eslint', ecosystem: 'js', cwd: dir, check: `${pm.exec} eslint . --format json`, fix: `${pm.exec} eslint . --fix`, parse: eslintJson, requires: null, install: [] })
+    else for (const dir of eslintRoots) analyzers.push({ id: `eslint:${dir || '.'}`, tool: 'eslint', ecosystem: 'js', cwd: dir, check: `${pm.exec} eslint . --format json`, fix: `${pm.exec} eslint . --fix`, fixFiles: (files) => `${pm.exec} eslint --fix --no-warn-ignored ${quoted(files)}`, exts: JS, parse: eslintJson, requires: null, install: [] })
     // ESLint's own --fix stays available even when the project runs lint through a script.
-    if (lintScript && eslintRoots.length) for (const dir of eslintRoots) analyzers.push({ id: `eslint-fix:${dir || '.'}`, tool: 'eslint', ecosystem: 'js', cwd: dir, check: '', fix: `${pm.exec} eslint . --fix`, parse: eslintJson, requires: null, install: [] })
+    if (lintScript && eslintRoots.length) for (const dir of eslintRoots) analyzers.push({ id: `eslint-fix:${dir || '.'}`, tool: 'eslint', ecosystem: 'js', cwd: dir, check: '', fix: `${pm.exec} eslint . --fix`, fixFiles: (files) => `${pm.exec} eslint --fix --no-warn-ignored ${quoted(files)}`, exts: JS, parse: eslintJson, requires: null, install: [] })
     const tsconfigs = files.filter((f) => /(^|\/)tsconfig\.json$/.test(f) && !hasNodeModules(f)).map(dirOf)
     if (typeScript) analyzers.push({ id: 'script:typecheck', tool: 'tsc', ecosystem: 'js', cwd: '', check: pm.run(typeScript), fix: null, parse: script('tsc'), requires: null, install: [] })
     else for (const dir of [...new Set(tsconfigs)].slice(0, MAX_DIRS)) {
@@ -79,9 +88,9 @@ export async function detect(files: string[], read: (path: string) => Promise<st
       analyzers.push({ id: `tsc:${dir || '.'}`, tool: 'tsc', ecosystem: 'js', cwd: dir, check: solution ? `${pm.exec} tsc -b --pretty false` : `${pm.exec} tsc -p tsconfig.json --noEmit --pretty false`, fix: null, parse: tsc, requires: null, install: [] })
     }
     const prettierConfigured = files.some((f) => PRETTIER_CONFIG.test(f)) || pkg.prettier !== undefined
-    if (formatScript) analyzers.push({ id: 'script:format', tool: 'prettier', ecosystem: 'js', cwd: '', check: pm.run(formatScript), fix: formatFix ? pm.run(formatFix) : prettierConfigured ? `${pm.exec} prettier --write .` : null, parse: script('prettier'), requires: null, install: [] })
-    else if (prettierConfigured) analyzers.push({ id: 'prettier', tool: 'prettier', ecosystem: 'js', cwd: '', check: `${pm.exec} prettier --check .`, fix: `${pm.exec} prettier --write .`, parse: prettier, requires: null, install: [] })
-    if (set.has('biome.json') || set.has('biome.jsonc')) analyzers.push({ id: 'biome', tool: 'biome', ecosystem: 'js', cwd: '', check: `${pm.exec} biome check --reporter=github .`, fix: `${pm.exec} biome check --write .`, parse: githubAnnotations('biome'), requires: null, install: [] })
+    if (formatScript) analyzers.push({ id: 'script:format', tool: 'prettier', ecosystem: 'js', cwd: '', check: pm.run(formatScript), fix: formatFix ? pm.run(formatFix) : prettierConfigured ? `${pm.exec} prettier --write .` : null, fixFiles: prettierConfigured ? (files) => `${pm.exec} prettier --write --ignore-unknown ${quoted(files)}` : null, exts: PRETTIER, parse: script('prettier'), requires: null, install: [] })
+    else if (prettierConfigured) analyzers.push({ id: 'prettier', tool: 'prettier', ecosystem: 'js', cwd: '', check: `${pm.exec} prettier --check .`, fix: `${pm.exec} prettier --write .`, fixFiles: (files) => `${pm.exec} prettier --write --ignore-unknown ${quoted(files)}`, exts: PRETTIER, parse: prettier, requires: null, install: [] })
+    if (set.has('biome.json') || set.has('biome.jsonc')) analyzers.push({ id: 'biome', tool: 'biome', ecosystem: 'js', cwd: '', check: `${pm.exec} biome check --reporter=github .`, fix: `${pm.exec} biome check --write .`, fixFiles: (files) => `${pm.exec} biome check --write ${quoted(files)}`, exts: PRETTIER, parse: githubAnnotations('biome'), requires: null, install: [] })
     if (!analyzers.some((a) => a.ecosystem === 'js' && a.check)) notes.push('JavaScript project without lint/typecheck scripts, ESLint, tsconfig, Prettier or Biome configuration')
   }
 
@@ -93,9 +102,9 @@ export async function detect(files: string[], read: (path: string) => Promise<st
     if (set.has('requirements.txt')) setup.push({ command: PIP('-r requirements.txt'), ecosystem: 'python', hostWhenMissing: null })
     if (set.has('pyproject.toml')) setup.push({ command: `${PIP('-e .')} || true`, ecosystem: 'python', hostWhenMissing: null })
     const ruffConfigured = set.has('ruff.toml') || set.has('.ruff.toml') || /\[tool\.ruff/.test(pyproject)
-    analyzers.push({ id: 'ruff', tool: 'ruff', ecosystem: 'python', cwd: '', check: 'ruff check . --output-format json', fix: 'ruff check . --fix', parse: ruffJson, requires: 'ruff', install: [PIP('ruff')] })
-    if (ruffConfigured) analyzers.push({ id: 'ruff-format', tool: 'ruff-format', ecosystem: 'python', cwd: '', check: 'ruff format --check .', fix: 'ruff format .', parse: ruffFormat, requires: 'ruff', install: [PIP('ruff')] })
-    if (/\[tool\.black\]/.test(pyproject)) analyzers.push({ id: 'black', tool: 'black', ecosystem: 'python', cwd: '', check: 'black --check .', fix: 'black .', parse: black, requires: 'black', install: [PIP('black')] })
+    analyzers.push({ id: 'ruff', tool: 'ruff', ecosystem: 'python', cwd: '', check: 'ruff check . --output-format json', fix: 'ruff check . --fix', fixFiles: (files) => `ruff check --fix ${quoted(files)}`, exts: PY, parse: ruffJson, requires: 'ruff', install: [PIP('ruff')] })
+    if (ruffConfigured) analyzers.push({ id: 'ruff-format', tool: 'ruff-format', ecosystem: 'python', cwd: '', check: 'ruff format --check .', fix: 'ruff format .', fixFiles: (files) => `ruff format ${quoted(files)}`, exts: PY, parse: ruffFormat, requires: 'ruff', install: [PIP('ruff')] })
+    if (/\[tool\.black\]/.test(pyproject)) analyzers.push({ id: 'black', tool: 'black', ecosystem: 'python', cwd: '', check: 'black --check .', fix: 'black .', fixFiles: (files) => `black ${quoted(files)}`, exts: PY, parse: black, requires: 'black', install: [PIP('black')] })
     if (set.has('mypy.ini') || set.has('.mypy.ini') || /\[tool\.mypy\]/.test(pyproject) || /^\[mypy\]/m.test(setupCfg)) analyzers.push({ id: 'mypy', tool: 'mypy', ecosystem: 'python', cwd: '', check: 'mypy . --no-error-summary --no-color-output --show-column-numbers --hide-error-context', fix: null, parse: mypy, requires: 'mypy', install: [PIP('mypy')] })
     if (set.has('pyrightconfig.json') || /\[tool\.pyright\]/.test(pyproject)) analyzers.push({ id: 'pyright', tool: 'pyright', ecosystem: 'python', cwd: '', check: 'pyright --outputjson', fix: null, parse: pyright, requires: 'pyright', install: [PIP('pyright')] })
     if (set.has('.flake8') || /^\[flake8\]/m.test(setupCfg) || /^\[flake8\]/m.test(toxIni)) analyzers.push({ id: 'flake8', tool: 'flake8', ecosystem: 'python', cwd: '', check: 'flake8', fix: null, parse: colonLines('flake8'), requires: 'flake8', install: [PIP('flake8')] })
@@ -104,7 +113,7 @@ export async function detect(files: string[], read: (path: string) => Promise<st
   if (set.has('go.mod')) {
     ecosystems.push('go')
     const go = [APT('golang-go')]
-    analyzers.push({ id: 'gofmt', tool: 'gofmt', ecosystem: 'go', cwd: '', check: 'gofmt -l .', fix: 'gofmt -w .', parse: gofmt, requires: 'gofmt', install: go })
+    analyzers.push({ id: 'gofmt', tool: 'gofmt', ecosystem: 'go', cwd: '', check: 'gofmt -l .', fix: 'gofmt -w .', fixFiles: (files) => `gofmt -w ${quoted(files)}`, exts: /\.go$/, parse: gofmt, requires: 'gofmt', install: go })
     analyzers.push({ id: 'go-vet', tool: 'go-vet', ecosystem: 'go', cwd: '', check: 'go vet ./...', fix: null, parse: colonLines('go-vet'), requires: 'go', install: go })
     if (files.some((f) => /^\.golangci\.(ya?ml|toml|json)$/.test(f))) analyzers.push({ id: 'golangci-lint', tool: 'golangci-lint', ecosystem: 'go', cwd: '', check: 'golangci-lint run', fix: null, parse: colonLines('golangci-lint'), requires: 'golangci-lint', install: [...go, 'curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b "$HOME/.local/bin"'] })
   }
@@ -119,7 +128,7 @@ export async function detect(files: string[], read: (path: string) => Promise<st
   if (set.has('Gemfile') && (set.has('.rubocop.yml') || /rubocop/.test((await read('Gemfile')) ?? ''))) {
     ecosystems.push('ruby')
     setup.push({ command: 'bundle install --quiet', ecosystem: 'ruby', hostWhenMissing: null })
-    analyzers.push({ id: 'rubocop', tool: 'rubocop', ecosystem: 'ruby', cwd: '', check: 'bundle exec rubocop --format json', fix: 'bundle exec rubocop -a', parse: rubocopJson, requires: 'bundle', install: [APT('ruby-full'), 'sudo gem install bundler >/dev/null'] })
+    analyzers.push({ id: 'rubocop', tool: 'rubocop', ecosystem: 'ruby', cwd: '', check: 'bundle exec rubocop --format json', fix: 'bundle exec rubocop -a', fixFiles: (files) => `bundle exec rubocop -a ${quoted(files)}`, exts: /\.(?:rb|rake|gemspec)$|(?:^|\/)(?:Gemfile|Rakefile)$/, parse: rubocopJson, requires: 'bundle', install: [APT('ruby-full'), 'sudo gem install bundler >/dev/null'] })
   }
 
   if (!ecosystems.length) notes.push('No supported ecosystem detected (looked for package.json, pyproject.toml/setup.py/requirements.txt, go.mod, Cargo.toml, Gemfile)')

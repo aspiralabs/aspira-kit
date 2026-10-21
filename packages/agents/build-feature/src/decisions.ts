@@ -12,7 +12,7 @@ import { STEPS } from '#src/route.ts'
 import type { QueuedAsk, RunState, TakenKey } from '#src/run-state.ts'
 
 /** The steps (and the Step 9 fix subagent) whose decisions the run lists. */
-export type DecisionStep = 'groomer' | 'spec-writer' | 'spec-reviewer' | 'planner' | 'implementor' | 'fix'
+export type DecisionStep = 'groomer' | 'spec-writer' | 'planner' | 'implementor' | 'fix'
 
 type Source = {
   /** The export file, relative to the ticket folder. */
@@ -74,8 +74,7 @@ export const DECISION_SOURCES: Readonly<Record<Exclude<DecisionStep, 'fix'>, Sou
       return { kind: 'taken', decision: { id, question, options, recommended, reasoning, whyYours, decidedBy, answer } }
     },
   },
-  'spec-writer': { file: 'spec.written/trace/review.json', list: field(['authorDecisions'], false), item: recordItem },
-  'spec-reviewer': { file: 'spec.reviewed/trace/review.json', list: field(['authorDecisions'], false), item: recordItem },
+  'spec-writer': { file: 'spec.reviewed/trace/review.json', list: field(['authorDecisions'], false), item: recordItem },
   planner: { file: 'plan.review/trace/plan.json', list: field(['decisions'], true), item: recordItem },
   implementor: {
     file: 'plan.review/trace/implementation-local.json',

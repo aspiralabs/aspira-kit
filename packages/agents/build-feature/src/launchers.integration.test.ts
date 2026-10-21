@@ -15,7 +15,7 @@ import { BOARD, PACKAGE, REPOSITORY } from './driver.test-helper.ts'
 
 const exec = promisify(execFile)
 const AGENTS = dirname(PACKAGE)
-const LAUNCHERS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer']
+const LAUNCHERS = ['groomer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer']
 const launcher = (name: string) => join(AGENTS, name, 'skill', `aspira-${name}`, 'scripts', `${name}.sh`)
 
 describe('KIT-19 T33 F6 F22: launchers accept --parent-run', () => {

@@ -29,7 +29,7 @@ async function pending(input: Parameters<typeof runLocal>[0]) {
 it('runs explore, draft and the review one stage at a time in the session, then exports the writer layout', async () => {
   const { dir, ideaPath, input } = await setup()
   const explore = await pending(input)
-  expect(explore).toMatchObject({ stage: 'explore', workDir: join(dir, 'spec.written.local') })
+  expect(explore).toMatchObject({ stage: 'explore', workDir: join(dir, 'spec.reviewed.local') })
   expect(explore.tasks.map((t) => t.phase)).toEqual(['explore'])
   const explorePrompt = await readFile(explore.tasks[0]!.prompt, 'utf8')
   expect(explorePrompt).toContain('Explore the repository for this idea')
@@ -66,15 +66,15 @@ it('runs explore, draft and the review one stage at a time in the session, then 
   await writeFile(synthesis.tasks[0]!.output, JSON.stringify({ edits: [{ id: 'E1', before: 'appears in the list.', after: 'appears in the list until removed.' }], dispositions: [{ findingId: 'R1', status: 'applied', reason: 'Retention stated', evidence: ['spec: list'], editIds: ['E1'], duplicateOf: null }] }))
 
   const done = await runLocal(input)
-  expect(done).toMatchObject({ pending: false, status: 'ready', dir: join(dir, 'spec.written'), findings: 1 })
+  expect(done).toMatchObject({ pending: false, status: 'ready', dir: join(dir, 'spec.reviewed'), findings: 1 })
   expect(await readFile(ideaPath, 'utf8')).toBe('Let people save items.')
-  expect((await readdir(join(dir, 'spec.written'))).sort()).toEqual(['idea.md', 'run-analysis.md', 'spec.draft.md', 'spec.md', 'trace'])
-  expect(await readFile(join(dir, 'spec.written/spec.md'), 'utf8')).toContain('until removed')
-  expect(await readFile(join(dir, 'spec.written/run-analysis.md'), 'utf8')).toContain('--local')
-  const trace = JSON.parse(await readFile(join(dir, 'spec.written/trace/calls.json'), 'utf8'))
+  expect((await readdir(join(dir, 'spec.reviewed'))).sort()).toEqual(['idea.md', 'run-analysis.md', 'spec.draft.md', 'spec.reviewed.md', 'trace'])
+  expect(await readFile(join(dir, 'spec.reviewed/spec.reviewed.md'), 'utf8')).toContain('until removed')
+  expect(await readFile(join(dir, 'spec.reviewed/run-analysis.md'), 'utf8')).toContain('--local')
+  const trace = JSON.parse(await readFile(join(dir, 'spec.reviewed/trace/calls.json'), 'utf8'))
   expect(trace.calls).toHaveLength(10)
-  expect(JSON.parse(await readFile(join(dir, 'spec.written/trace/review.json'), 'utf8'))).toMatchObject({ mode: 'local', status: 'ready' })
-  await expect(stat(join(dir, 'spec.written.local'))).rejects.toThrow()
+  expect(JSON.parse(await readFile(join(dir, 'spec.reviewed/trace/review.json'), 'utf8'))).toMatchObject({ mode: 'local', status: 'ready' })
+  await expect(stat(join(dir, 'spec.reviewed.local'))).rejects.toThrow()
 })
 
 it('exports an incomplete report with --finish and refuses to resume after the idea changes', async () => {
@@ -88,7 +88,7 @@ it('exports an incomplete report with --finish and refuses to resume after the i
   expect(finished.status).toBe('incomplete')
   expect(finished.spec).toBeNull()
   expect(finished.problems.join('\n')).toContain('no output was produced in the session')
-  expect(await readFile(join(dir, 'spec.written/trace/checks.md'), 'utf8')).toContain('incomplete')
+  expect(await readFile(join(dir, 'spec.reviewed/trace/checks.md'), 'utf8')).toContain('incomplete')
 })
 
 // The folder the session builds from Notion before the first step, in load-knowledge's shape.
@@ -102,7 +102,7 @@ async function seedKnowledge(dir: string) {
 async function folderSetup() {
   const { dir, ideaPath } = await setup()
   const agentDir = await mkdtemp(join(tmpdir(), 'spec-writer-agent-'))
-  const knowledge = join(dir, 'spec.written.local', 'knowledge')
+  const knowledge = join(dir, 'spec.reviewed.local', 'knowledge')
   return { dir, knowledge, input: { ideaPath, repoPath: dir, uiRequired: false }, deps: { agentDir, env: {} } }
 }
 
@@ -118,7 +118,7 @@ describe('engineering guidelines in --local', () => {
     expect(error.message).toContain(join(dir, '.env.local'))
     expect(error.message).not.toMatch(/Notion MCP|notion-fetch/i)
     await expect(stat(knowledge)).rejects.toThrow()
-    await expect(stat(join(dir, 'spec.written.local', 'state.json'))).rejects.toThrow()
+    await expect(stat(join(dir, 'spec.reviewed.local', 'state.json'))).rejects.toThrow()
   })
 
   it('gives every phase REQUIRED.md as its guidelines, points tool phases at the topic pages, and records the rules on export', async () => {
@@ -133,7 +133,7 @@ describe('engineering guidelines in --local', () => {
     expect(text).not.toMatch(/notion-fetch[^.]*guideline|guideline[^.]*notion-fetch/i)
     const finished = await runLocal({ ...input, finish: true }, deps)
     expect(finished.pending).toBe(false)
-    const report = JSON.parse(await readFile(join(dir, 'spec.written/trace/review.json'), 'utf8'))
+    const report = JSON.parse(await readFile(join(dir, 'spec.reviewed/trace/review.json'), 'utf8'))
     expect(report.knowledge).toMatchObject({ source: 'folder', path: knowledge })
     expect(report.knowledge.files.map((file: { name: string }) => file.name)).toEqual(['INDEX.md', 'REQUIRED.md', 'testing.md'])
   })

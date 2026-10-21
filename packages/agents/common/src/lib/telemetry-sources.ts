@@ -17,7 +17,6 @@ export type PhaseUsage = SpanInput
 export const USAGE_SCOPES: Readonly<Partial<Record<Skill, (typeof USAGE_SCOPE_VALUES)[number]>>> = {
   groomer: 'groomer-model-turns',
   'spec-writer': 'spec-writer-model-turns',
-  'spec-reviewer': 'spec-reviewer-model-turns',
   planner: 'planner-model-turns',
 }
 
@@ -25,7 +24,6 @@ export const USAGE_SCOPES: Readonly<Partial<Record<Skill, (typeof USAGE_SCOPE_VA
 export const HAND_USAGE_SOURCE: Readonly<Record<Skill, { file: string; kind: SourceKind } | null>> = {
   groomer: { file: 'trace/usage.json', kind: 'usage.json' },
   'spec-writer': { file: 'trace/usage.json', kind: 'usage.json' },
-  'spec-reviewer': { file: 'trace/usage.json', kind: 'usage.json' },
   planner: { file: 'trace/usage.json', kind: 'usage.json' },
   'code-analyzer': { file: 'usage.json', kind: 'ledger' },
   'pr-reviewer': { file: 'usage.jsonl', kind: 'usage.jsonl' },

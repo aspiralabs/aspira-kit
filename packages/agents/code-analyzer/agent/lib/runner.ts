@@ -10,6 +10,7 @@ import { Ledger } from './ledger.ts'
 import { runLoop, type Fixer, type LoopResult } from './loop.ts'
 import { renderReport } from './report.ts'
 import { branchName, cloneCommand, parseSource, redact, type Source } from './source.ts'
+import { changedScope, scopeNote } from './scope.ts'
 
 export type RunInput = {
   source: string
@@ -127,6 +128,9 @@ export async function runStaticAnalysis(input: RunInput, deps: RunDeps = {}) {
   const toolchain = await prepareToolchain(executor, detection.analyzers, progress)
   const setupNotes = toolchain.ready.length ? await runSetup(executor, detection, progress) : []
   detection.notes.push(...toolchain.notes, ...setupNotes)
+  // With a ticket on a local checkout, the run fixes only the files the ticket branch changed (KIT-48).
+  const scoped = source.kind === 'local' && input.ticket ? await changedScope(executor, source.gitRoot) : { scope: null, note: null }
+  if (scoped.note !== null) detection.notes.push(scoped.note)
   const ledger = new Ledger(started)
   const calls: Parameters<typeof createFixer>[0]['calls'] = []
   const model = env('STATIC_ANALYSIS_FIX_MODEL', 'openai/gpt-6.1-sol')
@@ -143,8 +147,10 @@ export async function runStaticAnalysis(input: RunInput, deps: RunDeps = {}) {
       commandTimeoutMs: Number(process.env.STATIC_ANALYSIS_COMMAND_TIMEOUT_MS) || 600_000,
       concurrency: Number(process.env.STATIC_ANALYSIS_CONCURRENCY) || 3,
       signal: deps.signal, progress,
+      scope: scoped.scope,
     })
   } finally { ledger.failRunning() }
+  if (scoped.scope !== null) detection.notes.push(scopeNote(scoped.scope, result.untouched ?? []))
   const loopMs = Date.now() - loopStarted
   const publishStarted = Date.now()
   const outputDir = resolve(input.outputDir ?? (source.kind === 'local' ? join(source.root, '.static-analysis') : join(tmpdir(), 'static-analysis', `${source.owner}-${source.name}`)))
@@ -166,8 +172,8 @@ export async function runStaticAnalysis(input: RunInput, deps: RunDeps = {}) {
     await mkdir(outputDir, { recursive: true })
     const files: Record<string, string> = {
       'report.md': report,
-      'diagnostics.json': JSON.stringify({ status: result.status, remaining: result.remaining, initial: result.initial }, null, 2),
-      'rounds.json': JSON.stringify({ status: result.status, reason: result.reason, reasonCode: result.reasonCode, ticket, head, rounds: result.rounds, problems: result.problems, rejected: result.rejected, editedFiles: result.editedFiles, detection: { ...detection, analyzers: detection.analyzers.map(({ parse: _p, ...a }) => a) }, unavailable: toolchain.unavailable, timing, remote, knowledge }, null, 2),
+      'diagnostics.json': JSON.stringify({ status: result.status, remaining: result.remaining, untouched: result.untouched ?? [], initial: result.initial }, null, 2),
+      'rounds.json': JSON.stringify({ status: result.status, reason: result.reason, reasonCode: result.reasonCode, ticket, head, scope: result.scope ?? null, rounds: result.rounds, problems: result.problems, rejected: result.rejected, editedFiles: result.editedFiles, detection: { ...detection, analyzers: detection.analyzers.map(({ parse: _p, ...a }) => a) }, unavailable: toolchain.unavailable, timing, remote, knowledge }, null, 2),
       'usage.json': JSON.stringify({ scope: 'Model turns of the fix loop only. Aborted turns may have unreported provider usage.', model, turns: ledger.turns }, null, 2),
       'calls.json': JSON.stringify({ system: 'see fixer.ts systemPrompt', model, calls: calls.map((c) => ({ ...c, output: c.output && redactOutput(c.output) })) }, null, 2),
     }

@@ -180,13 +180,14 @@ check_parent_run() {
 # ATTACH (the --local verify step's telemetry attach result) and,
 # with --no-ticket, SPEC.
 parse() {
-  POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED="" SPEC="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
+  POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" GUIDELINES="" PACKET="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED="" SPEC="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
   while [ $# -gt 0 ]; do
     case $1 in
       --no-ticket) NO_TICKET=1; shift ;;
       --force-pull) FORCE_PULL=1; shift ;;
       --verify) VERIFY=1; shift ;;
       --guidelines) [ $# -ge 2 ] || die "--guidelines needs a path"; GUIDELINES=$2; shift 2 ;;
+      --packet) [ $# -ge 2 ] || die "--packet needs a path"; PACKET=$2; shift 2 ;;
       --repo) [ $# -ge 2 ] || die "--repo needs a path"; REPO=$2; shift 2 ;;
       --output) [ $# -ge 2 ] || die "--output needs a path"; OUT=$2; shift 2 ;;
       --finish) FINISH=1; shift ;;
@@ -204,7 +205,7 @@ parse() {
   if [ -n "$NO_TICKET" ]; then
     [ -n "$POSITIONAL" ] || die "--no-ticket runs the spec-writer on an idea path with no board: spec-writer.sh start|local <idea.md> --no-ticket"
     SPEC=$(absolute_file "$POSITIONAL")
-    OUT=${OUT:-"$(dirname "$SPEC")/spec.written"}
+    OUT=${OUT:-"$(dirname "$SPEC")/spec.reviewed"}
   elif [ -n "$POSITIONAL" ] && [ -e "$POSITIONAL" ]; then
     die "$POSITIONAL is a file path, not a ticket; pass --no-ticket to run on a path with no board"
   fi
@@ -249,13 +250,16 @@ cmd_start() {
     ticket_start
     folder=$T_FOLDER
     spec=$T_INPUT
-    [ -n "$spec" ] && [ -f "$spec" ] || die "$T_ID has no idea.md in its working folder (expected $folder/idea.md); the pull writes it from the ticket's Idea"
-    OUT=${OUT:-"$folder/spec.written"}
+    [ -n "$spec" ] && [ -f "$spec" ] || die "$T_ID has no input in its working folder (idea.md from the ticket's Idea, or the spec to review again from In Review: Spec)"
+    OUT=${OUT:-"$folder/spec.reviewed"}
     printf 'ticket: %s %s (%s)\nstatus: %s -> %s\nfolder: %s\n' "$T_ID" "$T_TITLE" "$T_URL" "$T_BEFORE" "$T_STATUS" "$folder"
   fi
   [ -n "$GUIDELINES" ] || eve=$(eve_bin)
   run=$(mktemp -d "${TMPDIR:-/tmp}/spec-writer.XXXXXX")
-  prompt="Write a spec from the idea at $spec for the local repository $REPO. Write results directly to $OUT. Use load-knowledge for the required guidelines, then call write-spec once. The ticket's board moves and pushes are made by the launcher around this run; do not call board yourself. Report status, spec.md, spec.draft.md, run-analysis.md and open author decisions."
+  case $(basename "$spec") in
+    spec.md|spec.reviewed.md) prompt="Review the answered spec at $spec again for the local repository $REPO (the one spec step, rerun from In Review: Spec): call write-spec once with specPath, never ideaPath. Write results directly to $OUT. Use load-knowledge for the required guidelines first. The ticket's board pushes are made by the launcher around this run; do not call board yourself. Report status, spec.reviewed.md, run-analysis.md and open author decisions." ;;
+    *) prompt="Write a spec from the idea at $spec for the local repository $REPO. Write results directly to $OUT. Use load-knowledge for the required guidelines, then call write-spec once with ideaPath. The ticket's board moves and pushes are made by the launcher around this run; do not call board yourself. Report status, spec.reviewed.md, spec.draft.md, run-analysis.md and open author decisions." ;;
+  esac
   printf '%s\n' "$OUT" > "$run/output"
   printf '%s\n' "$REPO" > "$run/repo"
   printf '%s\n' "$AGENT/agent/instructions.md" > "$run/instructions"
@@ -277,9 +281,9 @@ code=$?
 printf '%s\n' "$code" > "$RUN/exit"
 # The trace records which agent package ran.
 [ ! -d "$OUTPUT/trace" ] || cp "$RUN/agent.json" "$OUTPUT/trace/agent-version.json"
-# The board step after the run: the written spec becomes the folder's spec.md, pushed as the Spec page, then the success move.
+# The board step after the run: the reviewed spec becomes the folder's spec.md (the Spec page) and is pushed as Spec Reviewed, then the success move (none from In Review: Spec).
 if [ -n "$FOLDER" ]; then
-  [ ! -f "$OUTPUT/spec.md" ] || cp "$OUTPUT/spec.md" "$FOLDER/spec.md"
+  [ ! -f "$OUTPUT/spec.reviewed.md" ] || cp "$OUTPUT/spec.reviewed.md" "$FOLDER/spec.md"
   status=$(node -p "try { JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).status ?? 'incomplete' } catch { 'incomplete' }" "$OUTPUT/trace/review.json" 2>/dev/null || echo incomplete)
   # The run's telemetry (KIT-19): the run id and start time ticket.ts start printed, or the build-feature
   # step this run is (--parent-run), which writes none of its own.
@@ -305,6 +309,7 @@ cmd_local() {
   if [ -n "$NO_TICKET" ]; then args+=(--no-ticket "$SPEC"); elif [ -n "$POSITIONAL" ]; then args+=(--ticket "$POSITIONAL"); fi
   [ -z "$OUT" ] || args+=(--output "$OUT")
   [ -z "$GUIDELINES" ] || args+=(--guidelines "$GUIDELINES")
+  [ -z "$PACKET" ] || args+=(--packet "$PACKET")
   [ -z "$FORCE_PULL" ] || args+=(--force-pull)
   [ -z "$VERIFY" ] || args+=(--verify)
   [ -z "$FINISH" ] || args+=(--finish)
@@ -329,7 +334,7 @@ cmd_status() {
   [ ! -f "$run/agent" ] || cat "$run/agent"
   [ ! -f "$run/log" ] || tail -n 40 "$run/log"
   [ ! -f "$run/instructions" ] || printf 'Instructions: %s\n' "$(cat "$run/instructions")"
-  printf 'Spec: %s/spec.md (only if the review produced valid edits)\nDraft: %s/spec.draft.md\nDecisions: %s/trace/decisions.md\nRun analysis: %s/run-analysis.md\n' "$output" "$output" "$output" "$output"
+  printf 'Spec: %s/spec.reviewed.md (only if the review produced valid edits)\nDraft: %s/spec.draft.md (write mode only)\nDecisions: %s/trace/decisions.md\nRun analysis: %s/run-analysis.md\n' "$output" "$output" "$output" "$output"
   exit "$REPORT_EXIT"
 }
 cmd_load_knowledge() {

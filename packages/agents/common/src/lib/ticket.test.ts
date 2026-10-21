@@ -47,8 +47,7 @@ const ticket: TicketRecord = {
 describe('the gate table', () => {
   it('names every skill, and the spec rows', () => {
     expect(Object.keys(GATES)).toEqual([...SKILLS])
-    expect(GATES['spec-writer']).toMatchObject({ accepts: ['Ready: Idea'], inProgress: 'In Progress: Spec', success: 'In Review: Spec' })
-    expect(GATES['spec-reviewer']).toMatchObject({ accepts: ['In Review: Spec'] })
+    expect(GATES['spec-writer']).toMatchObject({ accepts: ['Ready: Idea', 'In Review: Spec'], inProgress: 'In Progress: Spec', success: 'In Review: Spec', startFrom: ['Ready: Idea'] })
     expect(GATES.planner).toMatchObject({ accepts: ['Ready: Spec'], inProgress: 'In Progress: Plan', success: 'In Review: Plan' })
     expect(GATES.implementor).toMatchObject({ accepts: ['Ready: Plan'], inProgress: 'In Progress: Implementation', success: 'In Review: Implementation' })
     expect(GATES['code-analyzer']).toMatchObject({ accepts: ['In Progress: Implementation', 'In Review: Implementation'], pushes: [] })
@@ -74,7 +73,8 @@ describe('the gate table', () => {
     expect(checkGate('planner', { ...ticket, status: 'In Progress: Plan' })).toEqual({ ok: true, retry: true, startMove: null })
     expect(checkGate('spec-writer', { ...ticket, status: 'Ready: Idea' })).toEqual({ ok: true, retry: false, startMove: { from: 'Ready: Idea', to: 'In Progress: Spec' } })
     expect(checkGate('implementor', { ...ticket, status: 'In Progress: Implementation' })).toEqual({ ok: true, retry: true, startMove: null })
-    expect(checkGate('spec-reviewer', { ...ticket, status: 'In Review: Spec' })).toEqual({ ok: true, retry: false, startMove: null })
+    // The one spec step reruns from In Review: Spec with no move (KIT-48).
+    expect(checkGate('spec-writer', { ...ticket, status: 'In Review: Spec' })).toEqual({ ok: true, retry: false, startMove: null })
     expect(checkGate('code-analyzer', { ...ticket, status: 'In Review: Implementation' })).toEqual({ ok: true, retry: false, startMove: null })
   })
 
@@ -98,16 +98,15 @@ describe('the gate table', () => {
     expect(endMove('planner', 'ready', 'In Progress: Plan')).toEqual({ from: 'In Progress: Plan', to: 'In Review: Plan' })
     expect(endMove('planner', 'incomplete', 'In Progress: Plan')).toBeNull()
     expect(endMove('planner', 'ready', 'Ready: Spec')).toBeNull()
-    expect(endMove('spec-reviewer', 'ready', 'In Review: Spec')).toBeNull()
+    expect(endMove('spec-writer', 'ready', 'In Review: Spec')).toBeNull()
     expect(endMove('implementor', 'ready', 'In Progress: Implementation')).toBeNull()
     expect(endMove('implementor', 'ready', 'In Progress: Implementation', true)).toEqual({ from: 'In Progress: Implementation', to: 'In Review: Implementation' })
     expect(endMove('pr-reviewer', 'ready', 'In Review: Implementation')).toBeNull()
   })
 
   it('pushes the fixed titles, and the decisions page only for needs-author', () => {
-    expect(pushesFor('spec-writer', 'ready').map((push) => push.title)).toEqual(['Spec'])
-    expect(pushesFor('spec-reviewer', 'ready').map((push) => push.title)).toEqual(['Spec Reviewed'])
-    expect(pushesFor('spec-reviewer', 'needs-author').map((push) => [push.title, push.file])).toEqual([['Spec Reviewed', 'spec.reviewed/spec.reviewed.md'], ['Spec Review Decisions', 'spec.reviewed/trace/decisions.md']])
+    expect(pushesFor('spec-writer', 'ready').map((push) => push.title)).toEqual(['Spec', 'Spec Reviewed'])
+    expect(pushesFor('spec-writer', 'needs-author').map((push) => [push.title, push.file])).toEqual([['Spec', 'spec.md'], ['Spec Reviewed', 'spec.reviewed/spec.reviewed.md'], ['Spec Review Decisions', 'spec.reviewed/trace/decisions.md']])
     expect(pushesFor('planner', 'ready').map((push) => [push.title, push.file])).toEqual([['Plan', 'plan.review/plan.reviewed.md']])
     expect(pushesFor('implementor', 'ready').map((push) => [push.title, push.file])).toEqual([['Implementation', 'plan.review/implementation.md']])
     expect(pushesFor('pr-reviewer', 'ready').map((push) => [push.title, push.file])).toEqual([['PR Review', 'pr-review/review.md']])
@@ -236,14 +235,13 @@ const STATUSES = [
   'Dropped',
 ]
 const GROOMER_ACCEPTS = ['Idea', 'Grooming', 'Shortlist']
-const SIBLINGS = ['spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer'] as const
+const SIBLINGS = ['spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer'] as const
 
 describe('the gate table, groomer row', () => {
-  it('the six existing rows refuse Dropped with the messages they give today', () => {
+  it('the five existing rows refuse Dropped with the messages they give today', () => {
     const dropped = SIBLINGS.map((skill) => checkGate(skill, { ...ticket, status: 'Dropped' }))
     expect(dropped).toEqual([
-      { ok: false, message: 'NOM-4 Explore pagination is "Dropped"; spec-writer needs "Ready: Idea". "Ready: Idea" is set by a human, after grooming the idea. No model call was made.' },
-      { ok: false, message: 'NOM-4 Explore pagination is "Dropped"; spec-reviewer needs "In Review: Spec". "In Review: Spec" is set by the spec writer, when the spec is on the ticket. No model call was made.' },
+      { ok: false, message: 'NOM-4 Explore pagination is "Dropped"; spec-writer needs "Ready: Idea" or "In Review: Spec". "Ready: Idea" is set by a human, after grooming the idea. No model call was made.' },
       { ok: false, message: 'NOM-4 Explore pagination is "Dropped"; planner needs "Ready: Spec". "Ready: Spec" is set by a human, after approving the spec. No model call was made.' },
       { ok: false, message: 'NOM-4 Explore pagination is "Dropped"; implementor needs "Ready: Plan". "Ready: Plan" is set by a human, after approving the plan. No model call was made.' },
       {
@@ -480,9 +478,9 @@ describe('the board tool', () => {
     expect([...TOOL_SKILLS]).toEqual([...SIBLINGS])
   })
 
-  it('refuses the groomer and accepts the six siblings', () => {
+  it('refuses the groomer and accepts the five siblings', () => {
     expect(accepts('groomer')).toBe(false)
-    expect(TOOL_SKILLS.map(accepts)).toEqual([true, true, true, true, true, true])
+    expect(TOOL_SKILLS.map(accepts)).toEqual([true, true, true, true, true])
   })
 })
 

@@ -850,6 +850,8 @@ export function remainingStep(skill: Skill, status: string, prOpened: boolean, r
     if (runStatus === 'ready') return null
   }
   const failed = runStatus !== 'ready'
+  // A spec step rerun from In Review: Spec that still needs the author (KIT-48): the decisions, not a failure, are what is left.
+  if (skill === 'spec-writer' && runStatus === 'needs-author' && status === 'In Review: Spec') return `Answer the open decisions on the Spec Review Decisions page (or in spec.reviewed/trace/decisions.md), then run ${skill} again from "${status}"; it reviews the answered spec and makes no move.`
   if (skill === 'implementor' && runStatus === 'ready' && !prOpened) return `The ticket stays in "${status}": opening the PR is the remaining step. Push the branch, open the PR, set the ticket's PR property and move it to "In Review: Implementation".`
   if (failed && gate.inProgress !== undefined) return `The run did not succeed, so the ticket stays in "${status}". Fix what stopped it and run ${skill} again; a rerun from "${gate.inProgress}" makes no start move.`
   return null
@@ -1412,8 +1414,9 @@ export async function localBoardVerify(options: { skill: Skill; folder: string; 
 }
 
 /** The ticket's input file for a skill, checked to exist, with a message naming the page that is missing. */
-export function inputFileFor(skill: Skill, folder: string): string {
-  const input = GATES[skill].input
+export function inputFileFor(skill: Skill, folder: string, statusBefore?: string): string {
+  const gate = GATES[skill]
+  const input = statusBefore !== undefined && gate.inputByStatus?.[statusBefore] !== undefined ? gate.inputByStatus[statusBefore]! : gate.input
   if (input === undefined) throw new Error(`${skill} takes no input file`)
   const candidates = Array.isArray(input) ? input : [input]
   for (const candidate of candidates) {
@@ -1427,7 +1430,7 @@ export function inputFileFor(skill: Skill, folder: string): string {
 }
 
 function whoProduces(title: string): string {
-  const by: Record<string, string> = { Spec: 'The spec writer puts it there.', 'Spec Reviewed': 'The spec reviewer puts it there.', Plan: 'The planner puts it there.', Implementation: 'The implementor puts it there.' }
+  const by: Record<string, string> = { Spec: 'The spec writer puts it there.', 'Spec Reviewed': 'The spec writer puts it there.', Plan: 'The planner puts it there.', Implementation: 'The implementor puts it there.' }
   return by[title] ?? ''
 }
 

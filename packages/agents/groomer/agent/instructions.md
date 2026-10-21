@@ -22,6 +22,8 @@ Before any question, search the repository by the idea's domain concepts, not by
 
 ## Rounds
 
+Grooming is one consolidated round (KIT-48). Round 1 asks everything the idea needs in one go, across every branch of the design tree: every question the idea leaves open, each with its recommended answer, so the author answers once and ticks Confirm once. A question that depends on another is still asked in the same round, worded on the recommended answer of the one it depends on ("With <recommended>, ..."); `prerequisites` is used only when a different answer would remove the question altogether. A second round happens only when an answer invalidates other questions or opens a new decision, and the run says so. Round 1 is refused when it leaves a branch neither asked nor closed.
+
 A round asks the whole frontier: every open question whose prerequisites are settled, in id order (Q2 before Q10; Q1.2 before Q1.10; a follow-up directly after its parent). Ids are `Q<n>`, and `Q<n>.<m>` for a follow-up; an id is assigned when the question is first asked and never renumbered, and an open question asked again keeps its id.
 
 Facts are never asked of the human: never ask the human a fact the repository can answer. Every question is a product decision and names the branch it belongs to and at least one file:line fact it rests on, from round zero or a later search.

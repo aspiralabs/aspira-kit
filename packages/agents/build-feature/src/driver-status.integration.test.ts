@@ -85,21 +85,21 @@ describe('T15 F4: Statuses with nothing to run end the run', () => {
 })
 
 describe('T16 F5: In Review: Spec and the rows with no command', () => {
-  it('skips the spec-reviewer and moves to Ready: Spec when spec.written/ reviewed the current spec.md', async () => {
+  it('moves to Ready: Spec without a step when spec.reviewed/ is a ready export of the current spec.md', async () => {
     const h = await project({ status: 'In Review: Spec' })
     await writeStepExport(h.folder, h.repo, 'spec-writer', 'ready')
     const result = await h.advance(returnOn('move'), await h.start())
     expect({ move: moveOf(result.stage), steps: ofKind(h.stages, 'step').length }).toEqual({ move: { from: 'In Review: Spec', to: 'Ready: Spec' }, steps: 0 })
   }, SLOW)
 
-  it('runs the spec-reviewer when no review covers spec.md, and moves only after its ready report', async () => {
+  it('reruns the spec writer when no ready export covers spec.md, and moves only after its ready report (KIT-48)', async () => {
     const h = await project({ status: 'In Review: Spec' })
     await writeFile(join(h.folder, 'spec.md'), '# X\n\n- [ ] F1: it works.\n')
     const step = await h.advance({}, await h.start())
     const movesBefore = ofKind(h.stages, 'move').length
     await h.report(step.stage!, 'ready')
     const after = await h.advance(returnOn('move'))
-    expect({ command: commandOf(step), movesBefore, move: moveOf(after.stage) }).toEqual({ command: '/aspira-spec-reviewer KIT-11 --local --take-recommended', movesBefore: 0, move: { from: 'In Review: Spec', to: 'Ready: Spec' } })
+    expect({ command: commandOf(step), movesBefore, move: moveOf(after.stage) }).toEqual({ command: '/aspira-spec-writer KIT-11 --local --take-recommended', movesBefore: 0, move: { from: 'In Review: Spec', to: 'Ready: Spec' } })
   }, SLOW)
 
   it('prints a Ready move, not a step, in Shortlist and In Review: Plan', async () => {

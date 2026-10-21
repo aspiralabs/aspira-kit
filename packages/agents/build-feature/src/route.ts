@@ -8,7 +8,7 @@
 import { commandFor, nextStep } from '@aspiralabs/kit/playbook'
 
 /** The steps, in Playbook order. */
-export const STEPS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer'] as const
+export const STEPS = ['groomer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer'] as const
 export type StepName = (typeof STEPS)[number]
 export const isStep = (value: string): value is StepName => (STEPS as readonly string[]).includes(value)
 
@@ -17,7 +17,7 @@ export const isStep = (value: string): value is StepName => (STEPS as readonly s
  * run. Their default (cloud) modes refuse the flag ("--take-recommended only applies to local"), so
  * a cloud run passes nothing and a needs-author result stops it, naming the open decisions.
  */
-export const TAKE_RECOMMENDED: readonly StepName[] = ['groomer', 'spec-writer', 'spec-reviewer', 'planner']
+export const TAKE_RECOMMENDED: readonly StepName[] = ['groomer', 'spec-writer', 'planner']
 
 /**
  * How the run runs each step (F2, Q10 revised): 'local' runs the step skill with --local in this
@@ -64,7 +64,7 @@ export type RouteFacts = {
   id: string
   /** aspira.json `app`, or '.' (A2). */
   app: string
-  /** In Review: Spec: a review (spec.written/ or a ready spec-reviewer run) covers the current spec.md (A6). */
+  /** In Review: Spec: a ready spec step export (spec.reviewed/) covers the current spec.md (A6, KIT-48). */
   specCovered: boolean
   /** The implementor's last exported status (implementation-local.json), read through readRunStatus, or null. */
   implementor: string | null
@@ -152,6 +152,7 @@ export function routeStatus(status: string, facts: RouteFacts): Route {
       return { kind: 'readyMove', from: move.from, to: move.to }
     }
     case 'In Review: Spec':
+      // The one spec step reruns from here on the answered spec (KIT-48); a ready export that covers spec.md moves the card on.
       return facts.specCovered ? { kind: 'readyMove', from: 'In Review: Spec', to: 'Ready: Spec' } : stepCommand(named, facts)
     case 'In Progress: Implementation': {
       if (facts.implementor !== 'ready') return stepCommand('Ready: Plan', facts)

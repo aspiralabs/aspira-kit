@@ -142,8 +142,8 @@ describe('nextAction: run-status templates (T11)', () => {
     expect(allRunText(action)).toContain('/aspira-planner KIT-2 --local')
   })
 
-  it('an incomplete spec-reviewer names rerunning the stage', () => {
-    const action = nextAction({ kind: 'run', id: 'KIT-2', skill: 'spec-reviewer', runStatus: 'incomplete', reason: INJECTION_REASON })
+  it('an incomplete spec-writer names rerunning the stage', () => {
+    const action = nextAction({ kind: 'run', id: 'KIT-2', skill: 'spec-writer', runStatus: 'incomplete', reason: INJECTION_REASON })
     expect(`${action.step} ${action.do.join(' ')}`.toLowerCase()).toContain('rerun the stage')
   })
 
@@ -168,7 +168,7 @@ describe('nextAction: run-status templates (T11)', () => {
       nextAction({ kind: 'run', id: 'KIT-2', skill: 'groomer', runStatus: 'needs-author', reasonCode: 'paused', reason: INJECTION_REASON }),
       nextAction({ kind: 'run', id: 'KIT-2', skill: 'groomer', runStatus: 'needs-author', reasonCode: null, reason: INJECTION_REASON }),
       nextAction({ kind: 'run', id: 'KIT-2', skill: 'implementor', runStatus: 'refused', reasonCode: 'plan-drift', reason: INJECTION_REASON }),
-      nextAction({ kind: 'run', id: 'KIT-2', skill: 'spec-reviewer', runStatus: 'incomplete', reason: INJECTION_REASON }),
+      nextAction({ kind: 'run', id: 'KIT-2', skill: 'spec-writer', runStatus: 'incomplete', reason: INJECTION_REASON }),
       nextAction({ kind: 'run', id: 'KIT-2', skill: 'planner', runStatus: 'blocked', reason: INJECTION_REASON }),
       nextAction({ kind: 'run', id: 'KIT-2', skill: 'planner', runStatus: 'ready', verified: false, liveStatus: 'In Review: Plan', reason: INJECTION_REASON }),
       nextAction({ kind: 'run', id: 'KIT-2', skill: 'implementor', runStatus: 'ready', verified: true, liveStatus: 'In Progress: Implementation', apps: ['.'], analyzedApps: [], reason: INJECTION_REASON }),

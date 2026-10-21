@@ -1,17 +1,13 @@
 {
   "name": "@aspiralabs/spec-reviewer",
   "version": "0.8.15",
-  "description": "Spec review: research, concurrent audits, deterministic reconciliation checks.",
+  "description": "The spec review pipeline (research, concurrent specialist audits, deterministic reconciliation), as a library the spec writer runs on its draft and on an answered spec. No skill or agent of its own since KIT-48.",
   "type": "module",
   "exports": {
     "./lib/*": "./agent/lib/*.ts"
   },
   "scripts": {
-    "dev": "eve dev",
-    "build": "eve build",
-    "info": "eve info",
     "review": "node --env-file-if-exists=../.env.local --env-file-if-exists=.env.development.local --experimental-strip-types scripts/review.ts",
-    "review:local": "node --experimental-strip-types scripts/local.ts",
     "score": "node --experimental-strip-types scripts/score.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -39,10 +35,8 @@
   "license": "MIT",
   "files": [
     "agent",
-    "skill",
     "scripts",
-    "README.md",
-    ".env.example"
+    "README.md"
   ],
   "repository": {
     "type": "git",

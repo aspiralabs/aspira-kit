@@ -323,8 +323,11 @@ async function handFinish(skill: Skill, run: Started, when: string, fields: { ru
 
 /** What a spec-writer run leaves in the folder: the spec it pushes and its usage ledger, written mid-run. */
 async function seedSpecWriterExport(when: string): Promise<string> {
-  const exportDir = join(folderOf(), 'spec.written')
+  const exportDir = join(folderOf(), 'spec.reviewed')
   await writeFile(join(folderOf(), 'spec.md'), '## Intent\n\nPeople can reach every recipe.\n')
+  // The one spec step pushes Spec Reviewed from its own export too (KIT-48).
+  await mkdir(exportDir, { recursive: true })
+  await writeFile(join(exportDir, 'spec.reviewed.md'), '## Intent\n\nPeople can reach every recipe.\n')
   const turn = (phase: string, n: number, input: number, output: number, cost: string) => ({
     phase,
     model: 'anthropic/claude-opus-5.5',

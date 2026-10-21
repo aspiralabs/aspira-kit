@@ -51,7 +51,9 @@ import { acceptApproval, approvalFor, invocationApproval, recordApproval } from 
 import { buildRunStatus, buildStopSchema, type BuildStop } from '#src/build-status.ts'
 import { addTaken, collectTakenDecisions, isDecisionStep, openDecisions, takenKeyOf } from '#src/decisions.ts'
 import { gatePhase } from '#src/gate.ts'
+import { ensureKnowledge, knowledgeFlag } from '#src/knowledge.ts'
 import { modelFor, parseModels, subagentModels, type Role } from '#src/models.ts'
+import { PACKET_STEPS, writeRunPacket } from '#src/packet-file.ts'
 import { BACKWARD_MOVES_SKILL_MAY_MAKE, decideOverrides, findOverrides, overridesStage, recordOverrides } from '#src/overrides.ts'
 import { renderPrBody } from '#src/pr-body.ts'
 import { acceptResolution, cardDifferences, resolveStage, resolveWithToken, type Resolution } from '#src/resolve.ts'
@@ -146,7 +148,6 @@ const summaryPath = (ctx: Ctx) => join(ctx.folder, 'build-summary.md')
 const STEP_ROLE: Readonly<Record<StepName, Role>> = {
   groomer: 'groomer',
   'spec-writer': 'spec-writer',
-  'spec-reviewer': 'spec-reviewer',
   planner: 'planner',
   implementor: 'implementor',
   'code-analyzer': 'code-analyzer',
@@ -156,8 +157,7 @@ const STEP_ROLE: Readonly<Record<StepName, Role>> = {
 /** What each step itself does on Notion: it moves the card, sets Dev and pushes its own child pages. */
 const STEP_NOTION: Readonly<Record<StepName, { op: 'read' | 'write'; target: string; page?: string }[]>> = {
   groomer: [{ op: 'write', target: 'ticket' }, { op: 'write', target: 'child-page', page: 'Grooming Decisions' }],
-  'spec-writer': [{ op: 'write', target: 'ticket' }, { op: 'write', target: 'child-page', page: 'Spec' }],
-  'spec-reviewer': [{ op: 'write', target: 'child-page', page: 'Spec Reviewed' }, { op: 'write', target: 'child-page', page: 'Spec Review Decisions' }],
+  'spec-writer': [{ op: 'write', target: 'ticket' }, { op: 'write', target: 'child-page', page: 'Spec' }, { op: 'write', target: 'child-page', page: 'Spec Reviewed' }, { op: 'write', target: 'child-page', page: 'Spec Review Decisions' }],
   planner: [{ op: 'write', target: 'ticket' }, { op: 'write', target: 'child-page', page: 'Plan' }],
   implementor: [{ op: 'write', target: 'ticket' }, { op: 'write', target: 'child-page', page: 'Implementation' }],
   'code-analyzer': [{ op: 'read', target: 'ticket' }],
@@ -796,8 +796,7 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
 /** The five statuses every skill ends in (F7): each entry names the one file the run reads it from. */
 const STATUS_WORDS: Readonly<Record<StepName, string>> = {
   groomer: 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in groom/trace/groom.json',
-  'spec-writer': 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in spec.written/trace/review.json',
-  'spec-reviewer': 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in spec.reviewed/trace/review.json',
+  'spec-writer': 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in spec.reviewed/trace/review.json',
   planner: 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in plan.review/trace/review.json',
   implementor: 'the five-word run status (ready, needs-author, incomplete, refused or blocked) in plan.review/trace/implementation-local.json',
   'code-analyzer': 'the five-word run status (ready, needs-author, incomplete, refused or blocked) the analyzer finished with, in .static-analysis/rounds.json',
@@ -825,7 +824,9 @@ function printed(pending: Pending): Stage {
   const stage = pending.stage as Stage
   if (pending.kind !== 'step' || typeof stage.command !== 'string' || typeof stage.runId !== 'string') return stage
   const launcher = Array.isArray(stage.launcher) ? launcherWithParentRun(stage.launcher as string[], stage.runId, pending.nonce) : undefined
-  return { ...stage, command: `${stage.command}${parentRun(stage.runId, pending.nonce)}`, ...(launcher === undefined ? {} : { launcher }) }
+  const runFlags = typeof stage.runFlags === 'string' ? stage.runFlags : ''
+  const shownLauncher = launcher === undefined ? undefined : runFlags === '' ? launcher : launcherWithParentRun(launcherFor(`${stage.command}${runFlags}`, stage.mode === 'cloud' ? 'cloud' : 'local'), stage.runId, pending.nonce)
+  return { ...stage, command: `${stage.command}${runFlags}${parentRun(stage.runId, pending.nonce)}`, ...(shownLauncher === undefined ? {} : { launcher: shownLauncher }) }
 }
 
 /** The usage report a step (or fix) subagent writes: what the Agent tool reported for it, and one entry per subagent it launched. */
@@ -839,12 +840,20 @@ export const USAGE_REPORT_SHAPE = {
   subagents: [{ label: '<what it did>', startedAt: '<ISO wall clock before the Agent call>', endedAt: '<ISO wall clock after it>', totalTokens: '<number>', toolUses: '<number>', wallMs: '<number>', model: '<model id, if known>' }],
 }
 
-async function printStep(ctx: Ctx, state: RunState, step: StepName, command: string): Promise<Out> {
+async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: string): Promise<Out> {
   if (ctx.mode === 'cloud' && step === 'implementor') {
     const blocked = await cloudImplementorBlocked(ctx)
-    if (blocked !== null) return stop(ctx, state, blocked, { stopped: true, reason: { kind: 'cloud-implementor' }, failure: { action: step, command, message: blocked } })
+    if (blocked !== null) return stop(ctx, started, blocked, { stopped: true, reason: { kind: 'cloud-implementor' }, failure: { action: step, command: routed, message: blocked } })
   }
   await checkKitVersion(ctx.input.repo)
+  // The engineering guidelines once per ticket (KIT-48): built on the first step, verified against Notion before every later one.
+  const shared = await ensureKnowledge(started, { env: ctx.input.env, repo: ctx.input.repo, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }), folder: ctx.folder, now: ctx.input.now })
+  const state = shared.note === null ? shared.state : { ...shared.state, phases: { ...shared.state.phases, knowledgeNote: shared.note } }
+  // The run packet (KIT-48): rewritten before each step from what the ticket folder holds now.
+  const packet = PACKET_STEPS.includes(step) ? await writeRunPacket({ repo: ctx.input.repo, folder: ctx.folder, aspira: ctx.aspira, knowledgeDir: shared.knowledge?.dir ?? null }) : null
+  // The stored command stays the routed one; the run's own flags ride only on what is printed, like --parent-run.
+  const command = routed
+  const runFlags = [...(shared.knowledge === null ? [] : [knowledgeFlag(step, shared.knowledge)]), ...(packet === null ? [] : [`--packet ${packet}`])].map((flag) => ` ${flag}`).join('')
   const model = modelFor(STEP_ROLE[step], ctx.aspira)
   const promptDir = join(ctx.dir, 'prompts')
   await mkdir(promptDir, { recursive: true })
@@ -852,8 +861,8 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
   const skillMd = `.claude/skills/aspira-${step}/SKILL.md`
   // The nonce is minted first so the printed command and launcher can carry it; what is stored keeps both without it.
   const nonce = randomUUID()
-  const shownCommand = `${command}${parentRun(ctx.runId, nonce)}`
-  const shownLauncher = launcherWithParentRun(launcher, ctx.runId, nonce)
+  const shownCommand = `${command}${runFlags}${parentRun(ctx.runId, nonce)}`
+  const shownLauncher = launcherWithParentRun(launcherFor(`${command}${runFlags}`, ctx.mode), ctx.runId, nonce)
   const out = pend(
     ctx,
     state,
@@ -862,6 +871,8 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
       step,
       command,
       launcher,
+      // The run's own flags (KIT-48), kept apart so a re-print carries them and the stored command stays clean.
+      runFlags,
       mode: ctx.mode,
       cwd: ctx.input.repo,
       model,
@@ -890,6 +901,8 @@ async function printStep(ctx: Ctx, state: RunState, step: StepName, command: str
         ]
       : []),
     `You run on ${model}. ${subagentModels(step, ctx.aspira)}`,
+    '',
+    "Every task the step's `local` stage prints names the model it runs on (`model`): launch that task's subagent on that model, never on your own by default (KIT-48).",
     '',
     ...(ctx.autonomous
       ? ['This run is --autonomous: the step takes every open question as its recommended option and, for the groomer, confirms itself; no question is asked of a human, and the skill prints no chat round. If the skill still prints a question, report it in your result line and stop; do not answer it.', '']

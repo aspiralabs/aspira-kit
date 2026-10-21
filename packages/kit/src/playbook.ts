@@ -43,24 +43,24 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
     ].join('\n'),
   },
   {
-    title: 'Step 2: write the spec',
+    title: 'Step 2: write and review the spec',
     body: [
       '```bash',
       '/aspira-spec-writer <ID> --local',
       '```',
-      'Needs Ready: Idea; the skill refuses any other Status before it runs a model, naming the Status it needs and who moves the card there. It sets Dev, moves the card to In Progress: Spec, pulls the ticket into `.work/<id>-<slug>/` (`ticket.md`, `idea.md`) and runs the spec writer on `idea.md`. Output: `spec.md` in the folder, plus `spec.written/` (the writer runs one review on its own draft). On success it puts `spec.md` on the ticket as the child page **Spec** (BOARD-003) and moves the card to In Review: Spec. If the run stops, the card stays In Progress: Spec and the same command reruns it without a second claim. The run reports its status in `.work/<id>-<slug>/progress.md` and exits by it: 0 only when it ends ready, 1 incomplete or blocked, 3 refused, 5 needs-author; read the note before rerunning.',
+      'Needs Ready: Idea; the skill refuses any other Status before it runs a model, naming the Status it needs and who moves the card there. It sets Dev, moves the card to In Progress: Spec, pulls the ticket into `.work/<id>-<slug>/` (`ticket.md`, `idea.md`) and runs the spec writer on `idea.md`: it explores the repository, drafts the spec and runs the one specialist review on the draft (KIT-48: the spec is reviewed once, here, not again by a second skill). Output: `spec.reviewed/spec.reviewed.md`, `run-analysis.md`, `trace/`, plus `spec.md` in the folder (the same reviewed spec). On success it puts `spec.md` on the ticket as the child page **Spec**, the reviewed spec as **Spec Reviewed**, the open decisions as **Spec Review Decisions** when the status is `needs-author` (BOARD-003), and moves the card to In Review: Spec. If the run stops, the card stays In Progress: Spec and the same command reruns it without a second claim. The run reports its status in `.work/<id>-<slug>/progress.md` and exits by it: 0 only when it ends ready, 1 incomplete or blocked, 3 refused, 5 needs-author; read the note before rerunning.',
       'Skip this step when the ticket already has a Spec page (migrated tickets): move the card to In Review: Spec by hand and go to Step 3.',
     ].join('\n'),
   },
   {
-    title: 'Step 3: debate the spec',
+    title: 'Step 3: answer the spec\'s decisions',
     body: [
       '```bash',
-      '/aspira-spec-reviewer <ID> --local',
+      '/aspira-spec-writer <ID> --local',
       '```',
-      'Needs In Review: Spec. The skill pulls `spec.md` from the Spec page and reviews it; it makes no move. Output: `spec.reviewed/spec.reviewed.md`, `run-analysis.md`, `trace/`. On success it puts the reviewed spec on the ticket as **Spec Reviewed**, and the open decisions as **Spec Review Decisions** when the status is `needs-author`. Read `trace/review.json`:',
+      'Needs In Review: Spec. Read `spec.reviewed/trace/review.json`:',
       '- `ready`: go to Step 4.',
-      '- `needs-author`: answer each decision in `trace/decisions.md`, write the answers into `spec.reviewed/spec.reviewed.md`, and rerun this step; it reviews the answered file and replaces the Spec Reviewed page. Repeat until it says `ready`. Do not skip the rerun; NOM-4 did, and the planner then worked from an unreviewed edit.',
+      '- `needs-author`: answer each decision in `spec.reviewed/trace/decisions.md` (or on the Spec Review Decisions page), write the answers into `spec.reviewed/spec.reviewed.md`, and run the same command again: from In Review: Spec the spec writer reviews the answered spec again, makes no move, and replaces the Spec, Spec Reviewed and Spec Review Decisions pages. Repeat until it says `ready`. Do not skip the rerun; NOM-4 did, and the planner then worked from an unreviewed edit.',
     ].join('\n'),
   },
   {

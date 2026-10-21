@@ -112,7 +112,8 @@ async function roundOneAsked() {
     searched: ['cart limit'],
     facts: [{ path: 'src/cart.ts', line: 1 }],
     questions: [question('Q1', 'problem'), question('Q2', 'constraints')],
-    branches: [{ id: 'problem', state: 'visited' }, { id: 'constraints', state: 'visited' }],
+    // The one consolidated round (KIT-48): every other branch closed in round 1.
+    branches: SEEDED.map((id) => (id === 'problem' || id === 'constraints' ? { id, state: 'visited' } : { id, state: 'closed', reason: 'nothing to decide: out of scope' })),
   })
   return ws
 }
@@ -141,21 +142,13 @@ it('with --take-recommended, takes Q2 (an ordinary branch) as the agent\'s recom
   expect(block(page, 'Q2')).toContain('Taken by the agent')
 })
 
-it('with --autonomous, takes Q1 (an exit-criterion branch) too, prints no answers stage, and ends the round with nothing to answer while branches are still open (KIT-24)', async () => {
+it('with --autonomous, takes Q1 (an exit-criterion branch) too, prints no answers stage, and confirms itself at once: the consolidated round visited or closed every branch (KIT-24, KIT-48)', async () => {
   const { folder, input } = await roundOneAsked()
   const autonomous: LocalInput = { ...input, autonomous: true }
-  // No answers stage: the driver writes an empty answers file itself and goes on to fetch the page.
-  const fetch = await runLocal(autonomous, deps)
-  expect(fetch).toMatchObject({ stage: 'board' })
-  expect(JSON.parse(await readFile(answersFile(folder, 1), 'utf8'))).toEqual([])
-  await writeText(pageFile(folder, 1), firstPage)
-  const board = await runLocal(autonomous, deps)
-  expect(board).toMatchObject({ stage: 'board', runStatus: 'needs-author', open: 0 })
-  const record = await readGroomRecord(folder)
-  expect(record?.decisions.map((decision) => [decision.id, decision.decidedBy, decision.answer])).toEqual([
-    ['Q1', 'agent', 'A'],
-    ['Q2', 'agent', 'A'],
-  ])
+  // No answers stage: the driver writes the answers file itself; with nothing open and every branch visited or closed, that answer is Confirm.
+  const summary = await runLocal(autonomous, deps)
+  expect(summary).toMatchObject({ stage: 'summary' })
+  expect(JSON.parse(await readFile(answersFile(folder, 1), 'utf8'))).toEqual([{ id: 'CONFIRM', question: 'Grooming is complete', answer: 'Confirm' }])
 })
 
 it('with --autonomous, confirms itself once every branch is visited and nothing is open: the answers file holds CONFIRM and the next stage is the Idea summary (KIT-24)', async () => {

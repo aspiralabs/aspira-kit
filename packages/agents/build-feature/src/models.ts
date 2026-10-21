@@ -13,7 +13,6 @@ export const ROLES = [
   'orchestrator',
   'groomer',
   'spec-writer',
-  'spec-reviewer',
   'planner',
   'implementor',
   'pr-reviewer',
@@ -30,8 +29,6 @@ export const MODELS: Readonly<Record<Role, ModelName>> = {
   orchestrator: 'fable',
   groomer: 'opus',
   'spec-writer': 'opus',
-  // The spec-reviewer's reconciliation.
-  'spec-reviewer': 'opus',
   planner: 'opus',
   // The implementor's lane workers.
   implementor: 'sonnet',
@@ -45,6 +42,7 @@ export const MODELS: Readonly<Record<Role, ModelName>> = {
   'code-analyzer': 'haiku',
 }
 
+const RETIRED_ROLES = ['spec-reviewer'] as const
 const isRole = (value: string): value is Role => (ROLES as readonly string[]).includes(value)
 const isModel = (value: string): value is ModelName => (MODEL_NAMES as readonly string[]).includes(value)
 
@@ -53,11 +51,13 @@ export const modelsSchema = z
   .record(z.string(), z.string())
   .superRefine((models, ctx) => {
     for (const [role, model] of Object.entries(models)) {
+      // A role an earlier kit knew (spec-reviewer, folded into spec-writer by KIT-48) is ignored, not refused.
+      if ((RETIRED_ROLES as readonly string[]).includes(role)) continue
       if (!isRole(role)) ctx.addIssue({ code: 'custom', path: [role], message: `unknown role "${role}" in aspira.json models; the roles are ${ROLES.join(', ')}` })
       if (!isModel(model)) ctx.addIssue({ code: 'custom', path: [role], message: `unknown model "${model}" for ${role} in aspira.json models; the models are ${MODEL_NAMES.join(', ')}` })
     }
   })
-  .transform((models) => models as Partial<Record<Role, ModelName>>)
+  .transform((models) => Object.fromEntries(Object.entries(models).filter(([role]) => !(RETIRED_ROLES as readonly string[]).includes(role))) as Partial<Record<Role, ModelName>>)
 export type ModelOverrides = z.infer<typeof modelsSchema>
 
 /** The overrides in aspira.json `models`, or a thrown error naming the unknown role or model. */
@@ -78,5 +78,5 @@ export function subagentModels(step: string, aspira: { models?: unknown } | null
   const fetches = `knowledge fetches ${modelFor('knowledge', aspira)}, Notion page pushes ${modelFor('notion-push', aspira)}`
   if (step === 'implementor') return `Its lane workers run on ${modelFor('implementor', aspira)}; ${fetches}.`
   if (step === 'pr-reviewer') return `Its review seats run on ${modelFor('pr-reviewer', aspira)} and its verifier on ${modelFor('pr-reviewer-verifier', aspira)}; ${fetches}.`
-  return `Its own subagents: ${fetches}.`
+  return `Its own tasks name their model (research and reconciliation on opus, explorers and specialists on sonnet); ${fetches}.`
 }

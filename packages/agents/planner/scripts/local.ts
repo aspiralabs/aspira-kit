@@ -13,7 +13,7 @@ import { runLocal } from '../agent/lib/local.ts'
 // output file) or, once both phases are done, the exported plan with the end-of-run board actions.
 // --verify is the last step: ticket.md must show the Status the end stage expected. --finish
 // exports what exists as incomplete. Every step names the agent package that ran (`agent`).
-const usage = 'Usage: pnpm run plan:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <absolute-spec>) [--output DIR] [--guidelines REQUIRED.md] [--force-pull] [--verify] [--finish] [--parent-run RUN:NONCE] [--attach JSON]'
+const usage = 'Usage: pnpm run plan:local --repo <absolute-repo> (--ticket [ID | URL] | --no-ticket <absolute-spec>) [--output DIR] [--guidelines REQUIRED.md] [--packet FILE] [--force-pull] [--verify] [--finish] [--parent-run RUN:NONCE] [--attach JSON]'
 const SKILL = 'planner' as const
 
 /** The session usage report of a --local hand run: <export>/trace/session-usage.json (KIT-19, F9). */
@@ -25,7 +25,7 @@ let driverArgs: DriverTicketArgs = {}
 try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { repo: { type: 'string' }, ticket: { type: 'string' }, 'no-ticket': { type: 'string' }, output: { type: 'string' }, guidelines: { type: 'string' }, 'force-pull': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' }, 'parent-run': { type: 'string' }, attach: { type: 'string' } },
+    options: { repo: { type: 'string' }, ticket: { type: 'string' }, 'no-ticket': { type: 'string' }, output: { type: 'string' }, guidelines: { type: 'string' }, 'force-pull': { type: 'boolean' }, verify: { type: 'boolean' }, finish: { type: 'boolean' }, 'take-recommended': { type: 'boolean' }, 'parent-run': { type: 'string' }, attach: { type: 'string' }, packet: { type: 'string' } },
   })
   if (values.repo === undefined || positionals.length > 0 || (values.ticket !== undefined && values['no-ticket'] !== undefined)) throw new UsageError(usage)
   const repo = values.repo
@@ -48,6 +48,7 @@ try {
         repoPath: repo,
         ...(outputDir === undefined ? {} : { outputDir }),
         ...(values.guidelines === undefined ? {} : { guidelinesPath: values.guidelines }),
+        ...(values.packet === undefined ? {} : { packetPath: values.packet }),
         finish: values.finish === true, takeRecommended: values['take-recommended'] === true,
       })
       // The knowledge could not be loaded: blocked, reported and noted by handleRunError (F52).

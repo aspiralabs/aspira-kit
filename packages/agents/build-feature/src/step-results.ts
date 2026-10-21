@@ -67,8 +67,7 @@ const CONTINUE_ON: RunStatus = 'ready'
 /** Per step: where its result is read, and where its agent records its usage (KIT-19). */
 export const stepResultTable: Readonly<Record<StepName, ResultRow>> = {
   groomer: { file: ({ folder }) => join(folder, 'groom/trace/groom.json'), usage: ({ folder }) => ({ file: join(folder, 'groom/trace/usage.json'), kind: 'usage.json' }) },
-  'spec-writer': { file: ({ folder }) => join(folder, 'spec.written/trace/review.json'), usage: ({ folder }) => ({ file: join(folder, 'spec.written/trace/usage.json'), kind: 'usage.json' }) },
-  'spec-reviewer': { file: ({ folder }) => join(folder, 'spec.reviewed/trace/review.json'), usage: ({ folder }) => ({ file: join(folder, 'spec.reviewed/trace/usage.json'), kind: 'usage.json' }) },
+  'spec-writer': { file: ({ folder }) => join(folder, 'spec.reviewed/trace/review.json'), usage: ({ folder }) => ({ file: join(folder, 'spec.reviewed/trace/usage.json'), kind: 'usage.json' }) },
   planner: { file: ({ folder }) => join(folder, 'plan.review/trace/review.json'), usage: ({ folder }) => ({ file: join(folder, 'plan.review/trace/usage.json'), kind: 'usage.json' }) },
   implementor: { file: ({ folder }) => join(folder, 'plan.review/trace/implementation-local.json'), usage: () => null },
   'code-analyzer': { file: ({ repo, app }) => join(repo, app, '.static-analysis/rounds.json'), usage: ({ repo, app }) => ({ file: join(repo, app, '.static-analysis/usage.json'), kind: 'ledger' }) },
@@ -128,17 +127,14 @@ export async function readImplementorStatus(folder: string): Promise<RunStatus |
 
 const readText = (file: string) => readFile(file, 'utf8').catch(() => null)
 
-/** In Review: Spec: whether a review covers the current spec.md (A6). */
-export async function readSpecCoverage(folder: string, state: RunState): Promise<boolean> {
+/** In Review: Spec: whether a ready spec step export (spec.reviewed/) covers the current spec.md (A6, KIT-48). */
+export async function readSpecCoverage(folder: string, _state: RunState): Promise<boolean> {
   const spec = await readText(join(folder, 'spec.md'))
   if (spec === null) return false
-  const written = await readText(join(folder, 'spec.written/spec.md'))
-  const writerReview = await readJson(join(folder, 'spec.written/trace/review.json'))
-  const writerReady = writerReview.ok && reviewStatus.safeParse(writerReview.value).data === 'ready'
-  if (written === spec && writerReady) return true
-  const reviewer = await readJson(join(folder, 'spec.reviewed/trace/review.json'))
-  const reviewerReady = reviewer.ok && reviewStatus.safeParse(reviewer.value).data === 'ready'
-  return reviewerReady && state.steps.some((step) => step.step === 'spec-reviewer' && step.status === 'ready')
+  const reviewed = await readText(join(folder, 'spec.reviewed/spec.reviewed.md'))
+  const review = await readJson(join(folder, 'spec.reviewed/trace/review.json'))
+  const ready = review.ok && reviewStatus.safeParse(review.value).data === 'ready'
+  return ready && reviewed === spec
 }
 
 /** The code-analyzer finished ready (or its pre-upgrade clean) after the last build. */
