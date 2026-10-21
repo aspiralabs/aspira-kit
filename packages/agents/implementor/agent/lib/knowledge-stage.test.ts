@@ -79,7 +79,7 @@ describe('the implementor --local knowledge stage (T63)', () => {
     expect(notion.requests.length).toBeGreaterThan(0)
     // `as string`: there is no knowledge stage in the type any more; the guard still catches one at runtime.
     if (!first.pending || (first.stage as string) === 'knowledge') throw new Error(`expected a model stage, got ${JSON.stringify(first)}`)
-    for (const task of first.tasks) expect(await readFile(task.prompt, 'utf8')).not.toMatch(/Notion MCP/i)
+    for (const task of first.tasks) expect(await readFile(task.prompt, 'utf8')).not.toMatch(/Notion MCP[^.]*guideline|guideline[^.]*Notion MCP/i) // KIT-54: the Notion MCP is a research tool; the rules still come from the folder
 
     const afterFirst = notion.requests.length
     const second: LocalResult = await runLocal(ws.input, deps)

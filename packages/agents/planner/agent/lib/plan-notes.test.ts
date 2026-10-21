@@ -29,10 +29,11 @@ it('turns a plan gap about the UI catalog into a note once the listing succeeded
     ui.tasks[1]!.changes[0]!.path = 'app/items/page.tsx'
     const plan = planSchema.parse({ ...ui, gaps: [gap, 'src/other.ts could not be read'] })
     const assessed = assessPlan({ spec, guidelines: '', repo: { gaps: [], files: new Map(), tracked: new Set() }, research, plan, phaseErrors: [], uiRequired: true, reads, cancelled: false })
-    return { gaps: assessed.problems.filter((problem) => problem.startsWith('Plan gap:')), notes: plan.notes ?? [] }
+    return { gaps: assessed.problems.filter((problem) => problem.startsWith('Plan gap:')), notes: plan.notes ?? [], open: assessed.openGaps }
   }
+  // KIT-54: every plan gap is a note for the approver; only the catalog's own gap stays a problem, and only while the listing failed.
   const listed = assess([{ tool: 'mcp__aspiralabs-ui__list_components', ok: true }])
-  expect(listed).toEqual({ gaps: ['Plan gap: src/other.ts could not be read'], notes: [gap] })
+  expect(listed).toEqual({ gaps: [], notes: [gap, 'src/other.ts could not be read'], open: [`Plan gap: ${gap}`, 'Plan gap: src/other.ts could not be read'] })
   const unlisted = assess([])
-  expect(unlisted.gaps).toEqual([`Plan gap: ${gap}`, 'Plan gap: src/other.ts could not be read'])
+  expect(unlisted).toEqual({ gaps: [`Plan gap: ${gap}`], notes: ['src/other.ts could not be read'], open: ['Plan gap: src/other.ts could not be read'] })
 })

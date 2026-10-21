@@ -1,7 +1,7 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { generateText, Output, stepCountIs, tool, type ModelMessage, type ToolSet } from 'ai'
-import { gateway, streamStructured } from '@aspiralabs/agent-common/lib/gateway'
+import { generateText, stepCountIs, tool, type ModelMessage, type ToolSet } from 'ai'
+import { gateway, structuredWithTools } from '@aspiralabs/agent-common/lib/gateway'
 import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
 import { openDecisions } from '@aspiralabs/agent-common/lib/decisions'
 import { connectReadTools } from '@aspiralabs/agent-common/lib/mcp'
@@ -15,6 +15,14 @@ import { pageIdFrom } from '@aspiralabs/agent-common/lib/knowledge'
 import type { Answer, DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
 import { mergeDecisions, planSchema, readAnswers, renderChecks, renderDecisionsFile, renderPlan, researchSchema, touchesUi, validatePlan, type Plan, type Research } from './plan.ts'
 import { system, researchSystem, researchInstructions, planningInstructions, repairInstructions } from './prompts.ts'
+import { notionReadToolsFromEnv } from '@aspiralabs/agent-common/lib/notion-read'
+import { CLOUD_RESEARCH_TOOLS, RESEARCH_RULE } from '@aspiralabs/agent-common/lib/research-rule'
+
+/** The system prompts with the research rule (KIT-54): research and planning read before they report a gap. */
+const researchSystemWithRule = `${researchSystem}\n\n${RESEARCH_RULE}`
+const planningSystem = `${system}\n\n${RESEARCH_RULE}`
+/** Tool rounds planning gets before it must submit the plan (KIT-54). */
+export const PLANNING_MAX_STEPS = 8
 import { renderFactsBlock, researchSteps, reviewFacts } from './review-facts.ts'
 
 /** Correction passes planning gets when its plan fails the checks a model can fix. */
@@ -74,7 +82,7 @@ export function planContext(prepared: Pick<PreparedPlan, 'spec' | 'specPath' | '
 /** A guideline page research read in full: Notion through the read tool, or a knowledge file in --local. */
 export type GuidelinePage = { source: string; markdown: string }
 
-/** The full text of the guideline pages research read, so planning (which has no tools) sees them too. */
+/** The full text of the guideline pages research read, so planning sees them without re-reading them. */
 export function guidelinePagesSection(pages: GuidelinePage[]): string {
   return pages.length ? `\n\nGUIDELINE PAGES READ DURING RESEARCH (full text):\n${pages.map((page) => `SOURCE ${page.source}\n${page.markdown}`).join('\n\n')}` : ''
 }
@@ -190,21 +198,25 @@ export type PlanStatus = 'ready' | 'needs-author' | 'incomplete'
  * decision still open as the agent's recommended option; the status rule (needs-author only while a
  * decision is open) is unchanged, so a run with nothing left open is ready.
  */
-export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<PlanRepository, 'gaps' | 'files' | 'tracked'>; research: Research | null; plan: Plan | null; phaseErrors: { phase: string; error: string | null }[]; uiRequired: boolean; reads: { tool: string; ok: boolean }[]; cancelled: boolean; answers?: Answer[]; takeRecommended?: boolean }): { status: PlanStatus; problems: string[]; decisions: DecisionRecord[] } {
+export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<PlanRepository, 'gaps' | 'files' | 'tracked'>; research: Research | null; plan: Plan | null; phaseErrors: { phase: string; error: string | null }[]; uiRequired: boolean; reads: { tool: string; ok: boolean }[]; cancelled: boolean; answers?: Answer[]; takeRecommended?: boolean }): { status: PlanStatus; problems: string[]; openGaps: string[]; decisions: DecisionRecord[] } {
   const { spec, guidelines, repo, research, plan } = args
   // Snapshot gaps (files not indexed for size) are notes in the evidence packet, never a problem (KIT-29).
   const problems: string[] = []
   for (const phase of args.phaseErrors) if (phase.error) problems.push(`${phase.phase}: ${phase.error}`)
   if (!research) problems.push('Research unavailable')
   if (!plan) problems.push('No structured plan produced')
-  if (research?.gaps.length) problems.push(...research.gaps.map((gap) => `Research gap: ${gap}`))
+  // A gap research still had after its turns is a note for the approver, never a problem (KIT-54): it names what it looked for and could not settle.
+  const openGaps: string[] = (research?.gaps ?? []).map((gap) => `Research gap: ${gap}`)
+  if (plan && openGaps.length) plan.notes = [...(plan.notes ?? []), ...openGaps.filter((note) => !(plan.notes ?? []).includes(note))]
   // A spec that mentions a page or a card is not UI work; a plan that writes UI files is.
   const catalogMissing = missingUiReads(args.uiRequired && (plan === null || touchesUi(plan)), args.reads)
   if (plan) {
     // A gap about the UI catalog (an empty listing, a failed get_component) is a note once the listing itself succeeded (KIT-37): there is nothing more to read.
     const catalogGap = (gap: string) => /list_components|get_component|ui catalog|component docs|aspiralabs-ui|@aspiralabs\/ui/i.test(gap)
-    const [notes, gaps] = catalogMissing ? [[], plan.gaps] : [plan.gaps.filter(catalogGap), plan.gaps.filter((gap) => !catalogGap(gap))]
+    // Every plan gap is a note too (KIT-54): listed on the plan and in the summary for the approver; the UI catalog's own gap stays a problem only while the listing itself failed (KIT-37).
+    const [notes, gaps] = catalogMissing ? [plan.gaps.filter((gap) => !catalogGap(gap)), plan.gaps.filter(catalogGap)] : [plan.gaps, []]
     if (notes.length) plan.notes = [...(plan.notes ?? []), ...notes.filter((note) => !(plan.notes ?? []).includes(note))]
+    openGaps.push(...notes.map((gap) => `Plan gap: ${gap}`))
     problems.push(...validatePlan(plan, spec, repo.files, repo.tracked), ...gaps.map((gap) => `Plan gap: ${gap}`))
   }
   if (catalogMissing) problems.push('UI planning requires a successful list_components MCP read')
@@ -213,7 +225,7 @@ export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<
   const decisions = mergeDecisions([research?.decisions ?? [], plan?.decisions ?? []], args.answers ?? [], args.takeRecommended ?? false)
   if (plan) plan.decisions = decisions
   const status: PlanStatus = problems.length ? 'incomplete' : decisions.some((decision) => decision.decidedBy === 'open') ? 'needs-author' : 'ready'
-  return { status, problems, decisions }
+  return { status, problems, openGaps, decisions }
 }
 
 /** `problems` with any occurrence of `repoPath` (absolute) made repository-relative: the Plan page's
@@ -264,7 +276,8 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   let plan: Plan | null = null
   let research: Research | null = null
   const pages: GuidelinePage[] = []
-  const readTools = readingGuidelines(mcp.tools, pages)
+  // The Notion read tools ride on the integration token (KIT-54): any page or database, not only the guideline topics.
+  const readTools = { ...readingGuidelines(mcp.tools, pages), ...notionReadToolsFromEnv() }
   // The spec reviewer's own facts, reused when they still describe this spec and commit (F33-F35):
   // research then gets a smaller turn budget and the facts block in its prompt.
   const facts = await reviewFacts({ folder: ticketFolderFor(input.specPath), repoPath: input.repoPath, repo: { commit: repo.commit, dirty: repo.dirty } })
@@ -301,13 +314,13 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       while (!submitted && steps - used > 1 && !signal.aborted) {
         const remaining = steps - used
         const first = used === 0
-        const result = await generateText({ model: gateway(models.research), system: researchSystem, ...(first ? { prompt } : { messages }), tools, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', stopWhen: [stepCountIs(remaining - 1), () => submitted !== undefined], prepareStep: ({ stepNumber }) => { turn = used + stepNumber; return first && stepNumber === 0 ? { activeTools: Object.keys(tools).filter((name) => name !== 'submit_research'), toolChoice: 'required' as const } : {} }, ...hooks })
+        const result = await generateText({ model: gateway(models.research), system: researchSystemWithRule, ...(first ? { prompt } : { messages }), tools, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', stopWhen: [stepCountIs(remaining - 1), () => submitted !== undefined], prepareStep: ({ stepNumber }) => { turn = used + stepNumber; return first && stepNumber === 0 ? { activeTools: Object.keys(tools).filter((name) => name !== 'submit_research'), toolChoice: 'required' as const } : {} }, ...hooks })
         used += Math.max(1, result.steps?.length ?? 1)
         messages = [...messages, ...(result.responseMessages ?? [])]
         if (!submitted) messages.push({ role: 'user', content: researchContinue(steps - used) })
       }
       lastTurn = true
-      if (!submitted && !signal.aborted) await generateText({ model: gateway(models.research), system: researchSystem, messages: [...messages.slice(0, -1), { role: 'user', content: 'Your turns are used up. Submit the evidence you gathered with submit_research now. Cite only files and lines you actually read; list anything you did not read as a gap.' }], tools: { submit_research: tools.submit_research! }, toolChoice: { type: 'tool', toolName: 'submit_research' }, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', ...hooks })
+      if (!submitted && !signal.aborted) await generateText({ model: gateway(models.research), system: researchSystemWithRule, messages: [...messages.slice(0, -1), { role: 'user', content: 'Your turns are used up. Submit the evidence you gathered with submit_research now. Cite only files and lines you actually read; list anything you did not read as a gap.' }], tools: { submit_research: tools.submit_research! }, toolChoice: { type: 'tool', toolName: 'submit_research' }, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', ...hooks })
       if (!submitted) throw new Error('Research did not submit evidence within its turn budget')
       return researchSchema.parse(submitted)
     })
@@ -317,8 +330,10 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
     if (research && !options.signal?.aborted) {
       options.progress?.('planning')
       const prompt = planningPrompt(context, research, planningInstructions, pages)
+      // Planning reads too (KIT-54): the repository, the guideline topics and Notion, for a fact research left out, then submits the plan.
+      const planningTools: ToolSet = { ...repo.tools, ...readTools }
       const draftPlan = (phase: string, prompt: string) => trace.invoke({ phase, model: models.planning, prompt }, async (signal, hooks) => {
-        const output = await streamStructured({ model: gateway(models.planning), system, prompt, output: Output.object({ schema: planSchema }), abortSignal: signal, maxRetries: 0, maxOutputTokens: 24_000, reasoning: 'medium', ...hooks })
+        const output = await structuredWithTools({ model: gateway(models.planning), system: planningSystem, prompt: `${prompt}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: planSchema, tools: planningTools, maxSteps: PLANNING_MAX_STEPS, maxOutputTokens: 24_000, reasoning: 'medium', submitName: 'submit_plan', abortSignal: signal, ...hooks })
         return planSchema.parse(output)
       })
       plan = await draftPlan('planning', prompt)
@@ -333,7 +348,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         plan = revised
       }
     }
-    const { status, problems, decisions } = assessPlan({ spec, guidelines, repo, research, plan, phaseErrors: trace.phases, uiRequired, reads: mcp.reads, cancelled: options.signal?.aborted === true, answers, takeRecommended: input.takeRecommended ?? false })
+    const { status, problems, openGaps, decisions } = assessPlan({ spec, guidelines, repo, research, plan, phaseErrors: trace.phases, uiRequired, reads: mcp.reads, cancelled: options.signal?.aborted === true, answers, takeRecommended: input.takeRecommended ?? false })
     const runStatus: RunStatus = status
     const reviewMs = Date.now() - started - prepareMs
     const exportStarted = Date.now()
@@ -357,8 +372,8 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         : runStatus === 'needs-author' ? `${openCount} decision${openCount === 1 ? '' : 's'} open: ${join(dir, 'trace', 'decisions.md')}`
           : (problems[0] ?? null)
       const reasonCode = null
-      return { 'run-analysis.md': analysis.markdown, 'trace/review.json': JSON.stringify({ status: runStatus, reason, reasonCode, problems, decisions, input, repoCommit: repo.commit, repoDirty: repo.dirty, reviewFacts: { included: facts.included, reason: facts.reason }, models, phases: trace.phases, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, reviewMs, exportMs, totalMs, reportedCostUsd }, null, 2) }
+      return { 'run-analysis.md': analysis.markdown, 'trace/review.json': JSON.stringify({ status: runStatus, reason, reasonCode, problems, openGaps, decisions, input, repoCommit: repo.commit, repoDirty: repo.dirty, reviewFacts: { included: facts.included, reason: facts.reason }, models, phases: trace.phases, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, reviewMs, exportMs, totalMs, reportedCostUsd }, null, 2) }
     })
-    return { status, dir, problems, decisions, prepareMs, reviewMs, totalMs, reportedCostUsd }
+    return { status, dir, problems, openGaps, decisions, prepareMs, reviewMs, totalMs, reportedCostUsd }
   } finally { await mcp.close() }
 }

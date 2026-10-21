@@ -37,6 +37,7 @@
 // `Phase` (below), bound to its name in PHASES (NOVA1.2).
 
 import { randomUUID } from 'node:crypto'
+import { RESEARCH_RULE } from '@aspiralabs/agent-common/lib/research-rule'
 import { existsSync, mkdirSync } from 'node:fs'
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, join, relative } from 'node:path'
@@ -905,6 +906,8 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
     `You run on ${model}. ${subagentModels(step, ctx.aspira)}`,
     '',
     "Every task the step's `local` stage prints names the model it runs on (`model`): launch that task's subagent on that model, never on your own by default (KIT-48).",
+    '',
+    `${RESEARCH_RULE} Pass that on to every subagent you launch: the session's research tools are the repository (Read, Grep, Glob), the Notion MCP (notion-fetch, notion-search, notion-query-data-sources) and the web (WebFetch, WebSearch), read-only.`,
     '',
     ...(ctx.autonomous
       ? ['This run is --autonomous: the step takes every open question as its recommended option and, for the groomer, confirms itself; no question is asked of a human, and the skill prints no chat round. If the skill still prints a question, report it in your result line and stop; do not answer it.', '']

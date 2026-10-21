@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { notionReadToolsFromEnv } from '@aspiralabs/agent-common/lib/notion-read'
 import { readFile } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import { writeArtifacts } from './artifacts.ts'
@@ -85,7 +86,8 @@ export async function runReview(input: RunInput, options: { signal?: AbortSignal
   const prepared = await prepareReview(input, preparation)
   const { dir, spec, guidelines, repo, uiRequired, answers } = prepared
   const mcp = await connectReadTools(process.env.MCP_READ_CONNECTIONS, preparation)
-  const tools = { ...repo.tools, ...mcp.tools }
+  // The Notion read tools ride on the integration token every phase can use (KIT-54).
+  const tools = { ...repo.tools, ...mcp.tools, ...notionReadToolsFromEnv() }
   const catalogTool = Object.keys(mcp.tools).find((name) => name.endsWith('__list_components'))
   const componentTool = Object.keys(mcp.tools).find((name) => name.endsWith('__get_component'))
   let catalog: unknown = null

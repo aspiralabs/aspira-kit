@@ -344,3 +344,13 @@ describe('writeKnowledgeFolder (direct)', () => {
     expect(await readdir(out)).toEqual(['keep.md'])
   })
 })
+
+it('KIT-54: INDEX.md names the databases the tree links and how to read their rows', async () => {
+  const { databasesSection } = await import('./knowledge-walk.ts')
+  const text = databasesSection([{ title: 'Approved Technologies', url: 'https://app.notion.com/p/b62da71dab204ffb8450675c6dfc0bf7' }, { title: '', url: 'https://app.notion.com/p/x' }])
+  expect(text).toContain('## Databases')
+  expect(text).toContain('- Approved Technologies (https://app.notion.com/p/b62da71dab204ffb8450675c6dfc0bf7)')
+  expect(text).toContain('- Database (https://app.notion.com/p/x)')
+  expect(text).toContain('notion_read')
+  expect(databasesSection([])).toBe('')
+})

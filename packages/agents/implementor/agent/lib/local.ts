@@ -8,6 +8,7 @@
 // Nothing in this file restates their rules.
 
 import { execFile } from 'node:child_process'
+import { RESEARCH_RULE, sessionResearchTools } from '@aspiralabs/agent-common/lib/research-rule'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
@@ -367,6 +368,7 @@ function orchestratorPrompt(args: { task: OrchestratorStage; output: string; sch
     'You are the implementor, running as this Claude Code session instead of the `implementor` eve agent. The Procedure and Agent instructions sections below are the agent\'s own files, read when this step ran. They are the authority. This header only maps the run onto this machine.',
     '',
     `- You are in the Procedure's "Claude Code session" column. The repository is ${args.repo} (the agent's /workspace/repo). The Notion rules are already loaded into ${args.knowledgeDir}; do not call load-knowledge, checkout-repo or publish-branch, and push nothing.`,
+    `- ${RESEARCH_RULE} ${sessionResearchTools(args.repo)}`,
     `- This stage: ${headings} of the Procedure. ${task.does}`,
     `- Finish by writing ONE JSON object to \`${args.output}\` that validates against the output schema at the end, then run the \`local\` step again.`,
     '',

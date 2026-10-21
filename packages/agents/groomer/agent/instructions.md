@@ -41,3 +41,7 @@ Confirm is offered only when no question is open and every branch is visited. A 
 ## Results and the report
 
 Results are written under `groom/` in the working folder: `round-<n>.json`, `idea-summary.md` on a confirm, `run-analysis.md` and `trace/` (the record `trace/groom.json`, the pulled page `trace/decisions.md`, calls, usage and the agent version). Report the run status first (`ready` once confirmed, `needs-author` while decisions are open or, with the reason code `paused`, when Stop grooming was ticked, `incomplete`, `refused` or `blocked`), the round-zero report on a first round, every question with its recommended answer and why it is the human's to decide, and the paths of `trace/groom.json` and `run-analysis.md`. Never summarise away a question: the count you report equals the number of questions you list.
+
+## Research
+
+Use what you were given first: the packet, the snapshot, the record or the exploration in the task is your evidence, and most questions are answered there. When it does not answer a question, research it: read the repository's code (the files, not just the file map), Notion (any page or database the guidelines, the ticket, the idea or the spec point to: Approved Technologies, ADRs, decision pages, the Feature Board) or the product's public documentation, whichever can settle it. What you were given is a head start, not a wall. "Unknown", "unverified" or a gap is allowed only once that research is exhausted, and it names where you looked and why that did not settle it. Every phase and subagent of yours works under this rule.

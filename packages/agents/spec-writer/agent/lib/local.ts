@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { sessionResearchTools } from '@aspiralabs/agent-common/lib/research-rule'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -64,17 +65,17 @@ const schemaFor = (phase: string): z.ZodType => {
 }
 const systemFor = (phase: string) => (phase === 'explore' || phase.startsWith('explore:') || phase === 'draft' ? writerSystemPrompt : reviewSystemPrompt)
 
-const readOnly = (repo: string) => `Read-only tools only: Read, Grep, Glob and non-mutating git commands, in the repository at ${repo}; for a fact that lives outside it (a vendor limit, an infrastructure behaviour, a decision on a Notion page) the Notion MCP read tools (notion-fetch, notion-search) and WebFetch or WebSearch on public documentation, never a write. Cite every such source as a URL or a Notion page title with the quoted line (KIT-33); an external source you could not open stays a gap.`
+const readOnly = (repo: string) => `${sessionResearchTools(repo)} An external source you could not open stays a gap.`
 const uiCatalog = 'The agent preloads the Aspira UI catalog (list_components) for UI work; here, call list_components and get_component through the aspiralabs-ui MCP and record each read in uiEvidence. If that MCP is not available in this session, record it as a gap.'
 // Draft, research and reconciliation start from the packet (KIT-48) but are not walled in by it
 // (KIT-53, David: no phase is packet-only for reads). The exploration, the source packet and the
 // review record in the task are the head start; a fact they lack is read, not left as a gap.
-const headStart = (repo: string) => `The material in the task is your evidence and your head start: work from it first and do not re-explore the whole repository. When it lacks a fact you need, read it instead of raising a gap: Read and Grep in the repository at ${repo}; the Notion MCP read tools (notion-fetch, notion-search) for a Notion page or database the guidelines, the idea or the spec point to (Approved Technologies, ADRs, a decision page); WebFetch or WebSearch on public documentation for a vendor limit or an API shape. Cite each such read as a file:line, a Notion page title or a URL with the quoted line; a gap is only for a source you could not open. The session records your tool calls.`
+const headStart = (repo: string) => `The material in the task is your evidence and your head start, not a wall: work from it first and do not re-explore the whole repository; when it lacks a fact you need, read it instead of raising a gap. ${sessionResearchTools(repo)} The session records your tool calls.`
 const phaseNotes: Record<string, (repo: string) => string> = {
   explore: (repo) => `${readOnly(repo)} The agent gives this phase ${EXPLORE_MAX_STEPS} tool rounds; be as efficient: batch reads and searches. ${uiCatalog}`,
-  draft: (repo) => `The cloud agent runs this phase without tools, over the idea and exploration in the task; in this session you may read. ${headStart(repo)}`,
-  research: (repo) => `The cloud agent runs this phase without tools, over the source packet in the task; in this session you may read. ${headStart(repo)} Do not start the specialists' work.`,
-  synthesis: (repo) => `The cloud agent runs this phase without tools, over the review record in the task; in this session you may read. ${headStart(repo)}`,
+  draft: (repo) => `This phase works over the idea and the exploration in the task. ${headStart(repo)}`,
+  research: (repo) => `This phase works over the source packet in the task. ${headStart(repo)} Do not start the specialists' work.`,
+  synthesis: (repo) => `This phase works over the review record in the task. ${headStart(repo)}`,
   ui: (repo) => `${readOnly(repo)} The agent makes get_component this phase's first tool call. ${uiCatalog}`,
 }
 const specialistNote = (repo: string) => `${readOnly(repo)} The agent gives this phase ${SPECIALIST_STEPS} tool rounds; be as efficient: batch reads and searches.`
