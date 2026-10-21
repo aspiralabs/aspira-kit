@@ -1,8 +1,8 @@
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
-import { callsSoFar, capRefusal, maxSeatCalls } from '../lib/call-cap'
-import { REPO_PATH } from '../lib/review'
-import { SEARCH_CONTEXT_LINES, formatSearchOutput, searchCommand } from '../lib/search'
+import { callsSoFar, capRefusal, maxSeatCalls } from '../lib/call-cap.ts'
+import { REPO_PATH } from '../lib/review.ts'
+import { SEARCH_CONTEXT_LINES, formatSearchOutput, searchCommand } from '../lib/search.ts'
 
 // grep over the checked-out tree with two lines of context, for the seats and Quinn: where a
 // symbol is defined and who calls it, in one call. Counts toward the per-round call cap.

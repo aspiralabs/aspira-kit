@@ -1,9 +1,9 @@
 /* eslint-disable unicorn/filename-case -- eve names a tool after its file, and this one is read_files: the spec's name, beside the built-in read_file */
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
-import { callsSoFar, capRefusal, maxSeatCalls } from '../lib/call-cap'
-import { MAX_FULL_FILE_CHARS, truncateForRead } from '../lib/packet'
-import { REPO_PATH } from '../lib/review'
+import { callsSoFar, capRefusal, maxSeatCalls } from '../lib/call-cap.ts'
+import { MAX_FULL_FILE_CHARS, truncateForRead } from '../lib/packet.ts'
+import { REPO_PATH } from '../lib/review.ts'
 
 // Many files in one call, for the seats and Quinn: one read of everything a seat wants before it
 // writes, instead of a model call per file. Each file is numbered and cut past the same cap as

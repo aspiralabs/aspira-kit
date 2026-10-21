@@ -1,1 +1,1 @@
-export { default } from '../lib/usage-hook'
+export { default } from '../lib/usage-hook.ts'

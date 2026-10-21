@@ -1,10 +1,10 @@
 import type { SandboxSession } from 'eve/sandbox'
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
-import { writeHandoff } from '../lib/handoff'
-import { renderProvenance, type ProvenancePage } from '../lib/knowledge-snapshot'
-import { walkKnowledge } from '../lib/knowledge-walk'
-import { INDEX_FILE, KNOWLEDGE_ENV, KNOWLEDGE_PATH, REQUIRED_ENV, REQUIRED_FILE, pageIdFrom, parseRequired, renderPage, renderRequired, type LoadedPage } from '../lib/knowledge'
+import { writeHandoff } from '../lib/handoff.ts'
+import { renderProvenance, type ProvenancePage } from '../lib/knowledge-snapshot.ts'
+import { walkKnowledge } from '../lib/knowledge-walk.ts'
+import { INDEX_FILE, KNOWLEDGE_ENV, KNOWLEDGE_PATH, REQUIRED_ENV, REQUIRED_FILE, pageIdFrom, parseRequired, renderPage, renderRequired, type LoadedPage } from '../lib/knowledge.ts'
 
 // Puts the org's engineering guidelines in the sandbox as markdown so an agent
 // reads them like any other file: INDEX.md is the Notion page named in

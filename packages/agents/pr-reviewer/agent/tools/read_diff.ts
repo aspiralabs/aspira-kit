@@ -1,9 +1,9 @@
 /* eslint-disable unicorn/filename-case -- eve names a tool after its file; read_diff sits beside read_files and the built-in read_file */
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
-import { callsSoFar, capRefusal, maxSeatCalls } from '../lib/call-cap'
-import { MAX_FULL_FILE_CHARS, hunksFor } from '../lib/packet'
-import { FILES } from '../lib/review'
+import { callsSoFar, capRefusal, maxSeatCalls } from '../lib/call-cap.ts'
+import { MAX_FULL_FILE_CHARS, hunksFor } from '../lib/packet.ts'
+import { FILES } from '../lib/review.ts'
 
 // The hunks of the changed files a seat picked from the index, in one call. The packet carries
 // no hunks on purpose: a seat fetches only the files its lens needs, and what it fetches lives in

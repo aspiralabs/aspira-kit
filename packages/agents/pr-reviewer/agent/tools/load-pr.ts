@@ -6,10 +6,10 @@ import { promisify } from 'node:util'
 import type { SandboxSession } from 'eve/sandbox'
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
-import { parseCostSample } from '../lib/estimate'
-import { LAUNCH_FILES, packageFile } from '../lib/package-dir'
-import { buildPacket } from '../lib/packet'
-import { writeContext } from '../lib/shared-prefix'
+import { parseCostSample } from '../lib/estimate.ts'
+import { LAUNCH_FILES, packageFile } from '../lib/package-dir.ts'
+import { buildPacket } from '../lib/packet.ts'
+import { writeContext } from '../lib/shared-prefix.ts'
 import {
   LOCAL_BASE_FALLBACKS,
   LOCAL_EXCLUDES,
@@ -29,9 +29,9 @@ import {
   splitChanged,
   truncatePatch,
   type PrMeta,
-} from '../lib/pr'
-import { FILES, SEATS, type Reviewer } from '../lib/review'
-import { TARGET_FILE, headShaFromFindings, type ReviewContextFile, type ReviewTarget } from '../lib/target'
+} from '../lib/pr.ts'
+import { FILES, SEATS, type Reviewer } from '../lib/review.ts'
+import { TARGET_FILE, headShaFromFindings, type ReviewContextFile, type ReviewTarget } from '../lib/target.ts'
 
 const run = promisify(execFile)
 const MAX_TARBALL = 512 * 1024 * 1024

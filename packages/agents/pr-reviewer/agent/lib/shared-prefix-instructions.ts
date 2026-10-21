@@ -1,6 +1,6 @@
 import { defineDynamic } from 'eve'
 import { defineInstructions } from 'eve/instructions'
-import { sharedPrefixForSession } from './shared-prefix'
+import { sharedPrefixForSession } from './shared-prefix.ts'
 
 // The system prompt of every seat and of Quinn: the shared prefix, resolved at the start of the
 // session's turn from the review context its hook pointed it at. Mounted by each subagent as
