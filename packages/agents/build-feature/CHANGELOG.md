@@ -1,5 +1,15 @@
 # @aspiralabs/build-feature
 
+## 0.9.1
+
+### Patch Changes
+
+- 1fcdff8: A build-feature run starts a fresh ticket from any Status, cloud mode included (KIT-49). The cloud `start` of a step skill now pulls a ticket that has no ticket.md yet into the run's own working folder instead of refusing `--parent-run` (the --local path already did since KIT-21); the driver creates its stage output directory before printing a stage (the worktree stage's did not exist); and the ticket worktree gets the main checkout's root and app `.env.local` linked in before the install, as `kit worktree` does.
+- Updated dependencies [1fcdff8]
+  - @aspiralabs/agent-common@0.9.1
+  - @aspiralabs/pr-reviewer@0.9.1
+  - @aspiralabs/kit@0.9.1
+
 ## 0.9.0
 
 ### Minor Changes
