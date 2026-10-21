@@ -37,7 +37,7 @@
 // `Phase` (below), bound to its name in PHASES (NOVA1.2).
 
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, join, relative } from 'node:path'
 import { z } from 'zod'
@@ -220,6 +220,8 @@ async function reserveNewRunId(folder: string, state: RunState, now: string): Pr
 /** A stage that needs an answer: a fresh nonce (or the one the caller minted), an output file, and the pending record. */
 function pend(ctx: Ctx, state: RunState, kind: StageKind, body: (output: string) => Record<string, unknown>, options: { phase?: string; data?: Record<string, unknown>; startedAt?: string; nonce?: string } = {}): Out {
   const nonce = options.nonce ?? randomUUID()
+  // The session writes the answer here; the directory exists before the stage is printed (KIT-49: a worktree stage's did not).
+  mkdirSync(join(ctx.dir, 'stages'), { recursive: true })
   const output = join(ctx.dir, 'stages', `${kind}-${nonce}.json`)
   const stage: Stage = { stage: kind, runId: ctx.runId, nonce, output, ...body(output) }
   checkNotion(stage)
