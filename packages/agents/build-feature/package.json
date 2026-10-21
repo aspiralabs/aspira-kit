@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/build-feature",
-  "version": "0.8.15",
+  "version": "0.9.0",
   "description": "/aspira-build-feature: the one /aspira-* skill that orchestrates the other skills, taking a Feature Board ticket from wherever it is to a reviewed, merge-ready PR, one step per subagent.",
   "type": "module",
   "imports": {
