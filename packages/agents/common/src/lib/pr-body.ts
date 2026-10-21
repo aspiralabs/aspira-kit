@@ -1,5 +1,6 @@
-// The PR body every build renders from implementation.md (F3, F42, F43): three sections,
-// `## Summary` (a file tree of the branch's changed files), `## Evidence` (per feature ID, every
+// The PR body every build renders from implementation.md (F3, F42, F43; KIT-52): `## What it fixed`
+// (the implementor's own plain-English summary, lifted verbatim from the log; it is also the release
+// page's section for the feature and becomes the release notes), then `## Summary` (a file tree of the branch's changed files), `## Evidence` (per feature ID, every
 // implementation.md task that names it, with that task's red and green evidence, tailed and
 // redacted) and `## Merge Danger` (one-way when the build added a native dependency or touched a
 // migration, else two-way), then the decisions taken for the human, the run's notice and a link to
@@ -10,7 +11,7 @@
 // output) is redacted on its own, scoped to `app`, before it is woven into the body: redacting the
 // whole rendered document would also mangle this module's own headings and code fences (SEC-010).
 
-import { redact, tail } from './redact.ts'
+import { redact, redactSecrets, tail } from './redact.ts'
 
 export type PrBodyTicket = { id: string; title: string; url: string }
 
@@ -154,16 +155,27 @@ export function mergeDanger(implementationMd: string, changedFiles: readonly str
   return 'This is a **two-way door**: reverting it is a plain code revert, with no native build or migration to follow up.'
 }
 
+/** The `## What it fixed` placeholder when implementation.md has no such section, or an empty one: visible in the PR, never silently dropped. */
+export const WHAT_IT_FIXED_MISSING = '_Not written: the implementation log has no `## What it fixed` section (implementor SKILL.md, section 6 step 7). Write it here before merging; the release page and the release notes copy it._'
+
+/** `## What it fixed`: the implementor's summary section of implementation.md, verbatim (markdown kept, secrets redacted), or the placeholder. */
+export async function whatItFixed(implementationMd: string, repo: string, app: string | undefined): Promise<string> {
+  const body = sectionBody(implementationMd, '## What it fixed').trim()
+  if (body === '') return WHAT_IT_FIXED_MISSING
+  return redactSecrets(body, repo, { app })
+}
+
 /** `## Summary`: every changed file, as a sorted bullet list (a minimal file tree: build-feature and spec-reviewer render the fuller one for the card). */
 export function fileTree(changedFiles: readonly string[]): string {
   if (changedFiles.length === 0) return 'No files changed.'
   return [...changedFiles].sort((a, b) => a.localeCompare(b)).map((file) => `- \`${file}\``).join('\n')
 }
 
-/** The PR body: Summary, Evidence and Merge Danger from implementation.md and the branch diff, then the decisions taken for the human, the run's notice, and a link to the ticket. */
+/** The PR body: What it fixed (verbatim from implementation.md), then Summary, Evidence and Merge Danger from implementation.md and the branch diff, the decisions taken for the human, the run's notice, and a link to the ticket. */
 export async function renderPrBody(input: PrBodyInput): Promise<string> {
   const { ticket, implementationMd, changedFiles, analyzers, taken = [], notice, footer, repo, app } = input
   const lines: string[] = []
+  lines.push('## What it fixed', '', await whatItFixed(implementationMd, repo, app), '')
   lines.push('## Summary', '', fileTree(changedFiles), '')
   lines.push('## Evidence', '', await evidenceByFeature(implementationMd, analyzers, repo, app), '')
   lines.push('## Merge Danger', '', mergeDanger(implementationMd, changedFiles), '')

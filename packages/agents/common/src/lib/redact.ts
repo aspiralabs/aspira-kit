@@ -79,7 +79,16 @@ export async function envValues(repo: string, options: RedactOptions = {}): Prom
  * value replaced by `[redacted]`.
  */
 export async function redact(text: string, repo: string, options: RedactOptions = {}): Promise<string> {
-  let result = escapeText(text)
+  return redactSecrets(escapeText(text), repo, options)
+}
+
+/**
+ * The secret pass alone, with the markdown kept (KIT-52): for text the kit's own agent authored as
+ * markdown (the implementor's `## What it fixed` section), which must render as written in the PR
+ * body and on the release page. Never for a command's output or a card's free text: those take `redact`.
+ */
+export async function redactSecrets(text: string, repo: string, options: RedactOptions = {}): Promise<string> {
+  let result = text
   for (const pattern of TOKEN_PATTERNS) result = result.replace(pattern, '[redacted]')
   for (const value of await envValues(repo, options)) {
     if (value === '') continue

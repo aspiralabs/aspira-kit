@@ -12,7 +12,10 @@
 // - releaseRowStage: after the review loop, when aspira.json names `releases`, a subagent finds the
 //   open release page and drafts the customer line for the row that links this card and PR. The
 //   line is refused while it names a ticket ID or a package (REL-004); an accepted line is written
-//   by updating the row that already links the card, or by adding it once. Without `releases` the
+//   by updating the row that already links the card, or by adding it once. With it (KIT-52) the
+//   feature's `### <ID> — what it fixed` section under the Features table: the implementor's
+//   `## What it fixed` section of implementation.md, verbatim, which the PR body also carries and
+//   which becomes the release notes. A log without the section gets no section and a note. Without `releases` the
 //   row is skipped and the end of the run says so.
 
 import { execFile } from 'node:child_process'
@@ -20,6 +23,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, normalize } from 'node:path'
 import { z } from 'zod'
+import { WHAT_IT_FIXED_MISSING, whatItFixed } from '@aspiralabs/agent-common/lib/pr-body'
 import { slug } from '@aspiralabs/agent-common/lib/ticket'
 import type { Phase, PhaseContext, PhaseResult } from '#src/driver.ts'
 import type { Pending, RunState } from '#src/run-state.ts'
@@ -217,6 +221,14 @@ export function validateCustomerLine(line: string): { ok: true; line: string } |
 export const RELEASE_SKIPPED = 'Release row skipped: aspira.json names no `releases` page, so add the customer line, the card and the PR to the open release page by hand (REL-002).'
 
 const draftAnswer = z.object({ nonce: z.string(), customerLine: z.string(), existingRow: z.boolean() })
+
+/** The feature's section for the release page (KIT-52): the heading `### <ID> — what it fixed` and the log's section verbatim, or null when the log has none. */
+export async function whatItFixedSection(folder: string, id: string, repo: string, app?: string): Promise<{ heading: string; text: string } | null> {
+  const log = await readFile(join(folder, 'plan.review/implementation.md'), 'utf8').catch(() => '')
+  const text = await whatItFixed(log, repo, app)
+  if (text === WHAT_IT_FIXED_MISSING) return null
+  return { heading: `### ${id} — what it fixed`, text }
+}
 const writeAnswer = z.union([z.object({ nonce: z.string(), done: z.literal(true) }), z.object({ nonce: z.string(), error: z.string().min(1) })])
 
 function draftStage(context: PhaseContext, state: RunState, releases: string, error?: string): PhaseResult {
@@ -266,6 +278,8 @@ async function releaseRowAccept(context: PhaseContext, state: RunState, pending:
   if (!line.ok) return draftStage(context, state, releases, line.reason)
   const action = parsed.data.existingRow ? 'update' : 'add'
   const pr = state.step8.prUrl ?? context.card.pr
+  const section = await whatItFixedSection(context.folder, context.id, context.repo, context.aspira.app)
+  const sectionInstruction = section === null ? ' The implementation log has no `## What it fixed` section, so add no section for this feature.' : ` Then, under the Features table, add the section "${section.heading}" with the "whatItFixed" text given, verbatim, as the feature's own section (replace the section with that heading when one is there).`
   return {
     kind: 'stage',
     state,
@@ -273,12 +287,12 @@ async function releaseRowAccept(context: PhaseContext, state: RunState, pending:
     body: {
       part: 'write',
       releases,
-      write: { action, customerLine: line.line, card: context.card.url, pr },
+      write: { action, customerLine: line.line, card: context.card.url, pr, ...(section === null ? {} : { whatItFixed: `${section.heading}\n\n${section.text}` }) },
       notion: [{ op: 'write', target: 'release-page' }],
       instructions:
         action === 'update'
-          ? `On the open release page under ${releases}, update the Features row that links ${context.card.url}: set its customer line to the "customerLine" given, and link the card and ${pr ?? 'the PR'}. Add no second row, merge nothing and move no card. Write {"nonce", "done": true}, or {"nonce", "error"}, to the output file.`
-          : `On the open release page under ${releases}, add one Features row with the "customerLine" given, linking ${context.card.url} and ${pr ?? 'the PR'}, unless a row linking the card appeared meanwhile (then update that one). Merge nothing and move no card. Write {"nonce", "done": true}, or {"nonce", "error"}, to the output file.`,
+          ? `On the open release page under ${releases}, update the Features row that links ${context.card.url}: set its customer line to the "customerLine" given, and link the card and ${pr ?? 'the PR'}. Add no second row.${sectionInstruction} Merge nothing and move no card. Write {"nonce", "done": true}, or {"nonce", "error"}, to the output file.`
+          : `On the open release page under ${releases}, add one Features row with the "customerLine" given, linking ${context.card.url} and ${pr ?? 'the PR'}, unless a row linking the card appeared meanwhile (then update that one).${sectionInstruction} Merge nothing and move no card. Write {"nonce", "done": true}, or {"nonce", "error"}, to the output file.`,
     },
     data: { part: 'write', releases, action },
   }

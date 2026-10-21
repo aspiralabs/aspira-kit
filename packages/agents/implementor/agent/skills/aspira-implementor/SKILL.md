@@ -249,6 +249,14 @@ In the cloud, pass a matching `outputSchema` so the report comes back structured
 5. **Mid-build notes.** Any file the lanes wrote to hand off contracts (`handoff-notes.md`, or any file the plan or you named as inter-lane notes) is rewritten from the code at HEAD or deleted. Rewritten means: every backticked identifier, path, option name and signature in it is searched in the repository (`git grep -F`, one search per identifier); one that no longer exists is corrected to its current name, or its sentence is removed; and the file starts with a header saying it was rewritten at verification, with the commit SHA (`<!-- Rewritten from the code at verification · commit <sha> · <time> -->`). Notes are never committed as documentation of the result; kept notes stay in the work directory. Record each file and what happened to it under `## Mid-build notes` in the log.
 6. **Proposed Slop Repo entries.** For every bug found and fixed during the build (a red-to-green surprise, a reviewer-style finding you corrected, anything under `## Bugs found and fixed`), ask whether it could happen again in another feature or repository. If it could, write one entry under `## Proposed Slop Repo entries` in the Slop Repo's shape: **Rule** (one imperative sentence), **Area** (one of the topic pages the Agent Instructions routing table names), **What went wrong** (two sentences naming the file or symbol), **Source** (`implementor`, the repository and the ticket). If no bug qualifies, the section says `None:` followed by one sentence per bug saying why it would not recur; a build that found no bugs says `None: no bugs were found and fixed`. The report cannot be done with the section empty or missing.
 
+7. **What it fixed.** Write `## What it fixed` at the top of the log, right after the header: the plain-English summary of this build for someone who did not follow the ticket. It is copied verbatim into the pull request description and onto the release page, and it becomes the release notes, so write it from the spec's intent and acceptance criteria, the plan, `implementation.md` and the commit bodies, in this shape and nothing else:
+   - One headline line: `**<ticket> — what it fixed** (<the apps or instances touched>)`, then one sentence saying what was broken or missing.
+   - A numbered list with one item per problem fixed or capability added, each with a `Before:` line and a `Now:` line in user-visible terms (statuses, events, what the customer sees, numbers), never in terms of files, waves or task IDs.
+   - `Supporting changes:` one line per change that is not a numbered item (an API doc, a console button, a guard), or `none`.
+   - `Still to do:` what must happen after the merge (a deploy, a migration, a propagation to another instance, a re-run), or `none`.
+   - `Loose ends:` known gaps the build leaves (a stale docstring, a check nobody ran), or `none`.
+   Plain English, no rule IDs, no wave or P-numbers, no package names. The report cannot be done with the section empty or missing.
+
 ## 7. Progress log and report
 
 `<work dir>/implementation.md` is the durable record (in the cloud it is committed on the branch):
@@ -258,6 +266,7 @@ In the cloud, pass a matching `outputSchema` so the report comes back structured
 Source: <plan | spec | ticket> <path or key>  Status: done | partial | blocked   Branch: <name>   Started/finished: <times>
 Guidelines: Notion (live, load-knowledge) | --guidelines snapshot | /workspace/knowledge
 Parallelization: <the table from section 4>
+## What it fixed
 ## Tasks
 | Task | Features | Lane/wave | Status | Commit | Red → green evidence |
 ## Features

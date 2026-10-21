@@ -31,7 +31,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { renderPrBody } from './pr-body'
+import { renderPrBody, WHAT_IT_FIXED_MISSING } from './pr-body'
 
 const temps: string[] = []
 afterEach(async () => {
@@ -112,10 +112,22 @@ describe('renderPrBody (T33): Summary, Evidence and Merge Danger', () => {
   it('has the sections Summary, Evidence and Merge Danger in that order and links the ticket URL', async () => {
     const body = await renderPrBody({ ticket, implementationMd: tasksFixture(), changedFiles, analyzers: [], repo: await tempRepo() })
     const headings = sections(body).map((entry) => entry.heading.toLowerCase())
-    const order = ['summary', 'evidence', 'merge danger'].map((name) => headings.indexOf(name))
+    const order = ['what it fixed', 'summary', 'evidence', 'merge danger'].map((name) => headings.indexOf(name))
     const found = order.every((index) => index >= 0)
     const inOrder = found && order.every((index, i) => i === 0 || index > order[i - 1]!)
     expect({ inOrder, linksTicket: body.includes(ticket.url) }).toEqual({ inOrder: true, linksTicket: true })
+  })
+
+  it('KIT-52: What it fixed is the first section, lifted verbatim from the log', async () => {
+    const summary = '**KIT-2 — what it fixed** (web)\nEvery run left no trace.\n\n1. Nobody could tell where a run stopped.\n   - Before: the card went quiet.\n   - Now: `.work/<id>/progress.md` names the next action.\n\nSupporting changes: none\nStill to do: none\nLoose ends: none'
+    const body = await renderPrBody({ ticket, implementationMd: `# Implementation\n\n## What it fixed\n\n${summary}\n\n${tasksFixture()}`, changedFiles, analyzers: [], repo: await tempRepo() })
+    const first = sections(body)[0]
+    expect({ heading: first?.heading, verbatim: first?.body.includes(summary) }).toEqual({ heading: 'What it fixed', verbatim: true })
+  })
+
+  it('KIT-52: a log without the section gets the visible placeholder, never a silent drop', async () => {
+    const body = await renderPrBody({ ticket, implementationMd: tasksFixture(), changedFiles, analyzers: [], repo: await tempRepo() })
+    expect(sections(body)[0]).toEqual({ heading: 'What it fixed', body: expect.stringContaining(WHAT_IT_FIXED_MISSING) })
   })
 
   it('renders Summary as a file tree naming every changed file', async () => {

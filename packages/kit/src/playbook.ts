@@ -125,14 +125,14 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
     body: [
       'Before merging, in this order:',
       '1. Repo docs in the same PR: anything the change made untrue in `AGENTS.md` (Gotchas), `PRODUCT.md`, `docs/general/FEATURES.md`, `README.md`, `DEPLOYMENT.md`, `RELEASE.md`.',
-      "2. The product's open release page (REL-002): a customer line, a Features row with the card and PR, every deploy step.",
+      "2. The product's open release page (REL-002): a customer line, a Features row with the card and PR, the feature's `### <ID> — what it fixed` section under the Features table (the implementation log's `## What it fixed` section, which the PR description also carries; it becomes the release notes), every deploy step.",
       '3. Notion pages the change made untrue: list them on the ticket under **Docs to propagate** and update them.',
       'Then a human merges (BOARD-004) and moves the card to Ready: Implementation. No skill makes that move.',
     ].join('\n'),
   },
   {
     title: 'Step 11: release',
-    body: "Follow Releases: work the page's checklist, run the end-to-end suite on `main`, publish the GitHub Release with the page's customer summary, run the after-deploy steps, mark the page Released, set Version on each card and move it to Released (BOARD-008).",
+    body: "Follow Releases: work the page's checklist, run the end-to-end suite on `main`, publish the GitHub Release with the page's customer summary and its what-it-fixed sections, run the after-deploy steps, mark the page Released, set Version on each card and move it to Released (BOARD-008).",
   },
   {
     title: 'Step 12: learn',

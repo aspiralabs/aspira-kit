@@ -5,6 +5,8 @@
 // drafted only when aspira.json names the releases. The findings.md files are literal fixtures.
 // KIT-11 plan P5: T31-T33.
 
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { BOARD, BRANCH, RELEASES, REPOSITORY, cleanup, ofKind, type Project } from './driver.test-helper.ts'
@@ -49,6 +51,28 @@ describe('T33 F30 F31: Step 10 and the release row', () => {
     await h.answer(refused.stage, { customerLine: 'Every build now ends with a summary you can read', existingRow: true })
     const write = await h.next()
     expect({ draft: draft.stage?.stage, refused: refused.stage?.stage === 'release-row' && String(refused.stage.error ?? '').includes('KIT-11'), action: (write.stage?.write as { action?: string } | undefined)?.action }).toEqual({ draft: 'release-row', refused: true, action: 'update' })
+  }, SLOW)
+
+  it('KIT-52: the write stage carries the log’s What it fixed section under the feature’s heading, and tells the session to put it under the Features table', async () => {
+    const { h, review } = await reviewing({ aspira: { board: BOARD, repository: REPOSITORY, releases: RELEASES } })
+    const summary = '**KIT-11 — what it fixed** (web)\nRuns left no summary.\n\n1. Nobody could read what a build did.\n   - Before: the card went quiet.\n   - Now: every build ends with a summary.\n\nSupporting changes: none\nStill to do: none\nLoose ends: none'
+    await mkdir(join(h.folder, 'plan.review'), { recursive: true })
+    await writeFile(join(h.folder, 'plan.review/implementation.md'), `# Implementation\n\n## What it fixed\n\n${summary}\n\n## Tasks\n`)
+    await h.report(review.stage, 'complete', { findings: [] })
+    const draft = await h.advance()
+    await h.answer(draft.stage, { customerLine: 'Every build now ends with a summary you can read', existingRow: false })
+    const write = await h.next()
+    const body = write.stage?.write as { whatItFixed?: string } | undefined
+    expect({ section: body?.whatItFixed, instructs: String(write.stage?.instructions ?? '').includes('under the Features table') }).toEqual({ section: `### KIT-11 — what it fixed\n\n${summary}`, instructs: true })
+  }, SLOW)
+
+  it('KIT-52: a log without the section carries no whatItFixed and says so', async () => {
+    const { h, review } = await reviewing({ aspira: { board: BOARD, repository: REPOSITORY, releases: RELEASES } })
+    await h.report(review.stage, 'complete', { findings: [] })
+    const draft = await h.advance()
+    await h.answer(draft.stage, { customerLine: 'Every build now ends with a summary you can read', existingRow: false })
+    const write = await h.next()
+    expect({ section: (write.stage?.write as { whatItFixed?: string } | undefined)?.whatItFixed, says: String(write.stage?.instructions ?? '').includes('no `## What it fixed` section') }).toEqual({ section: undefined, says: true })
   }, SLOW)
 
   it('skips the release row without releases, says so, and never merges or moves to Ready: Implementation', async () => {
