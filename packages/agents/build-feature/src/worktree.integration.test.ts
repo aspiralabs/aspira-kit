@@ -6,7 +6,7 @@
 // inside it. The repository is a temp repo with a bare origin; nothing reaches the network.
 
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, lstatSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -86,6 +86,13 @@ describe('F50: the run works the ticket in its own worktree', () => {
   it('installs in the app directory aspira.json names, not the worktree root (KIT-21)', async () => {
     const { h } = await fromMain({ status: 'Ready: Spec', aspira: { board: BOARD, repository: REPOSITORY, app: 'tools/app' }, mainFiles: { 'tools/app/pnpm-lock.yaml': 'lockfileVersion: 9.0\n', 'tools/app/package.json': JSON.stringify({ name: 'fixture' }) } })
     expect(await h.pnpmCalls()).toEqual([`${join(worktreeFor(h.main), 'tools', 'app')} install`])
+  }, SLOW)
+
+  it('links the main checkout\'s root and app .env.local into the worktree before the install (KIT-49)', async () => {
+    const { h } = await fromMain({ status: 'Ready: Spec', aspira: { board: BOARD, repository: REPOSITORY, app: 'tools/app' }, mainFiles: { '.gitignore': '.env.local\n', '.env.local': 'ROOT=1\n', 'tools/app/.env.local': 'APP=1\n', 'tools/app/package.json': JSON.stringify({ name: 'fixture' }) } })
+    const worktree = worktreeFor(h.main)
+    const link = (path: string) => { try { return lstatSync(join(worktree, path)).isSymbolicLink() } catch { return false } }
+    expect({ root: link('.env.local'), app: link('tools/app/.env.local') }).toEqual({ root: true, app: true })
   }, SLOW)
 
   it('continues from inside the worktree: the ticket folder is there and the next stage is the step', async () => {

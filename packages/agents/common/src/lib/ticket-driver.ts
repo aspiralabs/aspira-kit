@@ -138,7 +138,7 @@ async function note(context: DriverContext, folder: string | null, build: () => 
  * before any ticket.md exists (build-feature resolves the card live), so its resolve stage must write
  * into that folder, not a second one, for `--parent-run` to find the run.
  */
-async function buildFeatureFolder(repo: string, ref: string): Promise<string | null> {
+export async function buildFeatureFolder(repo: string, ref: string): Promise<string | null> {
   const work = join(repo, WORK_DIR)
   if (!existsSync(work)) return null
   const lower = ref.trim().toLowerCase()

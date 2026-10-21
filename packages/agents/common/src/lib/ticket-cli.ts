@@ -13,7 +13,7 @@ import { exitCodeFor, readRunStatus, REFUSED_EXIT, USAGE_EXIT, type RunStatus } 
 import { parentRunSchema, reserveRunId } from './telemetry.ts'
 import { GATES, SKILLS, TicketArgumentError, reportHeader, type Skill } from './ticket.ts'
 import { FlowRefused, finishFlow, inputFileFor, readAspira, readTicketMd, startFlow } from './ticket-flow.ts'
-import { NO_RUN_ID_NOTICE, PARENT_RUN_FORMAT, checkParentRunArgument, cloudHandRunSpans, noBoardMessage, resolveArgument, runStartTime, UsageError, writeHandRunTelemetry } from './ticket-driver.ts'
+import { NO_RUN_ID_NOTICE, PARENT_RUN_FORMAT, checkParentRunArgument, cloudHandRunSpans, noBoardMessage, resolveArgument, runStartTime, UsageError, writeHandRunTelemetry, buildFeatureFolder } from './ticket-driver.ts'
 
 export { REFUSED_EXIT }
 
@@ -113,8 +113,13 @@ export async function ticketCli(
       return 0
     }
     if (command === 'start') {
-      const argument = await resolveArgument({ skill, repo, env }, { positional })
+      let argument = await resolveArgument({ skill, repo, env }, { positional })
       if (argument.kind === 'path') throw new UsageError(usage(skill))
+      // A build-feature step on a fresh ticket (no ticket.md yet) pulls into the run's own folder (KIT-21, and KIT-49 for a cloud start).
+      if (parentRun !== undefined && argument.kind === 'ticket' && argument.folder === undefined) {
+        const folder = await buildFeatureFolder(repo, argument.ref)
+        if (folder !== null) argument = { ...argument, folder }
+      }
       if (parentRun !== undefined) await checkParentRunArgument(argument.folder ?? null, parentRun, 'start')
       const started = await startFlow({ skill, repo, argument, board: config.board, force: values['force-pull'] === true, forceRun: values['force-run'] === true, dev: values.dev, client: board, env })
       const input = inputOf(skill, started.folder, started.trace.statusBefore ?? undefined)

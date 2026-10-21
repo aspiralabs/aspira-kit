@@ -8,7 +8,7 @@
 //
 // Every git and project command goes through the system wrappers (system.ts).
 
-import { existsSync } from 'node:fs'
+import { existsSync, lstatSync, symlinkSync } from 'node:fs'
 import { appendFile, cp, readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import { z } from 'zod'
@@ -102,6 +102,19 @@ export async function carryTicketFolder(folder: string, worktree: string): Promi
 
 export type Prepared = { ok: true; worktree: string; branch: string; created: boolean; ran: string[] } | { ok: false; message: string; command: string; exitCode: number; output: string }
 
+/** Link `<from>/<dir>/.env.local` to the same place under `to` for each dir; a missing source or an occupied target is skipped. Returns one line per link made. */
+export function linkEnvLocal(from: string, to: string, dirs: readonly string[]): string[] {
+  const made: string[] = []
+  for (const dir of dirs) {
+    const source = join(from, dir, '.env.local')
+    const target = join(to, dir, '.env.local')
+    if (!existsSync(source) || !existsSync(join(to, dir))) continue
+    try { lstatSync(target); continue } catch { /* nothing at the target: link it */ }
+    try { symlinkSync(source, target); made.push(`ln -s ${source} ${target}`) } catch { /* a link is a convenience; the install says what is missing */ }
+  }
+  return made
+}
+
 const errorOf = (result: CommandResult): string => tail((result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`).trim(), 20)
 
 /** Make the ticket's worktree (or reuse it), exclude .worktrees/, and run the install and build in a new one, in the project's `app` directory from aspira.json when it names one (KIT-21). */
@@ -125,7 +138,10 @@ export async function prepareWorktree(input: { place: Place; id: string; title: 
     return fail(shown('git', GIT_ARGS.worktreeAdd(path, branch, !exists)), added, why)
   }
   await excludeWorktrees(place)
-  const ran: string[] = []
+  // The main checkout's .env.local files, linked in (the root's, then the app's), as kit worktree does (KIT-49):
+  // the install and the first step need the project's keys, and a worktree has none of its own.
+  const linked = linkEnvLocal(place.main, worktree, ['', ...(input.app === undefined || input.app === '.' ? [] : [input.app])])
+  const ran: string[] = [...linked]
   const installDir = join(worktree, input.app ?? '.')
   for (const { command, args } of await installCommands(installDir)) {
     const result = await sys.projectCommand({ cwd: installDir, env }, command, args)
