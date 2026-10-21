@@ -1,5 +1,16 @@
 # @aspiralabs/kit
 
+## 0.12.0
+
+### Minor Changes
+
+- 87ad569: KIT-54: research can happen at any stage. One research rule, verbatim in every in-session task prompt and every cloud agent's instructions: anything missing or vague is looked up first, in the repository's code, in Notion (any page or database the rules, the ticket, the idea or the spec point to) and in public documentation; what a phase was given is a head start, not a wall; "unknown" or a gap only once that research is exhausted, naming where it looked. The cloud research, reconciliation, draft and planning phases now read through tools (they were tool-less structured calls), with `notion_read` and `notion_search` on the integration token for any Notion page or database. The planner no longer fails on research or plan gaps: they are notes for the approver, listed as `openGaps`. The guidelines snapshot's INDEX.md lists the databases the rules link (Approved Technologies, ADRs) and how to read their rows.
+
+### Patch Changes
+
+- Updated dependencies [87ad569]
+  - @aspiralabs/agent-common@0.12.0
+
 ## 0.11.1
 
 ### Patch Changes
