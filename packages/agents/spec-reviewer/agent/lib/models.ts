@@ -37,7 +37,7 @@ export function modelSession(started: number) {
     return streamStructured({ model: gateway(model), system, prompt, abortSignal: signal, maxRetries: 0, reasoning, maxOutputTokens, output: Output.object({ schema }), ...hooks(phase, model) })
   }
   /** Tool exploration that must end with a structured submit call within the step budget. */
-  async function toolLoop(options: { phase: string; model: string; system: string; prompt: string; schema: z.ZodType; tools: ToolSet; signal: AbortSignal; maxSteps: number; maxOutputTokens: number; submitName: string; firstTool?: string }): Promise<unknown> {
+  async function toolLoop(options: { phase: string; model: string; system: string; prompt: string; schema: z.ZodType; tools: ToolSet; signal: AbortSignal; maxSteps: number; maxOutputTokens: number; submitName: string; reasoning?: Reasoning; firstTool?: string }): Promise<unknown> {
     const { phase, model, system, prompt, schema, tools, signal, maxSteps, maxOutputTokens, submitName, firstTool } = options
     let submitted: unknown
     const accept = async (value: unknown) => { submitted = value; return { accepted: true } }
@@ -46,7 +46,7 @@ export function modelSession(started: number) {
       model: gateway(model), system, prompt: `${prompt}\nFinish by calling ${submitName} with your complete result.`, tools: phaseTools,
       abortSignal: signal, maxRetries: 0,
       maxOutputTokens,
-      reasoning: 'low',
+      reasoning: options.reasoning ?? 'low',
       stopWhen: [stepCountIs(maxSteps), hasToolCall(submitName)],
       prepareStep: ({ stepNumber }: { stepNumber: number }) => {
         if (stepNumber >= maxSteps - 1) return { toolChoice: { type: 'tool' as const, toolName: submitName } }
@@ -107,7 +107,7 @@ export function reviewModelCall(session: ModelSession, models: ReviewModels, too
   return async ({ phase, prompt, signal }) => {
     // Research and reconciliation read too (KIT-54, David: no phase is walled off from the repository, Notion or the web): a tool loop over the same tools the specialists have, ending in a submit.
     if (phase === 'research') return session.toolLoop({ phase, model: models.frontier, system: systemPrompt, prompt: `${prompt}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: reviewSchema, tools, signal, maxSteps: RESEARCH_MAX_STEPS, maxOutputTokens: 8_000, submitName: 'submit_research' })
-    if (phase === 'synthesis') return session.toolLoop({ phase, model: models.reconciliation, system: systemPrompt, prompt: `${prompt}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: synthesisSchema, tools, signal, maxSteps: SYNTHESIS_MAX_STEPS, maxOutputTokens: 20_000, submitName: 'submit_synthesis' })
+    if (phase === 'synthesis') return session.toolLoop({ phase, model: models.reconciliation, system: systemPrompt, prompt: `${prompt}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: synthesisSchema, tools, signal, maxSteps: SYNTHESIS_MAX_STEPS, maxOutputTokens: 20_000, submitName: 'submit_synthesis', reasoning: 'medium' })
     return session.toolLoop({ phase, model: models.specialist, system: systemPrompt, prompt, schema: reviewSchema, tools, signal, maxSteps: SPECIALIST_MAX_STEPS, maxOutputTokens: 5_000, submitName: 'submit_review', firstTool: phase === 'ui' ? componentTool : undefined })
   }
 }

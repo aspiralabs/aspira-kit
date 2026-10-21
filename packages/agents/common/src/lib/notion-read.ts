@@ -98,18 +98,25 @@ export function notionReadTools(options: NotionReadOptions): ToolSet {
   const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS
   const headers = { Authorization: `Bearer ${options.token}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' }
 
-  async function call<T>(path: string, init?: RequestInit): Promise<{ ok: true; body: T } | { ok: false; status: number; text: string }> {
-    const response = await request(`${NOTION_API}${path}`, { ...init, headers })
+  async function call<T>(path: string, init?: RequestInit, signal?: AbortSignal, retries = 3): Promise<{ ok: true; body: T } | { ok: false; status: number; text: string }> {
+    let response: Response
+    try {
+      response = await request(`${NOTION_API}${path}`, { ...init, headers, ...(signal ? { signal } : {}) })
+    } catch (error) {
+      return { ok: false, status: 0, text: `could not reach Notion: ${error instanceof Error ? error.message : String(error)}` }
+    }
     if (response.status === 429) {
+      // Rate limited: wait as told, at most three times, and never past the phase's abort.
+      if (retries === 0 || signal?.aborted) return { ok: false, status: 429, text: 'rate limited by Notion; try again later' }
       await new Promise((done) => setTimeout(done, Math.min(Number(response.headers.get('retry-after') ?? '1') * 1000, 10_000)))
-      return call<T>(path, init)
+      return call<T>(path, init, signal, retries - 1)
     }
     if (!response.ok) return { ok: false, status: response.status, text: (await response.text()).slice(0, 300) }
     return { ok: true, body: (await response.json()) as T }
   }
 
-  async function databaseRows(id: string): Promise<string> {
-    const database = await call<{ title?: unknown; data_sources?: { id: string; name?: string }[] }>(`/databases/${id}`)
+  async function databaseRows(id: string, signal?: AbortSignal): Promise<string> {
+    const database = await call<{ title?: unknown; data_sources?: { id: string; name?: string }[] }>(`/databases/${id}`, undefined, signal)
     if (!database.ok) return `Notion ${database.status} on the database ${id}: ${database.text}`
     const title = plain(database.body.title) || id
     const source = database.body.data_sources?.[0]?.id
@@ -118,8 +125,8 @@ export function notionReadTools(options: NotionReadOptions): ToolSet {
     let truncated = false
     do {
       const page = source === undefined
-        ? await call<{ results?: Row[]; next_cursor?: string | null; has_more?: boolean }>(`/databases/${id}/query`, { method: 'POST', body: JSON.stringify({ page_size: 100, ...(cursor ? { start_cursor: cursor } : {}) }) })
-        : await call<{ results?: Row[]; next_cursor?: string | null; has_more?: boolean }>(`/data_sources/${source}/query`, { method: 'POST', body: JSON.stringify({ page_size: 100, ...(cursor ? { start_cursor: cursor } : {}) }) })
+        ? await call<{ results?: Row[]; next_cursor?: string | null; has_more?: boolean }>(`/databases/${id}/query`, { method: 'POST', body: JSON.stringify({ page_size: 100, ...(cursor ? { start_cursor: cursor } : {}) }) }, signal)
+        : await call<{ results?: Row[]; next_cursor?: string | null; has_more?: boolean }>(`/data_sources/${source}/query`, { method: 'POST', body: JSON.stringify({ page_size: 100, ...(cursor ? { start_cursor: cursor } : {}) }) }, signal)
       if (!page.ok) return `Notion ${page.status} querying the database "${title}": ${page.text}`
       rows.push(...(page.body.results ?? []))
       cursor = page.body.has_more && page.body.next_cursor ? page.body.next_cursor : undefined
@@ -132,22 +139,22 @@ export function notionReadTools(options: NotionReadOptions): ToolSet {
     return `# ${title} (database, ${rows.length} row${rows.length === 1 ? '' : 's'}${truncated ? `, first ${maxRows} shown` : ''})\n\n${renderRows(rows)}`
   }
 
-  async function read(target: string): Promise<string> {
+  async function read(target: string, signal?: AbortSignal): Promise<string> {
     const id = pageIdFrom(target.trim())
     if (id === undefined) return `Not a Notion page or database URL or id: ${target}`
-    const page = await call<{ markdown?: string; truncated?: boolean }>(`/pages/${id}/markdown`)
+    const page = await call<{ markdown?: string; truncated?: boolean }>(`/pages/${id}/markdown`, undefined, signal)
     if (page.ok) {
       const markdown = page.body.markdown ?? ''
       const cut = markdown.length > maxChars
       return `${cut ? markdown.slice(0, maxChars) : markdown}${cut || page.body.truncated ? '\n\n[The page is longer than what is shown here.]' : ''}`
     }
-    if (page.status === 400 && DATABASE_NOT_PAGE.test(page.text)) return databaseRows(id)
+    if (page.status === 400 && DATABASE_NOT_PAGE.test(page.text)) return databaseRows(id, signal)
     const hint = page.status === 404 || page.status === 403 ? ' (is the page shared with the integration?)' : ''
     return `Notion ${page.status} on ${id}${hint}: ${page.text}`
   }
 
-  async function search(query: string): Promise<string> {
-    const found = await call<{ results?: { object?: string; id?: string; url?: string; title?: unknown; properties?: Record<string, Property> }[] }>('/search', { method: 'POST', body: JSON.stringify({ query, page_size: 10 }) })
+  async function search(query: string, signal?: AbortSignal): Promise<string> {
+    const found = await call<{ results?: { object?: string; id?: string; url?: string; title?: unknown; properties?: Record<string, Property> }[] }>('/search', { method: 'POST', body: JSON.stringify({ query, page_size: 10 }) }, signal)
     if (!found.ok) return `Notion ${found.status} searching "${query}": ${found.text}`
     const lines = (found.body.results ?? []).map((item) => {
       const title = item.object === 'database' || item.object === 'data_source' ? plain(item.title) : cellOf(Object.values(item.properties ?? {}).find((property) => property.type === 'title'))
@@ -160,12 +167,12 @@ export function notionReadTools(options: NotionReadOptions): ToolSet {
     notion_read: tool({
       description: 'Read one Notion page (returns its markdown) or one Notion database (returns its rows as a markdown table, title column first) by URL or id. Read-only. Use it for any page or database the guidelines, the ticket, the idea or the spec point to (Approved Technologies, ADRs, decision pages) before reporting a gap about it.',
       inputSchema: z.object({ url: z.string().min(1).describe('The Notion page or database URL, or its id') }),
-      execute: async ({ url }) => read(url),
+      execute: async ({ url }, options) => read(url, options?.abortSignal),
     }),
     notion_search: tool({
       description: 'Find Notion pages and databases by title (up to 10), with their URLs, to read with notion_read. Read-only.',
       inputSchema: z.object({ query: z.string().min(1).describe('Words from the title, for example "Approved Technologies"') }),
-      execute: async ({ query }) => search(query),
+      execute: async ({ query }, options) => search(query, options?.abortSignal),
     }),
   }
 }

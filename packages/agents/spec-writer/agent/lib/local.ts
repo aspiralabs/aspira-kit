@@ -73,9 +73,9 @@ const uiCatalog = 'The agent preloads the Aspira UI catalog (list_components) fo
 const headStart = (repo: string) => `The material in the task is your evidence and your head start, not a wall: work from it first and do not re-explore the whole repository; when it lacks a fact you need, read it instead of raising a gap. ${sessionResearchTools(repo)} The session records your tool calls.`
 const phaseNotes: Record<string, (repo: string) => string> = {
   explore: (repo) => `${readOnly(repo)} The agent gives this phase ${EXPLORE_MAX_STEPS} tool rounds; be as efficient: batch reads and searches. ${uiCatalog}`,
-  draft: (repo) => `The cloud agent runs this phase without tools, over the idea and exploration in the task; in this session you may read. ${headStart(repo)}`,
-  research: (repo) => `The cloud agent runs this phase without tools, over the source packet in the task; in this session you may read. ${headStart(repo)} Do not start the specialists' work.`,
-  synthesis: (repo) => `The cloud agent runs this phase without tools, over the review record in the task; in this session you may read. ${headStart(repo)}`,
+  draft: (repo) => `This phase works over the idea and the exploration in the task. ${headStart(repo)}`,
+  research: (repo) => `This phase works over the source packet in the task. ${headStart(repo)} Do not start the specialists' work.`,
+  synthesis: (repo) => `This phase works over the review record in the task. ${headStart(repo)}`,
   ui: (repo) => `${readOnly(repo)} The agent makes get_component this phase's first tool call. ${uiCatalog}`,
 }
 const specialistNote = (repo: string) => `${readOnly(repo)} The agent gives this phase ${SPECIALIST_STEPS} tool rounds; be as efficient: batch reads and searches.`

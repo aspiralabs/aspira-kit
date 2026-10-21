@@ -153,7 +153,7 @@ export async function runWrite(input: RunInput, options: { signal?: AbortSignal;
     const { phase, prompt, signal } = request
     if (phase === 'explore' || phase.startsWith('explore:')) return session.toolLoop({ phase, model: models.explore, system: writerSystemPrompt, prompt, schema: exploreSchema, tools, signal, maxSteps: EXPLORE_MAX_STEPS, maxOutputTokens: 8_000, submitName: 'submit_exploration' })
     // The draft reads too (KIT-54): what the exploration lacks is looked up, not left as an assumption.
-    if (phase === 'draft') return session.toolLoop({ phase, model: models.draft, system: writerSystemPrompt, prompt: `${prompt}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: draftSchema, tools, signal, maxSteps: DRAFT_MAX_STEPS, maxOutputTokens: 24_000, submitName: 'submit_draft' })
+    if (phase === 'draft') return session.toolLoop({ phase, model: models.draft, system: writerSystemPrompt, prompt: `${prompt}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: draftSchema, tools, signal, maxSteps: DRAFT_MAX_STEPS, maxOutputTokens: 24_000, submitName: 'submit_draft', reasoning: 'medium' })
     return reviewCall(request)
   })
   try {

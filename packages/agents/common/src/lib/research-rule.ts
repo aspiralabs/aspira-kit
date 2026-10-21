@@ -1,16 +1,18 @@
 // The one research rule every Aspira agent, phase and subagent works under (KIT-54, David:
 // "the skills should be able to review the code. If it's missing information or something is
 // vague, research it. Research it in the code, or Notion, or anywhere. 'unknown' should only
-// happen when the skill has exhausted its research."). The same sentence goes into every
+// happen when the skill has exhausted its research." And: it is not research-first; the agent
+// starts from what it was passed and researches only what that does not answer, so no step pays
+// for reads it does not need). The same sentence goes into every
 // in-session task prompt and every cloud agent's instructions.md, so a gap means the same thing
 // everywhere: a source that was looked for and could not be settled, never one nobody opened.
 
 /** The rule, as one paragraph. Every prompt that can report a gap, an unknown or an unverified fact carries it verbatim. */
 export const RESEARCH_RULE =
-  'Research before you report a gap: anything missing or vague is looked up first, in the repository\'s code (read the files, not just the file map), in Notion (any page or database the guidelines, the ticket, the idea or the spec point to: Approved Technologies, ADRs, decision pages, the Feature Board) and in public documentation, whichever can settle it. What you were given (a packet, a snapshot, a record, an exploration) is a head start, not a wall. "Unknown", "unverified" or a gap is allowed only once that research is exhausted, and it names where you looked and why that did not settle it.'
+  'Use what you were given first: the packet, the snapshot, the record or the exploration in the task is your evidence, and most questions are answered there. When it does not answer a question, research it: read the repository\'s code (the files, not just the file map), Notion (any page or database the guidelines, the ticket, the idea or the spec point to: Approved Technologies, ADRs, decision pages, the Feature Board) or the product\'s public documentation, whichever can settle it. What you were given is a head start, not a wall. "Unknown", "unverified" or a gap is allowed only once that research is exhausted, and it names where you looked and why that did not settle it.'
 
 /** The first clause of the rule: what a docs test checks for, so an instructions file that carries the rule in full passes and one that dropped it fails. */
-export const RESEARCH_RULE_MARKER = 'Research before you report a gap'
+export const RESEARCH_RULE_MARKER = 'Use what you were given first'
 
 /**
  * How a Claude Code session maps the research tools, for a task prompt the session runs as a

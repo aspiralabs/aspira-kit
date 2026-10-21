@@ -82,7 +82,7 @@ export function planContext(prepared: Pick<PreparedPlan, 'spec' | 'specPath' | '
 /** A guideline page research read in full: Notion through the read tool, or a knowledge file in --local. */
 export type GuidelinePage = { source: string; markdown: string }
 
-/** The full text of the guideline pages research read, so planning (which has no tools) sees them too. */
+/** The full text of the guideline pages research read, so planning sees them without re-reading them. */
 export function guidelinePagesSection(pages: GuidelinePage[]): string {
   return pages.length ? `\n\nGUIDELINE PAGES READ DURING RESEARCH (full text):\n${pages.map((page) => `SOURCE ${page.source}\n${page.markdown}`).join('\n\n')}` : ''
 }
@@ -207,6 +207,7 @@ export function assessPlan(args: { spec: string; guidelines: string; repo: Pick<
   if (!plan) problems.push('No structured plan produced')
   // A gap research still had after its turns is a note for the approver, never a problem (KIT-54): it names what it looked for and could not settle.
   const openGaps: string[] = (research?.gaps ?? []).map((gap) => `Research gap: ${gap}`)
+  if (plan && openGaps.length) plan.notes = [...(plan.notes ?? []), ...openGaps.filter((note) => !(plan.notes ?? []).includes(note))]
   // A spec that mentions a page or a card is not UI work; a plan that writes UI files is.
   const catalogMissing = missingUiReads(args.uiRequired && (plan === null || touchesUi(plan)), args.reads)
   if (plan) {
@@ -371,7 +372,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         : runStatus === 'needs-author' ? `${openCount} decision${openCount === 1 ? '' : 's'} open: ${join(dir, 'trace', 'decisions.md')}`
           : (problems[0] ?? null)
       const reasonCode = null
-      return { 'run-analysis.md': analysis.markdown, 'trace/review.json': JSON.stringify({ status: runStatus, reason, reasonCode, problems, decisions, input, repoCommit: repo.commit, repoDirty: repo.dirty, reviewFacts: { included: facts.included, reason: facts.reason }, models, phases: trace.phases, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, reviewMs, exportMs, totalMs, reportedCostUsd }, null, 2) }
+      return { 'run-analysis.md': analysis.markdown, 'trace/review.json': JSON.stringify({ status: runStatus, reason, reasonCode, problems, openGaps, decisions, input, repoCommit: repo.commit, repoDirty: repo.dirty, reviewFacts: { included: facts.included, reason: facts.reason }, models, phases: trace.phases, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, reviewMs, exportMs, totalMs, reportedCostUsd }, null, 2) }
     })
     return { status, dir, problems, openGaps, decisions, prepareMs, reviewMs, totalMs, reportedCostUsd }
   } finally { await mcp.close() }
