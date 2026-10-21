@@ -130,7 +130,8 @@ const spanNames: ReadonlySet<string> = new Set(SPAN_NAMES)
 const statusWords: ReadonlySet<string> = new Set(STATUS_WORDS)
 
 /** A span name from the closed set, or 'other'. */
-export const spanName = (name: string): string => (spanNames.has(name) || NUMBERED_NAME.test(name) ? name : OTHER)
+/** A per-area explore phase (`explore:<area>`, KIT-48) is the explore span. */
+export const spanName = (name: string): string => (spanNames.has(name) || NUMBERED_NAME.test(name) ? name : name.startsWith('explore:') ? 'explore' : OTHER)
 
 /** A status word from the closed set, or 'other'. */
 export const statusWord = (word: string): string => (statusWords.has(word) ? word : OTHER)

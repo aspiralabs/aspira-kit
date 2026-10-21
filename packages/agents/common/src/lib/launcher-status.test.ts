@@ -37,7 +37,6 @@ type Launcher = {
 const LAUNCHERS: Launcher[] = [
   { name: 'groomer', envVar: 'GROOMER_AGENT_DIR', skillDir: 'packages/agents/groomer/skill/aspira-groomer', agentDir: 'packages/agents/groomer', recordPath: 'trace/groom.json' },
   { name: 'spec-writer', envVar: 'SPEC_WRITER_AGENT_DIR', skillDir: 'packages/agents/spec-writer/skill/aspira-spec-writer', agentDir: 'packages/agents/spec-writer', recordPath: 'trace/review.json' },
-  { name: 'spec-reviewer', envVar: 'SPEC_REVIEWER_AGENT_DIR', skillDir: 'packages/agents/spec-reviewer/skill/aspira-spec-reviewer', agentDir: 'packages/agents/spec-reviewer', recordPath: 'trace/review.json' },
   { name: 'planner', envVar: 'PLANNER_AGENT_DIR', skillDir: 'packages/agents/planner/skill/aspira-planner', agentDir: 'packages/agents/planner', recordPath: 'trace/review.json' },
   { name: 'implementor', envVar: 'IMPLEMENTOR_AGENT_DIR', skillDir: 'packages/agents/implementor/skill/aspira-implementor', agentDir: 'packages/agents/implementor', recordPath: 'trace/implementation-local.json' },
   { name: 'code-analyzer', envVar: 'CODE_ANALYZER_AGENT_DIR', skillDir: 'packages/agents/code-analyzer/skill/aspira-code-analyzer', agentDir: 'packages/agents/code-analyzer', recordPath: 'rounds.json' },

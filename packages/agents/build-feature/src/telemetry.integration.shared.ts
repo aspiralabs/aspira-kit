@@ -10,7 +10,7 @@ export const SLOW = 240_000
 
 /** This package's version, the one every step skill's .kit-version must name. */
 export const VERSION = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8'))).version
-export const STEP_SKILLS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer']
+export const STEP_SKILLS = ['groomer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer']
 /** The .kit-version file kit init leaves in every step skill, as committed files. */
 export const kitVersions = (version = VERSION): Record<string, string> => Object.fromEntries(STEP_SKILLS.map((step) => [`.claude/skills/aspira-${step}/.kit-version`, `${version}\n`]))
 

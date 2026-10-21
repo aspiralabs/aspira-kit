@@ -68,7 +68,7 @@ it('takes the open decision as the agent\'s recommended option with --take-recom
   expect(done.authorDecisions[0]).toMatchObject({ decidedBy: 'agent', answer: decision.recommended })
   expect(done.authorDecisions.some((entry) => entry.decidedBy === 'author')).toBe(false)
 
-  const report = JSON.parse(await readFile(join(dir, 'spec.written/trace/review.json'), 'utf8')) as { status: string; authorDecisions: { decidedBy: string; answer: string }[] }
+  const report = JSON.parse(await readFile(join(dir, 'spec.reviewed/trace/review.json'), 'utf8')) as { status: string; authorDecisions: { decidedBy: string; answer: string }[] }
   expect(report.status).toBe('ready')
   expect(report.authorDecisions[0]).toMatchObject({ decidedBy: 'agent', answer: decision.recommended })
   expect(report.authorDecisions.some((entry) => entry.decidedBy === 'author')).toBe(false)
@@ -81,6 +81,6 @@ it('leaves the decision open without --take-recommended (regression)', async () 
   expect(done.status).toBe('needs-author')
   expect(done.authorDecisions[0]).toMatchObject({ decidedBy: 'open', answer: null })
 
-  const report = JSON.parse(await readFile(join(dir, 'spec.written/trace/review.json'), 'utf8')) as { status: string }
+  const report = JSON.parse(await readFile(join(dir, 'spec.reviewed/trace/review.json'), 'utf8')) as { status: string }
   expect(report.status).toBe('needs-author')
 })

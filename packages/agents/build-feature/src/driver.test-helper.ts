@@ -467,7 +467,7 @@ export type StepReportOptions = {
   apps?: string[]
   /** pr-reviewer: the findings of this review. */
   findings?: Parameters<typeof findingsMarkdown>[0]
-  /** spec-writer: whether spec.written/ holds the current spec.md. Default true. */
+  /** spec-writer: whether spec.reviewed/ holds the current spec.md. Default true. */
   covers?: boolean
   /** implementor: the verification status. Default 'done'. */
   verification?: string
@@ -476,8 +476,7 @@ export type StepReportOptions = {
 /** Where each step's own decisions file lies, relative to the ticket folder. */
 export const DECISIONS_FILE: Record<string, string> = {
   groomer: 'groom/trace/decisions.md',
-  'spec-writer': 'spec.written/trace/decisions.md',
-  'spec-reviewer': 'spec.reviewed/trace/decisions.md',
+  'spec-writer': 'spec.reviewed/trace/decisions.md',
   planner: 'plan.review/trace/decisions.md',
   implementor: 'plan.review/trace/decisions.md',
 }
@@ -486,7 +485,6 @@ export const DECISIONS_FILE: Record<string, string> = {
 const SUCCESS: Record<string, { status: string; card?: string }> = {
   groomer: { status: 'confirmed', card: 'Shortlist' },
   'spec-writer': { status: 'ready', card: 'In Review: Spec' },
-  'spec-reviewer': { status: 'ready' },
   planner: { status: 'ready', card: 'In Review: Plan' },
   implementor: { status: 'complete', card: 'In Progress: Implementation' },
   'code-analyzer': { status: 'clean' },
@@ -519,15 +517,12 @@ export async function writeStepExport(folder: string, repo: string, step: string
       await put(join(folder, DECISIONS_FILE.groomer!), decisionsMarkdown(decisions))
       return
     }
-    case 'spec-writer':
-    case 'spec-reviewer': {
-      const dir = step === 'spec-writer' ? 'spec.written' : 'spec.reviewed'
-      await put(join(folder, dir, 'trace/review.json'), JSON.stringify({ mode: 'local', status, problems: [], authorDecisions: decisionsOut }, null, 2))
-      await put(join(folder, dir, 'trace/decisions.md'), decisionsMarkdown(decisions))
-      if (step === 'spec-writer') {
-        await put(join(folder, 'spec.md'), SPEC)
-        if (options.covers !== false) await put(join(folder, 'spec.written/spec.md'), SPEC)
-      } else await put(join(folder, 'spec.reviewed/spec.reviewed.md'), SPEC)
+    case 'spec-writer': {
+      // The one spec step (KIT-48): the reviewer's layout under spec.reviewed/, and spec.md beside it.
+      await put(join(folder, 'spec.reviewed/trace/review.json'), JSON.stringify({ mode: 'local', status, problems: [], authorDecisions: decisionsOut }, null, 2))
+      await put(join(folder, 'spec.reviewed/trace/decisions.md'), decisionsMarkdown(decisions))
+      await put(join(folder, 'spec.md'), SPEC)
+      if (options.covers !== false) await put(join(folder, 'spec.reviewed/spec.reviewed.md'), SPEC)
       return
     }
     case 'planner': {

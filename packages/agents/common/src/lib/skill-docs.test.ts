@@ -19,11 +19,10 @@ import { describe, expect, it } from 'vitest'
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..', '..')
 
-// The eight launcher skills (seven agents and build-feature), each `skill/aspira-<name>/SKILL.md`.
+// The seven launcher skills (six agents and build-feature; spec-reviewer is a library since KIT-48), each `skill/aspira-<name>/SKILL.md`.
 const LAUNCHER_SKILLS: { name: string; path: string }[] = [
   { name: 'groomer', path: 'packages/agents/groomer/skill/aspira-groomer/SKILL.md' },
   { name: 'spec-writer', path: 'packages/agents/spec-writer/skill/aspira-spec-writer/SKILL.md' },
-  { name: 'spec-reviewer', path: 'packages/agents/spec-reviewer/skill/aspira-spec-reviewer/SKILL.md' },
   { name: 'planner', path: 'packages/agents/planner/skill/aspira-planner/SKILL.md' },
   { name: 'implementor', path: 'packages/agents/implementor/skill/aspira-implementor/SKILL.md' },
   { name: 'code-analyzer', path: 'packages/agents/code-analyzer/skill/aspira-code-analyzer/SKILL.md' },
@@ -115,7 +114,6 @@ type KnowledgeStep = { name: string; path: string; anchor: RegExp }
 const KNOWLEDGE_STEPS: KnowledgeStep[] = [
   { name: 'groomer', path: 'packages/agents/groomer/skill/aspira-groomer/SKILL.md', anchor: /^\d+\.\s\*\*Knowledge\.\*\*/ },
   { name: 'spec-writer', path: 'packages/agents/spec-writer/skill/aspira-spec-writer/SKILL.md', anchor: /^\d+\.\s\*\*Knowledge\.\*\*/ },
-  { name: 'spec-reviewer', path: 'packages/agents/spec-reviewer/skill/aspira-spec-reviewer/SKILL.md', anchor: /^\d+\.\s\*\*Knowledge\.\*\*/ },
   { name: 'planner', path: 'packages/agents/planner/skill/aspira-planner/SKILL.md', anchor: /^\d+\.\sStage `knowledge`:/ },
   { name: 'implementor', path: 'packages/agents/implementor/skill/aspira-implementor/SKILL.md', anchor: /^\d+\.\s\*\*`knowledge`\*\*/ },
   { name: 'code-analyzer', path: 'packages/agents/code-analyzer/skill/aspira-code-analyzer/SKILL.md', anchor: /^\d+\.\s\*\*Knowledge\.\*\*/ },

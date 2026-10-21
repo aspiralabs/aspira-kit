@@ -85,8 +85,7 @@ const current = (skill: Skill): string => GATES[skill].inProgress ?? GATES[skill
 
 const needsAuthorTable: Record<Skill, Expected> = {
   groomer: { pushes: ['Grooming Decisions'], move: null },
-  'spec-writer': { pushes: ['Spec'], move: { from: 'In Progress: Spec', to: 'In Review: Spec' } },
-  'spec-reviewer': { pushes: ['Spec Reviewed', 'Spec Review Decisions'], move: null },
+  'spec-writer': { pushes: ['Spec', 'Spec Reviewed', 'Spec Review Decisions'], move: { from: 'In Progress: Spec', to: 'In Review: Spec' } },
   planner: { pushes: ['Plan'], move: { from: 'In Progress: Plan', to: 'In Review: Plan' } },
   implementor: { pushes: [], move: null },
   'code-analyzer': { pushes: [], move: null },
@@ -95,8 +94,7 @@ const needsAuthorTable: Record<Skill, Expected> = {
 
 const readyTable: Record<Skill, Expected> = {
   groomer: { pushes: ['Grooming Decisions'], move: { from: 'Grooming', to: 'Shortlist' } },
-  'spec-writer': { pushes: ['Spec'], move: { from: 'In Progress: Spec', to: 'In Review: Spec' } },
-  'spec-reviewer': { pushes: ['Spec Reviewed'], move: null },
+  'spec-writer': { pushes: ['Spec', 'Spec Reviewed'], move: { from: 'In Progress: Spec', to: 'In Review: Spec' } },
   planner: { pushes: ['Plan'], move: { from: 'In Progress: Plan', to: 'In Review: Plan' } },
   implementor: { pushes: ['Implementation'], move: { from: 'In Progress: Implementation', to: 'In Review: Implementation' } },
   'code-analyzer': { pushes: [], move: null },

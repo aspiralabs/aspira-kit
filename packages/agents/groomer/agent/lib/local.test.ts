@@ -94,6 +94,8 @@ const confirmed = (id: string, branch: string, answer: string) => ({ ...question
 
 /** Every seeded branch visited, so nothing but open questions keeps Confirm away. */
 const allVisited = () => SEEDED.map((id) => ({ id, state: 'visited' as const }))
+/** A round 1's branches (KIT-48, the one consolidated round): the given ones visited, every other seeded branch closed. */
+const round1Branches = (visited: string[]) => SEEDED.map((id) => (visited.includes(id) ? { id, state: 'visited' as const } : { id, state: 'closed' as const, reason: 'nothing to decide: out of scope' }))
 const groomRecord = <D extends { decidedBy: 'open' | 'author' }>(round: number, decisions: D[], branches: { id: string; state: 'open' | 'visited' | 'closed' }[] = allVisited()) => ({
   decisions,
   branches,
@@ -153,7 +155,7 @@ describe('the answers of a chat round', () => {
   /** Round 1 asked Q1 and Q2 on the first run; the session is about to write the answers. */
   async function roundOneAsked() {
     const ws = await workspace()
-    await writeJson(roundFile(ws.folder, 1), { round: 1, searched: ['cart limit'], facts: [{ path: 'src/cart.ts', line: 1 }], questions: [question('Q1', 'problem'), question('Q2', 'who')], branches: [{ id: 'problem', state: 'visited' }, { id: 'who', state: 'visited' }] })
+    await writeJson(roundFile(ws.folder, 1), { round: 1, searched: ['cart limit'], facts: [{ path: 'src/cart.ts', line: 1 }], questions: [question('Q1', 'problem'), question('Q2', 'who')], branches: round1Branches(['problem', 'who']) })
     return ws
   }
 
@@ -267,7 +269,7 @@ describe('ticks made on the page during a chat round', () => {
 describe('resuming after an interruption', () => {
   it('starts the next round after a verified needs-author round, without asking its answers again', async () => {
     const { folder, input } = await workspace()
-    const round1 = { round: 1, searched: ['cart limit'], facts: [{ path: 'src/cart.ts', line: 1 }], questions: [question('Q1', 'problem'), question('Q2', 'who')], branches: [{ id: 'problem', state: 'visited' }, { id: 'who', state: 'visited' }] }
+    const round1 = { round: 1, searched: ['cart limit'], facts: [{ path: 'src/cart.ts', line: 1 }], questions: [question('Q1', 'problem'), question('Q2', 'who')], branches: round1Branches(['problem', 'who']) }
     const after = groomRecord(1, [confirmed('Q1', 'problem', 'A'), question('Q2', 'who')], SEEDED.map((id) => ({ id, state: id === 'problem' || id === 'who' ? ('visited' as const) : ('open' as const) })))
     await writeJson(roundFile(folder, 1), round1)
     await writeJson(answersFile(folder, 1), [{ id: 'Q1', question: question('Q1', 'problem').question, answer: 'A' }])
@@ -281,7 +283,7 @@ describe('resuming after an interruption', () => {
   it('merges a tick made on the page between rounds into the next round\'s base, so the question is not asked again (KIT-23)', async () => {
     const { folder, input } = await workspace()
     const after = groomRecord(1, [confirmed('Q1', 'problem', 'A'), question('Q2', 'who')], SEEDED.map((id) => ({ id, state: id === 'problem' || id === 'who' ? ('visited' as const) : ('open' as const) })))
-    await writeJson(roundFile(folder, 1), { round: 1, searched: ['cart limit'], facts: [{ path: 'src/cart.ts', line: 1 }], questions: [question('Q1', 'problem'), question('Q2', 'who')], branches: [{ id: 'problem', state: 'visited' }, { id: 'who', state: 'visited' }] })
+    await writeJson(roundFile(folder, 1), { round: 1, searched: ['cart limit'], facts: [{ path: 'src/cart.ts', line: 1 }], questions: [question('Q1', 'problem'), question('Q2', 'who')], branches: round1Branches(['problem', 'who']) })
     await writeJson(answersFile(folder, 1), [{ id: 'Q1', question: question('Q1', 'problem').question, answer: 'A' }])
     await writeText(pageFile(folder, 1), firstPage)
     await writeGroomRecord(folder, after)
@@ -297,5 +299,19 @@ describe('resuming after an interruption', () => {
       open: base.open,
       asksNone: prompt.includes('Open questions to ask again with their ids: none'),
     }).toMatchObject({ stage: 'round', q2: { decidedBy: 'author', answer: 'B' }, open: 0, asksNone: true })
+  })
+})
+
+describe('the one consolidated round (KIT-48)', () => {
+  it('refuses a round 1 that leaves a branch neither asked nor closed, naming the branches', async () => {
+    const ws = await workspace()
+    await writeJson(roundFile(ws.folder, 1), { round: 1, searched: ['cart limit'], facts: [{ path: 'src/cart.ts', line: 1 }], questions: [question('Q1', 'problem'), question('Q2', 'who')], branches: [{ id: 'problem', state: 'visited' }, { id: 'who', state: 'visited' }] })
+    const step = await runLocal(ws.input, deps)
+    expect(step).toMatchObject({ stage: 'round', round: 1 })
+    if (step.stage !== 'round') throw new Error('expected a round task')
+    const task = step.task as { error?: string; model: string }
+    expect(task.error).toContain('round 1 is the one consolidated round')
+    expect(task.error).toContain('done')
+    expect(task.model).toBe('opus')
   })
 })

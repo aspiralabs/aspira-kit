@@ -14,6 +14,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
 import type { DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
+import type { SessionModel } from '@aspiralabs/agent-common/lib/session-model'
 import { z } from 'zod'
 import { fingerprintKnowledge, KnowledgeBlocked, knowledgeConfig, knowledgeFiles, knowledgeSource, loadKnowledge, REQUIRED_NAME, verifyGuidelines, type KnowledgeConfig, type KnowledgeFile } from './local-knowledge.ts'
 import { planSchema, readAnswers, researchSchema, type Plan, type Research } from './plan.ts'
@@ -35,6 +36,8 @@ export type LocalInput = {
   finish?: boolean
   /** Take every open decision's recommended option as the agent's (F10). */
   takeRecommended?: boolean
+  /** The run packet build-feature wrote (KIT-48), put in front of every phase's context. */
+  packetPath?: string
 }
 
 /** Seams for tests: the agent's environment, the package the agent files are read from, and the knowledge walk's own fetch/API base (never set outside tests). */
@@ -43,8 +46,11 @@ export type LocalDeps = { env?: Record<string, string | undefined>; packageDir?:
 /** The model phases: research, planning, then up to REPAIR_ROUNDS correction passes. */
 export type PhaseId = 'research' | 'planning' | `repair-${number}`
 
-/** A task as printed for the session: the prompt and output are file paths. */
-export type LocalTask = { id: PhaseId; prompt: string; output: string; schema: string; reads?: string; error?: string; retry?: boolean }
+/** A task as printed for the session: the prompt and output are file paths; `model` the session model it runs on (KIT-48). */
+export type LocalTask = { id: PhaseId; prompt: string; output: string; schema: string; model: SessionModel; reads?: string; error?: string; retry?: boolean }
+
+/** Research and planning on Opus, the correction passes on Sonnet (KIT-48). */
+export const modelForPhase = (id: PhaseId): SessionModel => (id.startsWith('repair-') ? 'sonnet' : 'opus')
 
 /** A stage for the session to run. */
 export type LocalPending = { pending: true; status: 'pending'; stage: Stage; workDir: string; router: string; instructions: string; tasks: LocalTask[] }
@@ -170,10 +176,13 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   const prepared = await preparePlan({ specPath: input.specPath, repoPath: input.repoPath, guidelinesPath, outputDir: dir }, new AbortController().signal)
   await withoutWorkDir(prepared, input.repoPath, work)
   const prompts = await loadPrompts(packageDir)
-  const context = planContext(prepared)
+  // The run packet (KIT-48): what build-feature already gathered, in front of the spec and the source packet.
+  const packet = input.packetPath === undefined ? '' : await readFile(resolve(input.packetPath), 'utf8')
+  const context = `${packet ? `RUN PACKET (data):\n${packet}\n\n` : ''}${planContext(prepared)}`
   // The spec reviewer's own facts, reused in the session's research prompt when they still describe this spec and commit (F33-F35).
   const facts = await reviewFacts({ folder: ticketFolderFor(input.specPath), repoPath: input.repoPath, repo: { commit: prepared.repo.commit, dirty: prepared.repo.dirty } })
-  const fingerprint = createHash('sha256').update(JSON.stringify([prepared.spec, context, prepared.uiRequired])).digest('hex')
+  // The run packet is rewritten before every step print (KIT-48), so the fingerprint a resumed call checks leaves it out.
+  const fingerprint = createHash('sha256').update(JSON.stringify([prepared.spec, planContext(prepared), prepared.uiRequired])).digest('hex')
 
   await mkdir(join(work, 'outputs'), { recursive: true })
   const stateFile = join(work, 'state.json')
@@ -218,7 +227,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     }
     const promptFile = join(work, 'prompts', `${id}.md`)
     await writeFile(promptFile, renderTaskPrompt({ id, system: id === 'research' ? prompts.researchSystem : prompts.system, prompt, output, reads: readsFile, repo: resolve(input.repoPath), knowledge: topics, schema }))
-    return { task: { id, prompt: promptFile, output, schema: id === 'research' ? 'researchSchema' : 'planSchema', ...(readsFile === null ? {} : { reads: readsFile }), ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) } }
+    return { task: { id, prompt: promptFile, output, schema: id === 'research' ? 'researchSchema' : 'planSchema', model: modelForPhase(id), ...(readsFile === null ? {} : { reads: readsFile }), ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) } }
   }
 
   const coversRules = (value: Research) => {

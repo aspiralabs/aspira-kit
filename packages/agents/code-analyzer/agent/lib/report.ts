@@ -47,6 +47,9 @@ export function renderReport(input: ReportInput): string {
   if (result.editedFiles.length) lines.push('## Files edited by the model', '', ...result.editedFiles.map((f) => `- ${f}`), '', 'Review this diff before merging: static analysis proves the checks pass, not that behavior is unchanged. No tests were run.', '')
   if (result.rejected.length) lines.push('## Rejected edits', '', ...summarize(result.rejected), '')
   if (result.remaining.length) lines.push('## Remaining diagnostics', '', ...result.remaining.slice(0, 200).map((d) => `- ${d.severity} ${d.tool} ${d.file}:${d.line ?? '?'} [${d.rule ?? '-'}] ${d.message}`), result.remaining.length > 200 ? `- … ${result.remaining.length - 200} more in diagnostics.json` : '', '')
+  // A ticket run's pre-existing diagnostics in files it did not change (KIT-48): reported, never fixed, never a reason to end incomplete.
+  const untouched = result.untouched ?? []
+  if (untouched.length) lines.push('## Pre-existing diagnostics in untouched files', '', `${untouched.length} diagnostic${untouched.length === 1 ? '' : 's'} in ${new Set(untouched.map((d) => d.file)).size} file${new Set(untouched.map((d) => d.file)).size === 1 ? '' : 's'} the ticket branch did not change (scope: ${result.scope?.base ?? 'the branch'}). Left as they are; not counted against this run.`, '', ...untouched.slice(0, 50).map((d) => `- ${d.severity} ${d.tool} ${d.file}:${d.line ?? '?'} [${d.rule ?? '-'}] ${d.message}`), untouched.length > 50 ? `- … ${untouched.length - 50} more in diagnostics.json` : '', '')
   const unresolved = result.rounds.flatMap((r) => r.unresolved)
   if (unresolved.length) lines.push('## Left unresolved by the fixer', '', ...[...new Set(unresolved)].slice(0, 100).map((u) => `- ${u}`), '')
   if (result.problems.length) lines.push('## Problems', '', ...result.problems.map((p) => `- ${p.split('\n')[0]}`), '', 'Full output is in rounds.json.', '')

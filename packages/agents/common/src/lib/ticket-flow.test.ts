@@ -217,12 +217,12 @@ describe('startFlow (separate process)', () => {
 
   it('leaves an unchanged file alone, and refuses to overwrite a newer local file without --force-pull', async () => {
     const client = fakeBoard('In Review: Spec')
-    const first = await startFlow({ skill: 'spec-reviewer', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
+    const first = await startFlow({ skill: 'spec-writer', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
     const spec = join(first.folder, 'spec.md')
     await writeFile(spec, `${SPEC}\nlocal edit\n`)
     // The page has not changed since the pull: the local file (with its edit) is kept.
     client.calls = []
-    const second = await startFlow({ skill: 'spec-reviewer', repo, argument: { kind: 'ticket', ref: 'NOM-4', folder: first.folder }, board: BOARD, client })
+    const second = await startFlow({ skill: 'spec-writer', repo, argument: { kind: 'ticket', ref: 'NOM-4', folder: first.folder }, board: BOARD, client })
     expect(second.kept).toEqual([spec, join(first.folder, 'spec.reviewed/spec.reviewed.md')])
     expect(client.calls).toEqual(['resolve NOM-4'])
     expect(await readFile(spec, 'utf8')).toContain('local edit')
@@ -230,16 +230,16 @@ describe('startFlow (separate process)', () => {
     client.pages.Spec!.page.lastEditedAt = '2026-10-06T01:00:00.000Z'
     client.pages.Spec!.markdown = 'new spec'
     await setMtime(spec, '2026-10-06T02:00:00.000Z')
-    await expect(startFlow({ skill: 'spec-reviewer', repo, argument: { kind: 'ticket', ref: 'NOM-4', folder: first.folder }, board: BOARD, client })).rejects.toThrow(`Not overwriting a local file newer than its page: ${spec} (Spec). Pass --force-pull`)
+    await expect(startFlow({ skill: 'spec-writer', repo, argument: { kind: 'ticket', ref: 'NOM-4', folder: first.folder }, board: BOARD, client })).rejects.toThrow(`Not overwriting a local file newer than its page: ${spec} (Spec). Pass --force-pull`)
     expect(await readFile(spec, 'utf8')).toContain('local edit')
-    const forced = await startFlow({ skill: 'spec-reviewer', repo, argument: { kind: 'ticket', ref: 'NOM-4', folder: first.folder }, board: BOARD, client, force: true })
+    const forced = await startFlow({ skill: 'spec-writer', repo, argument: { kind: 'ticket', ref: 'NOM-4', folder: first.folder }, board: BOARD, client, force: true })
     expect(forced.pulled).toEqual([spec])
     expect(await readFile(spec, 'utf8')).toBe('new spec')
     // The page changed and the local file is older than the page: written.
     client.pages.Spec!.page.lastEditedAt = '2026-10-06T03:00:00.000Z'
     client.pages.Spec!.markdown = 'newer spec'
     await setMtime(spec, '2026-10-06T02:30:00.000Z')
-    const updated = await startFlow({ skill: 'spec-reviewer', repo, argument: { kind: 'ticket', ref: 'NOM-4', folder: first.folder }, board: BOARD, client })
+    const updated = await startFlow({ skill: 'spec-writer', repo, argument: { kind: 'ticket', ref: 'NOM-4', folder: first.folder }, board: BOARD, client })
     expect(updated.pulled).toEqual([spec])
     expect(await readFile(spec, 'utf8')).toBe('newer spec')
   })
@@ -304,19 +304,20 @@ describe('finishFlow (separate process)', () => {
     expect(finished.header[1]).toBe('Status: In Progress: Plan -> In Progress: Plan (no move)')
   })
 
-  it('the spec reviewer pushes the decisions page only for needs-author, and never moves', async () => {
+  it('the spec step rerun from In Review: Spec pushes the decisions page only for needs-author, and never moves (KIT-48)', async () => {
     const client = fakeBoard('In Review: Spec')
-    const started = await startFlow({ skill: 'spec-reviewer', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
+    const started = await startFlow({ skill: 'spec-writer', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
     await mkdir(join(started.folder, 'spec.reviewed/trace'), { recursive: true })
+    await writeFile(join(started.folder, 'spec.md'), 'reviewed v2')
     await writeFile(join(started.folder, 'spec.reviewed/spec.reviewed.md'), 'reviewed v2')
     await writeFile(join(started.folder, 'spec.reviewed/trace/decisions.md'), '# Decisions\n')
     client.calls = []
-    await finishFlow({ skill: 'spec-reviewer', folder: started.folder, runStatus: 'ready', board: BOARD, client })
-    expect(client.calls).toEqual(['push Spec Reviewed'])
+    await finishFlow({ skill: 'spec-writer', folder: started.folder, runStatus: 'ready', board: BOARD, client })
+    expect(client.calls).toEqual(['push Spec', 'push Spec Reviewed'])
     client.calls = []
-    const needs = await finishFlow({ skill: 'spec-reviewer', folder: started.folder, runStatus: 'needs-author', board: BOARD, client })
-    expect(client.calls).toEqual(['push Spec Reviewed', 'push Spec Review Decisions'])
-    expect(needs.trace.pushed.map((p) => p.title)).toEqual(['Spec Reviewed', 'Spec Review Decisions'])
+    const needs = await finishFlow({ skill: 'spec-writer', folder: started.folder, runStatus: 'needs-author', board: BOARD, client })
+    expect(client.calls).toEqual(['push Spec', 'push Spec Reviewed', 'push Spec Review Decisions'])
+    expect(needs.trace.pushed.map((p) => p.title)).toEqual(['Spec', 'Spec Reviewed', 'Spec Review Decisions'])
     expect(client.status).toBe('In Review: Spec')
   })
 
@@ -536,11 +537,14 @@ describe('inputFileFor', () => {
   it('takes the first file of the list that exists, and names the missing page otherwise', async () => {
     const folder = join(repo, '.work', 'nom-4-explore-pagination')
     await mkdir(join(folder, 'spec.reviewed'), { recursive: true })
-    expect(() => inputFileFor('spec-reviewer', folder)).toThrow('the ticket has no "Spec" page yet. The spec writer puts it there.')
+    // The spec step from In Review: Spec takes the answered reviewed spec, else the Spec page (KIT-48); from Ready: Idea the idea.
+    expect(() => inputFileFor('spec-writer', folder, 'In Review: Spec')).toThrow('the ticket has no "Spec" page yet. The spec writer puts it there.')
     await writeFile(join(folder, 'spec.md'), 'spec')
-    expect(inputFileFor('spec-reviewer', folder)).toBe(join(folder, 'spec.md'))
+    expect(inputFileFor('spec-writer', folder, 'In Review: Spec')).toBe(join(folder, 'spec.md'))
     await writeFile(join(folder, 'spec.reviewed/spec.reviewed.md'), 'answered')
-    expect(inputFileFor('spec-reviewer', folder)).toBe(join(folder, 'spec.reviewed/spec.reviewed.md'))
+    expect(inputFileFor('spec-writer', folder, 'In Review: Spec')).toBe(join(folder, 'spec.reviewed/spec.reviewed.md'))
+    await writeFile(join(folder, 'idea.md'), 'idea')
+    expect(inputFileFor('spec-writer', folder, 'Ready: Idea')).toBe(join(folder, 'idea.md'))
     expect(() => inputFileFor('planner', join(repo, 'nowhere'))).toThrow('the ticket has no "Spec Reviewed" page yet')
     expect(() => inputFileFor('code-analyzer', folder)).toThrow('takes no input file')
   })
@@ -839,9 +843,9 @@ describe('the groomer start (separate process)', () => {
     expect(((await readGroomJson(second.folder)).decisions ?? []).filter((decision) => decision.decidedBy === 'author')).toEqual([])
   })
 
-  it('the spec reviewer never pulls Grooming Decisions', async () => {
+  it('the spec step never pulls Grooming Decisions', async () => {
     const client = fakeBoard('In Review: Spec', { Spec: SPEC, 'Spec Reviewed': SPEC_REVIEWED, [GD]: renderedPage(groomRecord([Q1])) })
-    const started = await startFlow({ skill: 'spec-reviewer', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
+    const started = await startFlow({ skill: 'spec-writer', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
     expect(existsSync(decisionsPath(started.folder))).toBe(false)
     expect(client.calls).not.toContain('pull Grooming Decisions')
   })
@@ -1138,18 +1142,20 @@ describe('the ticket CLI for the groomer', () => {
     expect(await readGroomJson(started.folder)).toMatchObject({ status: 'needs-author', open: 2, page: { url } })
   })
 
-  it('the spec reviewer\'s finish output is today\'s, and needs-author exits 5 (F5, A2, Decision Q4)', async () => {
+  it('the spec step\'s finish output from In Review: Spec is today\'s, and needs-author exits 5 (F5, A2, Decision Q4)', async () => {
     const client = fakeBoard('In Review: Spec')
-    const started = await startFlow({ skill: 'spec-reviewer', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
+    const started = await startFlow({ skill: 'spec-writer', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
     await mkdir(join(started.folder, 'spec.reviewed/trace'), { recursive: true })
+    await writeFile(join(started.folder, 'spec.md'), 'reviewed v2')
     await writeFile(join(started.folder, 'spec.reviewed/spec.reviewed.md'), 'reviewed v2')
     await writeFile(join(started.folder, 'spec.reviewed/trace/decisions.md'), '# Decisions\n')
-    const finished = await cli('spec-reviewer', ['finish', '--run-status', 'needs-author', '--folder', started.folder], client)
+    const finished = await cli('spec-writer', ['finish', '--run-status', 'needs-author', '--folder', started.folder], client)
     expect(finished.out).toEqual([
       `Ticket: NOM-4 Explore pagination (${URL})`,
       'Status: In Review: Spec -> In Review: Spec (no move)',
-      `Pages pushed: Spec Reviewed (${client.pages['Spec Reviewed']?.page.url}), Spec Review Decisions (${client.pages['Spec Review Decisions']?.page.url})`,
+      `Pages pushed: Spec (${client.pages.Spec?.page.url}), Spec Reviewed (${client.pages['Spec Reviewed']?.page.url}), Spec Review Decisions (${client.pages['Spec Review Decisions']?.page.url})`,
       `Working folder: ${started.folder}`,
+      'Answer the open decisions: write the answers into the reviewed spec (the Spec Reviewed page, pulled as spec.reviewed/spec.reviewed.md) or tick them in spec.reviewed/trace/decisions.md, then run spec-writer again from "In Review: Spec"; it reviews the answered spec and makes no move.',
       `Board trace: ${join(started.folder, 'board.json')}`,
     ])
     expect(finished.code).toBe(5)
@@ -1377,7 +1383,7 @@ describe('the groomer --local board stage (against a stub session)', () => {
     expect((await verifyRun(ctxOf('spec-writer'), { positional: 'NOM-4' }, () => folderOf())).verified).toBe(true)
   })
 
-  it('the end stage refuses when the round did not render Grooming Decisions; the spec reviewer still skips a missing push file', async () => {
+  it('the end stage refuses when the round did not render Grooming Decisions; the spec step still skips a missing push file', async () => {
     const client = fakeBoard('Grooming', {})
     seedGroomPage(client, renderedPage(groomRecord([Q1])))
     const ready = await localReady(client)
@@ -1387,9 +1393,9 @@ describe('the groomer --local board stage (against a stub session)', () => {
 
     await rm(join(repo, '.work'), { recursive: true, force: true })
     const reviewer = fakeBoard('In Review: Spec')
-    const reviewReady = await localReady(reviewer, 'spec-reviewer')
-    const end = await afterRun(ctxOf('spec-reviewer'), reviewReady, { status: 'needs-author', exportDir: join(folderOf(), 'spec.reviewed'), verifyCommand: 'spec-reviewer.sh local NOM-4 --verify' })
-    expect(end.board.actions.map((action) => [action.action, field(action, 'title')])).toEqual([['push', 'Spec Reviewed']])
+    const reviewReady = await localReady(reviewer, 'spec-writer')
+    const end = await afterRun(ctxOf('spec-writer'), reviewReady, { status: 'needs-author', exportDir: join(folderOf(), 'spec.reviewed'), verifyCommand: 'spec-writer.sh local NOM-4 --verify' })
+    expect(end.board.actions.map((action) => [action.action, field(action, 'title')])).toEqual([['push', 'Spec'], ['push', 'Spec Reviewed']])
   })
 
   it('a ready (confirmed) round lists unmark, replace, resolve, write-idea and the Shortlist move, in that order', async () => {

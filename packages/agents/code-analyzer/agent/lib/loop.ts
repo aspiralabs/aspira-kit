@@ -3,12 +3,14 @@ import type { Analyzer } from './analyzers.ts'
 import { batch, errors, sameSet, type Batch, type Diagnostic } from './diagnostics.ts'
 import type { Executor } from './executor.ts'
 import type { Rejection } from './guards.ts'
+import { filesFor, partition, type Scope } from './scope.ts'
 
 export type AnalyzerRun = { id: string; exitCode: number; ms: number; diagnostics: number; problem: string | null }
 export type Round = { round: number; autofix: { id: string; exitCode: number; ms: number }[]; analyzers: AnalyzerRun[]; targets: number; batches: number; edits: number; rejected: number; unresolved: string[]; ms: number }
 /** One of the five shared run statuses (F1): code-analyzer only ever ends ready or incomplete. */
 export type Status = 'ready' | 'incomplete'
-export type LoopResult = { status: Status; reason: string; reasonCode: ReasonCode | null; rounds: Round[]; initial: Diagnostic[]; remaining: Diagnostic[]; problems: string[]; editedFiles: string[]; rejected: Rejection[]; ms: number }
+/** `scope` and `untouched` (KIT-48): a ticket run's changed files, and the diagnostics in files outside them that the run reported but never fixed. */
+export type LoopResult = { status: Status; reason: string; reasonCode: ReasonCode | null; rounds: Round[]; initial: Diagnostic[]; remaining: Diagnostic[]; problems: string[]; editedFiles: string[]; rejected: Rejection[]; ms: number; scope?: Scope | null; untouched?: Diagnostic[] }
 export type FixRequest = { batch: Batch; round: number; signal?: AbortSignal }
 export type FixResult = { edits: number; editedFiles: string[]; rejected: Rejection[]; unresolved: string[] }
 export type Fixer = (request: FixRequest) => Promise<FixResult>
@@ -21,6 +23,8 @@ export type LoopOptions = {
   concurrency: number
   signal?: AbortSignal
   progress?: (message: string) => void
+  /** A ticket run's changed files (KIT-48): auto-fix and the model fix stay inside them; null fixes the whole tree. */
+  scope?: Scope | null
 }
 
 const tail = (text: string, n = 1200) => text.trim().slice(-n)
@@ -45,14 +49,26 @@ export async function runAnalyzers(executor: Executor, analyzers: Analyzer[], op
   return { diagnostics, runs }
 }
 
-/** Every analyzer's whole-tree auto-fix, in order, recorded per analyzer. */
-export async function runAutofix(executor: Executor, analyzers: Analyzer[], options: Pick<LoopOptions, 'commandTimeoutMs' | 'signal' | 'progress'>): Promise<Round['autofix']> {
+/**
+ * Every analyzer's auto-fix, in order, recorded per analyzer: the whole tree, or, with a scope
+ * (KIT-48), only the scope's files the tool handles; an analyzer whose fix cannot take files
+ * (a project script) is skipped in a scoped run, and one with no matching file runs nothing.
+ */
+export async function runAutofix(executor: Executor, analyzers: Analyzer[], options: Pick<LoopOptions, 'commandTimeoutMs' | 'signal' | 'progress' | 'scope'>): Promise<Round['autofix']> {
   const autofix: Round['autofix'] = []
+  const scope = options.scope ?? null
   for (const analyzer of analyzers) {
     if (!analyzer.fix) continue
+    let command = analyzer.fix
+    if (scope !== null) {
+      if (!analyzer.fixFiles || !analyzer.exts) continue
+      const files = filesFor(scope, analyzer.cwd, analyzer.exts)
+      if (!files.length) continue
+      command = analyzer.fixFiles(files)
+    }
     options.progress?.(`autofix ${analyzer.id}`)
     const fixStarted = Date.now()
-    const result = await executor.run(analyzer.fix, { cwd: analyzer.cwd, timeoutMs: options.commandTimeoutMs, signal: options.signal })
+    const result = await executor.run(command, { cwd: analyzer.cwd, timeoutMs: options.commandTimeoutMs, signal: options.signal })
     autofix.push({ id: analyzer.id, exitCode: result.exitCode, ms: Date.now() - fixStarted })
   }
   return autofix
@@ -68,8 +84,8 @@ export const STOP = {
   cancelled: 'cancelled',
 } as const
 
-/** What the loop tries to fix: errors only, or warnings too. */
-export const targetsOf = (all: Diagnostic[], fixWarnings: boolean): Diagnostic[] => (fixWarnings ? all : errors(all))
+/** What the loop tries to fix: errors only, or warnings too; with a scope (KIT-48), only in the files the ticket changed. */
+export const targetsOf = (all: Diagnostic[], fixWarnings: boolean, scope: Scope | null = null): Diagnostic[] => partition(fixWarnings ? all : errors(all), scope).targets
 
 /** ready only when nothing targeted remains and every analyzer ran: an analyzer that could not run leaves its verdict unknown. */
 export const finalStatus = (remainingTargets: Diagnostic[], problems: string[]): Status => (remainingTargets.length === 0 && !problems.length ? 'ready' : 'incomplete')
@@ -90,14 +106,17 @@ export async function runLoop(executor: Executor, analyzers: Analyzer[], fixer: 
   const problems: string[] = []
   const rejected: Rejection[] = []
   const editedFiles = new Set<string>()
-  const finish = (status: Status, reason: string, initial: Diagnostic[], remaining: Diagnostic[], reasonCode: ReasonCode | null = null): LoopResult =>
-    ({ status, reason, reasonCode, rounds, initial, remaining, problems: [...new Set(problems)], editedFiles: [...editedFiles].sort(), rejected, ms: Date.now() - started })
+  const scope = options.scope ?? null
+  const finish = (status: Status, reason: string, initial: Diagnostic[], all: Diagnostic[], reasonCode: ReasonCode | null = null): LoopResult => {
+    const { targets: remaining, untouched } = partition(all, scope)
+    return { status, reason, reasonCode, rounds, initial, remaining, problems: [...new Set(problems)], editedFiles: [...editedFiles].sort(), rejected, ms: Date.now() - started, scope, untouched }
+  }
   if (!analyzers.some((a) => a.check)) return finish('ready', STOP.none, [], [], 'no-analyzers')
 
   const initialRun = await runAnalyzers(executor, analyzers, options)
   for (const run of initialRun.runs) if (run.problem) problems.push(run.problem)
   if (initialRun.runs.length && initialRun.runs.every((r) => r.problem)) return finish('incomplete', STOP.allFailed, [], [])
-  const targetsIn = (all: Diagnostic[]) => targetsOf(all, options.fixWarnings)
+  const targetsIn = (all: Diagnostic[]) => targetsOf(all, options.fixWarnings, scope)
   let current = initialRun.diagnostics
   let previous: Diagnostic[] | null = null
   let reason: string = STOP.roundCap(options.maxRounds)

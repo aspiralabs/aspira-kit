@@ -19,14 +19,15 @@ export const lastLine = (text: unknown) => String(text ?? '').trimEnd().split('\
 export const firstLine = (text: unknown) => String(text ?? '').trimStart().split('\n')[0]
 export const noStepOrMove = (h: Project) => !kinds(h.stages).some((kind) => kind === 'step' || kind === 'move')
 export const moveOf = (stage: Stage | null) => (stage?.stage === 'move' ? { from: stage.from, to: stage.to } : { stage: stage?.stage ?? 'no stage' })
-// The step command without its trailing --parent-run <run>:<nonce> (KIT-19), which these tests do not pin.
-export const commandOf = (result: Result) => (result.stage?.stage === 'step' ? String(result.stage.command).replace(/ --parent-run \S+$/, '') : `<${result.stage?.stage ?? 'no stage'}>`)
+// The step command without the run's own flags: the trailing --parent-run <run>:<nonce> (KIT-19) and the
+// --guidelines, --knowledge and --packet files the run adds per step (KIT-48), which these tests do not pin.
+export const commandOf = (result: Result) => (result.stage?.stage === 'step' ? String(result.stage.command).replace(/ --parent-run \S+$/, '').replace(/ --(?:guidelines|knowledge|packet) \S+/g, '') : `<${result.stage?.stage ?? 'no stage'}>`)
 /** Everything the run told the session at the end: the last stage, the output and the summary file. */
 export const told = async (h: Project, result: Result) => `${result.text}\n${JSON.stringify(result.stage)}\n${await h.summary()}`
 
 export const PLANNER_DECISIONS = [taken('D1', 'Should the summary list costs per step?'), taken('D2', 'Should the timeline use wall time?')]
 export const IMPLEMENTOR_ASSUMPTIONS = [taken('A1', 'Should the gate run in the app directory?')]
-export const SUCCESS: Record<string, string> = { groomer: 'confirmed', 'spec-writer': 'ready', 'spec-reviewer': 'ready', planner: 'ready', implementor: 'complete', 'code-analyzer': 'clean', 'pr-reviewer': 'complete' }
+export const SUCCESS: Record<string, string> = { groomer: 'confirmed', 'spec-writer': 'ready', planner: 'ready', implementor: 'complete', 'code-analyzer': 'clean', 'pr-reviewer': 'complete' }
 
 /** Start at Ready: Spec and run the planner (D1, D2) and the implementor (A1) up to the next stage after the build. */
 export async function plannedAndBuilt(h: Project): Promise<Result> {

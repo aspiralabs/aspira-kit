@@ -13,7 +13,7 @@ export { RUN_STATUSES }
 export type { RunStatus }
 
 /** The skills a model may run through the board tool: every skill but the groomer, whose start and finish only its driver runs. */
-export const TOOL_SKILLS = ['spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer'] as const
+export const TOOL_SKILLS = ['spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer'] as const
 export type ToolSkill = (typeof TOOL_SKILLS)[number]
 
 export const SKILLS = [...TOOL_SKILLS, 'groomer'] as const
@@ -58,8 +58,10 @@ export type Gate = {
   /** The ticket property the skill needs set before it runs. */
   requires?: 'PR'
   pushes: Push[]
-  /** The file in the working folder the skill takes as its input, when it takes one; a list is tried in order (the reviewer reruns on the answered reviewed spec). */
+  /** The file in the working folder the skill takes as its input, when it takes one; a list is tried in order. */
   input?: string | string[]
+  /** The input list for a run that starts from a given Status, when it differs (the spec writer reruns from In Review: Spec on the answered reviewed spec, KIT-48). */
+  inputByStatus?: Record<string, string[]>
   /** The accepted Statuses that make the start move; any other accepted Status runs with none. Absent: every accepted Status outside inProgress moves. */
   startFrom?: string[]
   /** false: the claim sets no Dev. */
@@ -82,14 +84,21 @@ export type Gate = {
 export const GROOMER_REOPEN = 'grooming is finished; a human moves the card back to Grooming to reopen it (for Dropped, a human decides whether to revive it)'
 
 export const GATES: Record<Skill, Gate> = {
-  'spec-writer': { accepts: ['Ready: Idea'], inProgress: 'In Progress: Spec', success: 'In Review: Spec', pushes: [{ title: 'Spec', file: 'spec.md', pushOn: ['ready', 'needs-author'] }], input: IDEA_FILE, moveOn: ['ready', 'needs-author'] },
-  'spec-reviewer': {
-    accepts: ['In Review: Spec'],
+  // One spec step (KIT-48): the writer explores, drafts and runs the one specialist review on its draft,
+  // from Ready: Idea; from In Review: Spec it reruns the review on the answered reviewed spec, with no move.
+  'spec-writer': {
+    accepts: ['Ready: Idea', 'In Review: Spec'],
+    inProgress: 'In Progress: Spec',
+    success: 'In Review: Spec',
+    startFrom: ['Ready: Idea'],
     pushes: [
+      { title: 'Spec', file: 'spec.md', pushOn: ['ready', 'needs-author'] },
       { title: 'Spec Reviewed', file: 'spec.reviewed/spec.reviewed.md', pushOn: ['ready', 'needs-author'] },
       { title: 'Spec Review Decisions', file: 'spec.reviewed/trace/decisions.md', pushOn: ['needs-author'] },
     ],
-    input: ['spec.reviewed/spec.reviewed.md', 'spec.md'],
+    input: IDEA_FILE,
+    inputByStatus: { 'In Review: Spec': ['spec.reviewed/spec.reviewed.md', 'spec.md'] },
+    moveOn: ['ready', 'needs-author'],
   },
   planner: { accepts: ['Ready: Spec'], inProgress: 'In Progress: Plan', success: 'In Review: Plan', pushes: [{ title: 'Plan', file: 'plan.review/plan.reviewed.md', pushOn: ['ready', 'needs-author'] }], input: 'spec.reviewed/spec.reviewed.md', moveOn: ['ready', 'needs-author'] },
   implementor: {
@@ -127,7 +136,7 @@ export function whoMoves(status: string): string {
     'Ready: Plan': 'a human, after approving the plan',
     'Ready: Implementation': 'a human, after merging the PR',
     'In Progress: Spec': 'the spec writer, when it claims the ticket',
-    'In Review: Spec': 'the spec writer, when the spec is on the ticket',
+    'In Review: Spec': 'the spec writer, when the reviewed spec is on the ticket',
     'In Progress: Plan': 'the planner, when it claims the ticket',
     'In Review: Plan': 'the planner, when the plan is on the ticket',
     'In Progress: Implementation': 'the implementor, when it claims the ticket',

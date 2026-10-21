@@ -11,6 +11,7 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { KNOWLEDGE_ENV, pageIdFrom } from '@aspiralabs/agent-common/lib/knowledge'
+import type { SessionModel } from '@aspiralabs/agent-common/lib/session-model'
 import { parseProvenance, verifyKnowledgeDir, verifySnapshot } from '@aspiralabs/agent-common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
 import { notionToken } from '@aspiralabs/agent-common/lib/notion-token'
@@ -26,6 +27,7 @@ import { changeRejection, type Rejection } from './guards.ts'
 import { finalStatus, runAnalyzers, runAutofix, STOP, targetsOf, type LoopResult, type Round, type Status } from './loop.ts'
 import { renderReport } from './report.ts'
 import { ignoreOutput, prepareToolchain, recordGuidelines, repositoryInstructions, runSetup, setting } from './runner.ts'
+import { changedScope, partition, scopeNote } from './scope.ts'
 import { parseSource } from './source.ts'
 
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -186,6 +188,8 @@ const stateSchema = z.object({
   // run-status.ts's old per-skill words) still parses (F7); readRunStatus maps it onto the shared
   // status and reason code at export. reasonCode is absent on such a state.
   stop: z.object({ status: z.string(), reason: z.string(), reasonCode: z.enum(REASON_CODES).nullable().optional() }).nullable(),
+  // A ticket run's changed files (KIT-48); null for the whole tree. Absent on a pre-upgrade state.json.
+  scope: z.object({ base: z.string(), files: z.array(z.string()) }).nullable().default(null),
 })
 type State = z.infer<typeof stateSchema>
 
@@ -218,7 +222,8 @@ export type LocalInput = {
 export type LocalDeps = { agentDir?: string; env?: NodeJS.ProcessEnv; progress?: (message: string) => void; fetch?: Fetch; api?: string }
 
 /** One batch for the session: run the prompt file as a subagent, which writes its JSON to `output`. */
-export type LocalTask = { id: string; prompt: string; output: string; files: string[]; diagnostics: number; error?: string; retry?: boolean }
+/** `model` (KIT-48): the session model the fix task runs on; the fixer is mechanical work, so Haiku. */
+export type LocalTask = { id: string; prompt: string; output: string; files: string[]; diagnostics: number; model: SessionModel; error?: string; retry?: boolean }
 
 /** A fix stage for the session to run, at most `parallel` subagents at a time. */
 export type LocalPending = {
@@ -317,6 +322,9 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     if (ignore) await ignoreOutput(source.root)
     const toolchain = await prepareToolchain(executor, detection.analyzers, progress)
     const notes = [...detection.notes, ...toolchain.notes]
+    // With a ticket, the run fixes only the files the ticket branch changed (KIT-48).
+    const scoped = input.ticket ? await changedScope(executor, source.gitRoot) : { scope: null, note: null }
+    if (scoped.note !== null) notes.push(scoped.note)
     if (noFix) notes.push('--no-fix: dependency setup, auto-fix and the model stage were skipped; no source file was changed.')
     else if (toolchain.ready.length) notes.push(...(await runSetup(executor, detection, progress)))
     const ready = toolchain.ready
@@ -348,6 +356,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       rejections: {},
       pending: null,
       stop: null,
+      scope: scoped.scope,
     }
     if (!ready.some((a) => a.check)) state.stop = { status: 'ready', reason: STOP.none, reasonCode: 'no-analyzers' }
     else {
@@ -356,7 +365,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       if (initial.runs.length && initial.runs.every((run) => run.problem)) state.stop = { status: 'incomplete', reason: STOP.allFailed, reasonCode: null }
       state.initial = initial.diagnostics
       state.current = initial.diagnostics
-      if (noFix && state.stop === null) state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), state.problems), reason: 'check only (--no-fix): no auto-fix or model fix ran', reasonCode: null }
+      if (noFix && state.stop === null) state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings, state.scope), state.problems), reason: 'check only (--no-fix): no auto-fix or model fix ran', reasonCode: null }
     }
     state.prepareMs = Date.now() - started
     await mkdir(join(work, 'outputs'), { recursive: true })
@@ -378,25 +387,25 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       const final = await runAnalyzers(executor, analyzers, options)
       state.problems.push(...final.runs.flatMap((run) => (run.problem ? [run.problem] : [])))
       state.current = final.diagnostics
-      state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), unique(state.problems)), reason: input.finish === true ? 'finished early (--finish)' : STOP.roundCap(state.maxRounds), reasonCode: null }
+      state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings, state.scope), unique(state.problems)), reason: input.finish === true ? 'finished early (--finish)' : STOP.roundCap(state.maxRounds), reasonCode: null }
     }
   }
 
   while (state.stop === null) {
     const round = state.rounds.length + 1
     if (input.finish === true) {
-      state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings), unique(state.problems)), reason: 'finished early (--finish)', reasonCode: null }
+      state.stop = { status: finalStatus(targetsOf(state.current, state.fixWarnings, state.scope), unique(state.problems)), reason: 'finished early (--finish)', reasonCode: null }
       break
     }
     const roundStarted = Date.now()
     const record: Round = { round, autofix: [], analyzers: [], targets: 0, batches: 0, edits: 0, rejected: 0, unresolved: [], ms: 0 }
     state.rounds.push(record)
-    record.autofix = await runAutofix(executor, analyzers, options)
+    record.autofix = await runAutofix(executor, analyzers, { ...options, scope: state.scope })
     const analyzed = await runAnalyzers(executor, analyzers, options)
     record.analyzers = analyzed.runs
     state.problems.push(...analyzed.runs.flatMap((run) => (run.problem ? [run.problem] : [])))
     state.current = analyzed.diagnostics
-    const targets = targetsOf(state.current, state.fixWarnings)
+    const targets = targetsOf(state.current, state.fixWarnings, state.scope)
     record.targets = targets.length
     record.ms = Date.now() - roundStarted
     const status = () => finalStatus(targets, unique(state.problems))
@@ -506,7 +515,7 @@ async function writeFixStage(state: State, executor: Executor, work: string, fix
     await writeFile(prompt, renderTaskPrompt({ id, root: state.root, output, system: fixer.systemPrompt, task, schema }))
     await rm(output, { force: true })
     tasks.tasks.push({ id, batch: index + 1, files: batch.files, diagnostics: batch.diagnostics, prompt, output })
-    out.push({ id, prompt, output, files: batch.files, diagnostics: batch.diagnostics.length })
+    out.push({ id, prompt, output, files: batch.files, diagnostics: batch.diagnostics.length, model: 'haiku' })
   }
   const snapshot: Snapshot = { hashes: {}, contents: {} }
   for (const file of await trackedFiles(executor, state)) {
@@ -558,7 +567,7 @@ async function collectFixStage(state: State, executor: Executor, work: string, f
       await rename(task.output, join(work, 'outputs', `${task.id}.rejected-${rejected.length + 1}.json`))
       retry = rejected.length + 1 < 2
     }
-    waiting.push({ id: task.id, prompt: task.prompt, output: task.output, files: task.files, diagnostics: task.diagnostics.length, ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) })
+    waiting.push({ id: task.id, prompt: task.prompt, output: task.output, files: task.files, diagnostics: task.diagnostics.length, model: 'haiku', ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) })
   }
   if (waiting.length > 0) return waiting
 
@@ -605,19 +614,23 @@ async function collectFixStage(state: State, executor: Executor, work: string, f
 async function exportRun(state: State, work: string, agentDir: string, fixer: FixerModule, detection: Detection, analyzers: Analyzer[], head: string | null): Promise<LocalDone> {
   const stop = resolveStop(state.stop)
   const totalMs = Date.now() - Date.parse(state.startedAt)
+  // A ticket run reports the diagnostics outside its scope as pre-existing, never as remaining (KIT-48).
+  const { targets: remaining, untouched } = partition(state.current, state.scope)
   const result: LoopResult = {
     status: stop.status,
     reason: stop.reason,
     reasonCode: stop.reasonCode,
     rounds: state.rounds,
     initial: state.initial,
-    remaining: state.current,
+    remaining,
     problems: unique(state.problems),
     editedFiles: state.editedFiles,
     rejected: state.rejected,
     ms: totalMs - state.prepareMs,
+    scope: state.scope,
+    untouched,
   }
-  const shown: Detection = { ...detection, analyzers, notes: state.notes }
+  const shown: Detection = { ...detection, analyzers, notes: state.scope === null ? state.notes : [...state.notes, scopeNote(state.scope, untouched)] }
   const timing = { prepareMs: state.prepareMs, loopMs: totalMs - state.prepareMs, publishMs: 0, totalMs }
   const local = [
     '## Mode',
@@ -631,8 +644,8 @@ async function exportRun(state: State, work: string, agentDir: string, fixer: Fi
   const knowledge = { path: state.knowledge.dir ?? state.knowledge.requiredFile, source: state.knowledge.source, files: state.knowledge.files, fingerprint: state.knowledge.fingerprint }
   const files: Record<string, string> = {
     'report.md': report,
-    'diagnostics.json': JSON.stringify({ status: result.status, reason: result.reason, reasonCode: result.reasonCode, ticket: state.ticket, head, remaining: result.remaining, initial: result.initial }, null, 2),
-    'rounds.json': JSON.stringify({ mode: 'local', status: result.status, reason: result.reason, reasonCode: result.reasonCode, ticket: state.ticket, head, rounds: result.rounds, problems: result.problems, rejected: result.rejected, editedFiles: result.editedFiles, missing: state.missing, detection: { ...shown, analyzers: analyzers.map(({ parse: _parse, ...a }) => a) }, unavailable: state.unavailable, timing, remote: null, knowledge }, null, 2),
+    'diagnostics.json': JSON.stringify({ status: result.status, reason: result.reason, reasonCode: result.reasonCode, ticket: state.ticket, head, remaining: result.remaining, untouched: result.untouched, initial: result.initial }, null, 2),
+    'rounds.json': JSON.stringify({ mode: 'local', status: result.status, reason: result.reason, reasonCode: result.reasonCode, ticket: state.ticket, head, scope: result.scope, rounds: result.rounds, problems: result.problems, rejected: result.rejected, editedFiles: result.editedFiles, missing: state.missing, detection: { ...shown, analyzers: analyzers.map(({ parse: _parse, ...a }) => a) }, unavailable: state.unavailable, timing, remote: null, knowledge }, null, 2),
     'usage.json': JSON.stringify({ scope: 'This run used --local: every fix ran as a subagent of a Claude Code session, on its model and usage. No model call went through the AI Gateway, so there are no turns to itemize.', model: 'Claude Code session (--local)', turns: [] }, null, 2),
     'calls.json': JSON.stringify({ mode: 'local', system: fixer.systemPrompt, model: 'Claude Code session (--local)', rejections: state.rejections, calls: state.calls }, null, 2),
   }

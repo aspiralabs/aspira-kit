@@ -56,7 +56,7 @@ describe('KIT-19 T26 F10 F11 F12: cloud step spans carry the numbers of their ow
     h.setNow(at('09:10:00'))
     await reportUsage(h, step.stage, 'ready', null)
     await put(
-      join(h.folder, 'spec.written/trace/usage.json'),
+      join(h.folder, 'spec.reviewed/trace/usage.json'),
       usageJson([
         { phase: 'explore', model: 'anthropic/claude-opus-5.5', input: 1000, output: 200, cost: 0.02, tools: 2 },
         { phase: 'explore', model: 'anthropic/claude-opus-5.5', input: 500, output: 100, cost: '0.01', tools: 1 },

@@ -6,7 +6,7 @@ The request names a ticket's working folder (`.work/<id>-<slug>/`, holding `tick
 
 The groomer grooms Feature and Bug cards. A Bug goes through the same rounds as a Feature until the Diagnoser (ticket KIT-9 (Diagnoser agent)) exists: its exit criteria are the same three (the problem, who has it, what done looks like), and its questions ground in the code that fails today. The gate refuses any other Type before you run; if you are asked to groom one anyway, refuse and say why.
 
-An empty Idea (a title-only card) is accepted: search by the concepts of the title, and the first round asks the three Grooming exit-criterion questions (the problem, who has it, what done looks like) before any other branch.
+An empty Idea (a title-only card) is accepted: search by the concepts of the title, and the one round asks the three Grooming exit-criterion questions (the problem, who has it, what done looks like) first, in id order, then every other branch's questions in the same round, worded on the recommended answers to the three.
 
 ## Knowledge first
 
@@ -21,6 +21,8 @@ Call groom exactly once with the working folder, the repository and the guidelin
 Before any question, search the repository by the idea's domain concepts, not by the card's wording: the nouns and behaviours the idea is about and their likely names in code. Report what already exists for each concept and every term in the idea that collides with an existing name, each item with one file:line citation and at most one quoted line. List every concept searched in `searched`, so a reader can tell "searched, nothing found" from "not searched"; when nothing is found the report reads `Round zero: nothing found for <concept list>; no term collides`. Read the repository only through the read tools: no `.env*` files, secrets or credentials, keys, `.git`, `node_modules` or `.work/`. Facts reach the Grooming Decisions page, which every reader of the card can open: never quote a value that looks like a credential, token or key, and cite such a line without a quote.
 
 ## Rounds
+
+Grooming is one consolidated round (KIT-48). Round 1 asks everything the idea needs in one go, across every branch of the design tree: every question the idea leaves open, each with its recommended answer, so the author answers once and ticks Confirm once. A question that depends on another is still asked in the same round, worded on the recommended answer of the one it depends on ("With <recommended>, ..."); `prerequisites` is used only when a different answer would remove the question altogether. A second round happens only when an answer invalidates other questions or opens a new decision, and the run says so. Round 1 is refused when it leaves a branch neither asked nor closed.
 
 A round asks the whole frontier: every open question whose prerequisites are settled, in id order (Q2 before Q10; Q1.2 before Q1.10; a follow-up directly after its parent). Ids are `Q<n>`, and `Q<n>.<m>` for a follow-up; an id is assigned when the question is first asked and never renumbered, and an open question asked again keeps its id.
 
