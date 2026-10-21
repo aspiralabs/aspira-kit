@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/kit",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "description": "The Aspira Labs kit CLI. `kit init --stack next` wires a project to @aspiralabs/ui, @aspiralabs/config and the @aspiralabs/agents skills; `kit add auth` writes a base Better Auth setup; `kit doctor` reports drift; `kit next` names a ticket's next step, `kit worktree` gives a ticket its own worktree and `kit cleanup` removes the folders and worktrees of finished tickets, each with an /aspira-* skill.",
   "type": "module",
   "license": "MIT",
