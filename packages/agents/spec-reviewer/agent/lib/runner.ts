@@ -68,7 +68,7 @@ export function reviewFiles(result: PipelineResult, { spec, guidelines }: Prepar
     'trace/guidelines.md': guidelines,
     'trace/decisions.md': renderDecisionsFile(result.status, result.authorDecisions, result.synthesis),
     'trace/findings.md': renderFindings(result.findings, result.synthesis, result.gaps),
-    'trace/checks.md': `# Checks\n\nStatus: ${result.status}\n\n${result.problems.map((p) => `- ${p}`).join('\n')}\n\n${result.reviews.map((r) => `## ${r.phase}\n\n${r.output.checks.map((c) => `- ${c.rule}: ${c.evidence}`).join('\n')}`).join('\n\n')}`,
+    'trace/checks.md': `# Checks\n\nStatus: ${result.status}\n\n${result.problems.map((p) => `- ${p}`).join('\n')}\n\n## Evidence gaps left open\n\n${result.openGaps.length ? result.openGaps.map((gap) => `- ${gap.id} (${gap.source}): ${gap.text}`).join('\n') : '- none'}\n\n${result.reviews.map((r) => `## ${r.phase}\n\n${r.output.checks.map((c) => `- ${c.rule}: ${c.evidence}`).join('\n')}`).join('\n\n')}`,
   }
   // A ready candidate is the spec the planner takes, so it carries nothing but the spec. A candidate
   // that still needs the author or has problems carries the findings, sorted, above it.
@@ -125,6 +125,6 @@ export async function runReview(input: RunInput, options: { signal?: AbortSignal
       const report = { ...result, candidate: undefined, input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, specSha256, models, reportedCostUsd, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, exportMs, totalMs, dir }
       return { 'run-analysis.md': analysis.markdown, 'trace/review.json': JSON.stringify(report, null, 2) }
     })
-    return { status: result.status, dir, findings: result.findings.length, problems: result.problems, authorDecisions: result.authorDecisions, prepareMs, reviewMs: result.reviewMs, reportedCostUsd, totalMs }
+    return { status: result.status, dir, findings: result.findings.length, problems: result.problems, openGaps: result.openGaps, authorDecisions: result.authorDecisions, prepareMs, reviewMs: result.reviewMs, reportedCostUsd, totalMs }
   } finally { await mcp.close() }
 }

@@ -27,6 +27,22 @@ export const synthesisSchema = z.object({
   })),
 })
 export type Disposition = z.infer<typeof synthesisSchema>['dispositions'][number]
+/** An evidence gap a review raised: `source` is the phase that raised it. */
+export type Gap = { id: string; source: string; text: string }
+
+/**
+ * The gaps the review left open (KIT-53): no resolution, an `unresolved` one, or one with no
+ * evidence. They are reported to the human approving the spec and never fail the review: an
+ * unverified vendor limit or an unread page is theirs to check, not a broken run.
+ */
+export function openGapsOf(gaps: readonly Gap[], synthesis: Pick<Synthesis, 'gapResolutions'> | null): Gap[] {
+  const resolutions = synthesis?.gapResolutions ?? []
+  return gaps.filter((gap) => {
+    const resolution = resolutions.find((r) => r.gapId === gap.id)
+    return !resolution || resolution.status === 'unresolved' || !resolution.evidence.length
+  })
+}
+
 export type Synthesis = Omit<z.infer<typeof synthesisSchema>, 'gapResolutions' | 'dispositions'> & { gapResolutions?: z.infer<typeof synthesisSchema>['gapResolutions']; dispositions: (Omit<Disposition, 'decision'> & { decision?: Disposition['decision'] })[] }
 
 export { checkBusinessSpec as checkContract } from '@aspiralabs/agent-common/lib/spec'

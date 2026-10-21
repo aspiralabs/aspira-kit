@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { renderFindings } from './report.ts'
 import { runPipeline, type Call } from './pipeline.ts'
 import type { Review } from './review.ts'
 
@@ -93,7 +94,7 @@ it('preserves findings but publishes no candidate on malformed synthesis', async
   expect(result.problems.some((problem) => problem.startsWith('synthesis:'))).toBe(true)
 })
 
-it('requires evidence to resolve a gap and lets another reviewer supply it', async () => {
+it('KIT-53: a gap resolved without evidence stays open for the approver and no longer fails the review', async () => {
   const spec = '# Feature\n## Intent\nSave.\n## Acceptance criteria\n### Features\n- [ ] F1: Save an item.\n### Tests\n- [ ] unit: [F1] save twice is idempotent.\n- [ ] integration: [F1] save persists.\n'
   const call: Call = async ({ phase }) => {
     if (phase === 'synthesis') return { edits: [], dispositions: [], gapResolutions: [{ gapId: 'G1', status: 'resolved', evidence: ['security read auth.ts:10: server denies anonymous'] }] }
@@ -101,10 +102,13 @@ it('requires evidence to resolve a gap and lets another reviewer supply it', asy
   }
   expect((await runPipeline({ ...input, spec }, call)).status).toBe('ready')
   const unsupported: Call = async (request) => request.phase === 'synthesis' ? { edits: [], dispositions: [], gapResolutions: [{ gapId: 'G1', status: 'resolved', evidence: [] }] } : call(request)
-  expect((await runPipeline({ ...input, spec }, unsupported)).status).toBe('incomplete')
+  const open = await runPipeline({ ...input, spec }, unsupported)
+  expect({ status: open.status, openGaps: open.openGaps.map((gap) => gap.id), problems: open.problems }).toEqual({ status: 'ready', openGaps: ['G1'], problems: [] })
+  expect(renderFindings(open.findings, open.synthesis, open.gaps)).toContain('## Evidence gaps left open\n\n')
+  expect(renderFindings(open.findings, open.synthesis, open.gaps)).toContain('- G1 (research): Auth policy not read yet')
 })
 
-it('lets the author resolve a gap with a cited answer in the spec, with the quote as evidence, and still blocks one without it (KIT-31)', async () => {
+it('lets the author resolve a gap with a cited answer in the spec, with the quote as evidence; one without a quote stays open, not blocking (KIT-31, KIT-53)', async () => {
   const spec = '# Feature\n## Intent\nSave.\n## Approach\nTextract synchronous AnalyzeID takes one page up to 10 MB (AWS Textract quotas page, "Synchronous operations").\n## Acceptance criteria\n### Features\n- [ ] F1: Save an item.\n'
   const call: Call = async ({ phase }) => {
     if (phase === 'synthesis') return { edits: [], dispositions: [], gapResolutions: [{ gapId: 'G1', status: 'author', evidence: ['spec Approach: "Textract synchronous AnalyzeID takes one page up to 10 MB (AWS Textract quotas page, \\"Synchronous operations\\")"'] }] }
@@ -113,7 +117,8 @@ it('lets the author resolve a gap with a cited answer in the spec, with the quot
   const result = await runPipeline({ ...input, spec }, call)
   expect({ status: result.status, problems: result.problems }).toEqual({ status: 'ready', problems: [] })
   const bare: Call = async (request) => request.phase === 'synthesis' ? { edits: [], dispositions: [], gapResolutions: [{ gapId: 'G1', status: 'author', evidence: [] }] } : call(request)
-  expect((await runPipeline({ ...input, spec }, bare)).status).toBe('incomplete')
+  const unquoted = await runPipeline({ ...input, spec }, bare)
+  expect({ status: unquoted.status, openGaps: unquoted.openGaps.map((gap) => gap.id) }).toEqual({ status: 'ready', openGaps: ['G1'] })
 })
 
 it('lets every phase finish beyond the former time limits and records elapsed time', async () => {
