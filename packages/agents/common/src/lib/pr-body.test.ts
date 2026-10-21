@@ -27,7 +27,7 @@
 // - `## Dependencies added` lists `- \`<name>\` <version> (<app>, <scope>): native: true|false;
 //   approval: <word>.` bullets, or `None.` when the build added nothing.
 
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -119,7 +119,7 @@ describe('renderPrBody (T33): Summary, Evidence and Merge Danger', () => {
   })
 
   it('KIT-52: What it fixed is the first section, lifted verbatim from the log', async () => {
-    const summary = '**KIT-2 — what it fixed** (web)\nEvery run left no trace.\n\n1. Nobody could tell where a run stopped.\n   - Before: the card went quiet.\n   - Now: `.work/<id>/progress.md` names the next action.\n\nSupporting changes: none\nStill to do: none\nLoose ends: none'
+    const summary = 'Scope: web.\nEvery run left no trace.\n\n1. Nobody could tell where a run stopped.\n   - Before: the card went quiet.\n   - Now: `.work/<id>/progress.md` names the next action.\n\nSupporting changes: none\nStill to do: none\nLoose ends: none'
     const body = await renderPrBody({ ticket, implementationMd: `# Implementation\n\n## What it fixed\n\n${summary}\n\n${tasksFixture()}`, changedFiles, analyzers: [], repo: await tempRepo() })
     const first = sections(body)[0]
     expect({ heading: first?.heading, verbatim: first?.body.includes(summary) }).toEqual({ heading: 'What it fixed', verbatim: true })
@@ -128,6 +128,21 @@ describe('renderPrBody (T33): Summary, Evidence and Merge Danger', () => {
   it('KIT-52: a log without the section gets the visible placeholder, never a silent drop', async () => {
     const body = await renderPrBody({ ticket, implementationMd: tasksFixture(), changedFiles, analyzers: [], repo: await tempRepo() })
     expect(sections(body)[0]).toEqual({ heading: 'What it fixed', body: expect.stringContaining(WHAT_IT_FIXED_MISSING) })
+  })
+
+  it('KIT-52: the section keeps plain prose and non-secret env values, strips credential tokens and credential-named env values, and closes an open fence', async () => {
+    const repo = await tempRepo()
+    await writeFile(join(repo, '.env.local'), 'NODE_ENV=production\nNOTION_TOKEN=ntn_abcdef123456\nDATABASE_PASSWORD=hunter22\n')
+    const summary = 'Scope: web.\nDeploy to production with task-level filters and a desk-side view; the token ntn_abcdef123456 and hunter22 leaked once.\n\n```\nnot closed'
+    const body = await renderPrBody({ ticket, implementationMd: `# Implementation\n\n## What it fixed\n\n${summary}\n\n${tasksFixture()}`, changedFiles, analyzers: [], repo })
+    const first = sections(body)[0]?.body ?? ''
+    expect({
+      prose: first.includes('Deploy to production with task-level filters and a desk-side view'),
+      token: first.includes('ntn_abcdef'),
+      password: first.includes('hunter22'),
+      fences: (first.match(/^```/gm) ?? []).length,
+      summaryStillThere: sections(body).some((entry) => entry.heading === 'Summary'),
+    }).toEqual({ prose: true, token: false, password: false, fences: 2, summaryStillThere: true })
   })
 
   it('renders Summary as a file tree naming every changed file', async () => {

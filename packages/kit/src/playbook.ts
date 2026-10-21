@@ -132,7 +132,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
   },
   {
     title: 'Step 11: release',
-    body: "Follow Releases: work the page's checklist, run the end-to-end suite on `main`, publish the GitHub Release with the page's customer summary and its what-it-fixed sections, run the after-deploy steps, mark the page Released, set Version on each card and move it to Released (BOARD-008).",
+    body: "Follow Releases: work the page's checklist, run the end-to-end suite on `main`, publish the GitHub Release with the page's customer summary and its what-it-fixed sections (their bodies, not their ticket headings: REL-004), run the after-deploy steps, mark the page Released, set Version on each card and move it to Released (BOARD-008).",
   },
   {
     title: 'Step 12: learn',

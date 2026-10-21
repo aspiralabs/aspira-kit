@@ -297,7 +297,7 @@ it('runs the plan in waves: worker briefs from the procedure, schema checks with
   expect(unchecked.tasks[0]!.retry).toBe(false)
   const dependenciesAdded = [{ name: 'left-pad', version: '1.3.0', app: 'root', scope: 'runtime', native: true, approval: 'not listed' }, { name: 'msw', version: '2.0.0', app: 'root', scope: 'dev', native: false, approval: 'Trial' }]
   const notesRewritten = [{ file: join(work, 'handoff-notes.md'), action: 'rewritten' }]
-  await writeFile(join(work, 'implementation.md'), '# Implementation\n\n## What it fixed\n\n**NOM-4 — what it fixed** (web)\n\n1. Members could not see their badge count.\n   - Before: no badge.\n   - Now: the header shows it.\n\n## Dependencies added\n\n- `left-pad`\n\n## Mid-build notes\n\n- handoff-notes.md: rewritten\n\n## Proposed Slop Repo entries\n\nNone: no bugs were found and fixed\n')
+  await writeFile(join(work, 'implementation.md'), '# Implementation\n\n## What it fixed\n\nScope: web.\n\n1. Members could not see their badge count.\n   - Before: no badge.\n   - Now: the header shows it.\n\n## Dependencies added\n\n- `left-pad`\n\n## Mid-build notes\n\n- handoff-notes.md: rewritten\n\n## Proposed Slop Repo entries\n\nNone: no bugs were found and fixed\n')
   // A notes file that still names a missing symbol, or carries no header, is not rewritten.
   await writeFile(verify.tasks[0]!.output, JSON.stringify({ ...claimed, dependenciesAdded, notesRewritten, slopEntries: [{ rule: 'x', area: 'Nowhere', whatWentWrong: 'y', source: 'z' }] }))
   const stale = staged(await step())

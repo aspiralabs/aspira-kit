@@ -156,13 +156,15 @@ export function mergeDanger(implementationMd: string, changedFiles: readonly str
 }
 
 /** The `## What it fixed` placeholder when implementation.md has no such section, or an empty one: visible in the PR, never silently dropped. */
-export const WHAT_IT_FIXED_MISSING = '_Not written: the implementation log has no `## What it fixed` section (implementor SKILL.md, section 6 step 7). Write it here before merging; the release page and the release notes copy it._'
+export const WHAT_IT_FIXED_MISSING = '_Not written: the implementation log (`plan.review/implementation.md` in the ticket folder) has no `## What it fixed` section (implementor SKILL.md, section 6 step 7). Add it there and rerun Step 8 so this description and the release page carry it; it becomes the release notes._'
 
 /** `## What it fixed`: the implementor's summary section of implementation.md, verbatim (markdown kept, secrets redacted), or the placeholder. */
 export async function whatItFixed(implementationMd: string, repo: string, app: string | undefined): Promise<string> {
   const body = sectionBody(implementationMd, '## What it fixed').trim()
   if (body === '') return WHAT_IT_FIXED_MISSING
-  return redactSecrets(body, repo, { app })
+  // An unclosed code fence in the section would swallow every section after it: close it.
+  const fences = (body.match(/^\s*```/gm) ?? []).length
+  return redactSecrets(fences % 2 === 1 ? `${body}\n\`\`\`` : body, repo, { app })
 }
 
 /** `## Summary`: every changed file, as a sorted bullet list (a minimal file tree: build-feature and spec-reviewer render the fuller one for the card). */

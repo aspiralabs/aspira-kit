@@ -279,7 +279,7 @@ async function releaseRowAccept(context: PhaseContext, state: RunState, pending:
   const action = parsed.data.existingRow ? 'update' : 'add'
   const pr = state.step8.prUrl ?? context.card.pr
   const section = await whatItFixedSection(context.folder, context.id, context.repo, context.aspira.app)
-  const sectionInstruction = section === null ? ' The implementation log has no `## What it fixed` section, so add no section for this feature.' : ` Then, under the Features table, add the section "${section.heading}" with the "whatItFixed" text given, verbatim, as the feature's own section (replace the section with that heading when one is there).`
+  const sectionInstruction = section === null ? ' The implementation log has no `## What it fixed` section, so add no section for this feature.' : ` Then paste the "whatItFixed" text verbatim under the Features table as the feature's own section: it starts with its own heading "${section.heading}", so add no heading of your own, and replace the section with that heading when one is already there.`
   return {
     kind: 'stage',
     state,

@@ -55,7 +55,7 @@ describe('T33 F30 F31: Step 10 and the release row', () => {
 
   it('KIT-52: the write stage carries the log’s What it fixed section under the feature’s heading, and tells the session to put it under the Features table', async () => {
     const { h, review } = await reviewing({ aspira: { board: BOARD, repository: REPOSITORY, releases: RELEASES } })
-    const summary = '**KIT-11 — what it fixed** (web)\nRuns left no summary.\n\n1. Nobody could read what a build did.\n   - Before: the card went quiet.\n   - Now: every build ends with a summary.\n\nSupporting changes: none\nStill to do: none\nLoose ends: none'
+    const summary = 'Scope: web.\nRuns left no summary.\n\n1. Nobody could read what a build did.\n   - Before: the card went quiet.\n   - Now: every build ends with a summary.\n\nSupporting changes: none\nStill to do: none\nLoose ends: none'
     await mkdir(join(h.folder, 'plan.review'), { recursive: true })
     await writeFile(join(h.folder, 'plan.review/implementation.md'), `# Implementation\n\n## What it fixed\n\n${summary}\n\n## Tasks\n`)
     await h.report(review.stage, 'complete', { findings: [] })
