@@ -179,13 +179,14 @@ check_parent_run() {
 # POSITIONAL, NO_TICKET, FORCE_PULL, VERIFY, GUIDELINES, REPO, OUT, FINISH, TAKE_RECOMMENDED, PARENT_RUN,
 # ATTACH (the --local verify step's telemetry attach result) and, with --no-ticket, SPEC.
 parse() {
-  POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" GUIDELINES="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED="" SPEC="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
+  POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" GUIDELINES="" PACKET="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED="" SPEC="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
   while [ $# -gt 0 ]; do
     case $1 in
       --no-ticket) NO_TICKET=1; shift ;;
       --force-pull) FORCE_PULL=1; shift ;;
       --verify) VERIFY=1; shift ;;
       --guidelines) [ $# -ge 2 ] || die "--guidelines needs a path"; GUIDELINES=$2; shift 2 ;;
+      --packet) [ $# -ge 2 ] || die "--packet needs a path"; PACKET=$2; shift 2 ;;
       --repo) [ $# -ge 2 ] || die "--repo needs a path"; REPO=$2; shift 2 ;;
       --output) [ $# -ge 2 ] || die "--output needs a path"; OUT=$2; shift 2 ;;
       --finish) FINISH=1; shift ;;
@@ -302,6 +303,7 @@ cmd_local() {
   if [ -n "$NO_TICKET" ]; then args+=(--no-ticket "$SPEC"); elif [ -n "$POSITIONAL" ]; then args+=(--ticket "$POSITIONAL"); fi
   [ -z "$OUT" ] || args+=(--output "$OUT")
   [ -z "$GUIDELINES" ] || args+=(--guidelines "$GUIDELINES")
+  [ -z "$PACKET" ] || args+=(--packet "$PACKET")
   [ -z "$FORCE_PULL" ] || args+=(--force-pull)
   [ -z "$VERIFY" ] || args+=(--verify)
   [ -z "$FINISH" ] || args+=(--finish)
