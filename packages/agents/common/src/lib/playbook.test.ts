@@ -12,13 +12,13 @@ describe('the Playbook Status table in agent-common (NOVA1.1)', () => {
   })
 
   it('nextStep finds a Status case-insensitively, and null for a Status the table does not know', () => {
-    expect(nextStep('ready: idea')?.command).toBe('/aspira-spec-writer <ID> --local')
-    expect(nextStep(' In Review: Implementation ')?.command).toBe('/aspira-pr-reviewer <ID> --local')
+    expect(nextStep('ready: idea')?.command).toBe('/aspira-spec-writer <ID>')
+    expect(nextStep(' In Review: Implementation ')?.command).toBe('/aspira-pr-reviewer <ID>')
     expect(nextStep('Not a status')).toBeNull()
   })
 
   it('commandFor fills in the ticket ID, and is null for a by-hand row', () => {
-    expect(commandFor(nextStep('Ready: Plan')!, 'KIT-2')).toBe('/aspira-implementor KIT-2 --local')
+    expect(commandFor(nextStep('Ready: Plan')!, 'KIT-2')).toBe('/aspira-implementor KIT-2')
     expect(commandFor(nextStep('Shortlist')!, 'KIT-2')).toBeNull()
   })
 

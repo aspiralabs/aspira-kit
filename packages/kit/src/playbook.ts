@@ -37,7 +37,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
     title: 'Step 1: groom the idea',
     body: [
       '```bash',
-      '/aspira-groomer <ID> --local',
+      '/aspira-groomer <ID>',
       '```',
       "Write Problem, who has it, and what done looks like in the ticket's Idea section, then run the groomer (kit 0.7.0 and later). Needs Idea or Grooming. It moves the card Idea → Grooming when it starts, interviews you in rounds on the ticket's **Grooming Decisions** page, grounded in the repository, and on Confirm writes the Decisions and Terms into the Idea and moves the card Grooming → Shortlist. You read the groomed Idea and move the card Shortlist → Ready: Idea by hand. No agent does this (BOARD-001). The one exception: an /aspira-build-feature run makes this move itself, on its recorded run-start approval. A ticket worked alongside another starts with `kit worktree <ID>` (or `/aspira-worktree <ID>`), which creates `.worktrees/<TYPE>-<ID>` on its branch.",
     ].join('\n'),
@@ -46,7 +46,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
     title: 'Step 2: write and review the spec',
     body: [
       '```bash',
-      '/aspira-spec-writer <ID> --local',
+      '/aspira-spec-writer <ID>',
       '```',
       'Needs Ready: Idea; the skill refuses any other Status before it runs a model, naming the Status it needs and who moves the card there. It sets Dev, moves the card to In Progress: Spec, pulls the ticket into `.work/<id>-<slug>/` (`ticket.md`, `idea.md`) and runs the spec writer on `idea.md`: it explores the repository, drafts the spec and runs the one specialist review on the draft (KIT-48: the spec is reviewed once, here, not again by a second skill). Output: `spec.reviewed/spec.reviewed.md`, `run-analysis.md`, `trace/`, plus `spec.md` in the folder (the same reviewed spec). On success it puts `spec.md` on the ticket as the child page **Spec**, the reviewed spec as **Spec Reviewed**, the open decisions as **Spec Review Decisions** when the status is `needs-author` (BOARD-003), and moves the card to In Review: Spec. If the run stops, the card stays In Progress: Spec and the same command reruns it without a second claim. The run reports its status in `.work/<id>-<slug>/progress.md` and exits by it: 0 only when it ends ready, 1 incomplete or blocked, 3 refused, 5 needs-author; read the note before rerunning.',
       'Skip this step when the ticket already has a Spec page (migrated tickets): move the card to In Review: Spec by hand and go to Step 3.',
@@ -56,7 +56,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
     title: 'Step 3: answer the spec\'s decisions',
     body: [
       '```bash',
-      '/aspira-spec-writer <ID> --local',
+      '/aspira-spec-writer <ID>',
       '```',
       'Needs In Review: Spec. Read `spec.reviewed/trace/review.json`:',
       '- `ready`: go to Step 4.',
@@ -71,7 +71,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
     title: 'Step 5: plan',
     body: [
       '```bash',
-      '/aspira-planner <ID> --local',
+      '/aspira-planner <ID>',
       '```',
       'Needs Ready: Spec. The skill sets Dev, moves the card to In Progress: Plan, pulls `spec.reviewed/spec.reviewed.md` from the Spec Reviewed page and plans from it. Output: `plan.review/plan.reviewed.md`, `run-analysis.md`, `trace/`. On success it puts the plan on the ticket as **Plan** and moves the card to In Review: Plan. Read `trace/review.json`:',
       '- `ready`: read the plan, then move the card to Ready: Plan by hand. The one exception: an /aspira-build-feature run makes this move itself, on its recorded run-start approval.',
@@ -83,7 +83,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
     title: 'Step 6: build',
     body: [
       '```bash',
-      '/aspira-implementor <ID> --local',
+      '/aspira-implementor <ID>',
       '```',
       'Needs Ready: Plan. The skill sets Dev, moves the card to In Progress: Implementation, pulls `plan.review/plan.reviewed.md` from the Plan page and builds it on `feat/<id>-<slug>`. Add `--serial` to run one lane at a time, or `--max-parallel 3` to cap the lanes. Output: commits on the branch, and `plan.review/implementation.md` with the task table, deviations and assumptions, which it puts on the ticket as **Implementation**. The card stays In Progress: Implementation until the PR is open (Step 8); a `refused`, `blocked` or `incomplete` result is not a finished build.',
       "Before going on, run the project's gate yourself: the static check, unit tests and integration tests named in the project's `AGENTS.md` (nomnomzz: `pnpm check`, `pnpm test`, `pnpm test:integration` in `apps/web`, and `npm test` in `apps/mobile` when mobile changed).",
@@ -94,8 +94,8 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
     body: [
       'Once per app directory:',
       '```bash',
-      '/aspira-code-analyzer <ID> --app apps/web --local',
-      '/aspira-code-analyzer <ID> --app apps/mobile --local',
+      '/aspira-code-analyzer <ID> --app apps/web',
+      '/aspira-code-analyzer <ID> --app apps/mobile',
       '```',
       'Needs In Progress: Implementation or In Review: Implementation; the skill makes no move. Review the diff it made. Clean analysis does not prove behaviour is unchanged.',
     ].join('\n'),
@@ -107,16 +107,16 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
       'git push -u origin feat/<id>-<slug>',
       'gh pr create --base main --title "<ID>: <feature>" --body-file <summary.md>',
       '```',
-      `Needs In Progress: Implementation, after Step 7; ${STEP8_ROW?.manual ?? 'by hand'}: read \`.work/<id>-<slug>/progress.md\`'s Next action for the commit of the analyzer's changes, the push and the \`gh pr create\` command above, word for word. The body links the ticket. Then set the ticket's **PR** property to the PR URL (BOARD-005) and move the card to In Review: Implementation. The implementor does both itself when it opened the PR (\`--pr\`, as a separate process); after a \`--local\` build, which pushes nothing, you do. Verify with \`.claude/skills/aspira-implementor/scripts/implementor.sh local <ID> --verify --pr-url <url>\`. Open the PR before the review; the reviewer comments on it.`,
+      `Needs In Progress: Implementation, after Step 7; ${STEP8_ROW?.manual ?? 'by hand'}: read \`.work/<id>-<slug>/progress.md\`'s Next action for the commit of the analyzer's changes, the push and the \`gh pr create\` command above, word for word. The body links the ticket. Then set the ticket's **PR** property to the PR URL (BOARD-005) and move the card to In Review: Implementation. The implementor does both itself when it opened the PR (\`--pr\`, as a separate process); after a build in this session (the default), which pushes nothing, you do. Verify with \`.claude/skills/aspira-implementor/scripts/implementor.sh local <ID> --verify --pr-url <url>\`. Open the PR before the review; the reviewer comments on it.`,
     ].join('\n'),
   },
   {
     title: 'Step 9: debate the diff',
     body: [
       '```bash',
-      '/aspira-pr-reviewer <ID> --local',
+      '/aspira-pr-reviewer <ID>',
       '```',
-      "Needs In Review: Implementation with the PR property set; the skill reviews that PR and makes no move. For the separate-process mode drop `--local` and export `GITHUB_TOKEN=$(gh auth token)` first; the agent needs it to read a private repo and post its comment. Output: the review comment on the PR, `review.md`, `findings.md` and `cost.md` in `.work/<id>-<slug>/pr-review/`, and `review.md` on the ticket as **PR Review**.",
+      "Needs In Review: Implementation with the PR property set; the skill reviews that PR and makes no move. For the separate-process mode add `--cloud` and export `GITHUB_TOKEN=$(gh auth token)` first; the agent needs it to read a private repo and post its comment. Output: the review comment on the PR, `review.md`, `findings.md` and `cost.md` in `.work/<id>-<slug>/pr-review/`, and `review.md` on the ticket as **PR Review**.",
       'Fix what it found, push, rerun. **Stop when nothing critical or high is left.** Put the remaining mediums and lows on follow-up tickets. NOM-4 ran four extra full reviews after that point and each one found a new layer of lows; that is the loop to avoid.',
     ].join('\n'),
   },

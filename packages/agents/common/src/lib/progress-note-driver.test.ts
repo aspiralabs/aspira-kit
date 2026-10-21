@@ -156,7 +156,7 @@ describe('T14: a passing verify sets the Next action to the following Playbook s
     const result = await verifyRun(context, {}, (f) => join(f, 'plan.review'))
     expect(result.verified).toBe(true)
     const action = parseNextAction(await note())
-    expect(action?.run).toEqual(['/aspira-implementor KIT-2 --local'])
+    expect(action?.run).toEqual(['/aspira-implementor KIT-2'])
   })
 })
 
@@ -166,7 +166,7 @@ describe('T14: a refusal at the board gate keeps the existing Next action and ad
     await mkdir(folder, { recursive: true })
     await writeFile(
       join(folder, 'progress.md'),
-      ['# KIT-2: Every skill writes a progress note', '', '## Ticket', '', 'Run id: r0', 'Written: 2026-10-10T00:00:00.000Z', '', '## Next action', '', 'Step: Step 6: build', 'Run: /aspira-implementor KIT-2 --local', 'Session: .claude/skills/aspira-implementor/scripts/implementor.sh local KIT-2', ''].join('\n'),
+      ['# KIT-2: Every skill writes a progress note', '', '## Ticket', '', 'Run id: r0', 'Written: 2026-10-10T00:00:00.000Z', '', '## Next action', '', 'Step: Step 6: build', 'Run: /aspira-implementor KIT-2', 'Session: .claude/skills/aspira-implementor/scripts/implementor.sh local KIT-2', ''].join('\n'),
     )
     // The live ticket is in a Status the planner's gate does not accept: a second call throws FlowRefused.
     await writeTicket(baseTicket({ status: 'In Review: Plan' }))
@@ -182,7 +182,7 @@ describe('T14: a refusal at the board gate keeps the existing Next action and ad
     expect(caught).toBeInstanceOf(Error)
     await handleRunError(context, caught, { positional: 'KIT-2' })
     const text = await note()
-    expect(parseNextAction(text)).toEqual({ step: 'Step 6: build', do: [], run: ['/aspira-implementor KIT-2 --local'], session: '.claude/skills/aspira-implementor/scripts/implementor.sh local KIT-2' })
+    expect(parseNextAction(text)).toEqual({ step: 'Step 6: build', do: [], run: ['/aspira-implementor KIT-2'], session: '.claude/skills/aspira-implementor/scripts/implementor.sh local KIT-2' })
     const openIssues = text.slice(text.indexOf('## Open issues'), text.indexOf('## Next action'))
     expect(openIssues).toMatch(/\d{4}-\d{2}-\d{2}/)
   })

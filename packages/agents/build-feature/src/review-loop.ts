@@ -1,5 +1,5 @@
 // Step 9's review loop (F27-F29), in In Review: Implementation after Step 10's repo work is pushed.
-// A review is one completed /aspira-pr-reviewer step (--local, or its cloud mode). After each, the driver reads the
+// A review is one completed /aspira-pr-reviewer step (in the session, or its --cloud mode). After each, the driver reads the
 // counts from pr-review/findings.md (countsFromFindings, recorded by the step) and records
 // { n, headSha, critical, high }. Nothing critical or high left: `gh pr ready`, the PR body is
 // rewritten and the loop is done (playbook.ts:122-123). Some left and fewer than three reviews

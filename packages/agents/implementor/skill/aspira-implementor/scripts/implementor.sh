@@ -166,7 +166,7 @@ absolute_path() {
 is_github() {
   [[ $1 =~ ^(https?://(www\.)?github\.com/|git@github\.com:)?[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+(\.git)?/?$ ]] && [ ! -d "$1" ]
 }
-SOURCE="" REPO="" REF="" PR="" LOCAL="" GUIDELINES="" PARALLEL="" SERIAL="" WORK="" FINISH="" NO_TICKET="" FORCE_PULL="" VERIFY="" PR_URL="" REPLACE_PENDING="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
+SOURCE="" REPO="" REF="" PR="" LOCAL="" CLOUD="" GUIDELINES="" PARALLEL="" SERIAL="" WORK="" FINISH="" NO_TICKET="" FORCE_PULL="" VERIFY="" PR_URL="" REPLACE_PENDING="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
 # --parent-run <run-id>:<nonce> marks a step of a build-feature run (KIT-19): ticket.ts and the local
 # driver check that it names the run's pending step, and the step writes and attaches no telemetry of
 # its own. A malformed value is refused here, before anything runs (exit 3, as ticket.ts refuses).
@@ -189,6 +189,7 @@ parse() {
       --ref) [ $# -ge 2 ] || die "--ref needs a branch"; REF=$2; shift 2 ;;
       --pr) PR=1; shift ;;
       --local) LOCAL=1; shift ;;
+      --cloud) CLOUD=1; shift ;;
       --no-ticket) NO_TICKET=1; shift ;;
       --force-pull) FORCE_PULL=1; shift ;;
       --verify) VERIFY=1; shift ;;
@@ -251,8 +252,8 @@ github_of() {
 }
 cmd_start() {
   parse "$@"
-  if [ -n "$LOCAL" ]; then local_step; return; fi
-  [ -z "$GUIDELINES$PARALLEL$SERIAL$WORK$FINISH$VERIFY$PR_URL$REPLACE_PENDING$ATTACH" ] || die "--guidelines, --max-parallel, --serial, --work, --finish, --verify, --pr-url, --replace-pending and --attach are for --local; the agent loads its rules from Notion"
+  if [ -n "$LOCAL" ] && [ -z "$CLOUD" ]; then local_step; return; fi
+  [ -z "$GUIDELINES$PARALLEL$SERIAL$WORK$FINISH$VERIFY$PR_URL$REPLACE_PENDING$ATTACH" ] || die "--guidelines, --max-parallel, --serial, --work, --finish, --verify, --pr-url, --replace-pending and --attach are for local, the default mode; the agent loads its rules from Notion"
   local repo ref=$REF source=$SOURCE folder="" top="" export_dir=""
   resolve_agent
   node_args
@@ -272,7 +273,7 @@ cmd_start() {
       # The agent clones the GitHub repository, so it cannot read the ticket's working folder when .work/ is
       # gitignored (as kit init makes it). Refuse before any board action, so the card is not claimed for nothing.
       if git -C "$top" check-ignore -q --no-index .work 2>/dev/null; then
-        die "the separate-process implementor clones $(github_of "$(git -C "$top" remote get-url origin 2>/dev/null || true)") from GitHub and cannot read .work/ (gitignored), where the ticket's plan is pulled to. Run the ticket with --local (/aspira-implementor <ticket> --local), or pass a committed plan path with --no-ticket. No board move was made."
+        die "the separate-process implementor clones $(github_of "$(git -C "$top" remote get-url origin 2>/dev/null || true)") from GitHub and cannot read .work/ (gitignored), where the ticket's plan is pulled to. Run the ticket in this session (/aspira-implementor <ticket>, without --cloud), or pass a committed plan path with --no-ticket. No board move was made."
       fi
       ticket_start "$top"
       folder=$T_FOLDER
@@ -288,14 +289,14 @@ cmd_start() {
     source=${file#"$top"/}
     [ -z "$folder" ] || export_dir=$top/$(dirname "$source")
     repo=$(github_of "$(git -C "$top" remote get-url origin 2>/dev/null || true)")
-    [ -n "$repo" ] || die "the origin of $top is not a GitHub repository; pass --repo owner/name with --no-ticket, or use --local"
-    [ -n "$(git -C "$top" ls-files -- "$source")" ] || die "$source is not committed; the agent clones $repo and cannot see it. Commit and push it, or use --local"
-    [ -z "$(git -C "$top" status --porcelain -- "$source")" ] || die "$source has uncommitted changes; commit and push them, or use --local"
+    [ -n "$repo" ] || die "the origin of $top is not a GitHub repository; pass --repo owner/name with --no-ticket, or drop --cloud"
+    [ -n "$(git -C "$top" ls-files -- "$source")" ] || die "$source is not committed; the agent clones $repo and cannot see it. Commit and push it, or drop --cloud"
+    [ -z "$(git -C "$top" status --porcelain -- "$source")" ] || die "$source has uncommitted changes; commit and push them, or drop --cloud"
     branch=$(git -C "$top" rev-parse --abbrev-ref HEAD)
     [ -n "$ref" ] || ref=$branch
     if [ "$ref" = "$branch" ]; then
-      git -C "$top" rev-parse --verify -q '@{u}' >/dev/null || die "$branch is not pushed to $repo; push it, or use --local"
-      [ "$(git -C "$top" rev-list --count '@{u}..HEAD')" = 0 ] || die "$branch has commits not pushed to $repo; push them, or use --local"
+      git -C "$top" rev-parse --verify -q '@{u}' >/dev/null || die "$branch is not pushed to $repo; push it, or drop --cloud"
+      [ "$(git -C "$top" rev-list --count '@{u}..HEAD')" = 0 ] || die "$branch has commits not pushed to $repo; push them, or drop --cloud"
     fi
   fi
   local run prompt eve=""
@@ -347,9 +348,10 @@ RUNNER
 # perform), then knowledge and the build stages, then the finished run with the end board actions;
 # --verify is the last step, once the session made the moves.
 local_step() {
-  [ -z "$REF$PR" ] || die "--ref and --pr are for the agent; --local builds the checkout you are in and pushes nothing"
+  [ -z "$CLOUD" ] || die "--cloud runs the separate agent: use the start command, not local"
+  [ -z "$REF$PR" ] || die "--ref and --pr are for the agent (--cloud); the default mode builds the checkout you are in and pushes nothing"
   [ -n "$VERIFY" ] || [ -z "$PR_URL$REPLACE_PENDING" ] || die "--pr-url and --replace-pending are only for --verify"
-  if [ -n "$REPO" ] && is_github "$REPO"; then die "--local builds a local checkout; $REPO is a GitHub repository. Drop --local to launch the agent on it"; fi
+  if [ -n "$REPO" ] && is_github "$REPO"; then die "the default mode builds a local checkout; $REPO is a GitHub repository. Pass --cloud to launch the agent on it"; fi
   local top args
   top=$(repo_top)
   args=(--repo "$top")

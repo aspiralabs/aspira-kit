@@ -1,7 +1,7 @@
 // T15 (F20): a build-feature run drives several skills in one session. While it is active, a
 // progress note written for the step it is currently on must not tell a human or a fresh session to
 // rerun that step directly (that would race build-feature's own state); it must point back at
-// `/aspira-build-feature <ID> [--local]`, the one command that resumes the whole run, and keep the
+// `/aspira-build-feature <ID> [--cloud]`, the one command that resumes the whole run, and keep the
 // step's own continuation visible (for a human reading the ticket) under Open issues instead.
 //
 // build-feature marks itself active at `.local/build-feature/active.json` (relative to the ticket
@@ -22,7 +22,7 @@ let folder: string
 const PLANNER_CONTINUATION: NextAction = {
   step: 'Step 5 is running, or it stopped: rerun it',
   do: [],
-  run: ['/aspira-planner KIT-2 --local'],
+  run: ['/aspira-planner KIT-2'],
   session: '.claude/skills/aspira-planner/scripts/planner.sh local KIT-2',
 }
 
@@ -53,15 +53,23 @@ const baseNote = {
 }
 
 describe('T15: a progress note written while build-feature is active', () => {
-  it('keeps "Run: /aspira-build-feature KIT-2 --local" as the Next action, and lists the step’s continuation under Open issues', async () => {
+  it('keeps "Run: /aspira-build-feature KIT-2" as the Next action, and lists the step’s continuation under Open issues', async () => {
     await mkdir(join(folder, '.local', 'build-feature'), { recursive: true })
     await writeFile(join(folder, '.local', 'build-feature', 'active.json'), JSON.stringify({ runId: 'b1', mode: 'local', end: null }))
     await writeProgressNote({ folder, repo, note: baseNote })
     const text = await readFile(join(folder, 'progress.md'), 'utf8')
     const action = parseNextAction(text)
-    expect(action?.run).toEqual(['/aspira-build-feature KIT-2 --local'])
+    expect(action?.run).toEqual(['/aspira-build-feature KIT-2'])
     const openIssues = text.slice(text.indexOf('## Open issues'), text.indexOf('## Next action'))
-    expect(openIssues).toContain('/aspira-planner KIT-2 --local')
+    expect(openIssues).toContain('/aspira-planner KIT-2')
+  })
+
+  it('KIT-51: a cloud-mode run resumes with --cloud; the default mode carries no flag', async () => {
+    await mkdir(join(folder, '.local', 'build-feature'), { recursive: true })
+    await writeFile(join(folder, '.local', 'build-feature', 'active.json'), JSON.stringify({ runId: 'b1', mode: 'cloud', end: null }))
+    await writeProgressNote({ folder, repo, note: baseNote })
+    const action = parseNextAction(await readFile(join(folder, 'progress.md'), 'utf8'))
+    expect(action?.run).toEqual(['/aspira-build-feature KIT-2 --cloud'])
   })
 
   it('BUILD_FEATURE_ACTIVE names the marker path writeProgressNote checks', () => {

@@ -8,7 +8,7 @@
   ],
   "examples": {
     "good": [
-      "/aspira-planner NOM-4 --local",
+      "/aspira-planner NOM-4",
       ".claude/skills/aspira-planner/scripts/planner.sh local NOM-4 --verify",
       "git add -- 'apps/web/fixed.ts' 'apps/web/a b.ts' && git commit -m 'NOM-4: static analysis'",
       "echo \"nothing to commit\"",

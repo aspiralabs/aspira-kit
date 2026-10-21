@@ -6,7 +6,7 @@
         "Grooming"
       ],
       "step": "Step 1: groom the idea with the groomer, then move the card to Ready: Idea",
-      "command": "/aspira-groomer <ID> --local",
+      "command": "/aspira-groomer <ID>",
       "who": "you, with an agent"
     },
     {
@@ -22,7 +22,7 @@
         "Ready: Idea"
       ],
       "step": "Step 2: write and review the spec",
-      "command": "/aspira-spec-writer <ID> --local",
+      "command": "/aspira-spec-writer <ID>",
       "who": "agent"
     },
     {
@@ -30,7 +30,7 @@
         "In Progress: Spec"
       ],
       "step": "Step 2 is running, or it stopped: rerun it",
-      "command": "/aspira-spec-writer <ID> --local",
+      "command": "/aspira-spec-writer <ID>",
       "who": "agent, then you"
     },
     {
@@ -38,7 +38,7 @@
         "In Review: Spec"
       ],
       "step": "Step 3: answer the spec's decisions and rerun the spec writer to settle them, then Step 4: approve it",
-      "command": "/aspira-spec-writer <ID> --local",
+      "command": "/aspira-spec-writer <ID>",
       "who": "agent, then you"
     },
     {
@@ -46,7 +46,7 @@
         "Ready: Spec"
       ],
       "step": "Step 5: plan",
-      "command": "/aspira-planner <ID> --local",
+      "command": "/aspira-planner <ID>",
       "who": "agent"
     },
     {
@@ -54,7 +54,7 @@
         "In Progress: Plan"
       ],
       "step": "Step 5 is running, or it stopped: rerun it",
-      "command": "/aspira-planner <ID> --local",
+      "command": "/aspira-planner <ID>",
       "who": "agent, then you"
     },
     {
@@ -70,7 +70,7 @@
         "Ready: Plan"
       ],
       "step": "Step 6: build",
-      "command": "/aspira-implementor <ID> --local",
+      "command": "/aspira-implementor <ID>",
       "who": "agent"
     },
     {
@@ -78,7 +78,7 @@
         "In Progress: Implementation"
       ],
       "step": "Step 6 is running or stopped, or Step 7 (static analysis) and Step 8 (open the PR) are still to do",
-      "command": "/aspira-code-analyzer <ID> --app <app-dir> --local",
+      "command": "/aspira-code-analyzer <ID> --app <app-dir>",
       "who": "agent, then you"
     },
     {
@@ -95,7 +95,7 @@
         "In Review: Implementation"
       ],
       "step": "Step 9: review the PR, fix, rerun; then Step 10: docs, release page, merge",
-      "command": "/aspira-pr-reviewer <ID> --local",
+      "command": "/aspira-pr-reviewer <ID>",
       "who": "agent, then you"
     },
     {

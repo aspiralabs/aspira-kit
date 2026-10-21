@@ -166,11 +166,11 @@ describe('KIT-19 T25 F6 F22: a run refuses before its first step when the step s
 describe('KIT-19 T27 F9 F22: an earlier run state and step reports in three shapes', () => {
   const EARLIER = 'run-20261011T090000Z'
   const OLD_STATE = {
-    runs: [{ runId: EARLIER, command: '/aspira-build-feature KIT-11 --local', startedAt: '2026-10-11T09:00:00.000Z', endedAt: '2026-10-11T10:00:00.000Z', ended: 'stopped', mode: 'local', end: { message: 'stopped by hand', stopped: true } }],
+    runs: [{ runId: EARLIER, command: '/aspira-build-feature KIT-11', startedAt: '2026-10-11T09:00:00.000Z', endedAt: '2026-10-11T10:00:00.000Z', ended: 'stopped', mode: 'local', end: { message: 'stopped by hand', stopped: true } }],
     inProgress: null,
-    approvals: [{ runId: EARLIER, notionUserId: 'user-1', name: 'Ada Approver', at: '2026-10-11T09:00:00.000Z', command: '/aspira-build-feature KIT-11 --local' }],
+    approvals: [{ runId: EARLIER, notionUserId: 'user-1', name: 'Ada Approver', at: '2026-10-11T09:00:00.000Z', command: '/aspira-build-feature KIT-11' }],
     moves: [],
-    steps: [{ step: 'groomer', runId: EARLIER, command: '/aspira-groomer KIT-11 --local --take-recommended', status: 'confirmed', startedAt: '2026-10-11T09:00:00.000Z', endedAt: '2026-10-11T09:30:00.000Z', usage: { tokens: 700, wallMs: 1800000 }, resultLine: 'groomer: confirmed', nonce: '00000000-0000-4000-8000-000000000000' }],
+    steps: [{ step: 'groomer', runId: EARLIER, command: '/aspira-groomer KIT-11 --take-recommended', status: 'confirmed', startedAt: '2026-10-11T09:00:00.000Z', endedAt: '2026-10-11T09:30:00.000Z', usage: { tokens: 700, wallMs: 1800000 }, resultLine: 'groomer: confirmed', nonce: '00000000-0000-4000-8000-000000000000' }],
     takenKeys: [],
     asked: [],
     reviews: [],

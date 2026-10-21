@@ -1,7 +1,7 @@
 ---
 name: aspira-spec-writer
-description: The one spec step. From an idea (a Feature Board ticket at Ready: Idea, a file, a Notion page or inline text) it explores the repository, writes a draft in the Aspira spec contract and runs the official spec review on it; from In Review: Spec it reviews the answered spec again, so a spec is reviewed once per round, never twice. By default it runs spec-writer as a separate process on Claude and OpenAI models; with --local the same pipeline runs inside this Claude Code session. Use for /aspira-spec-writer or requests to write or re-review a spec.
-argument-hint: [<ticket ID | Notion URL> | <idea.md> --no-ticket] [--local] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended] [--parent-run RUN:NONCE]
+description: The one spec step. From an idea (a Feature Board ticket at Ready: Idea, a file, a Notion page or inline text) it explores the repository, writes a draft in the Aspira spec contract and runs the official spec review on it; from In Review: Spec it reviews the answered spec again, so a spec is reviewed once per round, never twice. By default the pipeline runs inside this Claude Code session; with --cloud it runs spec-writer as a separate process on Claude and OpenAI models. Use for /aspira-spec-writer or requests to write or re-review a spec.
+argument-hint: [<ticket ID | Notion URL> | <idea.md> --no-ticket] [--cloud] [--force-pull] [--guidelines FILE] [--repo DIR] [--output DIR] [--take-recommended] [--parent-run RUN:NONCE]
 disable-model-invocation: true
 ---
 
@@ -24,27 +24,17 @@ With `--no-ticket` the pipeline reads the idea from a file. Turn whatever the us
 
 The repository is the git root of the current directory unless `--repo` is given. With `--no-ticket`, results go to `spec.reviewed/` beside the idea file unless `--output` is given. Both modes use `scripts/spec-writer.sh` beside this file (use its absolute path) and produce the same report.
 
-| | Default | `--local` |
+| | Default | `--cloud` |
 | --- | --- | --- |
-| Where the model work runs | `spec-writer`, a separate process | subagents of this Claude Code session |
-| Models | the agent's configured models (`agent/lib/runner.ts`, spec-reviewer's `models.ts`) | the model each task names (`model` in the stage) |
-| Independence | the reviewers are a second vendor with no session context | fresh subagent contexts, same session |
-| Cost | Vercel AI Gateway, itemized in `run-analysis.md` | this session's usage, not itemized |
-| Needs | Node 24, pnpm, screen, the agents' `.env.local`; Docker when loading Notion guidelines | Node 24, pnpm, the Notion MCP for the board, `NOTION_TOKEN` for the guidelines (or `--guidelines`) |
+| Where the model work runs | subagents of this Claude Code session | `spec-writer`, a separate process |
+| Models | the model each task names (`model` in the stage) | the agent's configured models (`agent/lib/runner.ts`, spec-reviewer's `models.ts`) |
+| Independence | fresh subagent contexts, same session | the reviewers are a second vendor with no session context |
+| Cost | this session's usage, not itemized | Vercel AI Gateway, itemized in `run-analysis.md` |
+| Needs | Node 24, pnpm, the Notion MCP for the board, `NOTION_TOKEN` for the guidelines (or `--guidelines`) | Node 24, pnpm, screen, the agents' `.env.local`; Docker when loading Notion guidelines |
 
-Use the default when the spec should be reviewed by models independent of this session. Use `--local` to stay in this session.
+The default stays in this session. Use `--cloud` when the spec should be reviewed by models independent of this session. `--local` is still accepted and means the default.
 
-## Default: run the agent
-
-```bash
-<skill-dir>/scripts/spec-writer.sh start [<ticket> | <idea.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output] [--parent-run RUN:NONCE]
-```
-
-The launcher does the board work itself, through the shared board module with `NOTION_TOKEN` from the project's `.env.local`: the ticket step before the agent starts (a refusal exits 3 and launches nothing), and the copy to `spec.md`, the pushes and the success move after it exits, appended to the run's log and recorded in `trace/board.json`. With `--guidelines` the launcher runs the agent's CLI on that snapshot; otherwise it runs the eve entry point, which loads the guidelines with `load-knowledge` (Notion credentials and its Docker sandbox). The launcher resolves the package from `SPEC_WRITER_AGENT_DIR` (kit development only; the report says so), then the installed `@aspiralabs/spec-writer` under the project's `node_modules`, then its own location. A launcher that resolves to a kit checkout prints one line saying it is running kit source, not the installed version. Every `start`, `status` and `local` output names the agent package and version that ran (`agent:` line, or `agent` in the JSON), and an export records it in `trace/agent-version.json`, and prints the run directory and the agent's `instructions:` file.
-
-The run is detached. Tell the user it started and where results will go, then use `status <run-dir>`, or `wait <run-dir> --max 30` between updates (`watch` is an alias). Waiting returns control without stopping the agent; keep checking until it finishes or the user cancels. If launch fails, report the error. When it finishes, read the file named in `instructions:` and report the result the way it says.
-
-## `--local`: run the pipeline in this session
+## Default: run the pipeline in this session
 
 ```bash
 <skill-dir>/scripts/spec-writer.sh local [<ticket> | <idea.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo DIR] [--output DIR] [--finish] [--verify] [--take-recommended] [--parent-run RUN:NONCE] [--attach JSON]
@@ -67,12 +57,22 @@ The engineering guidelines are mandatory, local mode included: `local` runs `loa
 
 A task that comes back with an `error` wrote an output that failed its schema: send that error back once, to the same subagent or a new one with the same message plus the error. If it fails again or a subagent cannot finish, run `local ... --finish` to export what exists with the missing phases recorded as failures. The work directory, `<output>.local/`, holds the knowledge folder, prompts and outputs between steps and is removed after export; every prompt and output is kept in `trace/calls.json`, the rules used (source, files and hashes) in `trace/review.json`, and every board action with the Status before and after in `trace/board.json`. If the idea, the spec, the guidelines or the repository change mid-run, `local` refuses to continue; delete the work directory to start again.
 
+## `--cloud`: run the agent
+
+```bash
+<skill-dir>/scripts/spec-writer.sh start [<ticket> | <idea.md> --no-ticket] [--force-pull] [--guidelines /absolute/REQUIRED.md] [--repo /absolute/repository] [--output /absolute/output] [--parent-run RUN:NONCE]
+```
+
+The launcher does the board work itself, through the shared board module with `NOTION_TOKEN` from the project's `.env.local`: the ticket step before the agent starts (a refusal exits 3 and launches nothing), and the copy to `spec.md`, the pushes and the success move after it exits, appended to the run's log and recorded in `trace/board.json`. With `--guidelines` the launcher runs the agent's CLI on that snapshot; otherwise it runs the eve entry point, which loads the guidelines with `load-knowledge` (Notion credentials and its Docker sandbox). The launcher resolves the package from `SPEC_WRITER_AGENT_DIR` (kit development only; the report says so), then the installed `@aspiralabs/spec-writer` under the project's `node_modules`, then its own location. A launcher that resolves to a kit checkout prints one line saying it is running kit source, not the installed version. Every `start`, `status` and `local` output names the agent package and version that ran (`agent:` line, or `agent` in the JSON), and an export records it in `trace/agent-version.json`, and prints the run directory and the agent's `instructions:` file.
+
+The run is detached. Tell the user it started and where results will go, then use `status <run-dir>`, or `wait <run-dir> --max 30` between updates (`watch` is an alias). Waiting returns control without stopping the agent; keep checking until it finishes or the user cancels. If launch fails, report the error. When it finishes, read the file named in `instructions:` and report the result the way it says.
+
 ## Run telemetry
 
 Every run of this skill on a ticket writes one telemetry file, `.work/<id>-<slug>/telemetry/<run-id>.json` (OpenTelemetry JSON: the run, its phases and subagents, with timings, tokens, tool calls and cost where they are measured), and attaches it to the end of the ticket page when the Feature Board rules list it (BOARD-003). A telemetry failure is a notice beside the result: it never changes the run's status, the card's move or the exit code.
 
-- **Default.** The launcher does it all: `ticket.ts start` prints `run-id=` and `run-started=`, and the finish step after the agent exits writes the file from them and attaches it. Nothing to do here.
-- **`--local`.** The session reports its own usage, since only it sees its subagents:
+- **`--cloud`.** The launcher does it all: `ticket.ts start` prints `run-id=` and `run-started=`, and the finish step after the agent exits writes the file from them and attaches it. Nothing to do here.
+- **Default.** The session reports its own usage, since only it sees its subagents:
   1. Record the wall-clock start and end (ISO 8601) of every subagent you launch, with the total tokens, tool uses and duration the Agent tool reports for it, and its model when you know it.
   2. Every pending step on a ticket prints `sessionUsage` with a `file` and a `runId`. Before the call that exports the run (the call after the last phase output is written, or `--finish`), write that `file` (`spec.reviewed/trace/session-usage.json`) as JSON: `{"runId": "<runId>", "subagents": [{"label": "…", "startedAt": "…", "endedAt": "…", "totalTokens": 0, "toolUses": 0, "wallMs": 0, "model": "…"}]}`, one entry per subagent in launch order. `label` is a short name of your own (`research`, `lane A`), never the task's description or prompt text. Leave out a number you do not have; never guess one. Without the file the run's telemetry records the subagents as missing.
   3. The export's `board.actions` then end with two telemetry actions. `read` (`target: "board-rules"`): fetch the Feature Board rules page with the Notion MCP (`notion-fetch`, read-only) and write it to `file` as plain markdown, one rule per line. `attach`: only when one line of the rules you saved contains every string of `onlyIf`, attach `file`, as `name`, in one file block at the end of the ticket page `page`: `notion-create-attachment` for a file of at most 200 KiB, otherwise `notion-create-file-upload`, then `notion-update-page`. Attach no other file, to no other page, and never edit or delete another block.
@@ -82,4 +82,4 @@ Every run of this skill on a ticket writes one telemetry file, `.work/<id>-<slug
 
 ## Reporting
 
-A non-zero exit is a run status to relay (exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author): never retry or rerun it on needs-author, settle the open decisions the report names first. Start the report with the run status and the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log). The output layout and what to report from it are in `agent/instructions.md`; hand `spec.reviewed/spec.reviewed.md` to `/aspira-planner` only as it allows. If a run fails before exporting, show its log or error and do not present an earlier report as the new result. Say which mode produced the report: a `--local` run used this session throughout, so its review is not independent of the writer.
+A non-zero exit is a run status to relay (exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author): never retry or rerun it on needs-author, settle the open decisions the report names first. Start the report with the run status and the ticket ID and title, the Status before and after, the pages pushed with their URLs, and the working folder (the `report` lines of the verify step, or the launcher's log). The output layout and what to report from it are in `agent/instructions.md`; hand `spec.reviewed/spec.reviewed.md` to `/aspira-planner` only as it allows. If a run fails before exporting, show its log or error and do not present an earlier report as the new result. Say which mode produced the report: a run in this session (the default) used it throughout, so its review is not independent of the writer.

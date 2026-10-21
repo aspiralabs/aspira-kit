@@ -13,27 +13,27 @@ export type StepName = (typeof STEPS)[number]
 export const isStep = (value: string): value is StepName => (STEPS as readonly string[]).includes(value)
 
 /**
- * The steps the run passes --take-recommended to under --local: an agent decision never stops the
- * run. Their default (cloud) modes refuse the flag ("--take-recommended only applies to local"), so
+ * The steps the run passes --take-recommended to in the default mode: an agent decision never stops the
+ * run. Their cloud modes refuse the flag ("--take-recommended only applies to local"), so
  * a cloud run passes nothing and a needs-author result stops it, naming the open decisions.
  */
 export const TAKE_RECOMMENDED: readonly StepName[] = ['groomer', 'spec-writer', 'planner']
 
 /**
- * How the run runs each step (F2, Q10 revised): 'local' runs the step skill with --local in this
- * session; 'cloud' runs its default mode, which starts the step's cloud agent and waits on it.
+ * How the run runs each step (F2, Q10 revised; KIT-51): 'local', the default, runs the step skill in this
+ * session; 'cloud' (--cloud) runs the step skill with --cloud, which starts the step's cloud agent and waits on it.
  */
 export const MODES = ['local', 'cloud'] as const
 export type Mode = (typeof MODES)[number]
 
-/** The command that resumes a run: `/aspira-build-feature <ID>`, with --local in local mode and --autonomous when the run skips the human gates (KIT-24). */
-export const RESUME = (id: string, mode: Mode = 'local', autonomous = false): string => `/aspira-build-feature ${id}${mode === 'local' ? ' --local' : ''}${autonomous ? ' --autonomous' : ''}`
+/** The command that resumes a run: `/aspira-build-feature <ID>`, with --cloud in cloud mode and --autonomous when the run skips the human gates (KIT-24). */
+export const RESUME = (id: string, mode: Mode = 'local', autonomous = false): string => `/aspira-build-feature ${id}${mode === 'cloud' ? ' --cloud' : ''}${autonomous ? ' --autonomous' : ''}`
 
 /** The line the Build Summary gives the mode. */
 export const modeLine = (mode: Mode, autonomous = false): string =>
   mode === 'local'
-    ? `Mode: --local (every step ran its skill with --local in this session)${autonomous ? ' and --autonomous (no human gate: the groomer took every question as recommended and confirmed itself; an ask with a recommended option was answered with it)' : ''}`
-    : "Mode: cloud (every step ran its skill's default mode: the step's own agent, started and waited on)"
+    ? `Mode: in this session (the default: every step ran its skill in this session)${autonomous ? ' and --autonomous (no human gate: the groomer took every question as recommended and confirmed itself; an ask with a recommended option was answered with it)' : ''}`
+    : "Mode: --cloud (every step ran its skill with --cloud: the step's own agent, started and waited on)"
 
 /** The later-phase modules, in run order. */
 export const PHASES = ['gate', 'step8', 'step10', 'review', 'release-row'] as const
@@ -74,9 +74,9 @@ export type RouteFacts = {
   apps?: string[]
   /** Which of `apps` the analyzer has finished ready since the last build. */
   analyzed?: string[]
-  /** How each step runs. Default 'local'. */
+  /** How each step runs. Default 'local' (in this session); 'cloud' with --cloud. */
   mode?: Mode
-  /** --autonomous (KIT-24): the groomer runs with --autonomous under --local. */
+  /** --autonomous (KIT-24): the groomer runs with --autonomous, in the default mode only. */
   autonomous?: boolean
 }
 
@@ -96,21 +96,22 @@ const launcherLine = (step: StepName, sub: 'local' | 'start' | 'wait', args: str
 
 /**
  * `command`'s launcher form (F44): the step's own script instead of the slash command, so a
- * subagent runs its launcher script directly instead of the Skill tool. Local: `.sh local <args>`,
- * `--local` dropped (implied by `local`). Cloud: `.sh start <args>` then `.sh wait <RUN>`.
+ * subagent runs its launcher script directly instead of the Skill tool. Local: `.sh local <args>`.
+ * Cloud: `.sh start <args>` then `.sh wait <RUN>`. The mode flag (--cloud, or a legacy --local) is
+ * dropped either way: the subcommand carries the mode.
  * Exported so a caller holding only a command string (the review loop's own re-review command,
  * which stepCommand never builds) can still get its launcher form, with the same algorithm.
  */
 export function launcherFor(command: string, mode: Mode): string[] {
   const step = stepOf(command)
-  const args = command.split(' ').slice(1).filter((word) => word !== '--local').join(' ')
+  const args = command.split(' ').slice(1).filter((word) => word !== '--local' && word !== '--cloud').join(' ')
   if (mode === 'cloud') return [launcherLine(step, 'start', args), launcherLine(step, 'wait', '<RUN>')]
   return [launcherLine(step, 'local', args)]
 }
 
 /**
- * A row's command as the run invokes it: ID filled, <app-dir> filled; under --local the row's
- * --local and --take-recommended where it applies, in cloud mode the same command without --local.
+ * A row's command as the run invokes it: ID filled, <app-dir> filled; in the default mode the row's
+ * command plus --take-recommended where it applies, in cloud mode the same command with --cloud.
  */
 export function stepCommand(status: string, facts: Pick<RouteFacts, 'id' | 'app' | 'mode' | 'autonomous'>): StepRoute {
   const row = nextStep(status)
@@ -120,7 +121,7 @@ export function stepCommand(status: string, facts: Pick<RouteFacts, 'id' | 'app'
   const step = stepOf(command)
   const mode = facts.mode ?? 'local'
   if (mode === 'cloud') {
-    const cloudCommand = command.split(' ').filter((word) => word !== '--local').join(' ')
+    const cloudCommand = `${command.split(' ').filter((word) => word !== '--local' && word !== '--cloud').join(' ')} --cloud`
     return { kind: 'step', step, command: cloudCommand, launcher: launcherFor(cloudCommand, mode) }
   }
   const taken = TAKE_RECOMMENDED.includes(step) ? `${command} --take-recommended` : command

@@ -180,7 +180,7 @@ check_parent_run() {
 # ATTACH (the --local verify step's telemetry attach result) and,
 # with --no-ticket, SPEC.
 parse() {
-  POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" GUIDELINES="" PACKET="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED="" SPEC="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
+  LOCAL_FLAG="" CLOUD_FLAG="" POSITIONAL="" NO_TICKET="" FORCE_PULL="" VERIFY="" GUIDELINES="" PACKET="" REPO="" OUT="" FINISH="" TAKE_RECOMMENDED="" SPEC="" PARENT_RUN="" ATTACH="" T_RUN_ID="" T_RUN_STARTED=""
   while [ $# -gt 0 ]; do
     case $1 in
       --no-ticket) NO_TICKET=1; shift ;;
@@ -193,6 +193,8 @@ parse() {
       --finish) FINISH=1; shift ;;
       --take-recommended) TAKE_RECOMMENDED=1; shift ;;
       --parent-run) [ $# -ge 2 ] || die "--parent-run needs <run-id>:<nonce>"; PARENT_RUN=$2; shift 2 ;;
+      --local) LOCAL_FLAG=1; shift ;;
+      --cloud) CLOUD_FLAG=1; shift ;;
       --attach) [ $# -ge 2 ] || die "--attach needs the telemetry attach result as JSON"; ATTACH=$2; shift 2 ;;
       -*) die "unknown option: $1" ;;
       *) [ -z "$POSITIONAL" ] || die "one ticket at a time (or one spec with --no-ticket)"; POSITIONAL=${1#@}; shift ;;
@@ -234,6 +236,7 @@ ticket_start() {
 }
 cmd_start() {
   parse "$@"
+  [ -z "$LOCAL_FLAG" ] || die "--local runs in this session: use the local command, not start"
   [ -z "$FINISH" ] || die "--finish only applies to local"
   [ -z "$VERIFY" ] || die "--verify only applies to local"
   [ -z "$TAKE_RECOMMENDED" ] || die "--take-recommended only applies to local"
@@ -304,6 +307,7 @@ RUNNER
 # --verify is the last step, once the session made the moves.
 cmd_local() {
   parse "$@"
+  [ -z "$CLOUD_FLAG" ] || die "--cloud runs the separate agent: use the start command, not local"
   command -v node >/dev/null || die "node is not installed"
   local args=(--repo "$REPO")
   if [ -n "$NO_TICKET" ]; then args+=(--no-ticket "$SPEC"); elif [ -n "$POSITIONAL" ]; then args+=(--ticket "$POSITIONAL"); fi

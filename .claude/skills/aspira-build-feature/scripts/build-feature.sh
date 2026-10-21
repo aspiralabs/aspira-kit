@@ -1,8 +1,8 @@
 #!/bin/bash
 # Launch /aspira-build-feature. This skill only steps the official build-feature driver: the stages
-# it prints are performed by this Claude Code session and its subagents (SKILL.md). With --local
-# every step runs its skill with --local; without it every step runs its skill's default mode (the
-# step's cloud agent, which the step skill starts and waits on). build-feature itself has no
+# it prints are performed by this Claude Code session and its subagents (SKILL.md). By default
+# every step runs its skill in this session; with --cloud every step runs its skill with --cloud (the
+# step's cloud agent, which the step skill starts and waits on). --local is accepted and means the default. build-feature itself has no
 # start/status/wait: the run is always this session, and the driver makes no model call.
 set -euo pipefail
 
@@ -131,7 +131,7 @@ node_args() {
   local file
   for file in "$PROJECT/.env.local" "$AGENT/.env.local" "$AGENT/.env.development.local"; do [ ! -f "$file" ] || NODE_ARGS+=("--env-file=$file"); done
 }
-usage() { die "usage: build-feature.sh local <ID> [--local] [--autonomous] [--run RUNID] [--force-run] [--finish]. With --local every step runs its skill with --local; without it every step runs its skill's cloud agent. --autonomous (with --local) skips the human gates: the groomer takes every question as recommended and confirms itself."; }
+usage() { die "usage: build-feature.sh local <ID> [--cloud] [--autonomous] [--run RUNID] [--force-run] [--finish]. By default every step runs its skill in this session; with --cloud every step runs its skill's cloud agent. --autonomous (not with --cloud) skips the human gates: the groomer takes every question as recommended and confirms itself."; }
 cmd_local() {
   [ $# -ge 1 ] || usage
   local id=$1; shift
@@ -144,6 +144,6 @@ cmd_local() {
 }
 case ${1:-} in
   local) shift; cmd_local "$@" ;;
-  start|status|wait|watch) die "/aspira-build-feature has no $1: the run is always this session. Use local <ID> --local (steps in this session) or local <ID> (each step's cloud agent)." ;;
+  start|status|wait|watch) die "/aspira-build-feature has no $1: the run is always this session. Use local <ID> (steps in this session) or local <ID> --cloud (each step's cloud agent)." ;;
   *) usage ;;
 esac

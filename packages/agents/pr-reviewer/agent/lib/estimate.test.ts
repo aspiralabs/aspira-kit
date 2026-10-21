@@ -50,7 +50,7 @@ describe('renderEstimate', () => {
     expect(text).toContain('seats: 6 reviewers plus Quinn, up to 4 rounds')
     expect(text).toContain('cost: $3.14 to $12.57 ($3.14 to $3.14 a round; a review that settles in two rounds is around $6.29)')
     expect(text).toContain('seeded from nomnomzz PR #2')
-    expect(text).toContain("--local costs this session's usage instead of the Gateway")
+    expect(text).toContain('Without --cloud the review runs in this session, on its usage instead of the Gateway')
   })
 })
 

@@ -79,7 +79,7 @@ describe('the Step 7 / Step 8 Next action built from changedApps and analyzedApp
     const apps = await changedApps(repo, base)
     const analyzed = await analyzedApps(repo, apps, { ticket: 'KIT-2', head })
     const action = nextAction({ kind: 'run', id: 'KIT-2', skill: 'implementor', runStatus: 'ready', verified: true, liveStatus: 'In Progress: Implementation', apps, analyzedApps: analyzed })
-    expect(action.run).toEqual(['/aspira-code-analyzer KIT-2 --app . --local'])
+    expect(action.run).toEqual(['/aspira-code-analyzer KIT-2 --app .'])
   })
 
   it('Step 8: once every app is analyzed, the ordered commit/push/PR/verify Run lines', async () => {

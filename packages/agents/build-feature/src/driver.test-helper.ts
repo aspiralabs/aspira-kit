@@ -47,7 +47,7 @@
 // the ticket's worktree at `<tmp>/repo/.worktrees/<TYPE>-KIT-11` on the ticket branch, which is
 // where the driver runs (`h.repo`). `layout: 'checkout'` leaves out the worktree, so the driver
 // runs from the main checkout and makes the worktree itself; `h.cd(dir)` moves the session there.
-// `mode: 'cloud'` calls the driver without --local (F2). `pnpm` is a fake on PATH that logs its
+// `mode: 'cloud'` calls the driver with --cloud (F2, KIT-51). `pnpm` is a fake on PATH that logs its
 // working directory and arguments.
 
 import { execFile } from 'node:child_process'
@@ -76,8 +76,8 @@ export const RELEASES = 'https://app.notion.com/p/releases-000000000000000000000
 export const GITHUB = 'https://github.com/aspiralabs/fixture.git'
 export const REPOSITORY = 'aspiralabs/fixture'
 export const PR_URL = 'https://github.com/aspiralabs/fixture/pull/7'
-export const RESUME = '/aspira-build-feature KIT-11 --local'
-export const RESUME_CLOUD = '/aspira-build-feature KIT-11'
+export const RESUME = '/aspira-build-feature KIT-11'
+export const RESUME_CLOUD = '/aspira-build-feature KIT-11 --cloud'
 /** The card's Type to the worktree name and branch prefix (GIT-001, GIT-002). */
 export const TYPES: Record<string, { dir: string; prefix: string }> = { Feature: { dir: 'FEATURE', prefix: 'feat' }, Bug: { dir: 'BUG', prefix: 'fix' }, Chore: { dir: 'CHORE', prefix: 'chore' } }
 export const branchFor = (type: string): string => `${TYPES[type]!.prefix}/kit-11-x`
@@ -168,7 +168,7 @@ type ProjectOptions = {
   type?: string | null
   /** 'worktree' (default): the driver runs in the ticket's worktree. 'checkout': only the main checkout on main, no worktree yet. */
   layout?: 'worktree' | 'checkout'
-  /** 'local' (default) calls the driver with --local; 'cloud' without it. */
+  /** 'local' (default) calls the driver with no mode flag; 'cloud' with --cloud (KIT-51). */
   mode?: 'local' | 'cloud'
   /** Extra variables in the session's environment (such as a fake credential the gate must strip). */
   env?: Record<string, string>
@@ -278,7 +278,7 @@ export async function project(options: ProjectOptions) {
   }
 
   async function call(args: string[]): Promise<Result> {
-    const outcome = await exec(process.execPath, ['--import', LOADER, DRIVER, ID, ...(local ? ['--local'] : []), '--repo', repo, ...args], { cwd: repo, env: env() }).then(
+    const outcome = await exec(process.execPath, ['--import', LOADER, DRIVER, ID, ...(local ? [] : ['--cloud']), '--repo', repo, ...args], { cwd: repo, env: env() }).then(
       ({ stdout, stderr }) => ({ code: 0, stdout, stderr }),
       (error: { code?: number; stdout?: string; stderr?: string }) => ({ code: typeof error.code === 'number' ? error.code : -1, stdout: error.stdout ?? '', stderr: error.stderr ?? '' }),
     )
@@ -328,7 +328,7 @@ export async function project(options: ProjectOptions) {
     },
     /** Every pnpm call: `<cwd> <args>`. */
     pnpmCalls: async () => (await readFile(pnpmLog, 'utf8')).split('\n').filter((line) => line !== ''),
-    /** A new invocation: `/aspira-build-feature KIT-11 --local` as the human typed it. */
+    /** A new invocation: `/aspira-build-feature KIT-11` as the human typed it. */
     start: (extra: string[] = []) => call(extra),
     /** The session calling the driver again within the run. */
     next: (extra: string[] = []) => call(runId === undefined ? extra : ['--run', runId, ...extra]),

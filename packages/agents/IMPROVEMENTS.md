@@ -20,7 +20,7 @@ The risk in a spec review is noise, not misses: the first real run raised 36 fin
   - Measure: the report records author decisions. Compare the acceptance rate of two-family findings against lone findings across a handful of runs (the `score` script is the place). Keep the second pass only if agreement predicts acceptance; then use it to rank and collapse the list.
   - Scope it: diversity likely pays only on the judgment lenses (acceptance, behavior). Security, data and UI are rule and MCP driven and would mostly return the same answer twice.
   - The second family must be a different vendor, not a different Claude tier. The independence claim rests on that.
-  - Local mode (`--local`) runs on one session model by design and already says so. None of this applies there.
+  - The session mode (the default since KIT-51) runs on one session model by design and already says so. None of this applies there.
 
 ## pr-reviewer
 

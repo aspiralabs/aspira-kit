@@ -43,7 +43,7 @@ async function seedReadySpecRun(): Promise<{ repo: string; folder: string; runId
   await mkdir(folder, { recursive: true })
   const runId = 'run-test'
   const card = { id: 'KIT-2', title: 'X', url: 'https://app.notion.com/p/kit-2-x', status: 'Ready: Spec', pr: null, dev: null, type: 'Feature' }
-  const run = { runId, command: '/aspira-build-feature KIT-2 --local', startedAt: NOW, endedAt: null, ended: null, mode: 'local' as const }
+  const run = { runId, command: '/aspira-build-feature KIT-2', startedAt: NOW, endedAt: null, ended: null, mode: 'local' as const }
   const state = runStateSchema.parse({ runs: [run], inProgress: { runId, startedAt: NOW }, card })
   await writeRunState(folder, state)
   return { repo, folder, runId }
@@ -70,7 +70,7 @@ describe('T30 F44: the step stage tells the subagent to run the launcher, not th
     // The printed stage carries --parent-run <runId>:<nonce> (KIT-19 F6); the forms themselves are what this test pins.
     const bare = (text: unknown) => String(text).replace(/ --parent-run \S+$/, '')
     expect({ command: bare(stage.command), launcher: (stage.launcher as string[]).map(bare) }).toEqual({
-      command: '/aspira-planner KIT-2 --local --take-recommended',
+      command: '/aspira-planner KIT-2 --take-recommended',
       launcher: ['.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 --take-recommended'],
     })
   })
@@ -81,7 +81,7 @@ describe('T30 F44: the step stage tells the subagent to run the launcher, not th
     await nextStage(input)
     const persisted = JSON.parse(await readFile(join(stateDirOf(folder), 'state.json'), 'utf8')) as { pending: { stage: { command?: string; launcher?: string[] } } | null }
     expect({ command: persisted.pending?.stage.command, launcher: persisted.pending?.stage.launcher }).toEqual({
-      command: '/aspira-planner KIT-2 --local --take-recommended',
+      command: '/aspira-planner KIT-2 --take-recommended',
       launcher: ['.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 --take-recommended'],
     })
   })

@@ -23,6 +23,6 @@ describe('KIT-39 per-app analyzer steps', () => {
     await h.report(second.stage!, 'ready', { app: 'pkgs/a', edited: [] })
     const after = await h.advance()
     await h.stop()
-    expect({ first: commandOf(first), second: commandOf(second), after: after.stage?.stage, stopped: (await h.summary()).includes('tools/aspira/.static-analysis') }).toEqual({ first: '/aspira-code-analyzer KIT-11 --app . --local', second: '/aspira-code-analyzer KIT-11 --app pkgs/a --local', after: 'step10', stopped: false })
+    expect({ first: commandOf(first), second: commandOf(second), after: after.stage?.stage, stopped: (await h.summary()).includes('tools/aspira/.static-analysis') }).toEqual({ first: '/aspira-code-analyzer KIT-11 --app .', second: '/aspira-code-analyzer KIT-11 --app pkgs/a', after: 'step10', stopped: false })
   }, SLOW)
 })

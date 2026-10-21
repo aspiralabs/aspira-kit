@@ -182,6 +182,6 @@ describe('an installed project', () => {
     const script = "const { nextStep, commandFor } = await import('@aspiralabs/kit/playbook'); process.stdout.write(commandFor(nextStep('Ready: Idea'), 'DEMO-1') ?? '')"
     const step = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: packageDir, env, encoding: 'utf8' })
     expect(step.status, step.stderr).toBe(0)
-    expect(step.stdout).toBe('/aspira-spec-writer DEMO-1 --local')
+    expect(step.stdout).toBe('/aspira-spec-writer DEMO-1')
   })
 })

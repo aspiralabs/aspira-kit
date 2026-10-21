@@ -635,7 +635,7 @@ async function exportRun(state: State, work: string, agentDir: string, fixer: Fi
   const local = [
     '## Mode',
     '',
-    `This run used \`--local\`: the analyzers ran from the code-analyzer package on this host, and the fix model was this Claude Code session's subagents, given the fixer's own prompts. No model call went through the AI Gateway, so no cost is itemized. The session's edits were checked against the agent's edit guards after each fix stage. Engineering guidelines: ${state.knowledge.dir ?? state.knowledge.requiredFile} (${state.knowledge.files.length} files, copied to \`guidelines/\`).`,
+    `This run ran in a Claude Code session (the default mode, without \`--cloud\`): the analyzers ran from the code-analyzer package on this host, and the fix model was this Claude Code session's subagents, given the fixer's own prompts. No model call went through the AI Gateway, so no cost is itemized. The session's edits were checked against the agent's edit guards after each fix stage. Engineering guidelines: ${state.knowledge.dir ?? state.knowledge.requiredFile} (${state.knowledge.files.length} files, copied to \`guidelines/\`).`,
     '',
   ].join('\n')
   const report = `${renderReport({ label: state.root, where: 'host', result, detection: shown, unavailable: state.unavailable, turns: [], model: 'Claude Code session (--local)', timing, remote: null })}\n${local}`

@@ -87,7 +87,7 @@ export function renderEstimate(estimate: Estimate, source: string): string {
     `  seats: ${estimate.seats} reviewers plus Quinn, up to ${estimate.maxRounds} round${estimate.maxRounds === 1 ? '' : 's'}`,
     `  cost: ${usd(estimate.low)} to ${usd(estimate.high)} (${usd(estimate.perRound.low)} to ${usd(estimate.perRound.high)} a round; a review that settles in two rounds is around ${usd(typical)})`,
     `  basis: ${history}`,
-    '  --local costs this session\'s usage instead of the Gateway; --max-cost <USD> stops a cloud run at a dollar amount.',
+    '  Without --cloud the review runs in this session, on its usage instead of the Gateway; --max-cost <USD> stops a cloud run at a dollar amount.',
   ].join('\n')
 }
 

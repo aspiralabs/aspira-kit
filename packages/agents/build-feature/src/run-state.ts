@@ -95,9 +95,9 @@ const runSchema = z.object({
   replaced: z.string().optional(),
   /** The end stage, kept so a later --finish prints it again; `reason` is why it ended (F20). */
   end: z.object({ message: z.string(), stopped: z.boolean(), reason: buildStopSchema.optional() }).optional(),
-  /** How each step ran (F2): 'local' (--local, in the session) or 'cloud' (each step skill's default mode). */
+  /** How each step ran (F2, KIT-51): 'local' (the default: in the session) or 'cloud' (--cloud: each step skill's cloud agent). */
   mode: z.enum(['local', 'cloud']).default('local'),
-  /** KIT-24: `--autonomous`, with --local: the groomer takes every question as recommended and confirms itself, and an ask with a recommended option is answered with it. */
+  /** KIT-24: `--autonomous`, in the default mode: the groomer takes every question as recommended and confirms itself, and an ask with a recommended option is answered with it. */
   autonomous: z.boolean().default(false),
   /** The ticket's worktree the run worked in (F50). */
   worktree: z.string().optional(),

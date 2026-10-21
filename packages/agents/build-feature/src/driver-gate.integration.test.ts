@@ -1,4 +1,4 @@
-// The build-feature driver at seam S1: `scripts/local.ts <ID> --local`, as `build-feature.sh local`
+// The build-feature driver at seam S1: `scripts/local.ts <ID>`, as `build-feature.sh local`
 // runs it, observed through the one JSON stage each call prints and the files it writes under
 // `.work/<id>-<slug>/` (build-summary.md, .local/build-feature/state.json and pr-body.md). Only the
 // boundaries are stood in for (TEST-007): the Notion answers the session would write, git's remote,
@@ -38,7 +38,7 @@ describe('T26 F22: the project gate after a complete build', () => {
   it('records no project gate found and continues to static analysis when there is none', async () => {
     const { h, next } = await built({})
     await h.stop()
-    expect({ next: commandOf(next), recorded: (await h.summary()).includes('no project gate found') }).toEqual({ next: '/aspira-code-analyzer KIT-11 --app . --local', recorded: true })
+    expect({ next: commandOf(next), recorded: (await h.summary()).includes('no project gate found') }).toEqual({ next: '/aspira-code-analyzer KIT-11 --app .', recorded: true })
   }, SLOW)
 
   it('stops on a non-zero exit with the failure tail in build-summary.md, before any push', async () => {
@@ -117,7 +117,7 @@ describe('AVA3.1: the project gate runs without credentials, and in cloud mode n
     expect(next.stage?.stage).toBe('gate')
   }, SLOW)
 
-  it('under --local, runs changed gate scripts without asking (the implementor ran in this session)', async () => {
+  it('in the default mode, runs changed gate scripts without asking (the implementor ran in this session)', async () => {
     const { h, next } = await built({ mode: 'local', main: BASE_SCRIPTS, branch: CHANGED_SCRIPTS })
     expect({ stage: next.stage?.stage, asks: ofKind(h.stages, 'ask').length }).toEqual({ stage: 'gate', asks: 0 })
   }, SLOW)

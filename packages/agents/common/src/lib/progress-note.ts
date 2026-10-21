@@ -45,7 +45,7 @@ export type ProgressNote = {
 
 const NOTHING_TO_DO = 'Nothing to do right now.'
 
-/** The launcher form of a skill's command: the script path, `local <id>`, and the flags the slash command carried, minus `--local` (implied by `local`). */
+/** The launcher form of a skill's command: the script path, `local <id>`, and the flags the slash command carried. */
 function launcherCommand(skill: string, id: string, extraFlags = ''): string {
   return `.claude/skills/aspira-${skill}/scripts/${skill}.sh local ${id}${extraFlags}`.trim()
 }
@@ -123,7 +123,7 @@ function runAction(input: RunActionInput): NextAction {
     return { step: `${skill}: answer the open decisions, then rerun it`, do: [`Answer the open decisions ${skill} left, then rerun it.`], run: [launcher()], session: launcher() }
   }
   if (runStatus === 'refused') {
-    if (reasonCode === 'plan-drift') return { step: 'Step 5: plan (the repository moved since the plan was made; re-plan it)', do: [], run: ['/aspira-planner <ID> --local'.replace('<ID>', id)], session: launcherCommand('planner', id) }
+    if (reasonCode === 'plan-drift') return { step: 'Step 5: plan (the repository moved since the plan was made; re-plan it)', do: [], run: ['/aspira-planner <ID>'.replace('<ID>', id)], session: launcherCommand('planner', id) }
     return { step: `${skill} refused; fix the blocker named in its report, then rerun it`, do: [`Fix the blocker ${skill} named.`], run: [launcher()], session: launcher() }
   }
   if (runStatus === 'incomplete') return { step: `${skill} ended incomplete: rerun the stage`, do: [], run: [launcher()], session: launcher() }
@@ -139,7 +139,7 @@ function runAction(input: RunActionInput): NextAction {
     const remaining = apps.filter((app) => !analyzed.has(app))
     if (remaining.length > 0) {
       const app = remaining[0]!
-      return { step: 'Step 7: static analysis', do: [], run: [`/aspira-code-analyzer ${id} --app ${app} --local`], session: launcherCommand('code-analyzer', id, ` --app ${app}`) }
+      return { step: 'Step 7: static analysis', do: [], run: [`/aspira-code-analyzer ${id} --app ${app}`], session: launcherCommand('code-analyzer', id, ` --app ${app}`) }
     }
     if (input.title !== undefined && input.branch !== undefined && input.prBodyFile !== undefined) {
       const built = step8Commands({ id, title: input.title }, input.branch, input.paths ?? [], input.prBodyFile)
@@ -283,7 +283,7 @@ export async function writeProgressNote(args: { folder: string; repo: string; ap
   let note: ProgressNote = { ...args.note, outputs }
   if (active !== null) {
     const demoted = note.nextAction === null ? [] : [`The step's own continuation: ${[`Step: ${note.nextAction.step}`, ...note.nextAction.run.map((line) => `Run: ${line}`)].join('; ')}`]
-    const flag = active.mode === 'local' ? ' --local' : ''
+    const flag = active.mode === 'cloud' ? ' --cloud' : ''
     const command = `/aspira-build-feature ${note.id}${flag}`
     note = { ...note, openIssues: [...note.openIssues, ...demoted], nextAction: { step: 'A build-feature run is driving this ticket: resume it, not this step directly.', do: [], run: [command], session: command } }
   }

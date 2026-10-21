@@ -692,7 +692,7 @@ describe('runLocal, budget and call cap', () => {
     expect(await readFile(first.tasks[0]!.prompt, 'utf8')).toContain('You have at most 5 tool calls this round')
     for (const task of first.tasks) await answer(task, first.workDir)
     const done = finished(await complete({ source: repo, maxCost: 3 }, { env: { MAX_SEAT_CALLS: '5' } }))
-    expect(await readFile(join(done.dir, 'cost.md'), 'utf8')).toContain('Budget: $3.00 (--max-cost). Not enforced in --local, where no cost is itemized.')
+    expect(await readFile(join(done.dir, 'cost.md'), 'utf8')).toContain('Budget: $3.00 (--max-cost). Not enforced in the session, where no cost is itemized.')
     await expect(runLocal({ source: repo, maxCost: -1 })).rejects.toThrow('--max-cost')
   })
 })

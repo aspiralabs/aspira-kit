@@ -23,7 +23,7 @@ describe("kit's Playbook table is agent-common's playbook.json (NOVA1.1)", () =>
   })
 
   it('nextStep and commandFor read that table', () => {
-    expect(commandFor(nextStep('Ready: Spec')!, 'NOM-4')).toBe('/aspira-planner NOM-4 --local')
+    expect(commandFor(nextStep('Ready: Spec')!, 'NOM-4')).toBe('/aspira-planner NOM-4')
     expect(nextStep('Not a status')).toBeNull()
   })
 })

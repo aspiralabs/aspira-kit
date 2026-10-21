@@ -1,4 +1,4 @@
-// The build-feature driver at seam S1: `scripts/local.ts <ID> --local`, as `build-feature.sh local`
+// The build-feature driver at seam S1: `scripts/local.ts <ID>`, as `build-feature.sh local`
 // runs it, observed through the one JSON stage each call prints and the files it writes under
 // `.work/<id>-<slug>/` (build-summary.md, .local/build-feature/state.json and pr-body.md). Only the
 // boundaries are stood in for (TEST-007): the Notion answers the session would write, git's remote,
@@ -67,7 +67,7 @@ describe('T35 F34 F35: a restarted run resumes from the recorded results', () =>
     await h.report(implementor.stage!, 'incomplete', { card: { status: 'In Progress: Implementation' } })
     await h.advance()
     const next = await h.advance({}, await h.start())
-    expect(commandOf(next)).toBe('/aspira-implementor KIT-11 --local')
+    expect(commandOf(next)).toBe('/aspira-implementor KIT-11')
   }, SLOW)
 })
 

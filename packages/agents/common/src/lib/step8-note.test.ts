@@ -104,7 +104,7 @@ describe('F21: a ready code-analyzer run picks Step 7 or Step 8 from the impleme
     await afterRun(ctx, before, { status: 'ready', exportDir: join(repo, 'apps/web', '.static-analysis'), verifyCommand: 'code-analyzer.sh local KIT-2 --verify' })
     const next = await nextOf()
     expect(next?.step).toBe('Step 7: static analysis')
-    expect(next?.run).toEqual(['/aspira-code-analyzer KIT-2 --app apps/api --local'])
+    expect(next?.run).toEqual(['/aspira-code-analyzer KIT-2 --app apps/api'])
   })
 
   it('once every changed app is analyzed, names Step 8 as ordered commands on the recorded branch and writes pr-body.md', async () => {
@@ -178,6 +178,6 @@ describe('F21: a verified ready implementor run names Step 7', () => {
     expect(verified.verified).toBe(true)
     const next = await nextOf()
     expect(next?.step).toBe('Step 7: static analysis')
-    expect(next?.run).toEqual(['/aspira-code-analyzer KIT-2 --app apps/web --local'])
+    expect(next?.run).toEqual(['/aspira-code-analyzer KIT-2 --app apps/web'])
   })
 })

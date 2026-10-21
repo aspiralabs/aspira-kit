@@ -518,7 +518,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     )
     if (review === null || !['ready', 'needs-author'].includes(review.status)) {
       return refuse('refused', {
-        reason: review === null ? `No readable trace/review.json in ${source.path}. Run the planner again (/aspira-planner --local) to produce a ready review.` : `The reviewed plan's status is ${review.status}. Run the planner again (/aspira-planner --local) to produce a ready review.`,
+        reason: review === null ? `No readable trace/review.json in ${source.path}. Run the planner again (/aspira-planner) to produce a ready review.` : `The reviewed plan's status is ${review.status}. Run the planner again (/aspira-planner) to produce a ready review.`,
         reasonCode: null,
         problems: (review?.problems ?? []).map(String),
       })
@@ -538,7 +538,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       }
       if (review.repoCommit === undefined || !(await isAncestor(source.repo, review.repoCommit, head))) {
         return refuse('refused', {
-          reason: `This plan was recovered from Notion (${review.recoveredFrom}); its repoCommit (${review.repoCommit ?? 'missing'}) is not an ancestor of HEAD (${head}), so it no longer matches this branch's history. Run the planner again (/aspira-planner --local).`,
+          reason: `This plan was recovered from Notion (${review.recoveredFrom}); its repoCommit (${review.repoCommit ?? 'missing'}) is not an ancestor of HEAD (${head}), so it no longer matches this branch's history. Run the planner again (/aspira-planner).`,
           reasonCode: null,
           problems: [],
         })
@@ -548,7 +548,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       const plan = planOf(await readFile(source.planFile, 'utf8'))
       const drift = plan === null ? [`${source.planFile} is not a readable plan.`] : targetProblems(plan, (path) => existsSync(join(source.repo, path)))
       if (drift.length > 0) {
-        return refuse('refused', { reason: `The plan was made at ${review.repoCommit} and HEAD is ${head}; its targets no longer match. Run the planner again (/aspira-planner --local).`, reasonCode: 'plan-drift', problems: drift })
+        return refuse('refused', { reason: `The plan was made at ${review.repoCommit} and HEAD is ${head}; its targets no longer match. Run the planner again (/aspira-planner).`, reasonCode: 'plan-drift', problems: drift })
       }
     }
     state.gate = { status: review.status, repoCommit: review.repoCommit ?? null, head, decisions: review.decisions, recoveredFrom: review.recoveredFrom ?? null }

@@ -1,7 +1,7 @@
 // The build-feature driver, as `build-feature.sh local` runs it:
-//   local.ts <ID> [--local] [--repo <dir>] [--run <runId>] [--force-run] [--finish]
-// With --local every step runs its skill with --local in this session; without it every step runs
-// its skill's default mode (the step's cloud agent, started and waited on). F2, Q10 revised.
+//   local.ts <ID> [--cloud] [--repo <dir>] [--run <runId>] [--force-run] [--finish]
+// By default every step runs its skill in this session; with --cloud every step runs its skill's
+// cloud agent, started and waited on (F2, Q10 revised; KIT-51). --local is accepted and means the default.
 // Prints exactly one stage as JSON on stdout and exits 0, except the `end` stage, which exits by
 // its run status (A2); a refusal prints its message on stderr and exits 1. Time comes from BUILD_FEATURE_NOW when set (tests), else the clock.
 
@@ -16,6 +16,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     allowPositionals: true,
     options: {
       local: { type: 'boolean', default: false },
+      cloud: { type: 'boolean', default: false },
       repo: { type: 'string' },
       run: { type: 'string' },
       'force-run': { type: 'boolean', default: false },
@@ -24,7 +25,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     },
   })
   const [id] = positionals
-  if (id === undefined || !/^[A-Za-z]+-\d+$/.test(id)) throw new Refusal('Usage: local.ts <ID> [--local] [--autonomous] [--run <runId>] [--force-run] [--finish]; <ID> is the Feature Board ticket ID, for example KIT-11.')
+  if (id === undefined || !/^[A-Za-z]+-\d+$/.test(id)) throw new Refusal('Usage: local.ts <ID> [--cloud] [--autonomous] [--run <runId>] [--force-run] [--finish]; <ID> is the Feature Board ticket ID, for example KIT-11.')
+  if (values.local && values.cloud) throw new Refusal('--local and --cloud name opposite modes; pass --cloud for the cloud agents, or nothing for this session (the default)')
   const now = process.env.BUILD_FEATURE_NOW !== undefined && process.env.BUILD_FEATURE_NOW !== '' ? process.env.BUILD_FEATURE_NOW : new Date().toISOString()
   const stage = await nextStage({
     id: id.toUpperCase(),
@@ -32,7 +34,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     ...(values.run === undefined ? {} : { run: values.run }),
     forceRun: values['force-run'],
     finish: values.finish,
-    mode: values.local ? 'local' : 'cloud',
+    mode: values.cloud ? 'cloud' : 'local',
     autonomous: values.autonomous,
     now,
     env: process.env,

@@ -539,9 +539,9 @@ describe('telemetry', () => {
 
     beforeEach(async () => {
       await writeJson(join(dir, '.local', 'build-feature', 'state.json'), {
-        runs: [{ runId: RUN, command: '/aspira-build-feature KIT-19 --local', startedAt: T0, endedAt: null, ended: null, mode: 'local' }],
+        runs: [{ runId: RUN, command: '/aspira-build-feature KIT-19', startedAt: T0, endedAt: null, ended: null, mode: 'local' }],
         inProgress: { runId: RUN, startedAt: T0 },
-        steps: [{ step: 'spec-writer', runId: RUN, command: '/aspira-spec-writer KIT-19 --local', status: 'ready', startedAt: at(1), endedAt: at(4), usage: { tokens: 1000, wallMs: 180_000 }, nonce: N0 }],
+        steps: [{ step: 'spec-writer', runId: RUN, command: '/aspira-spec-writer KIT-19', status: 'ready', startedAt: at(1), endedAt: at(4), usage: { tokens: 1000, wallMs: 180_000 }, nonce: N0 }],
         pending: { kind: 'step', nonce: N1, output: join(dir, '.local', 'build-feature', 'step.json'), stage: { kind: 'step', step: 'planner' }, startedAt: at(5) },
       })
     })

@@ -45,19 +45,19 @@ const run = (args: string[], cwd: string, env: NodeJS.ProcessEnv) =>
     (error: { code?: number; stdout?: string; stderr?: string }) => ({ code: typeof error.code === 'number' ? error.code : -1, output: `${error.stdout ?? ''}${error.stderr ?? ''}` }),
   )
 
-describe('T13 F2: the launcher runs with or without --local', () => {
-  it('runs the driver for local with --local, passing --local through', async () => {
+describe('T13 F2 (KIT-51): the launcher runs with or without --cloud', () => {
+  it('runs the driver for local with --cloud, passing --cloud through', async () => {
     const { repo, env, calls } = await sandbox()
-    const outcome = await run(['local', 'KIT-11', '--local'], repo, env)
+    const outcome = await run(['local', 'KIT-11', '--cloud'], repo, env)
     const line = (await calls()).split('\n').find((entry) => entry.startsWith('node ')) ?? ''
-    expect({ code: outcome.code, driver: line.includes('scripts/local.ts KIT-11'), local: line.split(' ').includes('--local') }).toEqual({ code: 0, driver: true, local: true })
+    expect({ code: outcome.code, driver: line.includes('scripts/local.ts KIT-11'), cloud: line.split(' ').includes('--cloud') }).toEqual({ code: 0, driver: true, cloud: true })
   })
 
-  it('runs the driver for local without --local (each step in its cloud mode), passing no --local', async () => {
+  it('runs the driver for local without a mode flag (each step in this session), passing no --cloud', async () => {
     const { repo, env, calls } = await sandbox()
     const outcome = await run(['local', 'KIT-11'], repo, env)
     const line = (await calls()).split('\n').find((entry) => entry.startsWith('node ')) ?? ''
-    expect({ code: outcome.code, refused: /only --local/i.test(outcome.output), driver: line.includes('scripts/local.ts KIT-11'), local: line.split(' ').includes('--local') }).toEqual({ code: 0, refused: false, driver: true, local: false })
+    expect({ code: outcome.code, refused: /with --cloud/i.test(outcome.output), driver: line.includes('scripts/local.ts KIT-11'), cloud: line.split(' ').includes('--cloud') }).toEqual({ code: 0, refused: false, driver: true, cloud: false })
   })
 
   it('refuses start, status and wait: the run itself is always this session, and never invokes the driver', async () => {

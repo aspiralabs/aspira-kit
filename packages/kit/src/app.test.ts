@@ -443,7 +443,7 @@ describe('kit next with an app', () => {
     const { lines, log } = logs()
     expect(next(root, 'NOM-4', log, resolver)).toBe(0)
     expect(seen).toEqual([[BOARD, 'NOM-4', root, join(root, 'apps', 'web')]])
-    expect(lines).toContain('run      /aspira-planner NOM-4 --local')
+    expect(lines).toContain('run      /aspira-planner NOM-4')
     mkdirSync(join(root, 'apps', 'mobile'))
     expect(next(root, 'NOM-4', log, resolver, 'apps/mobile')).toBe(0)
     expect(seen[1]![3]).toBe(join(root, 'apps', 'mobile'))
@@ -460,7 +460,7 @@ describe('kit next with an app', () => {
     const code = next(root, 'NOM-4', log, resolver)
     expect({ code, lines }).toEqual({
       code: 0,
-      lines: ['ticket   NOM-4 Explore pagination (https://app.notion.com/p/abc)', 'status   Ready: Spec', 'next     Step 5: plan', 'run      /aspira-planner NOM-4 --local', 'who      agent'],
+      lines: ['ticket   NOM-4 Explore pagination (https://app.notion.com/p/abc)', 'status   Ready: Spec', 'next     Step 5: plan', 'run      /aspira-planner NOM-4', 'who      agent'],
     })
   })
 
@@ -476,6 +476,6 @@ describe('kit next with an app', () => {
     const { lines, log } = logs()
     expect(next(root, 'NOM-4', log, liveResolver)).toBe(0)
     expect(lines).toContain('status   In Review: Spec')
-    expect(lines).toContain('run      /aspira-spec-writer NOM-4 --local')
+    expect(lines).toContain('run      /aspira-spec-writer NOM-4')
   })
 })

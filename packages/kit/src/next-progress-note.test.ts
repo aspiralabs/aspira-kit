@@ -84,17 +84,17 @@ describe('kit next reads the progress note (T40, F28)', () => {
   it('a note whose Status matches the live Status prints its Step, every Run line in order and the Session line, not the Playbook row', () => {
     writeFileSync(
       join(root, '.work', SLUG, 'progress.md'),
-      progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'Ready: Spec', written: '2026-10-14T12:00:00.000Z', step: 'Step 5: plan', runs: ['/aspira-planner NOM-4 --local'], session: '.claude/skills/aspira-planner/scripts/planner.sh local NOM-4' }),
+      progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'Ready: Spec', written: '2026-10-14T12:00:00.000Z', step: 'Step 5: plan', runs: ['/aspira-planner NOM-4'], session: '.claude/skills/aspira-planner/scripts/planner.sh local NOM-4' }),
     )
     const { code, lines } = run('NOM-4', resolverFor('Ready: Spec'))
     expect(code).toBe(0)
-    expect(lines).toEqual(expect.arrayContaining(['next     Step 5: plan', 'run      /aspira-planner NOM-4 --local', 'session  .claude/skills/aspira-planner/scripts/planner.sh local NOM-4']))
+    expect(lines).toEqual(expect.arrayContaining(['next     Step 5: plan', 'run      /aspira-planner NOM-4', 'session  .claude/skills/aspira-planner/scripts/planner.sh local NOM-4']))
   })
 
   it('a note whose Status is older than the live Status prints the Status-table step and says the note is older than the board', () => {
     writeFileSync(
       join(root, '.work', SLUG, 'progress.md'),
-      progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'In Progress: Spec', written: '2026-10-14T12:00:00.000Z', step: 'Step 2 is running, or it stopped: rerun it', runs: ['/aspira-spec-writer NOM-4 --local'], session: '.claude/skills/aspira-spec-writer/scripts/spec-writer.sh local NOM-4' }),
+      progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'In Progress: Spec', written: '2026-10-14T12:00:00.000Z', step: 'Step 2 is running, or it stopped: rerun it', runs: ['/aspira-spec-writer NOM-4'], session: '.claude/skills/aspira-spec-writer/scripts/spec-writer.sh local NOM-4' }),
     )
     const { code, lines } = run('NOM-4', resolverFor('Ready: Spec'))
     expect(code).toBe(0)
@@ -119,28 +119,28 @@ describe('kit next reads the progress note (T40, F28)', () => {
     const { code, lines } = run('NOM-4', resolverFor('Ready: Spec'))
     expect(code).toBe(0)
     expect(lines).toContain('run      .claude/skills/aspira-planner/scripts/planner.sh local NOM-4 --verify')
-    expect(lines.some((line) => line.includes('/aspira-planner NOM-4 --local') && !line.includes('--verify'))).toBe(false)
+    expect(lines.some((line) => line.includes('/aspira-planner NOM-4') && !line.includes('--verify'))).toBe(false)
   })
 
   it('when both a main and a worktree note exist, the later Written: wins, the worktree wins a tie, and the output says when it read the worktree', () => {
     const mainWritten = '2026-10-14T12:00:00.000Z'
-    writeFileSync(join(root, '.work', SLUG, 'progress.md'), progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'Ready: Spec', written: mainWritten, step: 'main note step', runs: ['/aspira-planner NOM-4 --local'], session: 'main-session' }))
+    writeFileSync(join(root, '.work', SLUG, 'progress.md'), progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'Ready: Spec', written: mainWritten, step: 'main note step', runs: ['/aspira-planner NOM-4'], session: 'main-session' }))
     const worktreeDir = join(root, '.worktrees', 'FEATURE-NOM-4', '.work', SLUG)
     mkdirSync(worktreeDir, { recursive: true })
 
     // Worktree note later: the worktree wins.
-    writeFileSync(join(worktreeDir, 'progress.md'), progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'Ready: Spec', written: '2026-10-14T13:00:00.000Z', step: 'worktree note step', runs: ['/aspira-planner NOM-4 --local'], session: 'worktree-session' }))
+    writeFileSync(join(worktreeDir, 'progress.md'), progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'Ready: Spec', written: '2026-10-14T13:00:00.000Z', step: 'worktree note step', runs: ['/aspira-planner NOM-4'], session: 'worktree-session' }))
     let { lines } = run('NOM-4', resolverFor('Ready: Spec'))
     expect(lines).toContain('next     worktree note step')
     expect(lines.some((line) => /worktree/i.test(line))).toBe(true)
 
     // Equal Written: the worktree still wins.
-    writeFileSync(join(worktreeDir, 'progress.md'), progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'Ready: Spec', written: mainWritten, step: 'worktree note step (tie)', runs: ['/aspira-planner NOM-4 --local'], session: 'worktree-session' }))
+    writeFileSync(join(worktreeDir, 'progress.md'), progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'Ready: Spec', written: mainWritten, step: 'worktree note step (tie)', runs: ['/aspira-planner NOM-4'], session: 'worktree-session' }))
     ;({ lines } = run('NOM-4', resolverFor('Ready: Spec')))
     expect(lines).toContain('next     worktree note step (tie)')
 
     // Worktree note older: the main note wins.
-    writeFileSync(join(worktreeDir, 'progress.md'), progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'Ready: Spec', written: '2026-10-14T11:00:00.000Z', step: 'worktree note step (stale)', runs: ['/aspira-planner NOM-4 --local'], session: 'worktree-session' }))
+    writeFileSync(join(worktreeDir, 'progress.md'), progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'Ready: Spec', written: '2026-10-14T11:00:00.000Z', step: 'worktree note step (stale)', runs: ['/aspira-planner NOM-4'], session: 'worktree-session' }))
     ;({ lines } = run('NOM-4', resolverFor('Ready: Spec')))
     expect(lines).toContain('next     main note step')
   })

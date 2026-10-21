@@ -248,7 +248,7 @@ describe('runLocal, the fix loop', () => {
     expect(calls.calls[0]).toMatchObject({ round: 1, batch: 1, output: { summary: 'fixed', unresolved: [] } })
     expect(calls.calls[0].prompt).toContain('DIAGNOSTICS TO FIX (2)')
     expect(await readFile(join(out, 'report.md'), 'utf8')).toContain('Status: **ready**')
-    expect(await readFile(join(out, 'report.md'), 'utf8')).toContain('--local')
+    expect(await readFile(join(out, 'report.md'), 'utf8')).toContain('ran in a Claude Code session')
     expect(await readFile(join(web, '.gitignore'), 'utf8')).toBe('.static-analysis/\n')
     expect(result.orchestrator.text).toBe(await readFile(join(agentDir, 'agent', 'instructions.md'), 'utf8'))
     await expect(stat(workDirFor(out))).rejects.toThrow()

@@ -30,9 +30,9 @@ const step = (name: string, startedAt: string, endedAt: string, usage: { tokens:
 /** A run state as the driver records it; every collection empty unless the test fills it. */
 function runState(fill: Record<string, unknown> = {}) {
   return {
-    runs: [{ runId: RUN, command: '/aspira-build-feature KIT-11 --local', startedAt: '2026-10-12T09:00:00.000Z', endedAt: '2026-10-12T12:00:00.000Z', ended: 'stopped', mode: 'local' as const, autonomous: false }],
+    runs: [{ runId: RUN, command: '/aspira-build-feature KIT-11', startedAt: '2026-10-12T09:00:00.000Z', endedAt: '2026-10-12T12:00:00.000Z', ended: 'stopped', mode: 'local' as const, autonomous: false }],
     inProgress: null,
-    approvals: [{ runId: RUN, notionUserId: 'user-1', name: 'Ada Approver', at: '2026-10-12T09:00:00.000Z', command: '/aspira-build-feature KIT-11 --local' }],
+    approvals: [{ runId: RUN, notionUserId: 'user-1', name: 'Ada Approver', at: '2026-10-12T09:00:00.000Z', command: '/aspira-build-feature KIT-11' }],
     moves: [],
     steps: [],
     takenKeys: [],
@@ -233,7 +233,7 @@ const TELEMETRY_STEPS = [
   {
     step: 'planner',
     runId: RUN,
-    command: '/aspira-planner KIT-11 --local --take-recommended',
+    command: '/aspira-planner KIT-11 --take-recommended',
     status: 'ready',
     startedAt: at('09:15:00'),
     endedAt: at('09:25:00'),
