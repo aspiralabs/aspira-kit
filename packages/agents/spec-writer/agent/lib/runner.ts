@@ -185,6 +185,6 @@ export const specSha256 = (files: Record<string, string>): string | undefined =>
 export function summary(result: WriteResult, dir: string, extra: Record<string, number>) {
   return {
     status: result.status, mode: result.mode, dir, spec: result.spec === null ? null : resolve(dir, 'spec.reviewed.md'), draft: result.draft ? resolve(dir, 'spec.draft.md') : null,
-    findings: result.review?.findings.length ?? 0, problems: result.problems, authorDecisions: result.authorDecisions, writeMs: result.writeMs, ...extra,
+    findings: result.review?.findings.length ?? 0, problems: result.problems, openGaps: result.review?.openGaps ?? [], authorDecisions: result.authorDecisions, writeMs: result.writeMs, ...extra,
   }
 }

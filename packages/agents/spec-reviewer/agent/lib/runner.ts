@@ -125,6 +125,6 @@ export async function runReview(input: RunInput, options: { signal?: AbortSignal
       const report = { ...result, candidate: undefined, input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, specSha256, models, reportedCostUsd, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, exportMs, totalMs, dir }
       return { 'run-analysis.md': analysis.markdown, 'trace/review.json': JSON.stringify(report, null, 2) }
     })
-    return { status: result.status, dir, findings: result.findings.length, problems: result.problems, authorDecisions: result.authorDecisions, prepareMs, reviewMs: result.reviewMs, reportedCostUsd, totalMs }
+    return { status: result.status, dir, findings: result.findings.length, problems: result.problems, openGaps: result.openGaps, authorDecisions: result.authorDecisions, prepareMs, reviewMs: result.reviewMs, reportedCostUsd, totalMs }
   } finally { await mcp.close() }
 }
