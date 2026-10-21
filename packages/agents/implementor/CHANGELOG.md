@@ -1,5 +1,11 @@
 # @aspiralabs/implementor
 
+## 0.11.1
+
+### Patch Changes
+
+- @aspiralabs/agent-common@0.11.1
+
 ## 0.11.0
 
 ### Minor Changes
