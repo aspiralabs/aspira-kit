@@ -846,11 +846,11 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
     if (blocked !== null) return stop(ctx, started, blocked, { stopped: true, reason: { kind: 'cloud-implementor' }, failure: { action: step, command: routed, message: blocked } })
   }
   await checkKitVersion(ctx.input.repo)
-  // The engineering guidelines once per ticket (KIT-48): built on the first step, verified against Notion before every later one.
-  const shared = await ensureKnowledge(started, { env: ctx.input.env, repo: ctx.input.repo, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }), folder: ctx.folder, now: ctx.input.now })
+  // The engineering guidelines once per ticket and the run packet (KIT-48) go to the --local launchers only:
+  // a cloud launcher's `start` refuses --guidelines, --knowledge and --packet, and its agent loads its own.
+  const shared = ctx.mode === 'local' ? await ensureKnowledge(started, { env: ctx.input.env, repo: ctx.input.repo, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }), folder: ctx.folder, now: ctx.input.now }) : { state: started, knowledge: null, note: null }
   const state = shared.note === null ? shared.state : { ...shared.state, phases: { ...shared.state.phases, knowledgeNote: shared.note } }
-  // The run packet (KIT-48): rewritten before each step from what the ticket folder holds now.
-  const packet = PACKET_STEPS.includes(step) ? await writeRunPacket({ repo: ctx.input.repo, folder: ctx.folder, aspira: ctx.aspira, knowledgeDir: shared.knowledge?.dir ?? null }) : null
+  const packet = ctx.mode === 'local' && PACKET_STEPS.includes(step) ? await writeRunPacket({ repo: ctx.input.repo, folder: ctx.folder, aspira: ctx.aspira, knowledgeDir: shared.knowledge?.dir ?? null }) : null
   // The stored command stays the routed one; the run's own flags ride only on what is printed, like --parent-run.
   const command = routed
   const runFlags = [...(shared.knowledge === null ? [] : [knowledgeFlag(step, shared.knowledge)]), ...(packet === null ? [] : [`--packet ${packet}`])].map((flag) => ` ${flag}`).join('')

@@ -139,7 +139,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   const { dir, mode, idea, spec, guidelines, repo, uiRequired, answers } = prepared
   const repoRoot = resolve(input.repoPath)
   const context = writeContext(prepared, 'not preloaded in --local mode; the explore and ui phases read it through the aspiralabs-ui MCP in the session')
-  const fingerprint = createHash('sha256').update(JSON.stringify([mode, idea, spec ?? null, guidelines, context, uiRequired, knowledge.digest])).digest('hex')
+  // The run packet is rewritten before every step print (KIT-48), so it stays out of the fingerprint a resumed call checks.
+  const fingerprint = createHash('sha256').update(JSON.stringify([mode, idea, spec ?? null, guidelines, writeContext({ ...prepared, packet: '' }, ''), uiRequired, knowledge.digest])).digest('hex')
   if (saved && saved.fingerprint !== fingerprint) throw new Error(`The ${mode === 'review' ? 'spec' : 'idea'}, guidelines or repository changed since this local run started. Delete ${work} to start over.`)
   await mkdir(join(work, 'prompts'), { recursive: true })
   await mkdir(join(work, 'outputs'), { recursive: true })

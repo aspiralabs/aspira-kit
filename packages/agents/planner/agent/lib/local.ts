@@ -181,7 +181,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   const context = `${packet ? `RUN PACKET (data):\n${packet}\n\n` : ''}${planContext(prepared)}`
   // The spec reviewer's own facts, reused in the session's research prompt when they still describe this spec and commit (F33-F35).
   const facts = await reviewFacts({ folder: ticketFolderFor(input.specPath), repoPath: input.repoPath, repo: { commit: prepared.repo.commit, dirty: prepared.repo.dirty } })
-  const fingerprint = createHash('sha256').update(JSON.stringify([prepared.spec, context, prepared.uiRequired])).digest('hex')
+  // The run packet is rewritten before every step print (KIT-48), so the fingerprint a resumed call checks leaves it out.
+  const fingerprint = createHash('sha256').update(JSON.stringify([prepared.spec, planContext(prepared), prepared.uiRequired])).digest('hex')
 
   await mkdir(join(work, 'outputs'), { recursive: true })
   const stateFile = join(work, 'state.json')

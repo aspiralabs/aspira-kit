@@ -23,6 +23,12 @@ const traceSchema = z.looseObject({
   reviews: z.array(z.looseObject({
     output: z.looseObject({ facts: z.array(z.string()).optional(), uiEvidence: z.array(z.string()).optional() }).optional(),
   })).optional(),
+  // The spec writer's report (KIT-48, the one spec step) nests the review pipeline's result under `review`.
+  review: z.looseObject({
+    reviews: z.array(z.looseObject({
+      output: z.looseObject({ facts: z.array(z.string()).optional(), uiEvidence: z.array(z.string()).optional() }).optional(),
+    })).optional(),
+  }).nullable().optional(),
 })
 
 /** Whether the reviewer's facts and UI evidence can be reused, and why (always set, even when included). */
@@ -72,8 +78,9 @@ export async function reviewFacts(args: { folder: string; repoPath: string; repo
     return noFacts(`${traceFile} is not valid JSON.`)
   }
 
-  const facts = trace.reviews?.flatMap((review) => review.output?.facts ?? []) ?? []
-  const uiEvidence = trace.reviews?.flatMap((review) => review.output?.uiEvidence ?? []) ?? []
+  const reviews = trace.reviews ?? trace.review?.reviews ?? []
+  const facts = reviews.flatMap((review) => review.output?.facts ?? [])
+  const uiEvidence = reviews.flatMap((review) => review.output?.uiEvidence ?? [])
   if (facts.length === 0 && uiEvidence.length === 0) return noFacts('The reviewer trace has no facts or uiEvidence to reuse.')
 
   const specPath = join(folder, 'spec.reviewed', 'spec.reviewed.md')

@@ -1155,7 +1155,7 @@ describe('the ticket CLI for the groomer', () => {
       'Status: In Review: Spec -> In Review: Spec (no move)',
       `Pages pushed: Spec (${client.pages.Spec?.page.url}), Spec Reviewed (${client.pages['Spec Reviewed']?.page.url}), Spec Review Decisions (${client.pages['Spec Review Decisions']?.page.url})`,
       `Working folder: ${started.folder}`,
-      'Answer the open decisions on the Spec Review Decisions page (or in spec.reviewed/trace/decisions.md), then run spec-writer again from "In Review: Spec"; it reviews the answered spec and makes no move.',
+      'Answer the open decisions: write the answers into the reviewed spec (the Spec Reviewed page, pulled as spec.reviewed/spec.reviewed.md) or tick them in spec.reviewed/trace/decisions.md, then run spec-writer again from "In Review: Spec"; it reviews the answered spec and makes no move.',
       `Board trace: ${join(started.folder, 'board.json')}`,
     ])
     expect(finished.code).toBe(5)

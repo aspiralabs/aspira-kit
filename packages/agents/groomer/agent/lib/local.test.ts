@@ -305,13 +305,13 @@ describe('resuming after an interruption', () => {
 describe('the one consolidated round (KIT-48)', () => {
   it('refuses a round 1 that leaves a branch neither asked nor closed, naming the branches', async () => {
     const ws = await workspace()
-    const input = { folder: ws.folder, repoPath: ws.repo, guidelinesPath: ws.guidelines }
     await writeJson(roundFile(ws.folder, 1), { round: 1, searched: ['cart limit'], facts: [{ path: 'src/cart.ts', line: 1 }], questions: [question('Q1', 'problem'), question('Q2', 'who')], branches: [{ id: 'problem', state: 'visited' }, { id: 'who', state: 'visited' }] })
-    const step = await runLocal(input, ws.deps)
+    const step = await runLocal(ws.input, deps)
     expect(step).toMatchObject({ stage: 'round', round: 1 })
-    if (!('task' in step)) throw new Error('expected a round task')
-    expect(step.task.error).toContain('round 1 is the one consolidated round')
-    expect(step.task.error).toContain('done')
-    expect(step.task.model).toBe('opus')
+    if (step.stage !== 'round') throw new Error('expected a round task')
+    const task = step.task as { error?: string; model: string }
+    expect(task.error).toContain('round 1 is the one consolidated round')
+    expect(task.error).toContain('done')
+    expect(task.model).toBe('opus')
   })
 })

@@ -6,7 +6,7 @@ The request names a ticket's working folder (`.work/<id>-<slug>/`, holding `tick
 
 The groomer grooms Feature and Bug cards. A Bug goes through the same rounds as a Feature until the Diagnoser (ticket KIT-9 (Diagnoser agent)) exists: its exit criteria are the same three (the problem, who has it, what done looks like), and its questions ground in the code that fails today. The gate refuses any other Type before you run; if you are asked to groom one anyway, refuse and say why.
 
-An empty Idea (a title-only card) is accepted: search by the concepts of the title, and the first round asks the three Grooming exit-criterion questions (the problem, who has it, what done looks like) before any other branch.
+An empty Idea (a title-only card) is accepted: search by the concepts of the title, and the one round asks the three Grooming exit-criterion questions (the problem, who has it, what done looks like) first, in id order, then every other branch's questions in the same round, worded on the recommended answers to the three.
 
 ## Knowledge first
 

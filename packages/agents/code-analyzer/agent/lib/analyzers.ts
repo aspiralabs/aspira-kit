@@ -78,9 +78,9 @@ export async function detect(files: string[], read: (path: string) => Promise<st
     const eslintDirs = files.filter((f) => ESLINT_CONFIG.test(f) && !hasNodeModules(f)).map(dirOf)
     const eslintRoots = eslintDirs.includes('') ? [''] : [...new Set(eslintDirs)].slice(0, MAX_DIRS)
     if (lintScript) analyzers.push({ id: 'script:lint', tool: 'lint', ecosystem: 'js', cwd: '', check: pm.run(lintScript), fix: null, parse: script('lint'), requires: null, install: [] })
-    else for (const dir of eslintRoots) analyzers.push({ id: `eslint:${dir || '.'}`, tool: 'eslint', ecosystem: 'js', cwd: dir, check: `${pm.exec} eslint . --format json`, fix: `${pm.exec} eslint . --fix`, fixFiles: (files) => `${pm.exec} eslint --fix --no-warn-ignored ${quoted(files)}`, exts: JS, parse: eslintJson, requires: null, install: [] })
+    else for (const dir of eslintRoots) analyzers.push({ id: `eslint:${dir || '.'}`, tool: 'eslint', ecosystem: 'js', cwd: dir, check: `${pm.exec} eslint . --format json`, fix: `${pm.exec} eslint . --fix`, fixFiles: (files) => `${pm.exec} eslint --fix ${quoted(files)}`, exts: JS, parse: eslintJson, requires: null, install: [] })
     // ESLint's own --fix stays available even when the project runs lint through a script.
-    if (lintScript && eslintRoots.length) for (const dir of eslintRoots) analyzers.push({ id: `eslint-fix:${dir || '.'}`, tool: 'eslint', ecosystem: 'js', cwd: dir, check: '', fix: `${pm.exec} eslint . --fix`, fixFiles: (files) => `${pm.exec} eslint --fix --no-warn-ignored ${quoted(files)}`, exts: JS, parse: eslintJson, requires: null, install: [] })
+    if (lintScript && eslintRoots.length) for (const dir of eslintRoots) analyzers.push({ id: `eslint-fix:${dir || '.'}`, tool: 'eslint', ecosystem: 'js', cwd: dir, check: '', fix: `${pm.exec} eslint . --fix`, fixFiles: (files) => `${pm.exec} eslint --fix ${quoted(files)}`, exts: JS, parse: eslintJson, requires: null, install: [] })
     const tsconfigs = files.filter((f) => /(^|\/)tsconfig\.json$/.test(f) && !hasNodeModules(f)).map(dirOf)
     if (typeScript) analyzers.push({ id: 'script:typecheck', tool: 'tsc', ecosystem: 'js', cwd: '', check: pm.run(typeScript), fix: null, parse: script('tsc'), requires: null, install: [] })
     else for (const dir of [...new Set(tsconfigs)].slice(0, MAX_DIRS)) {

@@ -851,7 +851,7 @@ export function remainingStep(skill: Skill, status: string, prOpened: boolean, r
   }
   const failed = runStatus !== 'ready'
   // A spec step rerun from In Review: Spec that still needs the author (KIT-48): the decisions, not a failure, are what is left.
-  if (skill === 'spec-writer' && runStatus === 'needs-author' && status === 'In Review: Spec') return `Answer the open decisions on the Spec Review Decisions page (or in spec.reviewed/trace/decisions.md), then run ${skill} again from "${status}"; it reviews the answered spec and makes no move.`
+  if (skill === 'spec-writer' && runStatus === 'needs-author' && status === 'In Review: Spec') return `Answer the open decisions: write the answers into the reviewed spec (the Spec Reviewed page, pulled as spec.reviewed/spec.reviewed.md) or tick them in spec.reviewed/trace/decisions.md, then run ${skill} again from "${status}"; it reviews the answered spec and makes no move.`
   if (skill === 'implementor' && runStatus === 'ready' && !prOpened) return `The ticket stays in "${status}": opening the PR is the remaining step. Push the branch, open the PR, set the ticket's PR property and move it to "In Review: Implementation".`
   if (failed && gate.inProgress !== undefined) return `The run did not succeed, so the ticket stays in "${status}". Fix what stopped it and run ${skill} again; a rerun from "${gate.inProgress}" makes no start move.`
   return null

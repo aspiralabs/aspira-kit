@@ -109,7 +109,7 @@ export function roundPrompt(prepared: PreparedGroom, n: number, facts: readonly 
     `Every question follows the rule: ${DECISION_RULE}. Each names its branch and at least one recorded file:line fact.`,
     `Open questions that stay on the frontier, to ask again with their ids: ${asked.join(', ') || 'none'}. New questions take ids from ${nextQuestionId(answered)} on; a follow-up of Q<n> is Q<n>.<m>.`,
     `Branches: ${answered.branches.map((branch) => `${branch.id}=${branch.state}`).join(', ')}.`,
-    prepared.idea.trim() === '' ? 'The idea is title-only: ask problem, who and done before any other branch.' : fence('IDEA', prepared.idea),
+    prepared.idea.trim() === '' ? 'The idea is title-only: ask problem, who and done first, then every other branch in this same round.' : fence('IDEA', prepared.idea),
     fence('GROOM RECORD (decisions with the page ticks applied)', JSON.stringify({ decisions: answered.decisions, branches: answered.branches }, null, 2)),
     fence('FACTS (round zero and earlier rounds)', JSON.stringify({ searched, facts }, null, 2)),
     fence('REQUIRED GUIDELINES', prepared.guidelines),

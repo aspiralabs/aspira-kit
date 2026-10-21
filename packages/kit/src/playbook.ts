@@ -60,7 +60,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
       '```',
       'Needs In Review: Spec. Read `spec.reviewed/trace/review.json`:',
       '- `ready`: go to Step 4.',
-      '- `needs-author`: answer each decision in `spec.reviewed/trace/decisions.md` (or on the Spec Review Decisions page), write the answers into `spec.reviewed/spec.reviewed.md`, and run the same command again: from In Review: Spec the spec writer reviews the answered spec again, makes no move, and replaces the Spec, Spec Reviewed and Spec Review Decisions pages. Repeat until it says `ready`. Do not skip the rerun; NOM-4 did, and the planner then worked from an unreviewed edit.',
+      '- `needs-author`: write the answers into `spec.reviewed/spec.reviewed.md` (the Spec Reviewed page, which the rerun pulls) or tick them in the local `spec.reviewed/trace/decisions.md`, and run the same command again: from In Review: Spec the spec writer reviews the answered spec again, makes no move, and replaces the Spec, Spec Reviewed and Spec Review Decisions pages. Repeat until it says `ready`. Do not skip the rerun; NOM-4 did, and the planner then worked from an unreviewed edit.',
     ].join('\n'),
   },
   {
