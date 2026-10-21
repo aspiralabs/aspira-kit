@@ -1,8 +1,8 @@
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
-import { countsFromFindings, reviewCommentBody, upsertReviewComment } from '../lib/github-comment'
-import { FILES } from '../lib/review'
-import { TARGET_FILE, targetFileSchema } from '../lib/target'
+import { countsFromFindings, reviewCommentBody, upsertReviewComment } from '../lib/github-comment.ts'
+import { FILES } from '../lib/review.ts'
+import { TARGET_FILE, targetFileSchema } from '../lib/target.ts'
 
 // Posts the finished review to the GitHub PR it was of: one conversation comment, updated
 // on a rerun. Reads review.md, findings.md and the target (the shas) from the sandbox itself

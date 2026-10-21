@@ -2,12 +2,12 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
-import { REVIEW_DIR, REVIEW_SUBDIR, ignoreRule, needsIgnoreRule, optionalPath, patchStats, ticketFolder } from '../lib/pr'
-import { sortFindingsMarkdown } from '../lib/findings'
-import { FILES, roundFilesInOrder, slugify } from '../lib/review'
-import { TARGET_FILE, stampReviewed, targetFileSchema } from '../lib/target'
-import { MODELS } from '../lib/models'
-import { USAGE_LEDGER, parseLedger, renderCostMarkdown, summarizeUsage } from '../lib/usage'
+import { REVIEW_DIR, REVIEW_SUBDIR, ignoreRule, needsIgnoreRule, optionalPath, patchStats, ticketFolder } from '../lib/pr.ts'
+import { sortFindingsMarkdown } from '../lib/findings.ts'
+import { FILES, roundFilesInOrder, slugify } from '../lib/review.ts'
+import { TARGET_FILE, stampReviewed, targetFileSchema } from '../lib/target.ts'
+import { MODELS } from '../lib/models.ts'
+import { USAGE_LEDGER, parseLedger, renderCostMarkdown, summarizeUsage } from '../lib/usage.ts'
 
 
 // Sandboxes are per session and disposable. This copies the review's markdown out to

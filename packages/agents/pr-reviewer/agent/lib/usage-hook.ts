@@ -1,8 +1,8 @@
 import { defineHook } from 'eve/hooks'
-import { forgetSpend, recordSpend } from './spend-ledger'
-import { forgetSession, recordCalls } from './call-cap'
-import { forgetSession as forgetSessionContext, rememberSession } from './shared-prefix'
-import { USAGE_LEDGER, type UsageLine } from './usage'
+import { forgetSpend, recordSpend } from './spend-ledger.ts'
+import { forgetSession, recordCalls } from './call-cap.ts'
+import { forgetSession as forgetSessionContext, rememberSession } from './shared-prefix.ts'
+import { USAGE_LEDGER, type UsageLine } from './usage.ts'
 
 // Appends one line per model call to the shared sandbox ledger. Mounted as
 // hooks/usage.ts on the root and on every seat: hooks fire per agent scope,

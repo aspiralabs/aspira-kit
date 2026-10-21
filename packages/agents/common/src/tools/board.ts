@@ -1,9 +1,9 @@
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
-import { RUN_STATUSES, TOOL_SKILLS } from '../lib/ticket'
-import { FlowRefused, finishFlow, readAspira, startFlow } from '../lib/ticket-flow'
-import { resolveArgument } from '../lib/ticket-driver'
-import { board as makeBoard } from '../lib/board'
+import { RUN_STATUSES, TOOL_SKILLS } from '../lib/ticket.ts'
+import { FlowRefused, finishFlow, readAspira, startFlow } from '../lib/ticket-flow.ts'
+import { resolveArgument } from '../lib/ticket-driver.ts'
+import { board as makeBoard } from '../lib/board.ts'
 
 // The Feature Board for an agent that runs as a separate process: the same flow the skill
 // launchers run on the host (start: resolve, gate, pull, claim; finish: push, move), through
