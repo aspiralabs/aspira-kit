@@ -9,6 +9,7 @@
 // code the agent uses.
 
 import { createHash } from 'node:crypto'
+import { RESEARCH_RULE, sessionResearchTools } from '@aspiralabs/agent-common/lib/research-rule'
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -56,7 +57,7 @@ export const modelForPhase = (id: PhaseId): SessionModel => (id.startsWith('repa
 export type LocalPending = { pending: true; status: 'pending'; stage: Stage; workDir: string; router: string; instructions: string; tasks: LocalTask[] }
 
 /** The exported plan. */
-export type LocalDone = { pending: false; status: 'ready' | 'needs-author' | 'incomplete'; dir: string; problems: string[]; decisions: DecisionRecord[]; totalMs: number }
+export type LocalDone = { pending: false; status: 'ready' | 'needs-author' | 'incomplete'; dir: string; problems: string[]; openGaps?: string[]; decisions: DecisionRecord[]; totalMs: number }
 
 /** The guidelines could not be loaded (no NOTION_TOKEN or KNOWLEDGE_PAGE): nothing ran and nothing was written to `dir` (F52). */
 export type LocalBlocked = Omit<LocalDone, 'status'> & { status: 'blocked'; stage: 'knowledge'; reason: string }
@@ -110,14 +111,16 @@ export function renderRouter(instructions: string, script: string): string {
 export function renderTaskPrompt(args: { id: PhaseId; system: string; prompt: string; output: string; reads: string | null; repo: string; knowledge: string[]; schema: z.ZodType }): string {
   const mechanics = args.id === 'research'
     ? [
+      `- ${RESEARCH_RULE} ${sessionResearchTools(args.repo)}`,
       `- The agent's repository tools (list_files, read_files, search) are read-only reads of the repository at ${args.repo}: use Read, Grep, Glob and non-mutating git commands there. The agent gives research ten tool steps; be as efficient: batch reads and searches.`,
       `- The agent's guideline MCP topics are these files, fetched from Notion for this run: ${args.knowledge.join(', ') || 'none beyond the required guidelines in the Task'}. Read them with Read. A Notion page the spec or the ticket names (a product doc the work mirrors, a decision page) you may read with the Notion MCP read tools (notion-fetch, notion-search), read-only, citing its title and the quoted line (KIT-35); when the spec names a Notion page the work changes or mirrors, read it this way rather than leaving it as a gap; any other Notion page stays out.`,
       '- The agent\'s Aspira UI tools (list_components, get_component) are the session\'s aspiralabs-ui MCP server. If it is not available, record that as a gap.',
       `- submit_research is your output file. Also write \`${args.reads ?? ''}\`: a JSON array with one {"tool", "ok"} entry per MCP call you made, tool named as the session names it (for example mcp__aspiralabs-ui__get_component), ok false when it failed. Write [] if you made none.`,
     ]
     : [
-      // KIT-34: the agent plans without tools; the session's planning subagent may read, so a fact the packet lacks is checked rather than left as a plan gap.
-      `- The agent runs planning without tools. In this session you may use Read, Grep, Glob and non-mutating git commands, read-only, in the repository at ${args.repo}, to settle a fact the packet and research leave out (a path, a symbol, a signature, a caller) before you name it, and the Notion MCP read tools (notion-fetch, notion-search) for a Notion page the spec or the ticket names, citing its title and the quoted line; a plan gap is only for evidence you could not read. Plan from the spec, guidelines, packet and research in the Task.`,
+      // KIT-34, KIT-54: the session's planning subagent reads, so a fact the packet lacks is checked rather than left as a plan gap.
+      `- ${RESEARCH_RULE} ${sessionResearchTools(args.repo)}`,
+      `- The cloud agent's planning reads through its tools too; in this session In this session you may use Read, Grep, Glob and non-mutating git commands, read-only, in the repository at ${args.repo}, to settle a fact the packet and research leave out (a path, a symbol, a signature, a caller) before you name it, and the Notion MCP read tools (notion-fetch, notion-search) for a Notion page the spec or the ticket names, citing its title and the quoted line; a plan gap is only for evidence you could not read. Plan from the spec, guidelines, packet and research in the Task.`,
       `- If your plan creates or changes a UI file (.tsx, .jsx, .css, .scss, or anything under components/), call the session's aspiralabs-ui MCP server first: list_components, then get_component for each component the change uses. Write \`${args.reads ?? ''}\`: a JSON array with one {"tool", "ok"} entry per MCP call you made, tool named as the session names it (for example mcp__aspiralabs-ui__get_component), ok false when it failed. Write [] if you made none.`,
     ]
   return [
@@ -278,7 +281,7 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
   const phaseErrors = calls.filter((call) => call.error !== undefined).map((call) => ({ phase: call.phase, error: call.error ?? null }))
   // The previous plan's trace/decisions.md, with the options the author ticked, is read before the export replaces it.
   const answers = await readAnswers(prepared.dir)
-  const { status, problems, decisions } = assessPlan({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan, phaseErrors, uiRequired: prepared.uiRequired, reads, cancelled: false, answers, takeRecommended: input.takeRecommended ?? false })
+  const { status, problems, openGaps, decisions } = assessPlan({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan, phaseErrors, uiRequired: prepared.uiRequired, reads, cancelled: false, answers, takeRecommended: input.takeRecommended ?? false })
   const totalMs = Date.now() - Date.parse(state.startedAt)
   const phaseRows = (['research', 'planning', ...calls.map((call) => call.phase).filter((phase) => phase.startsWith('repair-'))] as PhaseId[]).map((phase) => {
     const call = calls.find((item) => item.phase === phase)
@@ -300,12 +303,12 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
     'trace/knowledge.json': JSON.stringify({ ...knowledge, pages: knowledge.files.filter((file) => file.url !== null).map((file) => ({ file: file.name, title: file.title, url: file.url })).concat(knowledge.source === 'notion' ? requiredUrls(knowledgeContents.get(REQUIRED_NAME) ?? '') : []) }, null, 2),
     ...Object.fromEntries([...knowledgeContents].map(([name, text]) => [`trace/knowledge/${name}`, text])),
     'run-analysis.md': analysis,
-    'trace/review.json': JSON.stringify({ mode: 'local', status, problems, decisions, input, repoCommit: prepared.repo.commit, repoDirty: prepared.repo.dirty, reviewFacts: { included: facts.included, reason: facts.reason }, models: { all: 'Claude Code session subagents' }, phases: calls.map((call) => ({ phase: call.phase, error: call.error ?? null })), mcpReads: reads, knowledge: { source: knowledge.source, fingerprint: knowledge.fingerprint }, startedAt: state.startedAt, totalMs }, null, 2),
+    'trace/review.json': JSON.stringify({ mode: 'local', status, problems, openGaps, decisions, input, repoCommit: prepared.repo.commit, repoDirty: prepared.repo.dirty, reviewFacts: { included: facts.included, reason: facts.reason }, models: { all: 'Claude Code session subagents' }, phases: calls.map((call) => ({ phase: call.phase, error: call.error ?? null })), mcpReads: reads, knowledge: { source: knowledge.source, fingerprint: knowledge.fingerprint }, startedAt: state.startedAt, totalMs }, null, 2),
   }
   await writeArtifacts(prepared.dir, files)
   // Every prompt and output is now in trace/calls.json, and the knowledge in trace/knowledge/.
   await rm(work, { recursive: true, force: true })
-  return { pending: false, status, dir: prepared.dir, problems, decisions, totalMs }
+  return { pending: false, status, dir: prepared.dir, problems, openGaps, decisions, totalMs }
 }
 
 function safeJson(text: string): unknown {

@@ -244,7 +244,7 @@ export async function writeKnowledgeFolder(out: string, walk: WalkResult, opts: 
   const tmp = await mkdtemp(`${resolvedOut}.tmp-`)
   try {
     for (const page of walk.pages) {
-      const content = renderPage({ title: page.title, url: page.url, fetchedAt: walk.fetchedAt, truncated: false }, page.markdown) + (page.file === 'INDEX.md' ? notLoadedSection(walk.notLoaded) : '')
+      const content = renderPage({ title: page.title, url: page.url, fetchedAt: walk.fetchedAt, truncated: false }, page.markdown) + (page.file === 'INDEX.md' ? notLoadedSection(walk.notLoaded) + databasesSection(walk.skippedDatabases ?? []) : '')
       await writeFile(join(tmp, page.file), content)
     }
 
@@ -261,6 +261,13 @@ export async function writeKnowledgeFolder(out: string, walk: WalkResult, opts: 
 
   if (existsSync(resolvedOut)) await rm(resolvedOut, { recursive: true, force: true })
   await rename(tmp, resolvedOut)
+}
+
+/** INDEX.md's list of the databases the tree links (KIT-54): the walk fetches pages, not rows, so the agent is told which databases exist and how to read them when a rule points at one. */
+export function databasesSection(databases: { title: string; url: string }[]): string {
+  if (databases.length === 0) return ''
+  const n = databases.length
+  return `\n## Databases\n\n${n} database${n === 1 ? '' : 's'} linked from these pages (Approved Technologies, ADRs, …). This folder holds pages, not rows: read a database's rows when a rule or a decision depends on them, with notion_read (a cloud agent) or notion-fetch / notion-query-data-sources (a Claude Code session), before reporting it as unknown:\n\n${databases.map((d) => `- ${d.title || 'Database'} (${d.url})`).join('\n')}\n`
 }
 
 function notLoadedSection(notLoaded: { title: string; url: string }[]): string {

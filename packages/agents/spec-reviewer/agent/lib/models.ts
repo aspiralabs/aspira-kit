@@ -1,5 +1,6 @@
 import { generateText, Output, hasToolCall, tool, stepCountIs, type ToolSet } from 'ai'
 import { gateway, streamStructured } from '@aspiralabs/agent-common/lib/gateway'
+import { CLOUD_RESEARCH_TOOLS } from '@aspiralabs/agent-common/lib/research-rule'
 import type { z } from 'zod'
 import type { Call } from './pipeline.ts'
 import { reviewSchema, synthesisSchema, systemPrompt } from './review.ts'
@@ -97,14 +98,16 @@ export function reviewModels(env: NodeJS.ProcessEnv = process.env): ReviewModels
 
 /** Tool rounds a specialist gets before it must submit. */
 export const SPECIALIST_MAX_STEPS = 6
+/** Tool rounds research and reconciliation get (KIT-54): they used to run tool-less over the packet; now they read what it lacks. */
+export const RESEARCH_MAX_STEPS = 8
+export const SYNTHESIS_MAX_STEPS = 6
 
 /** The review phases: structured research and reconciliation, tool-using specialists. */
 export function reviewModelCall(session: ModelSession, models: ReviewModels, tools: ToolSet, componentTool?: string): Call {
   return async ({ phase, prompt, signal }) => {
-    // One native structured generation for research/reconciliation. Repository selection is code,
-    // exploration is parallel specialists: no fragile forced-tool loop on this model.
-    if (phase === 'research') return session.structured({ phase, model: models.frontier, system: systemPrompt, prompt, schema: reviewSchema, signal, reasoning: 'low', maxOutputTokens: 8_000 })
-    if (phase === 'synthesis') return session.structured({ phase, model: models.reconciliation, system: systemPrompt, prompt, schema: synthesisSchema, signal, reasoning: 'medium', maxOutputTokens: 20_000 })
+    // Research and reconciliation read too (KIT-54, David: no phase is walled off from the repository, Notion or the web): a tool loop over the same tools the specialists have, ending in a submit.
+    if (phase === 'research') return session.toolLoop({ phase, model: models.frontier, system: systemPrompt, prompt: `${prompt}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: reviewSchema, tools, signal, maxSteps: RESEARCH_MAX_STEPS, maxOutputTokens: 8_000, submitName: 'submit_research' })
+    if (phase === 'synthesis') return session.toolLoop({ phase, model: models.reconciliation, system: systemPrompt, prompt: `${prompt}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: synthesisSchema, tools, signal, maxSteps: SYNTHESIS_MAX_STEPS, maxOutputTokens: 20_000, submitName: 'submit_synthesis' })
     return session.toolLoop({ phase, model: models.specialist, system: systemPrompt, prompt, schema: reviewSchema, tools, signal, maxSteps: SPECIALIST_MAX_STEPS, maxOutputTokens: 5_000, submitName: 'submit_review', firstTool: phase === 'ui' ? componentTool : undefined })
   }
 }

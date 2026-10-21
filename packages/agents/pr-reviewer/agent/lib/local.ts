@@ -6,6 +6,7 @@
 // the review is exported in the agent's layout and, for a GitHub PR, posted.
 
 import { createHash } from 'node:crypto'
+import { RESEARCH_RULE, sessionResearchTools } from '@aspiralabs/agent-common/lib/research-rule'
 import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -263,6 +264,7 @@ export function renderTaskPrompt(task: PlanTask, output: string, persona: { path
     `Everything above is what the agent sends ${DISPLAY_NAME[task.agent]}: the shared prefix and the review instructions that agent/lib/review.ts builds for this review, the persona from ${persona.path}, and the turn. This part is only how a session runs the turn.`,
     '',
     `- This turn runs as a subagent of a Claude Code session, not in the agent's sandbox, so every path above is a real path on this machine. read_file is the Read tool; read_files is the Read tool over each path listed (one call per path counts as one read_files call); read_diff(paths) is the \`diff --git a/<path> b/<path>\` section of each listed path in ${pr.paths?.files.patch ?? FILES.patch} (Grep that header for the line, then Read the section up to the next \`diff --git\` line; one read_diff call however many paths); search is the Grep tool with two lines of context; and the shell commands named above run through Bash.`,
+    `- ${RESEARCH_RULE} ${sessionResearchTools(pr.repo ?? process.cwd())}`,
     `- The structured result the turn asks for goes into \`${output}\` as ONE JSON object valid against the output schema below (review.ts's own). No fences and no prose in that file. Then reply with one line.`,
     ...handBack,
     '',

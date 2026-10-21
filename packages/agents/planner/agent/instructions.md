@@ -11,3 +11,7 @@ When you report to the person: present the readiness problems in severity order 
 Use local Git repositories. A remote repository must be cloned by the caller first. MCP_READ_CONNECTIONS configures the runtime's read-only Notion and UI tools; a Codex connector is separate.
 
 When the request names a Feature Board ticket, the skill launcher has already claimed it, pulled its pages into the working folder and will push the plan and move the card when you finish; do not move the card yourself, and call the board tool only when the request says the ticket was not claimed.
+
+## Research
+
+Research before you report a gap: anything missing or vague is looked up first, in the repository's code (read the files, not just the file map), in Notion (any page or database the guidelines, the ticket, the idea or the spec point to: Approved Technologies, ADRs, decision pages, the Feature Board) and in public documentation, whichever can settle it. What you were given (a packet, a snapshot, a record, an exploration) is a head start, not a wall. "Unknown", "unverified" or a gap is allowed only once that research is exhausted, and it names where you looked and why that did not settle it. Every phase and subagent of yours works under this rule.

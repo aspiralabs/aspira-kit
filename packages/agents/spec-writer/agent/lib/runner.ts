@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { notionReadToolsFromEnv } from '@aspiralabs/agent-common/lib/notion-read'
+import { CLOUD_RESEARCH_TOOLS } from '@aspiralabs/agent-common/lib/research-rule'
 import { readFile } from 'node:fs/promises'
 import { basename, dirname, relative, resolve } from 'node:path'
 import { takenDecision } from '@aspiralabs/agent-common/lib/decisions'
@@ -126,13 +128,17 @@ export function writerModels(env: NodeJS.ProcessEnv = process.env) {
   }
 }
 
+/** Tool rounds the draft gets before it must submit (KIT-54). */
+export const DRAFT_MAX_STEPS = 6
+
 export async function runWrite(input: RunInput, options: { signal?: AbortSignal; progress?: (phase: string) => void } = {}) {
   const started = Date.now()
   const preparation = options.signal ?? new AbortController().signal
   const prepared = await prepareWrite(input, preparation)
   const { dir, idea, spec, guidelines, repo, uiRequired, answers } = prepared
   const mcp = await connectReadTools(process.env.MCP_READ_CONNECTIONS, preparation)
-  const tools = { ...repo.tools, ...mcp.tools }
+  // The Notion read tools ride on the integration token every phase can use (KIT-54).
+  const tools = { ...repo.tools, ...mcp.tools, ...notionReadToolsFromEnv() }
   const catalogTool = Object.keys(mcp.tools).find((name) => name.endsWith('__list_components'))
   const componentTool = Object.keys(mcp.tools).find((name) => name.endsWith('__get_component'))
   let catalog: unknown = null
@@ -146,7 +152,8 @@ export async function runWrite(input: RunInput, options: { signal?: AbortSignal;
   const call = session.record(async (request) => {
     const { phase, prompt, signal } = request
     if (phase === 'explore' || phase.startsWith('explore:')) return session.toolLoop({ phase, model: models.explore, system: writerSystemPrompt, prompt, schema: exploreSchema, tools, signal, maxSteps: EXPLORE_MAX_STEPS, maxOutputTokens: 8_000, submitName: 'submit_exploration' })
-    if (phase === 'draft') return session.structured({ phase, model: models.draft, system: writerSystemPrompt, prompt, schema: draftSchema, signal, reasoning: 'medium', maxOutputTokens: 24_000 })
+    // The draft reads too (KIT-54): what the exploration lacks is looked up, not left as an assumption.
+    if (phase === 'draft') return session.toolLoop({ phase, model: models.draft, system: writerSystemPrompt, prompt: `${prompt}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: draftSchema, tools, signal, maxSteps: DRAFT_MAX_STEPS, maxOutputTokens: 24_000, submitName: 'submit_draft' })
     return reviewCall(request)
   })
   try {

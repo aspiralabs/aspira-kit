@@ -7,6 +7,7 @@
 // the agent's edit guards, reverts what they would have rejected, and carries on with the loop.
 
 import { createHash } from 'node:crypto'
+import { RESEARCH_RULE } from '@aspiralabs/agent-common/lib/research-rule'
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -459,6 +460,7 @@ export function renderTaskPrompt(args: { id: string; root: string; output: strin
     'You are the code-analyzer\'s fix model, running as a subagent of a Claude Code session instead of inside code-analyzer. The System and Task sections below are the exact prompt the agent sends its fix model. Follow them.',
     '',
     `- The repository in the Task is ${args.root}; every path in it is relative to that directory. Its tools map onto yours: read_file is the Read tool, search is Grep (or read-only \`git grep\`), edit_file is the Edit tool with one exact, unique replacement per call, and done is writing the output file below.`,
+    `- ${RESEARCH_RULE} For a fix that needs a fact the diagnostic does not give (an API's shape, a type's definition, a library's current signature), read the repository's code and the library's public documentation (WebFetch) before listing a diagnostic as unresolved.`,
     `- You have no shell beyond read-only searches: do not run the analyzers, the project, installs or git commands that change anything. Edit only files under ${args.root}. After you finish, the driver checks every changed file against the agent's edit guards and reverts what they reject.`,
     `- Finish by writing ONE JSON object to \`${args.output}\` that validates against the output schema at the end: the done result. No markdown fences and no prose in that file. Then reply with one line: \`done\`, or what stopped you.`,
     '',

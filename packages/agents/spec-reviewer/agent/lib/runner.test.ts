@@ -18,7 +18,9 @@ vi.mock('ai', async (original) => {
       : { facts: [], findings: args.prompt.includes('Research and raise') ? [{ title: 'Missing contract', severity: 'high', whatThisMeans: 'Nobody could tell when the feature is done.', evidence: ['spec: Original'], fix: 'Add intent and acceptance' }] : [], checks: [{ rule: 'REV-001', evidence: 'spec: Original' }], uiEvidence: [], gaps: [] }
     args.onStepEnd({ usage: { inputTokens: 100, outputTokens: 10 }, finishReason: 'stop', text: 'mock model output', toolCalls: [], toolResults: [] })
     if (args.output !== undefined) return { output: result }
-    await args.tools.submit_review!.execute!(result, { toolCallId: 'test', messages: [], context: {} })
+    // KIT-54: research and reconciliation submit through their own tools now, like the specialists.
+    const submit = Object.keys(args.tools ?? {}).find((name) => name.startsWith('submit_'))!
+    await args.tools[submit]!.execute!(result, { toolCallId: 'test', messages: [], context: {} })
     return {}
   }) }
   // The agents stream structured output; the stand-in streams the same generateText result, so its calls stay recorded there.

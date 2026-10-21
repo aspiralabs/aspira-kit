@@ -94,7 +94,7 @@ describe('the groomer --local knowledge stage (T62)', () => {
     expect(notion.requests.length).toBeGreaterThan(0)
     expect(first).toMatchObject({ round: 2, stage: 'round' })
     const prompt = first.pending && 'task' in first ? await readFile((first as { task: { prompt: string } }).task.prompt, 'utf8') : ''
-    expect(prompt).not.toMatch(/Notion MCP/i)
+    expect(prompt).not.toMatch(/Notion MCP[^.]*guideline|guideline[^.]*Notion MCP/i) // KIT-54: the Notion MCP is a research tool; the guidelines still come from the folder
 
     const afterFirst = notion.requests.length
     // A later stage of round 2: the round file now exists, so the next call reaches the answers stage.

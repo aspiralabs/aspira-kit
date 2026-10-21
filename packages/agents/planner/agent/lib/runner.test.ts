@@ -15,6 +15,18 @@ vi.mock('ai', async (original) => {
     args.onStepStart({ stepNumber: 0, messages: [] })
     if (state.failResearch && args.tools) throw new Error('Research provider unavailable')
     args.onStepEnd({ usage: { inputTokens: 10, outputTokens: 5 }, providerMetadata: { gateway: { cost: '0.10' } }, finishReason: 'stop', text: 'mock output', toolCalls: [], toolResults: [] })
+    const planOf = () => {
+      const plan = validPlan()
+      if (state.brokenPlans > 0) { state.brokenPlans--; plan.tasks[1]!.dependsOn = [] }
+      if (state.uiPlan) plan.tasks[1]!.changes[0]!.path = 'src/components/item-card.tsx'
+      if (state.needsAuthor) plan.decisions = [retention]
+      return plan
+    }
+    // KIT-54: planning reads through tools and submits the plan with submit_plan.
+    if (args.tools?.submit_plan) {
+      await args.tools.submit_plan.execute!(planOf(), { toolCallId: 'plan', messages: [], context: {} })
+      return {}
+    }
     if (args.tools) {
       // Research that ends with prose hands in nothing unless it is given a submit-only turn.
       if (state.proseResearch && !args.toolChoice) {
@@ -36,11 +48,7 @@ vi.mock('ai', async (original) => {
       await args.tools.submit_research!.execute!({ facts: ['src/items.ts:1 establishes save'], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] }, { toolCallId: 'test', messages: [], context: {} })
       return {}
     }
-    const plan = validPlan()
-    if (state.brokenPlans > 0) { state.brokenPlans--; plan.tasks[1]!.dependsOn = [] }
-    if (state.uiPlan) plan.tasks[1]!.changes[0]!.path = 'src/components/item-card.tsx'
-    if (state.needsAuthor) plan.decisions = [retention]
-    return { output: plan }
+    return { output: planOf() }
   }) }
   // The agents stream structured output; the stand-in streams the same generateText result, so its calls stay recorded there.
   return { ...mock, streamText: vi.fn((args: Parameters<typeof mock.generateText>[0]) => {
@@ -48,6 +56,7 @@ vi.mock('ai', async (original) => {
     return { output: run.then((value) => value.output), consumeStream: () => run.then(() => undefined) }
   }) }
 })
+import { CLOUD_RESEARCH_TOOLS, RESEARCH_RULE } from '@aspiralabs/agent-common/lib/research-rule'
 import { runPlan } from './runner.ts'
 
 beforeEach(() => { Object.assign(state, { failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [] }); state.close.mockClear() })
@@ -96,8 +105,9 @@ it('sends research that replies without submitting back to keep reading, told ho
   const { generateText } = await import('ai')
   vi.mocked(generateText).mockClear()
   await runPlan(await input())
-  const calls = vi.mocked(generateText).mock.calls.map(([args]) => args as { toolChoice?: unknown; messages?: { role: string; content: unknown }[] })
-  const research = calls.filter((args) => args.messages !== undefined || !('output' in args))
+  const calls = vi.mocked(generateText).mock.calls.map(([args]) => args as { toolChoice?: unknown; messages?: { role: string; content: unknown }[]; tools?: ToolSet })
+  // KIT-54: planning is a tool loop too now; its one call carries submit_plan.
+  const research = calls.filter((args) => !args.tools?.submit_plan)
   // Nine free turns (one per call here), then the forced submit: never a hand-in after the first reply.
   expect(research.filter((args) => !args.toolChoice)).toHaveLength(9)
   const second = research[1]!.messages!
@@ -177,9 +187,10 @@ it('sends research and planning the exact default prompt bytes', async () => {
   const sent = vi.mocked(generateText).mock.calls.map(([call]) => call as { system?: string; prompt?: string })
   const context = `BUSINESS SPEC (spec.reviewed.md):\n${spec}\n\nREQUIRED GUIDELINES:\nREV-001 Inspect source evidence\n\nREPOSITORY INSTRUCTIONS:\nThe repository has no AGENTS.md or CLAUDE.md at its root.\n\n\nsrc/items.ts:1: existing save`
   const research = { facts: ['src/items.ts:1 establishes save'], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] }
-  expect(sent.map((call) => call.system)).toEqual([researchSystem, system])
+  // KIT-54: both system prompts carry the research rule; planning's prompt names its tools and ends on the submit instruction.
+  expect(sent.map((call) => call.system)).toEqual([`${researchSystem}\n\n${RESEARCH_RULE}`, `${system}\n\n${RESEARCH_RULE}`])
   expect(sent[0]!.prompt).toBe(`${context}\n\n${researchInstructions}`)
-  expect(sent[1]!.prompt).toBe(`${context}\n\nRESEARCH:\n${JSON.stringify(research)}\n\n${planningInstructions}`)
+  expect(sent[1]!.prompt).toBe(`${context}\n\nRESEARCH:\n${JSON.stringify(research)}\n\n${planningInstructions}\n\n${CLOUD_RESEARCH_TOOLS}\n\nFinish by calling submit_plan with your complete result.`)
 })
 
 it('needs UI kit reads only when the plan writes UI files', async () => {
@@ -223,7 +234,8 @@ it('refuses research\'s first gaps once while it has turns left, telling it to r
     expect.objectContaining({ accepted: false, reason: expect.stringContaining('read these now instead of listing them as gaps') }),
     { accepted: true },
   ])
-  expect(result.problems).toContain('Research gap: Did not read src/items.ts')
+  // KIT-54: a gap research still has after its turns is a note for the approver, never a problem.
+  expect({ problem: result.problems.some((problem) => problem.startsWith('Research gap:')), open: result.openGaps }).toEqual({ problem: false, open: ['Research gap: Did not read src/items.ts'] })
 })
 
 it('hands planning the full text of every guideline page research read, once each', async () => {
@@ -231,7 +243,7 @@ it('hands planning the full text of every guideline page research read, once eac
   const { generateText } = await import('ai')
   vi.mocked(generateText).mockClear()
   await runPlan(await input())
-  const planning = vi.mocked(generateText).mock.calls.map(([call]) => call as { prompt?: string; output?: unknown }).find((call) => call.output)!
+  const planning = vi.mocked(generateText).mock.calls.map(([call]) => call as { prompt?: string; tools?: ToolSet }).find((call) => call.tools?.submit_plan)!
   expect(planning.prompt).toContain('GUIDELINE PAGES READ DURING RESEARCH (full text):\nSOURCE https://www.notion.so/topic\nTEST-001 Write the failing test first.\n\n')
   expect(planning.prompt!.split('TEST-001 Write the failing test first.')).toHaveLength(2)
 })
@@ -244,6 +256,6 @@ it('hands planning every page the required guidelines link to, even ones researc
   const { generateText } = await import('ai')
   vi.mocked(generateText).mockClear()
   await runPlan(args)
-  const planning = vi.mocked(generateText).mock.calls.map(([call]) => call as { prompt?: string; output?: unknown }).find((call) => call.output)!
+  const planning = vi.mocked(generateText).mock.calls.map(([call]) => call as { prompt?: string; tools?: ToolSet }).find((call) => call.tools?.submit_plan)!
   expect(planning.prompt).toContain('GUIDELINE PAGES READ DURING RESEARCH (full text):\nSOURCE https://www.notion.so/topic\nTEST-001 Write the failing test first.')
 })
