@@ -138,6 +138,32 @@ agent_node() {  # agent_node SCRIPT ARG...: run an agent script with node, from 
   (cd "$AGENT" && exec node "${NODE_ARGS[@]}" "$AGENT/$script" "$@")
 }
 eve_bin() { find_up_module "$AGENT" eve/bin/eve.js || die "eve is not installed beside $AGENT; reinstall @aspiralabs/agents"; }
+
+# An installed package lives under node_modules, where eve compiles no workflow tool (the executor stays
+# missing) and Node strips no types. The cloud agent therefore runs from a copy of the package's files
+# outside node_modules, under the project's .work/.agents/, with the package's dependency directory linked
+# in as node_modules and the eve build run there once per installed package (KIT-50). A kit checkout runs
+# the package where it is. Sets AGENT_RUNTIME, the directory the eve invoke runs in.
+runtime_agent() {
+  AGENT_RUNTIME=$AGENT
+  case $AGENT in */node_modules/*) ;; *) return 0 ;; esac
+  local deps copy stamp
+  # pnpm: <store>/<pkg>@<version>/node_modules holds the package and every dependency beside it; npm: the app's node_modules.
+  deps=$(cd "$AGENT/../.." && pwd -P)
+  copy="${REPO:-$PROJECT}/.work/.agents/$NAME@$AGENT_VERSION"
+  stamp="$copy/.built-from"
+  if [ ! -f "$stamp" ] || [ "$(cat "$stamp")" != "$AGENT" ] || [ ! -d "$copy/.output" ]; then
+    rm -rf "$copy"
+    mkdir -p "$copy"
+    cp -R "$AGENT/agent" "$AGENT/scripts" "$AGENT/package.json" "$copy/"
+    [ ! -f "$AGENT/.env.local" ] || cp "$AGENT/.env.local" "$copy/.env.local"
+    ln -s "$deps" "$copy/node_modules"
+    echo "$NAME: building the cloud agent once in $copy" >&2
+    (cd "$copy" && node "${NODE_ARGS[@]}" "$EVE_BIN" build > "$copy/build.log" 2>&1) || die "eve build failed in $copy: $(tail -n 5 "$copy/build.log")"
+    printf '%s\n' "$AGENT" > "$stamp"
+  fi
+  AGENT_RUNTIME=$copy
+}
 # Prints "Run status: <status>" and, when the record carries one, its reason line, for the run
 # record at RECORD_FILE (RUN's saved repo and agent.json/node-args give ticket.ts record what it
 # needs): scripts/ticket.ts record maps the record's status word (old or new alike) onto one of the
@@ -275,6 +301,7 @@ cmd_start() {
   command -v screen >/dev/null || die "screen is not installed"
   [ -e "$PROJECT/.env.local" ] || [ -e "$AGENT/.env.local" ] || [ -n "${AI_GATEWAY_API_KEY:-}" ] || die "missing $PROJECT/.env.local (or the agent's .env.local) or AI_GATEWAY_API_KEY"
   eve=$(eve_bin)
+  EVE_BIN=$eve runtime_agent
   if [ -z "$NO_TICKET" ]; then
     ticket_start
     folder=$T_FOLDER
@@ -309,7 +336,7 @@ cmd_start() {
 #!/bin/bash
 NODE_ARGS=()
 while IFS= read -r line; do NODE_ARGS+=("$line"); done < "$RUN/node-args"
-cd "$AGENT" || exit 1
+cd "$AGENT_RUNTIME" || exit 1
 node "${NODE_ARGS[@]}" "$EVE" invoke "$PROMPT" > "$RUN/log" 2>&1
 code=$?
 printf '%s\n' "$code" > "$RUN/exit"
@@ -328,7 +355,7 @@ if [ -n "$FOLDER" ]; then
 fi
 RUNNER
   chmod +x "$run/run.sh"
-  AGENT="$AGENT" EVE="$eve" PROMPT="$prompt" RUN="$run" FOLDER="$folder" REPO="$REPO" OUTPUT="$OUT" RUN_ID="$T_RUN_ID" RUN_STARTED="$T_RUN_STARTED" PARENT_RUN="$PARENT_RUN" screen -dmS "pr-review-$(basename "$run")" "$run/run.sh"
+  AGENT="$AGENT" AGENT_RUNTIME="$AGENT_RUNTIME" EVE="$eve" PROMPT="$prompt" RUN="$run" FOLDER="$folder" REPO="$REPO" OUTPUT="$OUT" RUN_ID="$T_RUN_ID" RUN_STARTED="$T_RUN_STARTED" PARENT_RUN="$PARENT_RUN" screen -dmS "pr-review-$(basename "$run")" "$run/run.sh"
   printf 'started\nrun: %s\nsource: %s\n' "$run" "$SOURCE"
   agent_line
 }

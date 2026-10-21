@@ -138,6 +138,32 @@ agent_node() {  # agent_node SCRIPT ARG...: run an agent script with node, from 
   (cd "$AGENT" && exec node "${NODE_ARGS[@]}" "$AGENT/$script" "$@")
 }
 eve_bin() { find_up_module "$AGENT" eve/bin/eve.js || die "eve is not installed beside $AGENT; reinstall @aspiralabs/agents"; }
+
+# An installed package lives under node_modules, where eve compiles no workflow tool (the executor stays
+# missing) and Node strips no types. The cloud agent therefore runs from a copy of the package's files
+# outside node_modules, under the project's .work/.agents/, with the package's dependency directory linked
+# in as node_modules and the eve build run there once per installed package (KIT-50). A kit checkout runs
+# the package where it is. Sets AGENT_RUNTIME, the directory the eve invoke runs in.
+runtime_agent() {
+  AGENT_RUNTIME=$AGENT
+  case $AGENT in */node_modules/*) ;; *) return 0 ;; esac
+  local deps copy stamp
+  # pnpm: <store>/<pkg>@<version>/node_modules holds the package and every dependency beside it; npm: the app's node_modules.
+  deps=$(cd "$AGENT/../.." && pwd -P)
+  copy="${REPO:-$PROJECT}/.work/.agents/$NAME@$AGENT_VERSION"
+  stamp="$copy/.built-from"
+  if [ ! -f "$stamp" ] || [ "$(cat "$stamp")" != "$AGENT" ] || [ ! -d "$copy/.output" ]; then
+    rm -rf "$copy"
+    mkdir -p "$copy"
+    cp -R "$AGENT/agent" "$AGENT/scripts" "$AGENT/package.json" "$copy/"
+    [ ! -f "$AGENT/.env.local" ] || cp "$AGENT/.env.local" "$copy/.env.local"
+    ln -s "$deps" "$copy/node_modules"
+    echo "$NAME: building the cloud agent once in $copy" >&2
+    (cd "$copy" && node "${NODE_ARGS[@]}" "$EVE_BIN" build > "$copy/build.log" 2>&1) || die "eve build failed in $copy: $(tail -n 5 "$copy/build.log")"
+    printf '%s\n' "$AGENT" > "$stamp"
+  fi
+  AGENT_RUNTIME=$copy
+}
 # Prints "Run status: <status>" and, when the record carries one, its reason line, for the run
 # record at RECORD_FILE (RUN's saved repo and agent.json/node-args give ticket.ts record what it
 # needs): scripts/ticket.ts record maps the record's status word (old or new alike) onto one of the
@@ -261,6 +287,8 @@ cmd_start() {
   OUT="$folder/groom"
   printf 'ticket: %s %s (%s)\nstatus: %s -> %s\nfolder: %s\n' "$T_ID" "$T_TITLE" "$T_URL" "$T_BEFORE" "$T_STATUS" "$folder"
   [ -n "$GUIDELINES" ] || eve=$(eve_bin)
+  AGENT_RUNTIME=$AGENT
+  [ -n "$GUIDELINES" ] || { EVE_BIN=$eve runtime_agent; }
   run=$(mktemp -d "${TMPDIR:-/tmp}/groomer.XXXXXX")
   prompt="Groom the Feature Board ticket $T_ID in the working folder $folder for the local repository $REPO. Use load-knowledge for the required guidelines, then call groom once with the folder, the repository and the guidelines path. The ticket's board moves, the Grooming Decisions page and the Idea summary are written by the launcher around this run; do not move the card or write Notion yourself. Report the run status, the questions of the round, $OUT/trace/groom.json and $OUT/run-analysis.md."
   printf '%s\n' "$OUT" > "$run/output"
@@ -274,7 +302,7 @@ cmd_start() {
 #!/bin/bash
 NODE_ARGS=()
 while IFS= read -r line; do NODE_ARGS+=("$line"); done < "$RUN/node-args"
-cd "$AGENT" || exit 1
+cd "$AGENT_RUNTIME" || exit 1
 if [ -n "$GUIDELINES" ]; then
   node "${NODE_ARGS[@]}" "$AGENT/scripts/groom.ts" "$FOLDER" "$REPO" "$GUIDELINES" > "$RUN/log" 2>&1
 else
@@ -301,7 +329,7 @@ recorded=$(printf '%s\n' "$finish" | sed -n 's/^run-status=//p' | head -n 1)
 printf '%s\n' "${recorded:-$status}" > "$RUN/status"
 RUNNER
   chmod +x "$run/run.sh"
-  AGENT="$AGENT" EVE="$eve" REPO="$REPO" GUIDELINES="$GUIDELINES" OUTPUT="$OUT" PROMPT="$prompt" RUN="$run" FOLDER="$folder" GROOMER_REPO="$REPO" GROOMER_FOLDER="$folder" RUN_ID="$T_RUN_ID" RUN_STARTED="$T_RUN_STARTED" PARENT_RUN="$PARENT_RUN" screen -dmS "groomer-$(basename "$run")" "$run/run.sh"
+  AGENT="$AGENT" AGENT_RUNTIME="$AGENT_RUNTIME" EVE="$eve" REPO="$REPO" GUIDELINES="$GUIDELINES" OUTPUT="$OUT" PROMPT="$prompt" RUN="$run" FOLDER="$folder" GROOMER_REPO="$REPO" GROOMER_FOLDER="$folder" RUN_ID="$T_RUN_ID" RUN_STARTED="$T_RUN_STARTED" PARENT_RUN="$PARENT_RUN" screen -dmS "groomer-$(basename "$run")" "$run/run.sh"
   printf 'started\nrun: %s\nidea: %s\nrepo: %s\noutput: %s\ninstructions: %s\n' "$run" "$idea" "$REPO" "$OUT" "$AGENT/agent/instructions.md"
   agent_line
 }
