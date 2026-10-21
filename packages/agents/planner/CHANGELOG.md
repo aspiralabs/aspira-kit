@@ -1,5 +1,12 @@
 # @aspiralabs/planner
 
+## 0.9.2
+
+### Patch Changes
+
+- Updated dependencies [de787ea]
+  - @aspiralabs/agent-common@0.9.2
+
 ## 0.9.1
 
 ### Patch Changes
