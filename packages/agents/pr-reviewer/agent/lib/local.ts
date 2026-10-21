@@ -244,7 +244,7 @@ export const agentSources = (agentDir: string) => ({
  * schema is review.ts's. The only text added here is how a session runs a turn instead of eve:
  * real paths, and where to write the structured result.
  */
-export function renderTaskPrompt(task: PlanTask, output: string, persona: { path: string; text: string }, pr: PrContext, document?: string): string {
+export function renderTaskPrompt(task: PlanTask, output: string, persona: { path: string; text: string }, pr: PrContext, document?: string, repo?: string): string {
   const handBack =
     document === undefined
       ? []
@@ -264,7 +264,7 @@ export function renderTaskPrompt(task: PlanTask, output: string, persona: { path
     `Everything above is what the agent sends ${DISPLAY_NAME[task.agent]}: the shared prefix and the review instructions that agent/lib/review.ts builds for this review, the persona from ${persona.path}, and the turn. This part is only how a session runs the turn.`,
     '',
     `- This turn runs as a subagent of a Claude Code session, not in the agent's sandbox, so every path above is a real path on this machine. read_file is the Read tool; read_files is the Read tool over each path listed (one call per path counts as one read_files call); read_diff(paths) is the \`diff --git a/<path> b/<path>\` section of each listed path in ${pr.paths?.files.patch ?? FILES.patch} (Grep that header for the line, then Read the section up to the next \`diff --git\` line; one read_diff call however many paths); search is the Grep tool with two lines of context; and the shell commands named above run through Bash.`,
-    `- ${RESEARCH_RULE} ${sessionResearchTools(pr.repo ?? process.cwd())}`,
+    `- ${RESEARCH_RULE} ${sessionResearchTools(repo ?? process.cwd())}`,
     `- The structured result the turn asks for goes into \`${output}\` as ONE JSON object valid against the output schema below (review.ts's own). No fences and no prose in that file. Then reply with one line.`,
     ...handBack,
     '',
@@ -657,7 +657,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       const prompt = join(work, 'prompts', `${task.id}.md`)
       const system = sources.seat(task.agent)
       const document = DOCUMENT_TURNS.find((turn) => turn.id === task.id)
-      await writeFile(prompt, renderTaskPrompt(task, output, { path: system, text: await readFile(system, 'utf8') }, pr, document && paths.files[document.file]))
+      await writeFile(prompt, renderTaskPrompt(task, output, { path: system, text: await readFile(system, 'utf8') }, pr, document && paths.files[document.file], state.repoPath ?? undefined))
       tasks.push({ id: task.id, agent: task.agent, prompt, output, schema: SCHEMA_NAMES[task.kind], model: sessionModel(MODELS[task.agent] ?? MODELS['pr-reviewer']), ...(task.error === undefined ? {} : { error: task.error }), ...(retry === undefined ? {} : { retry }) })
     }
     await writeFile(stateFile, JSON.stringify(state, null, 2))
