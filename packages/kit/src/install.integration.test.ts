@@ -72,10 +72,10 @@ beforeAll(async () => {
 })
 
 describe('an installed project', () => {
-  it('has every agent under node_modules and kit init writes the seven agent skills from them and the three kit-owned skills', () => {
+  it('has every agent under node_modules and kit init writes the eight agent skills from them and the three kit-owned skills', () => {
     expect(JSON.parse(readFileSync(join(app, 'node_modules', '@aspiralabs', 'agents', 'package.json'), 'utf8'))).toMatchObject({ name: '@aspiralabs/agents' })
     const written = initLines.filter((l) => l.startsWith('write  .claude/skills/aspira-'))
-    expect(written.filter((l) => AGENTS.some((agent) => l.startsWith(`write  .claude/skills/aspira-${agent} `))).length).toBe(7)
+    expect(written.filter((l) => AGENTS.some((agent) => l.startsWith(`write  .claude/skills/aspira-${agent} `))).length).toBe(8)
     expect(written.filter((l) => /^write {2}\.claude\/skills\/aspira-(cleanup|next|worktree) /.test(l)).length).toBe(3)
     expect(initLines.some((l) => l.startsWith('write  .claude/skills/aspira-groomer'))).toBe(true)
     const version = (JSON.parse(readFileSync(join(repo, 'packages/agents/meta/package.json'), 'utf8')) as { version: string }).version
@@ -87,7 +87,7 @@ describe('an installed project', () => {
     const report: string[] = []
     doctor(app, (line) => report.push(line))
     const skillLines = report.filter((l) => l.startsWith('ok   .claude/skills/aspira-'))
-    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/agents')).length).toBe(7)
+    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/agents')).length).toBe(8)
     expect(skillLines.filter((l) => l.includes('matches @aspiralabs/kit')).length).toBe(3)
     expect(report.some((l) => l.startsWith('@aspiralabs/agents') && l.includes(`installed ${version}`))).toBe(true)
   })

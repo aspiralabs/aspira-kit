@@ -51,7 +51,7 @@ export async function visualVerifySummaryLines(state: { phases?: Record<string, 
   if (record === null) return []
   const lines = await visualVerifyLines(record, repo, { app })
   const blockers = record.findings.some((finding) => finding.grade === 'blocker')
-  if ((record.status === 'blocked' || record.status === 'stopped') && blockers) return [`Visual verify blockers (verification ${record.verifications} of ${MAX_VERIFICATIONS}):`, ...lines]
+  if ((record.status === 'blocked' || record.status === 'halted') && blockers) return [`Visual verify blockers (verification ${record.verifications} of ${MAX_VERIFICATIONS}):`, ...lines]
   return [`Visual verify: ${record.status}`, ...lines]
 }
 
@@ -125,7 +125,7 @@ async function nextStage(context: PhaseContext, state: RunState, sys: System): P
   }
   const local = localDevUrl(context.aspira.dev!.url)
   if (!local.ok) {
-    const record: VisualVerifyRecord = { status: 'stopped', verifications: 0, ...blank, key, dirtyBefore: [] }
+    const record: VisualVerifyRecord = { status: 'halted', verifications: 0, ...blank, key, dirtyBefore: [] }
     return stopWith(await settle(context, state, record), local.reason, { action: 'visual-verify', message: local.reason })
   }
   return verifyStage(context, state, key, 1, sys)
@@ -157,7 +157,7 @@ async function acceptVerify(context: PhaseContext, state: RunState, pending: Pen
   const unfixable = blockers.filter((finding) => finding.files.length === 0 || finding.deployedBackend)
   if (unfixable.length > 0) {
     const message = `visual verify found blockers the fix stage cannot take (${unfixable.map((finding) => (finding.files.length === 0 ? 'cites no file' : 'caused by the deployed backend')).join('; ')}): ${unfixable.map((finding) => finding.title).join('; ')}. The run stops before the gate`
-    return stopWith(await settle(context, state, { ...base, status: 'stopped' }, found.screenshots), message, { action: 'visual-verify', message })
+    return stopWith(await settle(context, state, { ...base, status: 'halted' }, found.screenshots), message, { action: 'visual-verify', message })
   }
   if (n >= MAX_VERIFICATIONS) {
     const message = `visual verify still has ${blockers.length} blocker${blockers.length === 1 ? '' : 's'} after verification ${n} of ${MAX_VERIFICATIONS}: ${blockers.map((finding) => finding.title).join('; ')}. The run stops before the gate`
@@ -207,7 +207,7 @@ async function acceptFix(context: PhaseContext, state: RunState, pending: Pendin
     const message = `the visual-verify fix ${n} changed files outside the findings: ${outside.join(', ')}. The fix may change only the files the findings cite and their tests, so nothing was committed`
     return stopWith(state, message, { action: 'fix', message })
   }
-  const stepRecord = { step: 'fix', runId: context.runId, command: `visual-verify fix subagent for verification ${n}`, status: 'complete', startedAt: pending.startedAt, endedAt: context.now, usage: readStepUsage(parsed.data.usage), nonce: pending.nonce }
+  const stepRecord = { step: 'fix', runId: context.runId, command: `visual-verify fix subagent for verification ${n}`, status: 'ready', startedAt: pending.startedAt, endedAt: context.now, usage: readStepUsage(parsed.data.usage), nonce: pending.nonce }
   const next: RunState = { ...state, steps: [...state.steps, stepRecord] }
   if (changed.length > 0) {
     const message = `${context.id}: fix visual-verify blockers, verification ${n}`

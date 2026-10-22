@@ -399,7 +399,7 @@ describe('kit doctor with an app', () => {
     expect(flagged.lines).toContain('ok   .gitignore ignores .aspira/ (the audit log the hooks write)')
     expect(flagged.lines).toContain('ok   aspira.json names the Feature Board and the app (apps/web)')
     const skillLines = flagged.lines.filter((l) => l.startsWith('ok   .claude/skills/aspira-'))
-    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/agents')).length).toBe(7)
+    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/agents')).length).toBe(8)
     expect(skillLines.filter((l) => l.includes('matches @aspiralabs/kit')).length).toBe(3)
     expect(flagged.lines.at(-1)).toBe('healthy')
     // Without the flag: the app comes from aspira.json.

@@ -72,7 +72,7 @@ export type VisualVerifyAnswer = z.infer<typeof visualVerifyAnswerSchema>
 
 /** What a caller records and renders: no screenshots, which stay local. */
 export const visualVerifyResultSchema = z.object({
-  status: z.enum(['passed', 'skipped', 'blocked', 'stopped']),
+  status: z.enum(['passed', 'skipped', 'blocked', 'halted']),
   verifications: z.number().int().min(0),
   skipReason: z.enum(SKIP_REASONS).optional(),
   skipDetail: text.optional(),
