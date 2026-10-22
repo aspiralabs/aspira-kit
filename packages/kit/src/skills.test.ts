@@ -8,14 +8,14 @@ import { AGENTS, agentPackageDir, checkSkills, installSkills, skillDir, VERSION_
 
 type Layout = 'npm' | 'pnpm'
 
-/** The kit-owned skills every project gets from @aspiralabs/kit itself, beside the seven agent skills. */
+/** The kit-owned skills every project gets from @aspiralabs/kit itself, beside the eight agent skills. */
 const KIT_OWNED = ['cleanup', 'next', 'worktree'] as const
 /** The version in packages/kit/package.json: the kit-owned skills are stamped with it. */
 const KIT_VERSION = (JSON.parse(readFileSync(join(dirname(dirname(fileURLToPath(import.meta.url))), 'package.json'), 'utf8')) as { version: string }).version
 
 const kitSkill = (root: string, name: string): string => join(root, '.claude', 'skills', `aspira-${name}`)
 
-/** The log lines installSkills prints for the seven agent skills only, by verb. */
+/** The log lines installSkills prints for the eight agent skills only, by verb. */
 const agentLines = (lines: string[], verb: string): string[] => lines.filter((l) => l.startsWith(verb) && AGENTS.some((agent) => l.includes(`.claude/skills/aspira-${agent} (`)))
 
 /** A package.json at `dir` naming the package. */
@@ -47,7 +47,7 @@ function project(version: string, layout: Layout = 'npm'): string {
     chmodSync(join(dir, 'skill', `aspira-${agent}`, 'scripts', `${agent}.sh`), 0o644)
   }
   // build-feature: not yet an Agent in skills.ts, but a fake package laid out the same way, so the
-  // seven-skill expectations below have a real fixture to install from once it is.
+  // eight-skill expectations below have a real fixture to install from once it is.
   const buildFeature = pkg('build-feature', join(scope, 'build-feature'))
   mkdirSync(join(buildFeature, 'skill', 'aspira-build-feature', 'scripts'), { recursive: true })
   writeFileSync(join(buildFeature, 'skill', 'aspira-build-feature', 'SKILL.md'), `---\nname: aspira-build-feature\n---\n# build-feature ${version}\n`)
@@ -124,7 +124,7 @@ describe('agentPackageDir', () => {
 })
 
 describe('installSkills', () => {
-  it('writes the seven skill folders as copies of the installed packages, each with .kit-version, and keeps them on a re-run', () => {
+  it('writes the eight skill folders as copies of the installed packages, each with .kit-version, and keeps them on a re-run', () => {
     const root = project('0.5.0', 'pnpm')
     const first = logs()
     expect(installSkills({ projectRoot: root, dryRun: false, log: first.log })).toEqual([])
@@ -135,14 +135,19 @@ describe('installSkills', () => {
       // The launcher is executable even when the package manager dropped the bit.
       expect(statSync(join(dir, 'scripts', `${agent}.sh`)).mode & 0o111).not.toBe(0)
     }
-    expect(agentLines(first.lines, 'write ').length).toBe(7)
+    expect(agentLines(first.lines, 'write ').length).toBe(8)
     for (const name of KIT_OWNED) {
       expect(first.lines.some((l) => l.startsWith('write ') && l.includes(`.claude/skills/aspira-${name}`)), name).toBe(true)
     }
-    // build-feature installs the same way as the other seven agents, pinned to .kit-version.
+    // build-feature installs the same way as the other agents, pinned to .kit-version.
     const buildFeature = buildFeatureSkillDir(root)
     expect(readFileSync(join(buildFeature, 'SKILL.md'), 'utf8')).toContain('# build-feature 0.5.0')
     expect(readFileSync(join(buildFeature, VERSION_FILE), 'utf8')).toBe('0.5.0\n')
+    // visual-verify (F16) is installed with its launcher and .kit-version like the others.
+    const visualVerify = join(root, '.claude', 'skills', 'aspira-visual-verify')
+    expect(existsSync(join(visualVerify, 'SKILL.md'))).toBe(true)
+    expect(existsSync(join(visualVerify, 'scripts', 'visual-verify.sh'))).toBe(true)
+    expect(readFileSync(join(visualVerify, VERSION_FILE), 'utf8')).toBe('0.5.0\n')
     const again = logs()
     installSkills({ projectRoot: root, dryRun: false, log: again.log })
     expect(again.lines.every((l) => l.startsWith('keep   '))).toBe(true)
@@ -167,7 +172,7 @@ describe('installSkills', () => {
     symlinkSync(join(bumped, 'node_modules'), join(root, 'node_modules'))
     const dry = logs()
     installSkills({ projectRoot: root, dryRun: true, log: dry.log })
-    expect(agentLines(dry.lines, 'update ').length).toBe(7)
+    expect(agentLines(dry.lines, 'update ').length).toBe(8)
     expect(readFileSync(join(skillDir(root, 'planner'), VERSION_FILE), 'utf8')).toBe('0.5.0\n')
     installSkills({ projectRoot: root, dryRun: false, log: () => {} })
     expect(readFileSync(join(skillDir(root, 'planner'), VERSION_FILE), 'utf8')).toBe('0.6.0\n')
@@ -186,7 +191,7 @@ describe('installSkills', () => {
     }
   })
 
-  it('writes the seven agent skills and the three kit-owned skills in the npm layout and in this repository\'s self-hosting layout', () => {
+  it('writes the eight agent skills and the three kit-owned skills in the npm layout and in this repository\'s self-hosting layout', () => {
     const cases: Array<[string, string, string]> = [
       ['npm', project('0.5.0'), '0.5.0'],
       ['self-hosting', selfHosting({ common: true, metaLink: true, agents: true }), '0.6.1'],
@@ -240,7 +245,7 @@ describe('checkSkills and kit doctor', () => {
     installSkills({ projectRoot: root, dryRun: false, log: () => {} })
     const healthy = logs()
     expect(doctor(root, healthy.log)).toBe(0)
-    expect(healthy.lines.filter((l) => l.startsWith('ok   .claude/skills/aspira-') && l.endsWith(' matches @aspiralabs/agents')).length).toBe(7)
+    expect(healthy.lines.filter((l) => l.startsWith('ok   .claude/skills/aspira-') && l.endsWith(' matches @aspiralabs/agents')).length).toBe(8)
     expect(healthy.lines.filter((l) => l.startsWith('ok   .claude/skills/aspira-') && l.endsWith(' matches @aspiralabs/kit')).length).toBe(3)
     expect(checkSkills(root).every((c) => c.ok)).toBe(true)
 
@@ -288,11 +293,11 @@ describe('checkSkills and kit doctor', () => {
       return root
     }
 
-    it('doctor prints the seven agent skill lines unchanged and three kit-owned lines matching @aspiralabs/kit', () => {
+    it('doctor prints the eight agent skill lines unchanged and three kit-owned lines matching @aspiralabs/kit', () => {
       const { lines, log } = logs()
       expect(doctor(healthyProject(), log)).toBe(0)
       const skillLines = lines.filter((l) => l.includes('.claude/skills/aspira-'))
-      expect(skillLines.length).toBe(10)
+      expect(skillLines.length).toBe(11)
       for (const agent of AGENTS) expect(lines).toContain(`ok   .claude/skills/aspira-${agent} matches @aspiralabs/agents`)
       for (const name of KIT_OWNED) {
         expect(skillLines.some((l) => l.startsWith('ok   ') && l.includes(`.claude/skills/aspira-${name} `) && l.endsWith('matches @aspiralabs/kit')), name).toBe(true)

@@ -38,6 +38,7 @@ const LAUNCHERS: Launcher[] = [
   { name: 'code-analyzer', envVar: 'CODE_ANALYZER_AGENT_DIR', skillDir: 'packages/agents/code-analyzer/skill/aspira-code-analyzer', args: ['local', 'KIT-2'] },
   { name: 'pr-reviewer', envVar: 'PR_REVIEWER_AGENT_DIR', skillDir: 'packages/agents/pr-reviewer/skill/aspira-pr-reviewer', args: ['local', 'KIT-2'] },
   { name: 'build-feature', envVar: 'BUILD_FEATURE_AGENT_DIR', skillDir: 'packages/agents/build-feature/skill/aspira-build-feature', args: ['local', 'KIT-2'] },
+  { name: 'visual-verify', envVar: 'VISUAL_VERIFY_AGENT_DIR', skillDir: 'packages/agents/visual-verify/skill/aspira-visual-verify', args: ['local', 'KIT-2'] },
 ]
 
 const AGENTS_VERSION = '0.8.0'
