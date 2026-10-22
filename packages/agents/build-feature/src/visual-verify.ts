@@ -13,8 +13,8 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { planSchema, touchesUi } from '@aspiralabs/agent-common/lib/plan'
-import { localDevUrl, visualVerifyAnswerSchema, visualVerifyLines, visualVerifyReport, visualVerifyResultSchema, type SkipReason, type VisualVerifyAnswer } from '@aspiralabs/agent-common/lib/visual-verify'
+import { touchesUi } from '@aspiralabs/agent-common/lib/plan'
+import { localDevUrl, planChangesSchema, visualVerifyAnswerSchema, visualVerifyLines, visualVerifyReport, visualVerifyResultSchema, type SkipReason, type VisualVerifyAnswer } from '@aspiralabs/agent-common/lib/visual-verify'
 import type { Phase, PhaseContext, PhaseResult } from '#src/driver.ts'
 import { buildKey, credentialNames, withoutCredentials } from '#src/gate.ts'
 import { outsideFindings, type Finding } from '#src/review-loop.ts'
@@ -62,16 +62,15 @@ async function settle(context: PhaseContext, state: RunState, record: VisualVeri
   return withRecord(state, record)
 }
 
-/** The plan's tasks, read defensively: only the changed paths matter here, so a plan whose other fields do not validate still decides whether it touches UI. */
-function parsePlanTasks(raw: string): z.infer<ReturnType<typeof planTasks>> | null {
+/** The plan's changed paths, read defensively: a plan whose other fields do not validate still decides whether it touches UI. */
+function parsePlanTasks(raw: string): z.infer<typeof planChangesSchema> | null {
   try {
-    const parsed = planTasks().safeParse(JSON.parse(raw))
+    const parsed = planChangesSchema.safeParse(JSON.parse(raw))
     return parsed.success ? parsed.data : null
   } catch {
     return null
   }
 }
-const planTasks = () => planSchema.pick({ tasks: true })
 
 /** The skip reason known before any stage: a plan without UI (Q1), --cloud, or no dev entry; null when the check runs. */
 async function skipBefore(context: PhaseContext): Promise<SkipReason | null> {

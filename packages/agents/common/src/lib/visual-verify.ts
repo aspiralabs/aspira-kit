@@ -7,6 +7,9 @@
 import { z } from 'zod'
 import { redact } from './redact.ts'
 
+/** The part of a plan.json that decides whether a build touches UI: each task's changed paths. Read leniently, so a plan whose other fields do not validate still decides. */
+export const planChangesSchema = z.object({ tasks: z.array(z.object({ changes: z.array(z.object({ path: z.string() })) })) })
+
 /** The aspira.json `dev` entry. Named DevServer, never `dev` alone, to stay apart from Card.dev. */
 export const devServerSchema = z.object({
   cwd: z.string().default('.'),
@@ -115,4 +118,21 @@ export async function visualVerifyReport(result: VisualVerifyResult, screenshots
   const lines = ['# Visual verify', '', `Viewport: ${await redact(result.viewport ?? 'not recorded', repo, options)}`, '', '## Findings', '', ...(await visualVerifyLines(result, repo, options))]
   if (screenshots.length > 0) lines.push('', '## Screenshots (local only)', '', ...screenshots.map((path) => `- ${path}`))
   return `${lines.join('\n')}\n`
+}
+
+/** Credentials a project command never gets, whether or not they are set. */
+export const CREDENTIALS = ['NOTION_TOKEN', 'NOTION_API_KEY', 'GITHUB_TOKEN', 'GH_TOKEN', 'AI_GATEWAY_API_KEY', 'NPM_TOKEN', 'NODE_AUTH_TOKEN'] as const
+/** A variable named like a credential. */
+const CREDENTIAL_NAME = /_(TOKEN|SECRET|KEY|PASSWORD)$/i
+
+/** The variables a project command runs without: the fixed credentials and every credential-named variable set in `env`, sorted. */
+export function credentialNames(env: NodeJS.ProcessEnv): string[] {
+  const named = Object.keys(env).filter((name) => CREDENTIAL_NAME.test(name))
+  return [...new Set([...CREDENTIALS, ...named])].sort()
+}
+
+/** `command` as a shell line that runs it with every one of `names` removed from its environment. */
+export function withoutCredentials(command: string, names: readonly string[]): string {
+  const quoted = (arg: string) => (/^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", "'\\''")}'`)
+  return `${['env', ...names.flatMap((name) => ['-u', name])].map(quoted).join(' ')} ${command}`
 }

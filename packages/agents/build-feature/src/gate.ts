@@ -25,8 +25,9 @@ import { dirname, join, relative } from 'node:path'
 import { z } from 'zod'
 import type { Phase, PhaseContext, PhaseResult } from '#src/driver.ts'
 import { tail } from '@aspiralabs/agent-common/lib/redact'
+import { CREDENTIALS, credentialNames, withoutCredentials } from '@aspiralabs/agent-common/lib/visual-verify'
 import type { Pending, RunState } from '#src/run-state.ts'
-import { gitShowFile, gitStatus, packageManagerOf, parseStatus, shown } from '#src/system.ts'
+import { gitShowFile, gitStatus, packageManagerOf, parseStatus } from '#src/system.ts'
 
 export const NO_GATE = 'no project gate found'
 
@@ -161,21 +162,8 @@ export async function findGate(repo: string, app: string, gates?: readonly Confi
 // Credentials and changed scripts (AVA3.1).
 // ---------------------------------------------------------------------------------------------
 
-/** Credentials a gate command never gets, whether or not they are set. */
-export const CREDENTIALS = ['NOTION_TOKEN', 'NOTION_API_KEY', 'GITHUB_TOKEN', 'GH_TOKEN', 'AI_GATEWAY_API_KEY', 'NPM_TOKEN', 'NODE_AUTH_TOKEN'] as const
-/** A variable named like a credential. */
-const CREDENTIAL_NAME = /_(TOKEN|SECRET|KEY|PASSWORD)$/i
-
-/** The variables a gate command runs without: the fixed credentials and every credential-named variable set in `env`, sorted. */
-export function credentialNames(env: NodeJS.ProcessEnv): string[] {
-  const named = Object.keys(env).filter((name) => CREDENTIAL_NAME.test(name))
-  return [...new Set([...CREDENTIALS, ...named])].sort()
-}
-
-/** `command` as a shell line that runs it with every one of `names` removed from its environment. */
-export function withoutCredentials(command: string, names: readonly string[]): string {
-  return `${shown('env', names.flatMap((name) => ['-u', name]))} ${command}`
-}
+// The credential helpers live in agent-common, shared with the visual-verify phase and the standalone run (KIT-58), so every one strips exactly the same names.
+export { CREDENTIALS, credentialNames, withoutCredentials }
 
 /** A gate script whose body differs from the base branch: `base` null when the base has no such script. */
 export type ChangedScript = { name: string; base: string | null; head: string }

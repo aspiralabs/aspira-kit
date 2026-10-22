@@ -10,7 +10,7 @@
     "build": "echo '@aspiralabs/visual-verify has no build step'",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src scripts"
+    "lint": "eslint scripts"
   },
   "dependencies": {
     "@aspiralabs/agent-common": "workspace:*",
