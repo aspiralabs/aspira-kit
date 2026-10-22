@@ -460,6 +460,9 @@ importers:
       '@aspiralabs/spec-writer':
         specifier: workspace:*
         version: link:../spec-writer
+      '@aspiralabs/visual-verify':
+        specifier: workspace:*
+        version: link:../visual-verify
 
   packages/agents/planner:
     dependencies:
@@ -592,6 +595,34 @@ importers:
       eve:
         specifier: ^0.63.0
         version: 0.63.0(ai@7.0.107(zod@4.5.4))
+      zod:
+        specifier: 4.5.4
+        version: 4.5.4
+    devDependencies:
+      '@aspiralabs/config':
+        specifier: workspace:*
+        version: link:../../config
+      '@types/node':
+        specifier: ^24
+        version: 24.13.6
+      eslint:
+        specifier: ^9.39.0
+        version: 9.39.5(jiti@2.7.0)(supports-color@7.2.0)
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.6)(jiti@2.7.0)(jsdom@26.1.0(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)
+
+  packages/agents/visual-verify:
+    dependencies:
+      '@aspiralabs/agent-common':
+        specifier: workspace:*
+        version: link:../common
+      amaro:
+        specifier: ^1.2.1
+        version: 1.2.1
       zod:
         specifier: 4.5.4
         version: 4.5.4

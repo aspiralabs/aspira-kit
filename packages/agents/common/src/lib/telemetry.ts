@@ -104,7 +104,7 @@ export const PHASE_NAMES = [
 ] as const
 
 /** The build-feature driver's stage kinds (build-feature driver.ts STAGE_KINDS; agent-common cannot import build-feature), plus the telemetry stage and the orchestration labels. */
-export const STAGE_NAMES = ['resolve', 'approval', 'overrides', 'worktree', 'step', 'ask', 'move', 'set-pr', 'gate', 'step10', 'fix', 'release-row', 'summary', 'end', 'telemetry', 'orchestration', 'segment'] as const
+export const STAGE_NAMES = ['resolve', 'approval', 'overrides', 'worktree', 'step', 'ask', 'move', 'set-pr', 'gate', 'step10', 'fix', 'release-row', 'visual-verify', 'summary', 'end', 'telemetry', 'orchestration', 'segment'] as const
 
 /** Every fixed span name. Numbered labels (subagent-<n>, round-<n>, repair-<n>, segment-<n>) are matched by NUMBERED_NAME. */
 export const SPAN_NAMES: readonly string[] = [...new Set<string>([...SKILLS, 'build-feature', ...PHASE_NAMES, ...STAGE_NAMES])]

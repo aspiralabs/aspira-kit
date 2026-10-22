@@ -16,7 +16,7 @@ import { initNext } from './stacks/next.js'
 
 const kit = dirname(dirname(fileURLToPath(import.meta.url)))
 const repo = dirname(dirname(kit))
-const PACKAGES = ['common', 'spec-reviewer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'groomer', 'build-feature', 'meta']
+const PACKAGES = ['common', 'spec-reviewer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'groomer', 'build-feature', 'visual-verify', 'meta']
 const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6'
 const run = (cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) => execFileSync(cmd, args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 

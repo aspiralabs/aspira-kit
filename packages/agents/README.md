@@ -17,10 +17,11 @@ Aspira Labs agents, built on [eve](https://vercel.com/eve). One package per agen
 | `packages/agents/code-analyzer` | `code-analyzer` | `specs/agents-code-analyzer.md` | detect, run, auto-fix, model-fix, loop until clean |
 | `packages/agents/implementor` | `implementor` | `specs/agents-implementor.md` | builds a plan test-first, parallel lanes |
 | `packages/agents/build-feature` | — (skill-only, no eve agent) | KIT-11 | orchestrates the other skills' steps into one AI-DLC run, idea to merge-ready PR |
+| `packages/agents/visual-verify` | — (skill-only, no eve agent) | KIT-58 | opens a UI-touching build in a real browser before the gate; also a standalone report-only run |
 
 ## Skills: one pattern for every agent
 
-Spec: `specs/agents-skill-pattern.md`. Every agent a person runs (groomer, spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer) has a Claude Code skill at `<agent>/skill/aspira-<agent>/`, with `SKILL.md` and `scripts/<agent>.sh`. The agent is the single source of truth, and the skill only calls it. `@aspiralabs/build-feature` is the one documented exception: a skill-only package with no `agent/` and no eve agent, whose `/aspira-build-feature` skill runs other skills' steps as subagents of this session instead of launching an agent.
+Spec: `specs/agents-skill-pattern.md`. Every agent a person runs (groomer, spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer) has a Claude Code skill at `<agent>/skill/aspira-<agent>/`, with `SKILL.md` and `scripts/<agent>.sh`. The agent is the single source of truth, and the skill only calls it. `@aspiralabs/build-feature` and `@aspiralabs/visual-verify` are the two documented exceptions: skill-only packages with no `agent/` and no eve agent. `/aspira-build-feature` runs other skills' steps as subagents of this session instead of launching an agent; `/aspira-visual-verify` drives a browser.
 
 Architecture Decision Record (Proposed): https://app.notion.com/p/3f83e59b225881a2bc2cf2317d7b27a7 covers both the shared `--take-recommended` option on the step agents (below) and this skill-only exception for `@aspiralabs/build-feature`.
 
@@ -115,7 +116,7 @@ Package scripts (`dev`, `info`, `typecheck`, `lint`) need no `exec`: `pnpm -C <d
 
 Root `typecheck`, `lint`, `build` and `test` (which packs every package) pick the package up for free. An eve agent's `build` is `eve build`, which bundles its workflow tools: a workflow body that reaches a Node.js builtin (`node:fs` and the like) fails there instead of at the first run. `eve info` alone does not catch that.
 
-A skill-only package (`@aspiralabs/build-feature` is the one so far) skips the `agent/` steps above: no `agent.ts`, no `instructions.md`, no eve agent to discover, no `.env.local` symlink. It still joins the `fixed` group, `meta/package.json`, and `packages/kit/src/skills.ts`, and still ships `skill/aspira-<name>/` with `SKILL.md` and `scripts/<name>.sh`.
+A skill-only package (`@aspiralabs/build-feature` and `@aspiralabs/visual-verify` are the two so far) skips the `agent/` steps above: no `agent.ts`, no `instructions.md`, no eve agent to discover, no `.env.local` symlink. It still joins the `fixed` group, `meta/package.json`, and `packages/kit/src/skills.ts`, and still ships `skill/aspira-<name>/` with `SKILL.md` and `scripts/<name>.sh`.
 
 ## Shared conventions
 

@@ -15,7 +15,7 @@ import { appRoot } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 
 /** The agents a project gets through @aspiralabs/agents, each with a /aspira-<agent> skill. */
-export const AGENTS = ['groomer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'build-feature'] as const
+export const AGENTS = ['groomer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'build-feature', 'visual-verify'] as const
 /** Skills an earlier kit installed that no longer exist: `kit init` removes their folders (spec-reviewer folded into spec-writer, KIT-48). */
 export const RETIRED_SKILLS = ['spec-reviewer'] as const
 export type Agent = (typeof AGENTS)[number]

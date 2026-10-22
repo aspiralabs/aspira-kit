@@ -16,7 +16,8 @@
       "@aspiralabs/code-analyzer",
       "@aspiralabs/pr-reviewer",
       "@aspiralabs/groomer",
-      "@aspiralabs/build-feature"
+      "@aspiralabs/build-feature",
+      "@aspiralabs/visual-verify"
     ]
   ],
   "access": "public",
