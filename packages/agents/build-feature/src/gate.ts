@@ -52,7 +52,7 @@ const resultSchema = z.object({ command: z.string().min(1), exitCode: z.number()
 const answerSchema = z.object({ nonce: z.string(), results: z.array(resultSchema) })
 
 export const gateRecordSchema = z.object({
-  /** The build this record belongs to (gateKey). */
+  /** The build this record belongs to (buildKey). */
   key: z.string(),
   status: z.enum(['passed', 'failed', 'none']),
   source: z.string().nullable(),
@@ -274,7 +274,7 @@ async function acceptScripts(context: PhaseContext, state: RunState, pending: Pe
 // ---------------------------------------------------------------------------------------------
 
 /** The build the gate belongs to: the implementor's export and its last recorded step. */
-async function gateKey(folder: string, state: RunState): Promise<string> {
+export async function buildKey(folder: string, state: RunState): Promise<string> {
   const exported = await readFile(join(folder, 'plan.review/trace/implementation-local.json'), 'utf8').catch(() => '')
   const last = state.steps.filter((step) => step.step === 'implementor').at(-1)
   const hash = createHash('sha256').update(exported).digest('hex').slice(0, 16)
@@ -296,7 +296,7 @@ const withRecord = (state: RunState, record: GateRecord): RunState => ({ ...stat
 
 /** Gate stage after an implementor 'complete': nothing when this build's gate is recorded, else the commands to run. */
 export async function gateStage(context: PhaseContext, state: RunState): Promise<PhaseResult> {
-  const key = await gateKey(context.folder, state)
+  const key = await buildKey(context.folder, state)
   const recorded = gateRecordOf(state)
   if (recorded !== null && recorded.key === key && recorded.status !== 'failed') return { kind: 'done', state }
   const app = context.aspira.app ?? '.'
@@ -331,7 +331,7 @@ export async function gateStage(context: PhaseContext, state: RunState): Promise
 async function acceptGate(context: PhaseContext, state: RunState, pending: Pending, answer: Record<string, unknown>): Promise<PhaseResult> {
   const commands = z.array(z.string()).parse(pending.data?.commands ?? [])
   const source = typeof pending.data?.source === 'string' ? pending.data.source : null
-  const key = typeof pending.data?.key === 'string' ? pending.data.key : await gateKey(context.folder, state)
+  const key = typeof pending.data?.key === 'string' ? pending.data.key : await buildKey(context.folder, state)
   const parsed = answerSchema.safeParse(answer)
   if (!parsed.success) {
     const message = `the project gate answer at ${pending.output} is not a list of results: ${parsed.error.issues.map((issue) => `${issue.path.join('.') || 'answer'}: ${issue.message}`).join('; ')}`

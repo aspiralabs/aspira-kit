@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises'
 import { afterAll, describe, expect, it } from 'vitest'
 import { PHASES } from '#src/driver.ts'
 import { gatePhase } from '#src/gate.ts'
+import { visualVerifyPhase } from '#src/visual-verify.ts'
 import { reviewPhase } from '#src/review-loop.ts'
 import { releaseRowPhase, step10Phase } from '#src/step10.ts'
 import { step8Phase } from '#src/step8.ts'
@@ -133,6 +134,6 @@ describe('F2 (Q10 revised): two modes', () => {
 
 describe('NOVA1.2: the later phases are bound statically, never found by a runtime import', () => {
   it('binds every phase name to the module export that ships with the package', () => {
-    expect(PHASES).toStrictEqual({ gate: gatePhase, step8: step8Phase, step10: step10Phase, review: reviewPhase, 'release-row': releaseRowPhase })
+    expect(PHASES).toStrictEqual({ 'visual-verify': visualVerifyPhase, gate: gatePhase, step8: step8Phase, step10: step10Phase, review: reviewPhase, 'release-row': releaseRowPhase })
   })
 })

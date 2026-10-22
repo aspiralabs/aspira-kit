@@ -27,7 +27,7 @@ export const planSchema = z.object({
 export type Plan = z.infer<typeof planSchema>
 
 /** True when a plan writes UI code, which needs the Aspira UI kit's component docs. */
-export function touchesUi(plan: Plan): boolean {
+export function touchesUi(plan: Pick<Plan, 'tasks'>): boolean {
   return plan.tasks.some((task) => task.changes.some((change) => /\.(?:tsx|jsx|css|scss)$/.test(change.path) || /(?:^|\/)components\//.test(change.path)))
 }
 
