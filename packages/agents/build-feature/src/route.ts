@@ -1,6 +1,6 @@
 // The live Status picks what the run does next, through the Playbook's own table
 // (@aspiralabs/kit/playbook): a step (the row's command with the ID filled in), a Ready move for
-// the rows a human used to do by hand, the later phases (gate, Step 8, Step 10, the review loop,
+// the rows a human used to do by hand, the later phases (visual verify, gate, Step 8, Step 10, the review loop,
 // the release row), or the end of the run. What the rows cannot say is decided here, from facts
 // the driver reads: whether a review covers the current spec.md, what the implementor's last
 // result was, and whether the analyzer finished clean.
@@ -36,7 +36,7 @@ export const modeLine = (mode: Mode, autonomous = false): string =>
     : "Mode: --cloud (every step ran its skill with --cloud: the step's own agent, started and waited on)"
 
 /** The later-phase modules, in run order. */
-export const PHASES = ['gate', 'step8', 'step10', 'review', 'release-row'] as const
+export const PHASES = ['visual-verify', 'gate', 'step8', 'step10', 'review', 'release-row'] as const
 export type PhaseName = (typeof PHASES)[number]
 
 /** The Ready moves a human used to make by hand, which the run makes on its run-start approval (F15, F16). */
@@ -161,6 +161,7 @@ export function routeStatus(status: string, facts: RouteFacts): Route {
         kind: 'sequence',
         // One analyzer step per app directory the build changed (KIT-39), each done when its own run ended ready.
         items: [
+          { kind: 'phase', phase: 'visual-verify' },
           { kind: 'phase', phase: 'gate' },
           ...analyzerApps(facts).map((app) => ({ ...stepCommand(named, { ...facts, app }), done: facts.apps?.length ? (facts.analyzed ?? []).includes(app) : facts.analyzerReady })),
           { kind: 'phase', phase: 'step8' },

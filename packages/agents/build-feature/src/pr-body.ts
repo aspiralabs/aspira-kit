@@ -16,6 +16,7 @@ import { promisify } from 'node:util'
 import { renderPrBody as renderSharedPrBody } from '@aspiralabs/agent-common/lib/pr-body'
 import { orderedTaken } from '#src/decisions.ts'
 import type { RunState } from '#src/run-state.ts'
+import { visualVerifyRecordOf } from '#src/visual-verify.ts'
 
 const exec = promisify(execFile)
 
@@ -74,6 +75,7 @@ export async function renderPrBody(input: RenderPrBodyInput): Promise<string> {
   const analyzers = results.flat()
   const taken = orderedTaken(state.takenKeys).map((entry) => ({ key: entry.key, decision: { question: entry.decision.question, answer: entry.decision.answer, recommended: entry.decision.recommended } }))
   const notice = (state.runs.at(-1)?.mode ?? 'local') === 'local' ? SAME_SESSION_NOTICE : CLOUD_NOTICE
+  const visualVerify = visualVerifyRecordOf(state)
   const footer = `See this ticket's **Build Summary** page for the full report: ${ticket.url}`
-  return renderSharedPrBody({ ticket, implementationMd, changedFiles: changed, analyzers, taken, notice, footer, repo, ...(app === undefined ? {} : { app }) })
+  return renderSharedPrBody({ ticket, implementationMd, changedFiles: changed, analyzers, taken, notice, footer, repo, ...(visualVerify === null ? {} : { visualVerify }), ...(app === undefined ? {} : { app }) })
 }

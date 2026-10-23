@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..', '..')
 
-// The seven launcher skills (six agents and build-feature; spec-reviewer is a library since KIT-48), each `skill/aspira-<name>/SKILL.md`.
+// The eight launcher skills (six agents, build-feature and visual-verify; spec-reviewer is a library since KIT-48), each `skill/aspira-<name>/SKILL.md`.
 const LAUNCHER_SKILLS: { name: string; path: string }[] = [
   { name: 'groomer', path: 'packages/agents/groomer/skill/aspira-groomer/SKILL.md' },
   { name: 'spec-writer', path: 'packages/agents/spec-writer/skill/aspira-spec-writer/SKILL.md' },
@@ -28,6 +28,7 @@ const LAUNCHER_SKILLS: { name: string; path: string }[] = [
   { name: 'code-analyzer', path: 'packages/agents/code-analyzer/skill/aspira-code-analyzer/SKILL.md' },
   { name: 'pr-reviewer', path: 'packages/agents/pr-reviewer/skill/aspira-pr-reviewer/SKILL.md' },
   { name: 'build-feature', path: 'packages/agents/build-feature/skill/aspira-build-feature/SKILL.md' },
+  { name: 'visual-verify', path: 'packages/agents/visual-verify/skill/aspira-visual-verify/SKILL.md' },
 ]
 // The implementor cloud agent's own skill file, embedded by --local and load_skill'd in the cloud:
 // not a launcher (no start/status/wait of its own), and never user-invoked directly.

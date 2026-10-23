@@ -44,6 +44,7 @@ import { basename, join, relative } from 'node:path'
 import { z } from 'zod'
 import { nextAction, writeProgressNote, type NextAction } from '@aspiralabs/agent-common/lib/progress-note'
 import { readRunStatus } from '@aspiralabs/agent-common/lib/run-status'
+import { devServerSchema } from '@aspiralabs/agent-common/lib/visual-verify'
 import { encodeTrace, listsTelemetry, readAttached, recordAttached, releaseRunId, reserveRunId, telemetryFile, telemetryNotice, writeTelemetry, type WriteResult } from '@aspiralabs/agent-common/lib/telemetry'
 import { readUsageSource, type PhaseUsage } from '@aspiralabs/agent-common/lib/telemetry-sources'
 import { slug } from '@aspiralabs/agent-common/lib/ticket'
@@ -52,6 +53,7 @@ import { acceptApproval, approvalFor, invocationApproval, recordApproval } from 
 import { buildRunStatus, buildStopSchema, type BuildStop } from '#src/build-status.ts'
 import { addTaken, collectTakenDecisions, isDecisionStep, openDecisions, takenKeyOf } from '#src/decisions.ts'
 import { gatePhase } from '#src/gate.ts'
+import { visualVerifyPhase } from '#src/visual-verify.ts'
 import { ensureKnowledge, knowledgeFlag } from '#src/knowledge.ts'
 import { modelFor, parseModels, subagentModels, type Role } from '#src/models.ts'
 import { PACKET_STEPS, writeRunPacket } from '#src/packet-file.ts'
@@ -69,7 +71,7 @@ import { shown, system } from '#src/system.ts'
 import { runSpans } from '#src/telemetry.ts'
 import { carryTicketFolder, existingWorktree, insideWorktree, locate, prepareWorktree, ticketTypeOf, worktreePath, type Place } from '#src/worktree.ts'
 
-export const STAGE_KINDS = ['resolve', 'approval', 'overrides', 'worktree', 'step', 'ask', 'move', 'set-pr', 'gate', 'step10', 'fix', 'release-row', 'summary', 'telemetry', 'end'] as const
+export const STAGE_KINDS = ['resolve', 'approval', 'overrides', 'worktree', 'step', 'ask', 'move', 'set-pr', 'visual-verify', 'gate', 'step10', 'fix', 'release-row', 'summary', 'telemetry', 'end'] as const
 export type StageKind = (typeof STAGE_KINDS)[number]
 /** One stage as printed: `nonce` and `output` when it needs an answer. Only the worktree stage that sends a new invocation into the worktree carries no runId. */
 export type Stage = { stage: StageKind; runId?: string; nonce?: string; output?: string; [key: string]: unknown }
@@ -97,7 +99,7 @@ export type DriverInput = {
   env: NodeJS.ProcessEnv
 }
 
-const aspiraSchema = z.looseObject({ board: z.string().optional(), repository: z.string().optional(), app: z.string().optional(), releases: z.string().optional(), models: z.unknown().optional(), gates: z.array(z.object({ cwd: z.string().optional(), command: z.string().min(1) })).optional() })
+const aspiraSchema = z.looseObject({ board: z.string().optional(), repository: z.string().optional(), app: z.string().optional(), releases: z.string().optional(), models: z.unknown().optional(), gates: z.array(z.object({ cwd: z.string().optional(), command: z.string().min(1) })).optional(), dev: devServerSchema.optional() })
 export type Aspira = z.infer<typeof aspiraSchema>
 
 /** What every handler works from. */
@@ -110,7 +112,7 @@ type Out = { state: RunState; stage: Stage; ctx?: Ctx }
 // The later-phase contract (gate.ts, step8.ts, step10.ts, review-loop.ts).
 // ---------------------------------------------------------------------------------------------
 
-export type PhaseContext = { id: string; repo: string; folder: string; dir: string; runId: string; now: string; aspira: Aspira; card: Card; resume: string; env: NodeJS.ProcessEnv; mode: Mode }
+export type PhaseContext = { id: string; repo: string; folder: string; dir: string; runId: string; now: string; aspira: Aspira; card: Card; resume: string; env: NodeJS.ProcessEnv; mode: Mode; autonomous: boolean }
 
 export type PhaseResult =
   /** Nothing (more) for this phase now: the run goes on to the next item. `note`: a line the end of the run adds (a skipped item). */
@@ -131,6 +133,7 @@ export type Phase = {
 
 /** Each later phase by name: the gate, Step 8, Step 10, the review loop and the release row. */
 export const PHASES: Readonly<Record<PhaseName, Phase>> = {
+  'visual-verify': visualVerifyPhase,
   gate: gatePhase,
   step8: step8Phase,
   step10: step10Phase,
@@ -294,6 +297,9 @@ async function driverVersion(): Promise<string> {
   return packageSchema.parse(JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))).version
 }
 
+/** Skills the driver runs that are not steps (KIT-58): their .kit-version is checked like a step's, but they have no step result. */
+export const SKILL_CHECKS = ['visual-verify'] as const
+
 const VERSION_TEXT = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]{1,40})?$/
 
 /**
@@ -301,14 +307,14 @@ const VERSION_TEXT = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]{1,40})?$/
  * is missing or names another kit version than this driver's: an older launcher would reject the
  * `--parent-run` option every step command now carries (KIT-19 F6, F22).
  */
-export async function checkKitVersion(repo: string): Promise<void> {
+export async function checkKitVersion(repo: string, skills: readonly string[] = [...STEPS, ...SKILL_CHECKS]): Promise<void> {
   const version = await driverVersion()
-  for (const step of STEPS) {
+  for (const step of skills) {
     const file = join('.claude', 'skills', `aspira-${step}`, '.kit-version')
     const text = await readFile(join(repo, file), 'utf8').catch(() => null)
     if (text === null) throw new Refusal(`step skills are from kit (none: ${file} is missing), the driver is ${version}: run kit init`)
     const found = text.trim()
-    if (found !== version) throw new Refusal(`step skills are from kit ${VERSION_TEXT.test(found) ? found : `(unreadable: ${file})`}, the driver is ${version}: run kit init`)
+    if (found !== version) throw new Refusal(`step skills are from kit ${VERSION_TEXT.test(found) ? found : `(unreadable: ${file})`}, the driver is ${version}: run kit init (${file})`)
   }
 }
 
@@ -710,6 +716,7 @@ const phaseContext = (ctx: Ctx, state: RunState): PhaseContext => ({
   resume: ctx.resume,
   env: ctx.input.env,
   mode: ctx.mode,
+  autonomous: ctx.autonomous,
 })
 
 async function handlePhase(ctx: Ctx, phase: PhaseName, result: PhaseResult): Promise<Out> {
@@ -1209,6 +1216,8 @@ export async function nextStage(input: DriverInput): Promise<Stage> {
     // --autonomous rides on the default mode: the cloud step agents take neither --take-recommended nor --autonomous (KIT-24).
     if (input.autonomous && input.mode !== 'local') throw new Refusal(`--autonomous does not apply with --cloud; run it in this session: ${RESUME(input.id, 'local', true)}`)
     refuseInProgress(input, state)
+    // The skills the driver runs itself (KIT-58 F16) are refused at the start, before any stage or record.
+    await checkKitVersion(input.repo, SKILL_CHECKS)
     const ctx: Ctx = { ...base, runId: await reserveNewRunId(initialFolder, state, input.now), mode: input.mode, autonomous: input.autonomous, resume: RESUME(input.id, input.mode, input.autonomous) }
     return save(ctx, await startRun(ctx, state))
   }

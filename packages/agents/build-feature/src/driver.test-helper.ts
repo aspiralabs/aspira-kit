@@ -95,7 +95,7 @@ export const BOARD_RULES_WITH_TELEMETRY =
 /** This package's version: what kit init writes into every step skill's .kit-version. */
 const PACKAGE_VERSION = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8'))).version
 /** The seven step skills, whose .kit-version the driver checks before a run's first step (KIT-19). */
-export const STEP_SKILLS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer']
+export const STEP_SKILLS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'visual-verify']
 
 export type Stage = { stage: string; runId?: string; nonce?: string; output?: string; [key: string]: unknown }
 export type Result = { code: number; stage: Stage | null; text: string }

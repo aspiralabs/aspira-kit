@@ -96,6 +96,7 @@ function contextFor(repo: string, env: NodeJS.ProcessEnv): PhaseContext {
     resume: '/aspira-build-feature KIT-2',
     env,
     mode: 'local',
+    autonomous: false,
   }
 }
 

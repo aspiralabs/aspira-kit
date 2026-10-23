@@ -26,6 +26,11 @@ export const planSchema = z.object({
 })
 export type Plan = z.infer<typeof planSchema>
 
+/** True when a plan writes UI code, which needs the Aspira UI kit's component docs. */
+export function touchesUi(plan: { tasks: { changes: { path: string }[] }[] }): boolean {
+  return plan.tasks.some((task) => task.changes.some((change) => /\.(?:tsx|jsx|css|scss)$/.test(change.path) || /(?:^|\/)components\//.test(change.path)))
+}
+
 /**
  * Research's and planning's decisions as one list, D1, D2, ..., the same question once, with the
  * author's ticked answers applied. With `takeRecommended` (F10), every decision still open after the

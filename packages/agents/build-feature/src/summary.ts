@@ -15,6 +15,7 @@ import { allowedPath } from '@aspiralabs/agent-common/lib/repository'
 import { SEVERITIES } from '@aspiralabs/agent-common/lib/severity'
 import { orderedTaken } from '#src/decisions.ts'
 import { gateSummaryLines } from '#src/gate.ts'
+import { visualVerifySummaryLines } from '#src/visual-verify.ts'
 import { MODELS, type ModelName } from '#src/models.ts'
 import { modeLine, RESUME, STEPS } from '#src/route.ts'
 import type { RunState, StepRecord } from '#src/run-state.ts'
@@ -122,6 +123,8 @@ async function statusLines(input: RenderBuildSummaryInput, resume: string): Prom
   const card = state.card ?? null
   if (card !== null) lines.push(`Card: ${card.status} (${card.url})`, '')
   if (run !== undefined) lines.push(modeLine(run.mode, run.autonomous), ...(run.worktree === undefined ? [] : [`Worktree: ${run.worktree}`]), '')
+  const visual = await visualVerifySummaryLines(state, repo, app)
+  if (visual.length > 0) lines.push(...visual, '')
   const gate = gateSummaryLines(state)
   if (gate.length > 0) lines.push(...gate, '')
   const remaining = orderedRemaining(state.remaining)

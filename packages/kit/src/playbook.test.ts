@@ -39,6 +39,14 @@ describe('the Playbook module', () => {
   })
 })
 
+describe('the Playbook and visual-verify', () => {
+  it('has no row, title or command that names visual verification', () => {
+    for (const row of PLAYBOOK) {
+      expect([...row.statuses, row.step, row.command ?? ''].join(' ').toLowerCase()).not.toContain('visual')
+    }
+  })
+})
+
 describe('Step 1 of the Playbook', () => {
   it('names /aspira-groomer and keeps the Shortlist -> Ready: Idea move as the human\'s', () => {
     const { body } = PLAYBOOK_STEPS[0] ?? { body: '' }

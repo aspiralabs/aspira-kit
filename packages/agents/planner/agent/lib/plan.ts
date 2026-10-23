@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { decisionSchema, parseTickedDecisions, renderDecisions, type Answer, type DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
-import { mergeDecisions, planSchema, problemSeverity, renderPlan, type Plan } from '@aspiralabs/agent-common/lib/plan'
+import { mergeDecisions, planSchema, problemSeverity, renderPlan, touchesUi, type Plan } from '@aspiralabs/agent-common/lib/plan'
 import { allowedPath } from '@aspiralabs/agent-common/lib/repository'
 import { countBySeverity, findingsHeader, severityHeading, sortBySeverity } from '@aspiralabs/agent-common/lib/severity'
 import { specFeatures } from '@aspiralabs/agent-common/lib/spec'
@@ -13,7 +13,7 @@ export { decisionSchema }
 // planSchema, Plan, renderPlan, mergeDecisions and problemSeverity now live in
 // @aspiralabs/agent-common/lib/plan (the implementor's plan-block recovery needs them without
 // depending on this package); re-exported here unchanged so every existing import of './plan.ts' keeps working.
-export { planSchema, renderPlan, mergeDecisions, problemSeverity }
+export { planSchema, renderPlan, mergeDecisions, problemSeverity, touchesUi }
 export type { Plan }
 export const researchSchema = z.object({ facts: z.array(text), checks: z.array(z.object({ rule: text, evidence: text })), gaps: z.array(text), decisions: z.array(decisionSchema), notes: z.array(text).optional() })
 export type Research = z.infer<typeof researchSchema>
@@ -28,11 +28,6 @@ export function writablePath(path: string) {
   const structural = !isAbsolute(path) && !/^[A-Za-z]:/.test(path) && !path.includes('\\') && !path.split('/').some((part) => !part || part === '.' || part === '..')
   const managed = /(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|\.npmrc)$/.test(path)
   return structural && (allowedPath(path) || (managed && !path.split('/').some((part) => /^(?:\.git|node_modules|\.eve|\.next|dist|\.output|coverage|vendor)$/i.test(part))))
-}
-
-/** True when a plan writes UI code, which needs the Aspira UI kit's component docs. */
-export function touchesUi(plan: Plan): boolean {
-  return plan.tasks.some((task) => task.changes.some((change) => /\.(?:tsx|jsx|css|scss)$/.test(change.path) || /(?:^|\/)components\//.test(change.path)))
 }
 
 export function validatePlan(plan: Plan, spec: string, files: Map<string, string>, tracked: Set<string> = new Set(files.keys())): string[] {

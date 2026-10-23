@@ -205,3 +205,37 @@ describe('renderPrBody (T35): Merge Danger names a one-way door for a native bui
     })
   }
 })
+
+// T3 (KIT-58 F8, F15): the "## Visual verify" section renderPrBody weaves in after "## Merge Danger"
+// when the caller passes a visualVerify result, and nothing when it does not.
+describe('renderPrBody visual verify section (T3)', () => {
+  const implementationMd = ['# Implementation', '', '## What it fixed', '', 'Scope: web. Prices were dashes.', '', '## Tasks', ''].join('\n')
+  const visualVerify = {
+    status: 'blocked' as const,
+    verifications: 1,
+    findings: [
+      { grade: 'minor' as const, title: 'icon is 1px off', page: '/admin/models', files: [], deployedBackend: false },
+      { grade: 'blocker' as const, title: 'every price is a dash', page: '/admin/models', files: ['src/prices.ts'], deployedBackend: false },
+    ],
+    notExercised: [],
+    backendNotDeployed: [],
+    noData: [],
+  }
+
+  it('renders ## Visual verify after ## Merge Danger, the blocker before the minor, with no screenshot path', async () => {
+    const repo = await tempRepo()
+    const body = await renderPrBody({ ticket, implementationMd, changedFiles: ['src/prices.ts'], analyzers: [], repo, visualVerify })
+    const headings = sections(body).map((entry) => entry.heading)
+    expect(headings.indexOf('Visual verify')).toBe(headings.indexOf('Merge Danger') + 1)
+    const text = section(body, /^Visual verify$/)
+    expect(text.indexOf('every price is a dash')).toBeGreaterThanOrEqual(0)
+    expect(text.indexOf('every price is a dash')).toBeLessThan(text.indexOf('icon is 1px off'))
+    expect(body).not.toMatch(/visual-verify\/[\w.-]+\.png/)
+  })
+
+  it('renders no such heading when visualVerify is absent', async () => {
+    const repo = await tempRepo()
+    const body = await renderPrBody({ ticket, implementationMd, changedFiles: ['src/prices.ts'], analyzers: [], repo })
+    expect(body).not.toContain('## Visual verify')
+  })
+})

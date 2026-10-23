@@ -12,6 +12,7 @@
 // whole rendered document would also mangle this module's own headings and code fences (SEC-010).
 
 import { redact, redactSecrets, tail } from './redact.ts'
+import { visualVerifyLines, type VisualVerifyResult } from './visual-verify.ts'
 
 export type PrBodyTicket = { id: string; title: string; url: string }
 
@@ -34,6 +35,8 @@ export type PrBodyInput = {
   notice?: string
   /** The closing line, after the notice. Defaults to a plain link to `ticket.url`; a caller with its own page to point to (build-feature's Build Summary) passes its own line naming `ticket.url`. */
   footer?: string
+  /** The visual verify result (KIT-58); when present the body gets `## Visual verify` after Merge Danger, never a screenshot path. */
+  visualVerify?: VisualVerifyResult
   repo: string
   /** The app directory (aspira.json `app`) to also read `.env*` files from when redacting; omitted means the repository root alone. */
   app?: string
@@ -175,12 +178,13 @@ export function fileTree(changedFiles: readonly string[]): string {
 
 /** The PR body: What it fixed (verbatim from implementation.md), then Summary, Evidence and Merge Danger from implementation.md and the branch diff, the decisions taken for the human, the run's notice, and a link to the ticket. */
 export async function renderPrBody(input: PrBodyInput): Promise<string> {
-  const { ticket, implementationMd, changedFiles, analyzers, taken = [], notice, footer, repo, app } = input
+  const { ticket, implementationMd, changedFiles, analyzers, taken = [], notice, footer, repo, app, visualVerify } = input
   const lines: string[] = []
   lines.push('## What it fixed', '', await whatItFixed(implementationMd, repo, app), '')
   lines.push('## Summary', '', fileTree(changedFiles), '')
   lines.push('## Evidence', '', await evidenceByFeature(implementationMd, analyzers, repo, app), '')
   lines.push('## Merge Danger', '', mergeDanger(implementationMd, changedFiles), '')
+  if (visualVerify !== undefined) lines.push('## Visual verify', '', ...(await visualVerifyLines(visualVerify, repo, { app })), '')
   if (taken.length > 0) {
     lines.push('## Decisions taken for you', '')
     for (const entry of taken) {
