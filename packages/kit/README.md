@@ -18,6 +18,8 @@ pnpm -C apps/web kit doctor                  # the app is read from aspira.json;
 
 Installing needs a GitHub Packages token in `~/.npmrc`; see the [repo README](../../README.md#use-the-kit-in-an-app).
 
+Setting up a new project end to end (the Notion teamspace, Feature Board and Releases page, `aspira.json`, the environment, `AGENTS.md`, the first run) is on Notion: [New Project Setup](https://app.notion.com/p/4023e59b2258812189cdfb82a603cb7d), under Engineering Central › AI-DLC.
+
 ## Commands
 
 | Command | What it does |
@@ -70,7 +72,7 @@ Puts a Next.js project on the kit. `next` is the only stack so far. Without `--a
 | `.claude/skills/aspira-<agent>/` | One folder per agent (groomer, spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer): a copy of the installed package's `skill/aspira-<agent>/` (`SKILL.md` and `scripts/`) plus `.kit-version`, the installed `@aspiralabs/agents` version. Commit them. A re-run after a bump rewrites them |
 | `.claude/skills/aspira-{cleanup,next,worktree}/` | The three kit-owned skills, copied from this package's `skills/` with `.kit-version` set to the installed `@aspiralabs/kit` version, written even when `@aspiralabs/agents` is not installed. Each is a launcher that runs the matching `kit` command and relays it: `/aspira-cleanup` lists, confirms in chat and reruns with `--yes --only`; `/aspira-next` offers to run the next command on a yes; `/aspira-worktree` moves the session into the new worktree |
 | `.gitignore` | Adds `.work/` (the per-ticket working folder) and `.aspira/` (the audit log the hooks write, `.aspira/audit.jsonl`), whichever is missing; `.worktrees/` (ticket worktrees) to the git repository root's `.gitignore`; and `.env.local` unless `git check-ignore` already reports it ignored (a `.env*.local` glob counts) |
-| `aspira.json` | With `--board`: the project's Feature Board URL and, with `--releases`, its Releases page. The `/aspira-*` skills and `kit next` read it. With `--app`: `"app": "<dir>"`, which `kit doctor`, `kit next` and the skill launchers read to find the installed packages. Without `--board` the board is left as it is, and a project without one has no board: every skill then needs `--no-ticket` |
+| `aspira.json` | With `--board`: the project's Feature Board URL and, with `--releases`, its Releases page. The `/aspira-*` skills and `kit next` read it. With `--app`: `"app": "<dir>"`, which `kit doctor`, `kit next` and the skill launchers read to find the installed packages. Without `--board` the board is left as it is, and a project without one has no board: every skill then needs `--no-ticket`. Add `"knowledge": "<Agent Instructions URL>"` by hand so a build-feature run builds the guidelines without `KNOWLEDGE_PAGE` in its environment |
 
 ### `--app`: a repository whose app is not the root
 
