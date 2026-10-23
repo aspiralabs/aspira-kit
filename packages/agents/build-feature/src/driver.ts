@@ -100,7 +100,7 @@ export type DriverInput = {
   env: NodeJS.ProcessEnv
 }
 
-const aspiraSchema = z.looseObject({ board: z.string().optional(), repository: z.string().optional(), app: z.string().optional(), releases: z.string().optional(), models: z.unknown().optional(), gates: z.array(z.object({ cwd: z.string().optional(), command: z.string().min(1) })).optional(), dev: devServerSchema.optional() })
+const aspiraSchema = z.looseObject({ board: z.string().optional(), repository: z.string().optional(), app: z.string().optional(), releases: z.string().optional(), knowledge: z.string().optional(), models: z.unknown().optional(), gates: z.array(z.object({ cwd: z.string().optional(), command: z.string().min(1) })).optional(), dev: devServerSchema.optional() })
 export type Aspira = z.infer<typeof aspiraSchema>
 
 /** What every handler works from. */
@@ -863,7 +863,7 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
   await checkKitVersion(ctx.input.repo)
   // The engineering guidelines once per ticket and the run packet (KIT-48) go to the in-session launchers only:
   // a cloud launcher's `start` refuses --guidelines, --knowledge and --packet, and its agent loads its own.
-  const shared = ctx.mode === 'local' ? await ensureKnowledge(started, { env: ctx.input.env, repo: ctx.input.repo, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }), folder: ctx.folder, now: ctx.input.now }) : { state: started, knowledge: null, note: null }
+  const shared = ctx.mode === 'local' ? await ensureKnowledge(started, { env: ctx.input.env, repo: ctx.input.repo, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }), ...(ctx.aspira?.knowledge === undefined ? {} : { page: ctx.aspira.knowledge }), folder: ctx.folder, now: ctx.input.now }) : { state: started, knowledge: null, note: null }
   const state = shared.note === null ? shared.state : { ...shared.state, phases: { ...shared.state.phases, knowledgeNote: shared.note } }
   const packet = ctx.mode === 'local' && PACKET_STEPS.includes(step) ? await writeRunPacket({ repo: ctx.input.repo, folder: ctx.folder, aspira: ctx.aspira, knowledgeDir: shared.knowledge?.dir ?? null }) : null
   // The stored command stays the routed one; the run's own flags ride only on what is printed, like --parent-run.

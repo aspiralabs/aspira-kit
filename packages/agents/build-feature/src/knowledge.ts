@@ -3,8 +3,10 @@
 // `.work/<id>-<slug>/knowledge/` (the full walk, never a partial snapshot: the KIT-8 rule stands) and,
 // before each step, compares the folder's pages against Notion by hash. Unchanged, the step gets the
 // folder (`--guidelines <dir>/REQUIRED.md`, or `--knowledge <dir>` for the steps that take a folder);
-// any page changed, the whole folder is rebuilt. Without a Notion token or a configured index page
-// nothing is built and every step loads its own guidelines as before.
+// any page changed, the whole folder is rebuilt. The index page is KNOWLEDGE_PAGE, else aspira.json
+// `knowledge` (a step subagent never sees a shell rc changed after the session started; aspira.json
+// is in the repository). Without a Notion token or an index page nothing is built and every step
+// loads its own guidelines as before.
 
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -34,6 +36,8 @@ export type EnsureInput = {
   env: Record<string, string | undefined>
   repo: string
   app?: string
+  /** aspira.json `knowledge`: the index page when the environment names none. */
+  page?: string
   folder: string
   now: string
   fetch?: Fetch
@@ -49,7 +53,7 @@ export type EnsureResult = { state: RunState; knowledge: SharedKnowledge | null;
  */
 export async function ensureKnowledge(state: RunState, input: EnsureInput): Promise<EnsureResult> {
   const token = (await notionToken({ env: input.env, projectRoot: input.repo, ...(input.app === undefined || input.app === '.' ? {} : { appDir: resolve(input.repo, input.app) }) }))?.token
-  const page = input.env[KNOWLEDGE_ENV.page]?.trim()
+  const page = input.env[KNOWLEDGE_ENV.page]?.trim() || input.page?.trim()
   if (token === undefined || token === '' || page === undefined || page === '') return { state, knowledge: null, note: null }
   const required = parseRequired(input.env[REQUIRED_ENV])
   const dir = join(input.folder, 'knowledge')

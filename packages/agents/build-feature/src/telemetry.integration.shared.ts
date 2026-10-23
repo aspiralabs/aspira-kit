@@ -145,15 +145,8 @@ export async function stopWith(h: Project, handlers: Partial<Record<string, Hand
   return h.advance(handlers, await h.finish())
 }
 
-/** Answer Step 10 when it is asked for and return the next stage (the first review). */
-export async function toReview(h: Project, from?: Result): Promise<Result> {
-  let result = await h.advance({}, from)
-  while (result.stage?.stage === 'step10') {
-    await h.answer(result.stage, { docs: [], docsToPropagate: 'none' })
-    result = await h.advance()
-  }
-  return result
-}
+/** Answer the late gate and analyzer and Step 10 when they are asked for and return the next stage (the first review). */
+export { toReview } from './review-loop.integration.shared.ts'
 
 export async function put(path: string, content: string, mtime?: string) {
   await mkdir(dirname(path), { recursive: true })

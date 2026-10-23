@@ -17,11 +17,13 @@ export async function reviewing(options: { aspira?: Record<string, unknown>; fil
   return { h, review: await toReview(h, await h.start()) }
 }
 
-/** Answer Step 10 when it is asked for and return the next review (or whatever stops the run). */
+/** Answer the late gate and analyzer step (a card that reached In Review unanalyzed) and Step 10 when they are asked for, and return the next review (or whatever stops the run). */
 export async function toReview(h: Project, from?: Result): Promise<Result> {
   let result = await h.advance({}, from)
-  while (result.stage?.stage === 'step10') {
-    await h.answer(result.stage, { docs: [], docsToPropagate: 'none' })
+  while (result.stage?.stage === 'step10' || result.stage?.stage === 'gate' || (result.stage?.stage === 'step' && result.stage.step === 'code-analyzer')) {
+    if (result.stage.stage === 'step10') await h.answer(result.stage, { docs: [], docsToPropagate: 'none' })
+    else if (result.stage.stage === 'gate') await h.answer(result.stage, { results: ((result.stage.commands ?? []) as string[]).map((command) => ({ command, exitCode: 0, output: 'ok' })) })
+    else await h.report(result.stage, 'clean')
     result = await h.advance()
   }
   return result

@@ -61,6 +61,20 @@ describe('the review loop fixes medium findings and gates each fix', () => {
   }, SLOW)
 })
 
+describe('a card that reached In Review unanalyzed (NOM-38)', () => {
+  it('runs the code analyzer before the first review and commits its fixes to the open PR, with no move', async () => {
+    const { h, review } = await reviewing()
+    const steps = ofKind(h.stages, 'step').map((stage) => String(stage.step))
+    const commits = (await h.gitCalls()).filter((args) => args.includes('commit')).map((args) => args.join(' '))
+    expect({
+      order: steps.slice(0, 2),
+      next: review.stage?.step,
+      committed: commits.some((line) => line.includes('apply the code-analyzer fixes')),
+      moves: ofKind(h.stages, 'move').length,
+    }).toEqual({ order: ['code-analyzer', 'pr-reviewer'], next: 'pr-reviewer', committed: true, moves: 0 })
+  }, SLOW)
+})
+
 describe('the merge after a clean review', () => {
   it('merges once with a merge commit, moves the card to Ready: Implementation and ends finished', async () => {
     const { h, review } = await reviewing()

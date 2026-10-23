@@ -83,6 +83,14 @@ describe('ensureKnowledge', () => {
     } finally { await close() }
   })
 
+  it("takes the index page from aspira.json's knowledge when the environment names none (NOM-38)", async () => {
+    const { folder, input, close } = await setup()
+    try {
+      const built = await ensureKnowledge(emptyRunState(), { ...input, env: { NOTION_TOKEN: 'secret', KNOWLEDGE_REQUIRED: input.env.KNOWLEDGE_REQUIRED }, page: input.env.KNOWLEDGE_PAGE })
+      expect(built.knowledge).toEqual({ dir: join(folder, 'knowledge'), requiredFile: join(folder, 'knowledge', 'REQUIRED.md') })
+    } finally { await close() }
+  })
+
   it('names the flag each step takes the folder through', () => {
     const shared = { dir: '/w/.work/kit-48-x/knowledge', requiredFile: '/w/.work/kit-48-x/knowledge/REQUIRED.md' }
     expect(knowledgeFlag('spec-writer', shared)).toBe('--guidelines /w/.work/kit-48-x/knowledge/REQUIRED.md')
