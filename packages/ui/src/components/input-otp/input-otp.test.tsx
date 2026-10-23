@@ -1,7 +1,7 @@
 /// <reference types="@testing-library/jest-dom" />
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import { Form } from '../form/index.js';
 import { InputOTP } from './input-otp.js';
 
