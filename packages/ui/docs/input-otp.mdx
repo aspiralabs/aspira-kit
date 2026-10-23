@@ -54,6 +54,13 @@ export const FormDemo = () => {
     );
 };
 
+export const StretchDemo = () => (
+    <div className="w-[350px] flex flex-col gap-4">
+        <InputOTP length={6} label="Verification code" stretch />
+        <Button className="w-full">Verify</Button>
+    </div>
+);
+
 ## Usage
 
 ```tsx
@@ -94,6 +101,18 @@ import { InputOTP } from '@aspiralabs/ui';
     <ControlledDemo />
 </Demo>
 
+## Full width
+
+Slots are a fixed `w-12` by default, so six of them come to 328px. In a full-width form (the 350px auth column) pass `stretch`: the row fills its container and the slots share the width, so it lines up with the `Input` and `Button` around it. It works with `length`, with your own `InputOTPGroup`/`InputOTPSlot` children, and inside `<Form>`.
+
+```tsx
+<InputOTP name="otp" length={6} stretch />
+```
+
+<Demo>
+    <StretchDemo />
+</Demo>
+
 ## Form-controlled
 
 Drop into `<Form>` with a `name` — Form wires it through a RHF `Controller`. Submit empty to see the zod error paint inline.
@@ -123,7 +142,7 @@ const schema = z.object({
 
 | Export              | Purpose                                                                                                                                                                                                                                                                                                                                                                                  |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `InputOTP`          | Root. Pass `length` for the one-liner — auto-renders an `InputOTPGroup` with `length` sequential slots. Or pass `children` (group + slots + optional separator) for advanced layouts. Also accepts `value`, `onChange`, `onComplete`, `label`, `error` (FormError), and `name` for Form auto-wiring — slot borders flip to destructive when error is present. |
+| `InputOTP`          | Root. Pass `length` for the one-liner — auto-renders an `InputOTPGroup` with `length` sequential slots. Or pass `children` (group + slots + optional separator) for advanced layouts. Also accepts `value`, `onChange`, `onComplete`, `label`, `error` (FormError), `stretch` (fill the container's width), and `name` for Form auto-wiring — slot borders flip to destructive when error is present. |
 | `InputOTPGroup`     | Wrapper for a contiguous group of slots. Use multiple to visually separate segments.                                                                                                                                                                                                                                                                                                     |
 | `InputOTPSlot`      | One character cell. Takes `index` — required and sequential.                                                                                                                                                                                                                                                                                                                             |
 | `InputOTPSeparator` | Visual dash between groups (e.g. 3-3 formats).                                                                                                                                                                                                                                                                                                                                           |

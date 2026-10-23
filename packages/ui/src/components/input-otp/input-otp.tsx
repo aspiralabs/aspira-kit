@@ -21,6 +21,11 @@ type InputOTPProps = Omit<
     length?: number;
     /** Override the underlying input-otp maxLength. Defaults to `length`. */
     maxLength?: number;
+    /**
+     * Fill the container's width: the row is `w-full` and the slots share it
+     * equally instead of the fixed `w-12`. Works with `length` and with children.
+     */
+    stretch?: boolean;
     children?: React.ReactNode;
 };
 
@@ -32,6 +37,7 @@ function InputOTP({
     id,
     length,
     maxLength,
+    stretch,
     children,
     ...props
 }: InputOTPProps) {
@@ -58,6 +64,8 @@ function InputOTP({
             aria-invalid={invalid}
             containerClassName={cn(
                 'flex items-center gap-2 has-disabled:opacity-50',
+                stretch &&
+                    'w-full [&_[data-slot=input-otp-group]]:flex-1 [&_[data-slot=input-otp-slot]]:w-auto [&_[data-slot=input-otp-slot]]:flex-1',
                 error &&
                     '[&_[data-slot=input-otp-slot]]:border-destructive [&_[data-slot=input-otp-slot]]:data-[active=true]:border-destructive',
                 containerClassName,
@@ -72,7 +80,7 @@ function InputOTP({
     if (!label && !error) return otp;
 
     return (
-        <div className="flex flex-col">
+        <div className={cn('flex flex-col', stretch && 'w-full')}>
             <div className="flex items-center justify-between mb-1.5">
                 {label && (
                     <label htmlFor={inputId} className="text-sm text-foreground font-medium">
