@@ -1,5 +1,11 @@
 # @aspiralabs/ui
 
+## 0.14.0
+
+### Minor Changes
+
+- bf32c29: InputOTP takes a `stretch` prop: the code row fills its container's width and the slots share it, instead of the fixed `w-12` slots (328px for six). Works with `length`, with composed children, and inside `Form`. Default unchanged.
+
 ## 0.13.0
 
 ## 0.12.0
