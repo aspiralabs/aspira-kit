@@ -1,5 +1,12 @@
 # @aspiralabs/groomer
 
+## 0.13.0
+
+### Patch Changes
+
+- Updated dependencies [e6199cd]
+  - @aspiralabs/agent-common@0.13.0
+
 ## 0.12.0
 
 ### Minor Changes
