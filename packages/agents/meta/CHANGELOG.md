@@ -1,5 +1,20 @@
 # @aspiralabs/agents
 
+## 0.14.0
+
+### Patch Changes
+
+- @aspiralabs/agent-common@0.14.0
+- @aspiralabs/spec-writer@0.14.0
+- @aspiralabs/spec-reviewer@0.14.0
+- @aspiralabs/planner@0.14.0
+- @aspiralabs/implementor@0.14.0
+- @aspiralabs/code-analyzer@0.14.0
+- @aspiralabs/pr-reviewer@0.14.0
+- @aspiralabs/groomer@0.14.0
+- @aspiralabs/build-feature@0.14.0
+- @aspiralabs/visual-verify@0.14.0
+
 ## 0.13.0
 
 ### Minor Changes
