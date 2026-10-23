@@ -348,7 +348,8 @@ export async function project(options: ProjectOptions) {
 
     /**
      * Answer the stages the session performs without a model (resolve, approval, overrides, move,
-     * set-pr, summary) until a step, ask, gate, step10, fix, release-row or end stage, which it returns.
+     * set-pr, merge, summary) until a step, ask, gate, step10, fix, release-row or end stage, which it returns.
+     * A merge runs the fake gh's `pr merge`, as the session would after the checks pass.
      */
     async advance(handlers: Partial<Record<string, Handler>> = {}, from?: Result): Promise<Result> {
       let result = from ?? (await h.next())
@@ -367,6 +368,9 @@ export async function project(options: ProjectOptions) {
         } else if (stage.stage === 'set-pr') {
           card.pr = String(stage.url)
           await h.answer(stage, { done: true })
+        } else if (stage.stage === 'merge') {
+          await exec(join(bin, 'gh'), ['pr', 'merge', String(stage.pr), '--merge'], { env: env() })
+          await h.answer(stage, { merged: true })
         } else if (stage.stage === 'summary') {
           if (typeof stage.rules === 'string') {
             await mkdir(dirname(stage.rules), { recursive: true })
@@ -587,10 +591,14 @@ case "$1 $2" in
   "pr create")
     echo "$GH_CREATED_URL" > "$GH_DIR/pr"
     echo "$GH_CREATED_URL" ;;
+  "pr merge")
+    if [ -z "$pr" ]; then echo 'no pull request to merge' >&2; exit 1; fi
+    /usr/bin/touch "$GH_DIR/merged" ;;
   "pr view")
     if [ -z "$pr" ]; then echo 'no pull requests found for branch "feat/kit-11-x"' >&2; exit 1; fi
+    state=OPEN; [ -f "$GH_DIR/merged" ] && state=MERGED
     if [ -n "$jq" ]; then echo "$pr"
-    elif [ -n "$json" ]; then printf '{"url":"%s","number":7,"state":"OPEN","isDraft":true}\\n' "$pr"
+    elif [ -n "$json" ]; then printf '{"url":"%s","number":7,"state":"%s","isDraft":true}\\n' "$pr" "$state"
     else echo "$pr"; fi ;;
   "repo view") printf '{"nameWithOwner":"aspiralabs/fixture","url":"https://github.com/aspiralabs/fixture"}\\n' ;;
   *) exit 0 ;;

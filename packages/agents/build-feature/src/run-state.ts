@@ -155,7 +155,7 @@ export type TakenKey = z.infer<typeof takenSchema>
 const askedSchema = z.object({ key: z.string().optional(), step: text, runId: z.string().optional(), id: z.string().optional(), question: text, answer: z.string().nullable() })
 export type Asked = z.infer<typeof askedSchema>
 
-const reviewSchema = z.looseObject({ n: z.number().int().positive(), headSha: z.string(), critical: z.number(), high: z.number(), runId: z.string() })
+const reviewSchema = z.looseObject({ n: z.number().int().positive(), headSha: z.string(), critical: z.number(), high: z.number(), medium: z.number().optional(), runId: z.string() })
 const remainingSchema = z.looseObject({ id: text, severity: text, title: z.string() })
 const failureSchema = z.looseObject({ action: text, command: z.string().optional(), exitCode: z.number().optional(), output: z.string().optional(), message: z.string().optional() })
 export type Failure = z.infer<typeof failureSchema>

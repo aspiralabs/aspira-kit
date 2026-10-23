@@ -283,8 +283,8 @@ async function dirtyTracked(context: PhaseContext): Promise<string[]> {
 const withRecord = (state: RunState, record: GateRecord): RunState => ({ ...state, phases: { ...state.phases, gate: record } })
 
 /** Gate stage after an implementor 'complete': nothing when this build's gate is recorded, else the commands to run. */
-export async function gateStage(context: PhaseContext, state: RunState): Promise<PhaseResult> {
-  const key = await buildKey(context.folder, state)
+export async function gateStage(context: PhaseContext, state: RunState, buildOf?: string): Promise<PhaseResult> {
+  const key = buildOf ?? (await buildKey(context.folder, state))
   const recorded = gateRecordOf(state)
   if (recorded !== null && recorded.key === key && recorded.status !== 'failed') return { kind: 'done', state }
   const app = context.aspira.app ?? '.'
@@ -342,6 +342,6 @@ async function acceptGate(context: PhaseContext, state: RunState, pending: Pendi
 
 /** The driver's gate phase (PHASE_MODULES.gate). */
 export const gatePhase: Phase = {
-  next: gateStage,
+  next: (context, state) => gateStage(context, state),
   accept: (context, state, pending, answer) => (pending.data?.part === 'scripts' ? acceptScripts(context, state, pending, answer) : acceptGate(context, state, pending, answer)),
 }

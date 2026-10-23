@@ -36,7 +36,7 @@ export const modeLine = (mode: Mode, autonomous = false): string =>
     : "Mode: --cloud (every step ran its skill with --cloud: the step's own agent, started and waited on)"
 
 /** The later-phase modules, in run order. */
-export const PHASES = ['visual-verify', 'gate', 'step8', 'step10', 'review', 'release-row'] as const
+export const PHASES = ['visual-verify', 'gate', 'step8', 'step10', 'review', 'release-row', 'merge'] as const
 export type PhaseName = (typeof PHASES)[number]
 
 /** The Ready moves a human used to make by hand, which the run makes on its run-start approval (F15, F16). */
@@ -45,6 +45,9 @@ export const READY_MOVES: readonly { from: string; to: string }[] = [
   { from: 'In Review: Spec', to: 'Ready: Spec' },
   { from: 'In Review: Plan', to: 'Ready: Plan' },
 ]
+
+/** The move after the run merged the PR itself (BOARD-004 as revised 2026-10-23), on its run-start approval. */
+export const MERGE_MOVE = { from: 'In Review: Implementation', to: 'Ready: Implementation' } as const
 
 /** The one move Step 8 makes, after the PR property reads back (BOARD-005). */
 export const STEP8_MOVE = { from: 'In Progress: Implementation', to: 'In Review: Implementation' } as const
@@ -78,6 +81,8 @@ export type RouteFacts = {
   mode?: Mode
   /** --autonomous (KIT-24): the groomer runs with --autonomous, in the default mode only. */
   autonomous?: boolean
+  /** This ticket's PR was merged by a build-feature run (state.phases.merge). */
+  merged?: boolean
 }
 
 /** The end of an exhaustive switch over a union (TS-008). */
@@ -176,10 +181,13 @@ export function routeStatus(status: string, facts: RouteFacts): Route {
           { kind: 'phase', phase: 'step10' },
           { kind: 'phase', phase: 'review' },
           { kind: 'phase', phase: 'release-row' },
+          { kind: 'phase', phase: 'merge' },
         ],
-        then: { kind: 'end', reason: 'finished', message: `${facts.id}: the PR is reviewed and ready for a human to merge (BOARD-004); the run never merges and never moves the card to Ready: Implementation` },
+        then: { kind: 'end', reason: 'unsettled', message: `${facts.id} is still in In Review: Implementation after the merge; resolve it again` },
       }
     case 'Ready: Implementation':
+      if (facts.merged === true) return { kind: 'end', reason: 'finished', message: `${facts.id}: the review left nothing medium or above, the run merged the PR and moved the card to Ready: Implementation` }
+      return { kind: 'end', reason: 'nothing-to-do', message: `nothing to do: ${facts.id} is in ${named}; ${row.step}` }
     case 'Released':
       return { kind: 'end', reason: 'nothing-to-do', message: `nothing to do: ${facts.id} is in ${named}; ${row.step}` }
     case 'Dropped':

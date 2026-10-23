@@ -117,7 +117,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
       '/aspira-pr-reviewer <ID>',
       '```',
       "Needs In Review: Implementation with the PR property set; the skill reviews that PR and makes no move. For the separate-process mode add `--cloud` and export `GITHUB_TOKEN=$(gh auth token)` first; the agent needs it to read a private repo and post its comment. Output: the review comment on the PR, `review.md`, `findings.md` and `cost.md` in `.work/<id>-<slug>/pr-review/`, and `review.md` on the ticket as **PR Review**.",
-      'Fix what it found, push, rerun. **Stop when nothing critical or high is left.** Put the remaining mediums and lows on follow-up tickets. NOM-4 ran four extra full reviews after that point and each one found a new layer of lows; that is the loop to avoid.',
+      'Fix what it found, run the project gate again, push, rerun. **Stop when nothing medium or above is left.** Put the remaining lows on follow-up tickets. A fix that would contradict a ticket decision is not made: ask the human. NOM-4 ran four extra full reviews after that point and each one found a new layer of lows; that is the loop to avoid. An /aspira-build-feature run does this loop itself, for at most four reviews.',
     ].join('\n'),
   },
   {
@@ -127,7 +127,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
       '1. Repo docs in the same PR: anything the change made untrue in `AGENTS.md` (Gotchas), `PRODUCT.md`, `docs/general/FEATURES.md`, `README.md`, `DEPLOYMENT.md`, `RELEASE.md`.',
       "2. The product's open release page (REL-002): a customer line, a Features row with the card and PR, the feature's `### <ID> — what it fixed` section under the Features table (the implementation log's `## What it fixed` section, which the PR description also carries; it becomes the release notes), every deploy step.",
       '3. Notion pages the change made untrue: list them on the ticket under **Docs to propagate** and update them.',
-      'Then a human merges (BOARD-004) and moves the card to Ready: Implementation. No skill makes that move.',
+      'Then the PR is merged and the card moves to Ready: Implementation (BOARD-004). An /aspira-build-feature run does both itself once the gate passed and the last review left nothing medium or above, on its recorded run-start approval; outside such a run a human does.',
     ].join('\n'),
   },
   {

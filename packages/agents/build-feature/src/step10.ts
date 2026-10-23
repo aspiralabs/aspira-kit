@@ -1,7 +1,7 @@
 // Step 10 (F30, F31): the repository work before the first review, and the release row after the
 // review loop. The Playbook's order (playbook.ts:129-133): repo docs in the same PR, the product's
-// open release page, the Notion pages to propagate; then a human merges and moves the card to
-// Ready: Implementation. No stage here merges or makes that move.
+// open release page, the Notion pages to propagate; then the merge phase (merge.ts) merges and
+// moves the card to Ready: Implementation. No stage here merges or makes that move.
 //
 // - step10Stage: a subagent updates the repo docs the change made untrue (the Playbook's list) and
 //   writes the "Docs to propagate" section on the ticket (or "none"), replacing an existing one.

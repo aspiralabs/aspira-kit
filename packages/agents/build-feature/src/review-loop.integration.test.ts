@@ -1,7 +1,7 @@
 // Steps 9 and 10 in the build-feature run (seam S1 with real git and the fake gh): Step 10's repo
 // work is committed and pushed before the first review, each review is one /aspira-pr-reviewer
 // run whose findings.md the driver counts, a fix subagent may change only the files the findings
-// cite and their tests, three reviews per ticket at most across runs, and the release row is
+// cite and their tests, four reviews per ticket at most across runs, and the release row is
 // drafted only when aspira.json names the releases. The findings.md files are literal fixtures.
 // KIT-11 plan P5: T31-T33.
 
@@ -25,10 +25,10 @@ describe('T31 F27 F29: the review loop', () => {
     expect({ since: String(second.stage?.command ?? '').includes(`--since ${copy}`), copied: copied.includes('Review 1 found the retry never stops') }).toEqual({ since: true, copied: true })
   }, SLOW)
 
-  it('stops after three reviews with a high left: no pr ready, no move, the finding first in build-summary.md', async () => {
+  it('stops after four reviews with a high left: no pr ready, no move, the finding first in build-summary.md', async () => {
     const { h, review } = await reviewing()
     let stage = review
-    for (const n of [1, 2, 3]) {
+    for (const n of [1, 2, 3, 4]) {
       await h.report(stage.stage, 'complete', { findings: high(n) })
       stage = await h.advance()
       if (stage.stage?.stage !== 'fix') break
@@ -36,12 +36,12 @@ describe('T31 F27 F29: the review loop', () => {
       stage = await h.advance()
     }
     const summary = await h.summary()
-    const remaining = summary.indexOf('Review 3 found the retry never stops')
+    const remaining = summary.indexOf('Review 4 found the retry never stops')
     const secondSection = summary.indexOf('\n## ', summary.indexOf('## ') + 1)
-    expect({ end: stage.stage?.stage, reviews: reviewSteps(h).length, ready: await ghRan(h, 'ready'), moves: ofKind(h.stages, 'move').length, first: remaining >= 0 && remaining < secondSection }).toEqual({ end: 'end', reviews: 3, ready: 0, moves: 0, first: true })
+    expect({ end: stage.stage?.stage, reviews: reviewSteps(h).length, ready: await ghRan(h, 'ready'), moves: ofKind(h.stages, 'move').length, first: remaining >= 0 && remaining < secondSection }).toEqual({ end: 'end', reviews: 4, ready: 0, moves: 0, first: true })
   }, SLOW)
 
-  it('runs only two more reviews when an earlier run already recorded one', async () => {
+  it('runs only three more reviews when an earlier run already recorded one', async () => {
     const { h, review } = await reviewing()
     await h.report(review.stage, 'complete', { findings: high(1) })
     await h.advance()
@@ -54,10 +54,10 @@ describe('T31 F27 F29: the review loop', () => {
       else break
       stage = await toReview(h)
     }
-    expect(reviewSteps(h, from).length).toBe(2)
+    expect(reviewSteps(h, from).length).toBe(3)
   }, SLOW)
 
-  it('marks the PR ready when the second review leaves no critical or high finding', async () => {
+  it('marks the PR ready when the second review leaves nothing medium or above', async () => {
     const { h, review } = await reviewing()
     await h.report(review.stage, 'complete', { findings: high(1) })
     const fixStage = await h.advance()
