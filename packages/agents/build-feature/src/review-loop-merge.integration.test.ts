@@ -5,7 +5,7 @@
 // Ready: Implementation. A refused merge stops the run with the PR open and the card where it was.
 
 import { afterAll, describe, expect, it } from 'vitest'
-import { cleanup, ofKind } from './driver.test-helper.ts'
+import { BOARD, RELEASES, REPOSITORY, cleanup, ofKind } from './driver.test-helper.ts'
 import { SLOW, high, reviewing, fix, reviewSteps, ghRan } from './review-loop.integration.shared.ts'
 
 afterAll(cleanup)
@@ -74,6 +74,29 @@ describe('the merge after a clean review', () => {
       moves: ofKind(h.stages, 'move').map((stage) => `${String(stage.from)} -> ${String(stage.to)}`),
       merged: String(end.stage?.message ?? '').includes('merged the PR'),
     }).toEqual({ end: 'end', merges: 1, run: [`gh pr checks ${String(merge?.pr)} --watch --fail-fast`, `gh pr merge ${String(merge?.pr)} --merge`], moves: ['In Review: Implementation -> Ready: Implementation'], merged: true })
+  }, SLOW)
+
+  it('updates the release page entry after the merge, before the move, when aspira.json names releases', async () => {
+    const { h, review } = await reviewing({ aspira: { board: BOARD, repository: REPOSITORY, releases: RELEASES } })
+    await h.report(review.stage, 'complete', { findings: [{ id: 'L1', severity: 'low', title: 'A name could be clearer', file: 'src/a.ts' }] })
+    let stage = await h.advance()
+    const order: string[] = []
+    for (let turn = 0; turn < 6 && stage.stage?.stage === 'release-row'; turn += 1) {
+      const part = String(stage.stage.part)
+      order.push(part)
+      if (part === 'draft') await h.answer(stage.stage, { customerLine: 'You can now save a recipe for later.', existingRow: false })
+      else await h.answer(stage.stage, { done: true })
+      stage = await h.advance()
+    }
+    const merged = ofKind(h.stages, 'release-row').find((candidate) => candidate.part === 'merged')
+    expect({
+      order,
+      end: stage.stage?.stage,
+      writes: merged?.notion,
+      checklist: String(merged?.instructions ?? '').includes('checked on dev'),
+      afterMerge: h.stages.indexOf(merged!) > h.stages.indexOf(ofKind(h.stages, 'merge')[0]!),
+      moves: ofKind(h.stages, 'move').map((candidate) => String(candidate.to)),
+    }).toEqual({ order: ['draft', 'write', 'merged'], end: 'end', writes: [{ op: 'write', target: 'release-page' }], checklist: true, afterMerge: true, moves: ['Ready: Implementation'] })
   }, SLOW)
 
   it('stops with the PR open and no move when the merge is refused', async () => {
