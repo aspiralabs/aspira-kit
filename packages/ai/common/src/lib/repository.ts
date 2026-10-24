@@ -15,9 +15,8 @@ const MAX_REF_MATCHES = 3
 /** Largest line-numbered file body pasted into the packet; larger files are linked. */
 const INLINE_LIMIT = 40_000
 
-/** A reproducible source packet avoids a frontier model spending its budget navigating.
- * Large files are linked rather than inlined and stay available through the read tools. */
-export function evidencePacket(spec: string, files: Map<string, string>): string {
+/** The files a spec's packet selects, in packet order, and the current-producer facts found on the way. */
+export function packetSelection(spec: string, files: Map<string, string>): { ordered: string[]; producerFacts: string[] } {
   const refs = [...new Set([...spec.matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!).filter((value) => value.length < 160))]
   const exact = new Set<string>()
   const selected = new Set<string>()
@@ -57,6 +56,13 @@ export function evidencePacket(spec: string, files: Map<string, string>): string
   // Files the spec names by full path come first, then current producers, then
   // schema, policy, imports and looser matches; long docs go last.
   const ordered = new Set([...exact, ...producers, ...[...selected].filter((file) => !file.endsWith('.md')), ...selected])
+  return { ordered: [...ordered], producerFacts }
+}
+
+/** A reproducible source packet avoids a frontier model spending its budget navigating.
+ * Large files are linked rather than inlined and stay available through the read tools. */
+export function evidencePacket(spec: string, files: Map<string, string>): string {
+  const { ordered, producerFacts } = packetSelection(spec, files)
   // Every selected file is either inlined whole or linked; nothing is cut
   // mid-file. A file too large to inline is listed by path and size, and the
   // agent reads it with read_files/search when it needs it.
@@ -69,7 +75,44 @@ export function evidencePacket(spec: string, files: Map<string, string>): string
     else linked.push(`- ${file} (${lines.length} lines)`)
   }
   const links = linked.length ? `\n\nLINKED FILES (selected but too large to inline; read them with read_files in line windows, or search):\n${linked.join('\n')}` : ''
-  return `Source packet selected from spec references, schemas, auth policy and first-hop imports. It is not exhaustive; specialists must inspect callers and missing paths.\nCURRENT PRODUCER LINKS (literal source observations; check applicability):\n${producerFacts.slice(0, 30).join('\n')}\n\n${parts.join('\n\n')}${links}`
+  return `Source packet selected from spec references, schemas, auth policy and first-hop imports. It is not exhaustive: read a caller or a path it leaves out when the work needs it, not the files it already holds.\nCURRENT PRODUCER LINKS (literal source observations; check applicability):\n${producerFacts.slice(0, 30).join('\n')}\n\n${parts.join('\n\n')}${links}`
+}
+
+/**
+ * The packet as an index (path and line count, no content): what later phases get instead of the
+ * whole packet, once research has read it. A file listed here was read; open it again only for a
+ * line the research facts and touch list do not give.
+ */
+export function packetIndex(spec: string, files: Map<string, string>): string {
+  const { ordered } = packetSelection(spec, files)
+  if (!ordered.length) return ''
+  const lines = ordered.map((file) => `- ${file} (${files.get(file)!.split('\n').length} lines)`)
+  return `SOURCE ALREADY READ (research had every file below in full; its facts and touch list carry what the plan needs from them. Open one again only for a line they do not give):\n${lines.join('\n')}`
+}
+
+/** An area of the repository a spec touches, for one parallel explorer: its directory and the packet files under it. */
+export type ExploreArea = { name: string; files: string[] }
+
+/** The directory an area is named by: two segments under packages/ or apps/ (packages/kit), else the first one. */
+const areaOf = (file: string): string => {
+  const parts = file.split('/')
+  if (parts.length > 2 && (parts[0] === 'packages' || parts[0] === 'apps')) return parts.slice(0, parts[1] === 'agents' && parts.length > 3 ? 3 : 2).join('/')
+  return parts.length > 1 ? parts[0]! : '.'
+}
+
+/**
+ * The areas of the packet's files, largest first, at most `max`: the smallest areas are folded into the
+ * last one. Fewer than two areas means there is nothing to split, and research reads on its own.
+ */
+export function exploreAreas(spec: string, files: Map<string, string>, max = 4): ExploreArea[] {
+  const groups = new Map<string, string[]>()
+  for (const file of packetSelection(spec, files).ordered) groups.set(areaOf(file), [...(groups.get(areaOf(file)) ?? []), file])
+  const areas = [...groups.entries()].map(([name, list]) => ({ name, files: list })).sort((a, b) => b.files.length - a.files.length || a.name.localeCompare(b.name))
+  if (areas.length < 2) return []
+  if (areas.length <= max) return areas
+  const kept = areas.slice(0, max - 1)
+  const rest = areas.slice(max - 1)
+  return [...kept, { name: rest.map((area) => area.name).join(', '), files: rest.flatMap((area) => area.files) }]
 }
 
 /** The installed Aspira kit configuration the agents' rules point at (constraints.md, the shared
@@ -129,7 +172,7 @@ export async function repository(root: string, signal?: AbortSignal) {
   const status = (await run('git', ['-C', base, 'status', '--porcelain'], { signal })).stdout.trim()
   const instructions = [...files].filter(([p]) => /(^|\/)(AGENTS|CLAUDE)\.md$/.test(p) || /agent\/constraints\.md$/.test(p)).map(([p, text]) => `SOURCE ${p}\n${text}`).join('\n\n')
   return {
-    files, tracked, commit, dirty: status.length > 0, gaps, instructions, packet: (spec: string) => evidencePacket(spec, files),
+    files, tracked, commit, dirty: status.length > 0, gaps, instructions, packet: (spec: string) => evidencePacket(spec, files), packetIndex: (spec: string) => packetIndex(spec, files), areas: (spec: string) => exploreAreas(spec, files),
     tools: {
       list_files: tool({ description: 'List available snapshot paths matching a substring. Refine when truncated.', inputSchema: z.object({ contains: z.string() }), execute: async ({ contains }) => {
         const matches = [...files.keys()].filter((p) => p.toLowerCase().includes(contains.toLowerCase()))

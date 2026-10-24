@@ -19,12 +19,13 @@ import type { SessionModel } from '@aspiralabs/ai/common/lib/session-model'
 import { taskModel, type Effort } from '@aspiralabs/ai/common/lib/model-config'
 import { z } from 'zod'
 import { fingerprintKnowledge, KnowledgeBlocked, knowledgeConfig, knowledgeFiles, knowledgeSource, loadKnowledge, REQUIRED_NAME, verifyGuidelines, type KnowledgeConfig, type KnowledgeFile } from './local-knowledge.ts'
-import { applyPlanPatch, planPatchSchema, planSchema, readAnswers, researchSchema, type Plan, type PlanPatch, type Research } from './plan.ts'
-import { assertPlannableSpec, assessPlan, type GuidelinePage, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, ticketFolderFor, uncoveredRules, type PreparedPlan } from './runner.ts'
+import { applyPlanPatch, exploreSchema, planPatchSchema, planSchema, readAnswers, researchSchema, type Exploration, type Plan, type PlanPatch, type Research } from './plan.ts'
+import { exploreInstructions, exploreSystem } from './prompts.ts'
+import { assertPlannableSpec, assessPlan, explorationsSection, explorePrompt, withExplorations, type GuidelinePage, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, ticketFolderFor, uncoveredRules, type PreparedPlan } from './runner.ts'
 import { renderFactsBlock, reviewFacts, type ReviewFactsResult } from './review-facts.ts'
 
 /** The model phases of a --local run, in order. */
-export type Stage = 'research' | 'planning'
+export type Stage = 'explore' | 'research' | 'planning'
 
 /** What one `local` call is asked to do. */
 export type LocalInput = {
@@ -46,16 +47,16 @@ export type LocalInput = {
 export type LocalDeps = { env?: Record<string, string | undefined>; packageDir?: string; fetch?: (url: string, init?: RequestInit) => Promise<Response>; api?: string }
 
 /** The model phases: research, planning, then up to REPAIR_ROUNDS correction passes. */
-export type PhaseId = 'research' | 'planning' | `repair-${number}`
+export type PhaseId = `explore-${number}` | 'research' | 'planning' | `repair-${number}`
 
 /** A task as printed for the session: the prompt and output are file paths; `model` the session model it runs on (KIT-48). */
 export type LocalTask = { id: PhaseId; prompt: string; output: string; schema: string; model: SessionModel; effort?: Effort; reads?: string; error?: string; retry?: boolean }
 
 /** Research and planning on Opus, the correction passes on Sonnet (KIT-48). */
-export const modelForPhase = (id: PhaseId): SessionModel => (id.startsWith('repair-') ? 'sonnet' : 'opus')
+export const modelForPhase = (id: PhaseId): SessionModel => (id.startsWith('repair-') || id.startsWith('explore-') ? 'sonnet' : 'opus')
 
 /** The phase's model and effort: aspira.json `models` planner.research, planner.planning or planner.repair, else modelForPhase. */
-export const taskModelForPhase = (id: PhaseId, repo: string): { model: SessionModel; effort?: Effort } => taskModel(`planner.${id.startsWith('repair-') ? 'repair' : id}`, modelForPhase(id), repo)
+export const taskModelForPhase = (id: PhaseId, repo: string): { model: SessionModel; effort?: Effort } => taskModel(`planner.${id.startsWith('repair-') ? 'repair' : id.startsWith('explore-') ? 'explore' : id}`, modelForPhase(id), repo)
 
 /** A stage for the session to run. */
 export type LocalPending = { pending: true; status: 'pending'; stage: Stage; workDir: string; router: string; instructions: string; tasks: LocalTask[] }
@@ -75,7 +76,7 @@ export const workDirFor = (outputDir: string) => `${outputDir}.local`
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-const promptsModule = z.object({ system: z.string().min(1), researchSystem: z.string().min(1), researchInstructions: z.string().min(1), planningInstructions: z.string().min(1), repairInstructions: z.string().min(1) })
+const promptsModule = z.object({ system: z.string().min(1), researchSystem: z.string().min(1), researchInstructions: z.string().min(1), planningInstructions: z.string().min(1), repairInstructions: z.string().min(1), exploreSystem: z.string().min(1).default(exploreSystem), exploreInstructions: z.string().min(1).default(exploreInstructions) })
 /** The agent's prompt texts, loaded from its prompt module when the step runs. */
 export type AgentPrompts = z.infer<typeof promptsModule>
 
@@ -113,7 +114,12 @@ export function renderRouter(instructions: string, script: string): string {
 
 /** The file a subagent reads: the agent's system prompt and phase prompt verbatim, the tool mapping and the output contract. */
 export function renderTaskPrompt(args: { id: PhaseId; system: string; prompt: string; output: string; reads: string | null; repo: string; knowledge: string[]; schema: z.ZodType }): string {
-  const mechanics = args.id === 'research'
+  const mechanics = args.id.startsWith('explore-')
+    ? [
+      `- ${RESEARCH_RULE} ${sessionResearchTools(args.repo)}`,
+      `- Read the repository at ${args.repo} with Read, Grep, Glob and non-mutating git commands, read-only, and only inside your AREA. Batch reads and searches; other explorers run beside you.`,
+    ]
+    : args.id === 'research'
     ? [
       `- ${RESEARCH_RULE} ${sessionResearchTools(args.repo)}`,
       `- The agent's repository tools (list_files, read_files, search) are read-only reads of the repository at ${args.repo}: use Read, Grep, Glob and non-mutating git commands there. The agent gives research ten tool steps; be as efficient: batch reads and searches.`,
@@ -233,23 +239,35 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       retry = rejected.length < 2
     }
     const promptFile = join(work, 'prompts', `${id}.md`)
-    await writeFile(promptFile, renderTaskPrompt({ id, system: id === 'research' ? prompts.researchSystem : prompts.system, prompt, output, reads: readsFile, repo: resolve(input.repoPath), knowledge: topics, schema }))
-    return { task: { id, prompt: promptFile, output, schema: id === 'research' ? 'researchSchema' : id.startsWith('repair-') ? 'planPatchSchema' : 'planSchema', ...taskModelForPhase(id, resolve(input.repoPath)), ...(readsFile === null ? {} : { reads: readsFile }), ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) } }
+    await writeFile(promptFile, renderTaskPrompt({ id, system: id === 'research' ? prompts.researchSystem : id.startsWith('explore-') ? prompts.exploreSystem : prompts.system, prompt, output, reads: readsFile, repo: resolve(input.repoPath), knowledge: topics, schema }))
+    return { task: { id, prompt: promptFile, output, schema: id === 'research' ? 'researchSchema' : id.startsWith('explore-') ? 'exploreSchema' : id.startsWith('repair-') ? 'planPatchSchema' : 'planSchema', ...taskModelForPhase(id, resolve(input.repoPath)), ...(readsFile === null ? {} : { reads: readsFile }), ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) } }
   }
 
   const coversRules = (value: Research) => {
     const missing = uncoveredRules(prepared.guidelines, value.checks)
     return missing.length ? `Checks must name every required rule ID. Add a check for each of these, with how it applies or evidence that it does not: ${missing.join(', ')}` : undefined
   }
-  const researched = await resolvePhase('research', researchPrompt(context, prompts.researchInstructions, renderFactsBlock(facts)), researchSchema, coversRules)
+  // Explorers read the spec's areas in parallel first (one task each, launched together); research then
+  // starts from their findings. An area whose explorer has no output under --finish is left to research.
+  const explorations: { area: string; result: Exploration }[] = []
+  const exploring: LocalTask[] = []
+  for (const [index, area] of (prepared.repo.areas?.(prepared.spec) ?? []).entries()) {
+    const explored = await resolvePhase(`explore-${index + 1}`, explorePrompt(context, area, prompts.exploreInstructions), exploreSchema)
+    if (explored.task !== undefined) exploring.push(explored.task)
+    else if (explored.value !== undefined) explorations.push({ area: area.name, result: explored.value })
+  }
+  if (exploring.length) return { ...base, stage: 'explore', tasks: exploring }
+  const researched = await resolvePhase('research', researchPrompt(context, prompts.researchInstructions, renderFactsBlock(facts), explorationsSection(explorations)), researchSchema, coversRules)
   if (researched.task !== undefined) return { ...base, stage: 'research', tasks: [researched.task] }
-  const research: Research | null = researched.value ?? null
+  const research: Research | null = researched.value === undefined ? null : withExplorations(researched.value, explorations)
+  // Planning and repair get the packet's index instead of the packet: research's facts and touches carry it.
+  const planningContext = `${packet ? `RUN PACKET (data):\n${packet}\n\n` : ''}${planContext(prepared, 'index')}`
   let plan: Plan | null = null
   if (research !== null) {
     // The agent hands planning the guideline pages research read; here research reads the
     // knowledge folder's topic pages, so planning gets all of them.
     const pages: GuidelinePage[] = await Promise.all(topics.map(async (file) => ({ source: file, markdown: await readFile(file, 'utf8') })))
-    const planned = await resolvePhase('planning', planningPrompt(context, research, prompts.planningInstructions, pages), planSchema)
+    const planned = await resolvePhase('planning', planningPrompt(planningContext, research, prompts.planningInstructions, pages), planSchema)
     if (planned.task !== undefined) return { ...base, stage: 'planning', tasks: [planned.task] }
     plan = planned.value ?? null
     // The agent's correction passes: the same rounds, kept only while each one improves the plan.
@@ -258,7 +276,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       if (!issues.length) break
       // A correction pass answers with a patch of only what it changes (planPatchSchema), merged into the plan here.
       const before: Plan = plan
-      const repaired = await resolvePhase(`repair-${round}`, repairPrompt(context, research, plan, issues, prompts.repairInstructions, pages), planPatchSchema, (patch) => mergeProblem(before, patch))
+      const repaired = await resolvePhase(`repair-${round}`, repairPrompt(planningContext, research, plan, issues, prompts.repairInstructions, pages), planPatchSchema, (patch) => mergeProblem(before, patch))
       if (repaired.task !== undefined) return { ...base, stage: 'planning', tasks: [repaired.task] }
       const merged = repaired.value === undefined ? undefined : applyPlanPatch(before, repaired.value)
       if (merged === undefined || planIssues({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan: merged }).length >= issues.length) break
@@ -295,12 +313,13 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
     const parsed = readsSchema.safeParse(safeJson(text))
     return parsed.success ? parsed.data : []
   }))).flat()
-  const phaseErrors = calls.filter((call) => call.error !== undefined).map((call) => ({ phase: call.phase, error: call.error ?? null }))
+  // An explorer that produced nothing only leaves its area to research: never a plan problem.
+  const phaseErrors = calls.filter((call) => call.error !== undefined && !call.phase.startsWith('explore-')).map((call) => ({ phase: call.phase, error: call.error ?? null }))
   // The previous plan's trace/decisions.md, with the options the author ticked, is read before the export replaces it.
   const answers = await readAnswers(prepared.dir)
   const { status, problems, openGaps, decisions } = assessPlan({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan, phaseErrors, uiRequired: prepared.uiRequired, reads, cancelled: false, answers, takeRecommended: input.takeRecommended ?? false })
   const totalMs = Date.now() - Date.parse(state.startedAt)
-  const phaseRows = (['research', 'planning', ...calls.map((call) => call.phase).filter((phase) => phase.startsWith('repair-'))] as PhaseId[]).map((phase) => {
+  const phaseRows = ([...calls.map((call) => call.phase).filter((phase) => phase.startsWith('explore-')), 'research', 'planning', ...calls.map((call) => call.phase).filter((phase) => phase.startsWith('repair-'))] as PhaseId[]).map((phase) => {
     const call = calls.find((item) => item.phase === phase)
     return `| ${phase} | ${call === undefined ? 'not run' : call.error === undefined ? 'completed' : `failed: ${call.error.replaceAll('|', '/').slice(0, 200)}`} |`
   })

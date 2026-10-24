@@ -15,7 +15,19 @@ export { decisionSchema }
 // depending on this package); re-exported here unchanged so every existing import of './plan.ts' keeps working.
 export { applyPlanPatch, planPatchSchema, planSchema, renderPlan, mergeDecisions, problemSeverity, touchesUi, type PlanPatch }
 export type { Plan }
-export const researchSchema = z.object({ facts: z.array(text), checks: z.array(z.object({ rule: text, evidence: text })), gaps: z.array(text), decisions: z.array(decisionSchema), notes: z.array(text).optional() })
+/**
+ * One file the change will create, modify, delete or move, as research found it: the symbols the plan
+ * will touch there and, for an existing file, the line window that holds them. Planning writes its
+ * changes from this list instead of opening the files again.
+ */
+export const touchSchema = z.object({ path: text, operation: z.enum(['create', 'modify', 'delete', 'move']), symbols: z.array(text).min(1), lines: text.optional(), why: text })
+export type Touch = z.infer<typeof touchSchema>
+
+export const researchSchema = z.object({ facts: z.array(text), checks: z.array(z.object({ rule: text, evidence: text })), gaps: z.array(text), decisions: z.array(decisionSchema), notes: z.array(text).optional(), touches: z.array(touchSchema).optional() })
+
+/** One parallel explorer's findings for its area: facts with file:line citations, the files the change touches there, and what it could not read. */
+export const exploreSchema = z.object({ facts: z.array(text), touches: z.array(touchSchema), gaps: z.array(text) })
+export type Exploration = z.infer<typeof exploreSchema>
 export type Research = z.infer<typeof researchSchema>
 
 function safePath(path: string) {
@@ -28,6 +40,26 @@ export function writablePath(path: string) {
   const structural = !isAbsolute(path) && !/^[A-Za-z]:/.test(path) && !path.includes('\\') && !path.split('/').some((part) => !part || part === '.' || part === '..')
   const managed = /(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|\.npmrc)$/.test(path)
   return structural && (allowedPath(path) || (managed && !path.split('/').some((part) => /^(?:\.git|node_modules|\.eve|\.next|dist|\.output|coverage|vendor)$/i.test(part))))
+}
+
+/**
+ * The file a citation points at when the citation holds, else null. Two forms: `path:line` or
+ * `path:start-end` inside the file, and `path#symbol` where the symbol appears in the file as a whole
+ * word. A symbol citation lets a plan cite a function or export without opening the file for its line.
+ */
+export function citedPath(citation: string, files: Map<string, string>): string | null {
+  const symbol = citation.match(/^([^\s#]+?)#([^\s#]+)(?:\s|$)/)
+  if (symbol !== null) {
+    const source = files.get(symbol[1]!)
+    const name = symbol[2]!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return source !== undefined && new RegExp(`(?<![\\w$])${name}(?![\\w$])`).test(source) ? symbol[1]! : null
+  }
+  const line = citation.match(/^(.+?):(\d+)(?:-(\d+))?(?::|\s|$)/)
+  if (line === null) return null
+  const source = files.get(line[1]!)
+  const start = Number(line[2])
+  const end = line[3] === undefined ? start : Number(line[3])
+  return source !== undefined && start > 0 && end >= start && end <= source.split('\n').length ? line[1]! : null
 }
 
 export function validatePlan(plan: Plan, spec: string, files: Map<string, string>, tracked: Set<string> = new Set(files.keys())): string[] {
@@ -84,8 +116,8 @@ export function validatePlan(plan: Plan, spec: string, files: Map<string, string
         if (!moved.length) errors.push(`Missing move source: ${from}`)
         if ([...existing].some((path) => path === change.path || path.startsWith(`${change.path}/`))) errors.push(`Move target already exists: ${change.path}`)
         const cited = change.evidence.some((citation) => {
-          const match = citation.match(/^(.+?):(\d+)/)
-          return match !== null && files.has(match[1]!) && (match[1] === from || match[1]!.startsWith(`${from}/`))
+          const path = citedPath(citation, files)
+          return path !== null && (path === from || path.startsWith(`${from}/`))
         })
         if (!cited) errors.push(`No valid source evidence: ${task.id}/${from}`)
         for (const path of moved) {
@@ -100,15 +132,9 @@ export function validatePlan(plan: Plan, spec: string, files: Map<string, string
         errors.push(directory ? `Target is a directory, not a file; name each file to ${change.operation}: ${change.path}` : `Missing ${change.operation} target: ${change.path}`)
       }
       // Citations are `path:line` or `path:start-end`; a range must sit inside the file.
-      const sources = change.evidence.map((citation) => citation.match(/^(.+?):(\d+)(?:-(\d+))?(?::|\s|$)/)).filter((match) => match !== null)
-      const valid = sources.filter((match) => {
-        const source = files.get(match[1]!)
-        const start = Number(match[2])
-        const end = match[3] === undefined ? start : Number(match[3])
-        return source !== undefined && start > 0 && end >= start && end <= source.split('\n').length
-      })
+      const valid = change.evidence.map((citation) => citedPath(citation, files)).filter((path) => path !== null)
       if (!valid.length) errors.push(`No valid source evidence: ${task.id}/${change.path}`)
-      if (change.operation !== 'create' && files.has(change.path) && !valid.some((match) => match[1] === change.path)) errors.push(`Target not cited: ${change.path}`)
+      if (change.operation !== 'create' && files.has(change.path) && !valid.includes(change.path)) errors.push(`Target not cited: ${change.path}`)
       if (change.operation === 'delete') existing.delete(change.path)
       else existing.add(change.path)
     }

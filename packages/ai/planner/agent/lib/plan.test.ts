@@ -169,3 +169,17 @@ describe('a move (KIT-65: a directory move made every later target look missing)
     expect(planSchema.safeParse({ ...plan, tasks: [plan.tasks[0], { ...plan.tasks[1]!, changes: [{ ...plan.tasks[1]!.changes[0]!, from: 'src' }] }, plan.tasks[2]] }).success).toBe(false)
   })
 })
+
+describe('symbol citations (path#symbol)', () => {
+  it('accept a symbol that appears in the file as a whole word, as target evidence', () => {
+    const plan = validPlan(); plan.tasks[1]!.changes[0]!.evidence = ['src/items.ts#save']
+    expect(validatePlan(plan, spec, files)).toEqual([])
+  })
+
+  it('refuse a symbol the file does not hold, a partial word, and a file that does not exist', () => {
+    for (const citation of ['src/items.ts#load', 'src/items.ts#sav', 'src/gone.ts#save']) {
+      const plan = validPlan(); plan.tasks[1]!.changes[0]!.evidence = [citation]
+      expect(validatePlan(plan, spec, files)).toContain('No valid source evidence: P2/src/items.ts')
+    }
+  })
+})

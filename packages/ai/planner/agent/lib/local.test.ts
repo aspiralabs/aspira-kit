@@ -246,3 +246,29 @@ it('reads the option the author ticked in trace/decisions.md on the rerun and re
   expect(review.status).toBe('ready')
   expect(review.decisions.filter((d) => d.decidedBy === 'open')).toEqual([])
 })
+
+it('runs one explorer per area in parallel before research, folds their touches in, and gives planning only the packet index', async () => {
+  const f = await fixture()
+  await writeFile(f.specPath, `${spec}\nThe change touches \`src/items.ts\` and its tests beside \`tests/example.test.ts\`.\n`)
+  const snapshot = join(f.dir, 'REQUIRED.md')
+  await writeSnapshot(snapshot)
+  const args = { specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir, guidelinesPath: snapshot }
+  const explore = pending(await runLocal(args, { env: {} }))
+  expect(explore).toMatchObject({ stage: 'explore', tasks: [{ id: 'explore-1', model: 'sonnet', schema: 'exploreSchema' }, { id: 'explore-2', model: 'sonnet', schema: 'exploreSchema' }] })
+  const touch = { path: 'src/items.ts', operation: 'modify', symbols: ['save'], lines: '1-1', why: 'persist the item' }
+  await writeFile(explore.tasks[0]!.output, JSON.stringify({ facts: ['save is the only export (src/items.ts:1)'], touches: [touch], gaps: [] }))
+  await writeFile(explore.tasks[1]!.output, JSON.stringify({ facts: ['tests use vitest (tests/example.test.ts:1)'], touches: [], gaps: [] }))
+  const research = pending(await runLocal(args, { env: {} }))
+  expect(research.stage).toBe('research')
+  expect(await readFile(research.tasks[0]!.prompt, 'utf8')).toContain('EXPLORER FINDINGS')
+  await writeFile(research.tasks[0]!.output, JSON.stringify({ facts: [], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] }))
+  const planning = pending(await runLocal(args, { env: {} }))
+  const prompt = await readFile(planning.tasks[0]!.prompt, 'utf8')
+  expect({ index: prompt.includes('SOURCE ALREADY READ'), packet: prompt.includes('SOURCE src/items.ts ('), touch: prompt.includes('"path":"src/items.ts","operation":"modify"'), fact: prompt.includes('save is the only export') }).toEqual({ index: true, packet: false, touch: true, fact: true })
+  // The plan cites the target by symbol: no line number needed.
+  const plan = validPlan(); plan.tasks[1]!.changes[0]!.evidence = ['src/items.ts#save']
+  await writeFile(planning.tasks[0]!.output, JSON.stringify(plan))
+  const done = await runLocal(args, { env: {} })
+  if (done.pending) throw new Error('expected export')
+  expect(done.status).toBe('ready')
+})

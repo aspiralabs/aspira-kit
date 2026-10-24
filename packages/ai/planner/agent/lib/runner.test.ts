@@ -6,13 +6,15 @@ import type { ToolSet } from 'ai'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 
 const retention = { question: 'Choose retention duration before implementing deletion?', options: ['Keep forever', 'Delete after 30 days'], recommended: 'Keep forever', reasoning: 'nothing else in the app expires', whyYours: 'storage cost is a product choice' }
-const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [] as unknown[], close: vi.fn() }))
-vi.mock('@aspiralabs/ai/common/lib/repository', () => ({ repository: async () => ({ files, instructions: '', packet: () => 'src/items.ts:1: existing save', gaps: [], commit: 'abc', dirty: false, tools: { read_files: {} } }), allowedPath: (path: string) => !path.includes('.env') }))
+const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [] as unknown[], close: vi.fn(), areas: [] as { name: string; files: string[] }[], explorers: 0, prompts: [] as string[] }))
+vi.mock('@aspiralabs/ai/common/lib/repository', () => ({ repository: async () => ({ files, instructions: '', packet: () => 'src/items.ts:1: existing save', packetIndex: () => 'SOURCE ALREADY READ (index)', areas: () => state.areas, gaps: [], commit: 'abc', dirty: false, tools: { read_files: {} } }), allowedPath: (path: string) => !path.includes('.env') }))
 vi.mock('@aspiralabs/ai/common/lib/mcp', () => ({ connectReadTools: async () => ({ tools: state.guidelineTool ? { notion__read_guideline: { execute: async () => ({ content: [{ type: 'text', text: JSON.stringify({ source: 'https://www.notion.so/topic', markdown: 'TEST-001 Write the failing test first.' }) }] }) } } : {}, reads: [], sources: [], close: state.close }) }))
 vi.mock('ai', async (original) => {
   const actual = await original<typeof import('ai')>()
   const mock = { ...actual, gateway: vi.fn(() => ({})), generateText: vi.fn(async (args: { tools?: ToolSet; toolChoice?: unknown; messages?: unknown[]; output?: unknown; onStepStart: (value: { stepNumber: number; messages: unknown[] }) => void; onStepEnd: (value: { usage: { inputTokens: number; outputTokens: number }; providerMetadata: unknown; finishReason: string; text: string; toolCalls: unknown[]; toolResults: unknown[] }) => void }) => {
     args.onStepStart({ stepNumber: 0, messages: [] })
+    const sentPrompt = (args as unknown as { prompt?: unknown }).prompt
+    if (typeof sentPrompt === 'string') state.prompts.push(sentPrompt)
     if (state.failResearch && args.tools) throw new Error('Research provider unavailable')
     args.onStepEnd({ usage: { inputTokens: 10, outputTokens: 5 }, providerMetadata: { gateway: { cost: '0.10' } }, finishReason: 'stop', text: 'mock output', toolCalls: [], toolResults: [] })
     const planOf = () => {
@@ -21,6 +23,12 @@ vi.mock('ai', async (original) => {
       if (state.uiPlan) plan.tasks[1]!.changes[0]!.path = 'src/components/item-card.tsx'
       if (state.needsAuthor) plan.decisions = [retention]
       return plan
+    }
+    // Explorers read one area each and submit with submit_exploration.
+    if (args.tools?.submit_exploration) {
+      state.explorers++
+      await args.tools.submit_exploration.execute!({ facts: [`explored fact ${state.explorers}`], touches: [{ path: 'src/items.ts', operation: 'modify', symbols: ['save'], lines: '1-1', why: 'persist' }], gaps: [] }, { toolCallId: 'explore', messages: [], context: {} })
+      return {}
     }
     // KIT-54: planning reads through tools and submits the plan with submit_plan.
     if (args.tools?.submit_plan) {
@@ -59,7 +67,7 @@ vi.mock('ai', async (original) => {
 import { CLOUD_RESEARCH_TOOLS, RESEARCH_RULE } from '@aspiralabs/ai/common/lib/research-rule'
 import { runPlan } from './runner.ts'
 
-beforeEach(() => { Object.assign(state, { failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [] }); state.close.mockClear() })
+beforeEach(() => { Object.assign(state, { failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [], areas: [], explorers: 0, prompts: [] }); state.close.mockClear() })
 async function input() {
   const dir = await mkdtemp(join(tmpdir(), 'planner-test-'))
   const specPath = join(dir, 'spec.reviewed.md')
@@ -186,11 +194,13 @@ it('sends research and planning the exact default prompt bytes', async () => {
   await runPlan(args)
   const sent = vi.mocked(generateText).mock.calls.map(([call]) => call as { system?: string; prompt?: string })
   const context = `BUSINESS SPEC (spec.reviewed.md):\n${spec}\n\nREQUIRED GUIDELINES:\nREV-001 Inspect source evidence\n\nREPOSITORY INSTRUCTIONS:\nThe repository has no AGENTS.md or CLAUDE.md at its root.\n\n\nsrc/items.ts:1: existing save`
+  // Planning gets the packet's index in place of the packet: research's facts and touch list carry it.
+  const planningContext = context.replace('src/items.ts:1: existing save', 'SOURCE ALREADY READ (index)')
   const research = { facts: ['src/items.ts:1 establishes save'], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] }
   // KIT-54: both system prompts carry the research rule; planning's prompt names its tools and ends on the submit instruction.
   expect(sent.map((call) => call.system)).toEqual([`${researchSystem}\n\n${RESEARCH_RULE}`, `${system}\n\n${RESEARCH_RULE}`])
   expect(sent[0]!.prompt).toBe(`${context}\n\n${researchInstructions}`)
-  expect(sent[1]!.prompt).toBe(`${context}\n\nRESEARCH:\n${JSON.stringify(research)}\n\n${planningInstructions}\n\n${CLOUD_RESEARCH_TOOLS}\n\nFinish by calling submit_plan with your complete result.`)
+  expect(sent[1]!.prompt).toBe(`${planningContext}\n\nRESEARCH:\n${JSON.stringify(research)}\n\n${planningInstructions}\n\n${CLOUD_RESEARCH_TOOLS}\n\nFinish by calling submit_plan with your complete result.`)
 })
 
 it('needs UI kit reads only when the plan writes UI files', async () => {
@@ -258,4 +268,18 @@ it('hands planning every page the required guidelines link to, even ones researc
   await runPlan(args)
   const planning = vi.mocked(generateText).mock.calls.map(([call]) => call as { prompt?: string; tools?: ToolSet }).find((call) => call.tools?.submit_plan)!
   expect(planning.prompt).toContain('GUIDELINE PAGES READ DURING RESEARCH (full text):\nSOURCE https://www.notion.so/topic\nTEST-001 Write the failing test first.')
+})
+
+it('runs one explorer per area before research, folds their findings in, and gives planning the packet index only', async () => {
+  state.areas = [{ name: 'src', files: ['src/items.ts'] }, { name: 'tests', files: ['tests/example.test.ts'] }]
+  const result = await runPlan(await input())
+  const research = state.prompts.find((prompt) => prompt.includes('submit_research') || prompt.includes('EXPLORER FINDINGS')) ?? ''
+  const planning = state.prompts.find((prompt) => prompt.includes('RESEARCH:')) ?? ''
+  expect({
+    status: result.status,
+    explorers: state.explorers,
+    researchSawFindings: research.includes('EXPLORER FINDINGS') && research.includes('explored fact 1'),
+    planningIndexOnly: planning.includes('SOURCE ALREADY READ (index)') && !planning.includes('src/items.ts:1: existing save'),
+    planningSawTouch: planning.includes('"path":"src/items.ts"'),
+  }).toEqual({ status: 'ready', explorers: 2, researchSawFindings: true, planningIndexOnly: true, planningSawTouch: true })
 })

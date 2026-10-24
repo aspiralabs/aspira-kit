@@ -7,14 +7,14 @@ import { openDecisions } from '@aspiralabs/ai/common/lib/decisions'
 import { connectReadTools } from '@aspiralabs/ai/common/lib/mcp'
 import { modelTrace } from '@aspiralabs/ai/common/lib/model-trace'
 import { renderPlanBlock } from '@aspiralabs/ai/common/lib/plan-block'
-import { repository } from '@aspiralabs/ai/common/lib/repository'
+import { repository, type ExploreArea } from '@aspiralabs/ai/common/lib/repository'
 import { runAnalysis } from '@aspiralabs/ai/common/lib/run-analysis'
 import { type RunStatus } from '@aspiralabs/ai/common/lib/run-status'
 import { checkBusinessSpec } from '@aspiralabs/ai/common/lib/spec'
 import { pageIdFrom } from '@aspiralabs/ai/common/lib/knowledge'
 import type { Answer, DecisionRecord } from '@aspiralabs/ai/common/lib/decisions'
-import { applyPlanPatch, mergeDecisions, planPatchSchema, planSchema, readAnswers, renderChecks, renderDecisionsFile, renderPlan, researchSchema, touchesUi, validatePlan, type Plan, type Research } from './plan.ts'
-import { system, researchSystem, researchInstructions, planningInstructions, repairInstructions } from './prompts.ts'
+import { applyPlanPatch, mergeDecisions, planPatchSchema, planSchema, readAnswers, renderChecks, renderDecisionsFile, renderPlan, exploreSchema, researchSchema, touchesUi, validatePlan, type Exploration, type Plan, type Research, type Touch } from './plan.ts'
+import { system, researchSystem, researchInstructions, planningInstructions, repairInstructions, exploreSystem, exploreInstructions } from './prompts.ts'
 import { notionReadToolsFromEnv } from '@aspiralabs/ai/common/lib/notion-read'
 import { CLOUD_RESEARCH_TOOLS, RESEARCH_RULE } from '@aspiralabs/ai/common/lib/research-rule'
 
@@ -23,6 +23,8 @@ const researchSystemWithRule = `${researchSystem}\n\n${RESEARCH_RULE}`
 const planningSystem = `${system}\n\n${RESEARCH_RULE}`
 /** Tool rounds planning gets before it must submit the plan (KIT-54). */
 export const PLANNING_MAX_STEPS = 8
+/** Tool turns one cloud explorer gets for its area. */
+export const EXPLORE_MAX_STEPS = 8
 import { renderFactsBlock, researchSteps, reviewFacts } from './review-facts.ts'
 
 /** Correction passes planning gets when its plan fails the checks a model can fix. */
@@ -72,11 +74,38 @@ export async function preparePlan(input: PlanInput, signal: AbortSignal): Promis
 }
 
 /** The evidence block both model phases start from: spec, required guidelines, repository instructions and source packet. */
-export function planContext(prepared: Pick<PreparedPlan, 'spec' | 'specPath' | 'guidelines' | 'repo'>): string {
+export function planContext(prepared: Pick<PreparedPlan, 'spec' | 'specPath' | 'guidelines' | 'repo'>, source: 'packet' | 'index' = 'packet'): string {
   // A missing root instruction file is a fact the plan can state, not evidence it lacks.
   const root = ['AGENTS.md', 'CLAUDE.md'].filter((name) => prepared.repo.files.has(name))
   const rootNote = root.length ? '' : 'The repository has no AGENTS.md or CLAUDE.md at its root.\n'
-  return `BUSINESS SPEC (${prepared.specPath}):\n${prepared.spec}\n\nREQUIRED GUIDELINES:\n${prepared.guidelines}\n\nREPOSITORY INSTRUCTIONS:\n${rootNote}${prepared.repo.instructions}\n\n${prepared.repo.packet(prepared.spec)}`
+  // Research reads the whole source packet; planning and repair get only its index, since research's
+  // facts and touch list carry what they need from it (pasting it again made every planning turn heavier).
+  const packet = source === 'index' && prepared.repo.packetIndex !== undefined ? prepared.repo.packetIndex(prepared.spec) : prepared.repo.packet(prepared.spec)
+  return `BUSINESS SPEC (${prepared.specPath}):\n${prepared.spec}\n\nREQUIRED GUIDELINES:\n${prepared.guidelines}\n\nREPOSITORY INSTRUCTIONS:\n${rootNote}${prepared.repo.instructions}\n\n${packet}`
+}
+
+/** One explorer's prompt: the shared context and its area, with the packet files under it. */
+export function explorePrompt(context: string, area: ExploreArea, instructions: string = exploreInstructions): string {
+  return `${context}\n\nAREA: ${area.name}\nFiles of the source packet in this area:\n${area.files.map((file) => `- ${file}`).join('\n')}\n\n${instructions}`
+}
+
+/** The explorers' findings, for research's prompt: settled evidence it builds on rather than rereads. */
+export function explorationsSection(explorations: readonly { area: string; result: Exploration }[]): string {
+  if (!explorations.length) return ''
+  return `\n\nEXPLORER FINDINGS (settled evidence for their areas; carry their touches into yours and read only what they leave open):\n${explorations.map(({ area, result }) => `AREA ${area}:\n${JSON.stringify(result)}`).join('\n\n')}`
+}
+
+/**
+ * Research with the explorers' findings folded in: their facts first, then research's own, and one touch
+ * per path (research's own entry wins, since it saw every area). Planning sees one research record.
+ */
+export function withExplorations(research: Research, explorations: readonly { result: Exploration }[]): Research {
+  if (!explorations.length) return research
+  const facts = [...new Set([...explorations.flatMap(({ result }) => result.facts), ...research.facts])]
+  const touches = new Map<string, Touch>()
+  for (const touch of explorations.flatMap(({ result }) => result.touches)) if (!touches.has(touch.path)) touches.set(touch.path, touch)
+  for (const touch of research.touches ?? []) touches.set(touch.path, touch)
+  return { ...research, facts, touches: [...touches.values()] }
 }
 
 /** A guideline page research read in full: Notion through the read tool, or a knowledge file in --local. */
@@ -99,8 +128,8 @@ export function researchGapsRefusal(gaps: string[], turnsLeft: number, guideline
 }
 
 /** The research phase's user prompt, with the spec reviewer's reusable facts (reviewFacts/renderFactsBlock) appended when there are any. */
-export function researchPrompt(context: string, instructions: string = researchInstructions, factsBlock: string = ''): string {
-  return `${context}\n\n${instructions}${factsBlock}`
+export function researchPrompt(context: string, instructions: string = researchInstructions, factsBlock: string = '', explorations: string = ''): string {
+  return `${context}${explorations}\n\n${instructions}${factsBlock}`
 }
 
 /**
@@ -271,8 +300,10 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   const mcp = await connectReadTools(process.env.MCP_READ_CONNECTIONS, preparation)
   const prepareMs = Date.now() - started
   const trace = modelTrace(started, options.signal)
-  const models = { research: process.env.SPEC_PLAN_RESEARCH_MODEL || 'anthropic/claude-opus-5.5', planning: process.env.SPEC_PLAN_MODEL || 'openai/gpt-6.1-sol' }
+  const models = { explore: process.env.SPEC_PLAN_EXPLORE_MODEL || 'anthropic/claude-sonnet-5', research: process.env.SPEC_PLAN_RESEARCH_MODEL || 'anthropic/claude-opus-5.5', planning: process.env.SPEC_PLAN_MODEL || 'openai/gpt-6.1-sol' }
   const context = planContext(prepared)
+  // Planning and repair get the packet's index, not the packet: research's facts and touches carry it.
+  const planningContext = planContext(prepared, 'index')
   let plan: Plan | null = null
   let research: Research | null = null
   const pages: GuidelinePage[] = []
@@ -283,8 +314,16 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   const facts = await reviewFacts({ folder: ticketFolderFor(input.specPath), repoPath: input.repoPath, repo: { commit: repo.commit, dirty: repo.dirty } })
   const steps = researchSteps(facts.included)
   try {
+    // Explorers read the spec's areas of the repository in parallel first, so research starts from their
+    // findings instead of reading everything itself. One that fails leaves its area to research.
+    const areas = repo.areas?.(spec) ?? []
+    if (areas.length) options.progress?.('explore')
+    const explorations = (await Promise.all(areas.map((area, index) => trace.invoke({ phase: `explore-${index + 1}`, model: models.explore, prompt: explorePrompt(context, area) }, async (signal, hooks) => {
+      const output = await structuredWithTools({ model: gateway(models.explore), system: exploreSystem, prompt: `${explorePrompt(context, area)}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: exploreSchema, tools: repo.tools, maxSteps: EXPLORE_MAX_STEPS, maxOutputTokens: 12_000, reasoning: 'low', submitName: 'submit_exploration', abortSignal: signal, ...hooks })
+      return { area: area.name, result: exploreSchema.parse(output) }
+    })))).filter((exploration) => exploration !== null)
     options.progress?.('research')
-    const prompt = researchPrompt(context, researchInstructions, renderFactsBlock(facts))
+    const prompt = researchPrompt(context, researchInstructions, renderFactsBlock(facts), explorationsSection(explorations))
     research = await trace.invoke({ phase: 'research', model: models.research, prompt }, async (signal, hooks) => {
       let submitted: Research | undefined
       // Until its last turn, research cannot submit checks that leave a required rule out: the
@@ -322,14 +361,14 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       lastTurn = true
       if (!submitted && !signal.aborted) await generateText({ model: gateway(models.research), system: researchSystemWithRule, messages: [...messages.slice(0, -1), { role: 'user', content: 'Your turns are used up. Submit the evidence you gathered with submit_research now. Cite only files and lines you actually read; list anything you did not read as a gap.' }], tools: { submit_research: tools.submit_research! }, toolChoice: { type: 'tool', toolName: 'submit_research' }, abortSignal: signal, maxRetries: 0, maxOutputTokens: 7000, reasoning: 'low', ...hooks })
       if (!submitted) throw new Error('Research did not submit evidence within its turn budget')
-      return researchSchema.parse(submitted)
+      return withExplorations(researchSchema.parse(submitted), explorations)
     })
     // Planning gets every page the required guidelines link to, not only the ones research
     // chose to open: the routing table names the pages that bind every code change.
     if (research && !options.signal?.aborted) await readLinkedGuidelines(readTools, guidelines, pages, preparation)
     if (research && !options.signal?.aborted) {
       options.progress?.('planning')
-      const prompt = planningPrompt(context, research, planningInstructions, pages)
+      const prompt = planningPrompt(planningContext, research, planningInstructions, pages)
       // Planning reads too (KIT-54): the repository, the guideline topics and Notion, for a fact research left out, then submits the plan.
       const planningTools: ToolSet = { ...repo.tools, ...readTools }
       const draftPlan = (phase: string, prompt: string) => trace.invoke({ phase, model: models.planning, prompt }, async (signal, hooks) => {
@@ -344,7 +383,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         if (!issues.length) break
         options.progress?.(`repair-${round}`)
         const before = plan
-        const fix = repairPrompt(context, research, before, issues, repairInstructions, pages)
+        const fix = repairPrompt(planningContext, research, before, issues, repairInstructions, pages)
         // A correction pass submits only what it changes (planPatchSchema), merged into the plan here.
         const patch = await trace.invoke({ phase: `repair-${round}`, model: models.planning, prompt: fix }, async (signal, hooks) => {
           const output = await structuredWithTools({ model: gateway(models.planning), system: planningSystem, prompt: `${fix}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: planPatchSchema, tools: planningTools, maxSteps: PLANNING_MAX_STEPS, maxOutputTokens: 24_000, reasoning: 'medium', submitName: 'submit_plan', abortSignal: signal, ...hooks })
@@ -355,7 +394,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         plan = revised
       }
     }
-    const { status, problems, openGaps, decisions } = assessPlan({ spec, guidelines, repo, research, plan, phaseErrors: trace.phases, uiRequired, reads: mcp.reads, cancelled: options.signal?.aborted === true, answers, takeRecommended: input.takeRecommended ?? false })
+    const { status, problems, openGaps, decisions } = assessPlan({ spec, guidelines, repo, research, plan, phaseErrors: trace.phases.filter((phase) => !phase.phase.startsWith('explore-')), uiRequired, reads: mcp.reads, cancelled: options.signal?.aborted === true, answers, takeRecommended: input.takeRecommended ?? false })
     const runStatus: RunStatus = status
     const reviewMs = Date.now() - started - prepareMs
     const exportStarted = Date.now()
