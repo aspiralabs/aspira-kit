@@ -52,8 +52,9 @@ describe('the kit is three packages (F1)', () => {
     expect(readFileSync(join(ROOT, 'pnpm-workspace.yaml'), 'utf8')).not.toContain('packages/agents/*')
   })
 
-  it('is at 0.15.0 before the release bump', () => {
-    expect(ai().version).toBe('0.15.0')
+  // Lockstep, never a literal version: the version PR bumps all three, and a pinned number fails there.
+  it('keeps the three packages at one version', () => {
+    expect(new Set(manifests().map((manifest) => manifest.version)).size).toBe(1)
   })
 })
 
