@@ -41,17 +41,18 @@ const KIT_VERSION = '0.9.0'
  * code turns on the Notion and token checks alone: the four kit packages declared and
  * @aspiralabs/agents installed, the kit's eslint, tsconfig, tokens, AGENTS.md block, .mcp.json,
  * hooks and .gitignore entries, and every /aspira-* skill pinned to the installed version of the
- * package that ships it (@aspiralabs/agents for the agent skills, @aspiralabs/kit for the kit's own). */
-function project(config: Record<string, unknown>) {
+ * package that ships it (@aspiralabs/ai, for the agent skills and the kit's own alike).
+ * `declared` is what package.json declares; @aspiralabs/ai is installed only when it is declared. */
+function project(config: Record<string, unknown>, declared: string[] = ['@aspiralabs/ui', '@aspiralabs/config', '@aspiralabs/ai']) {
   root = mkdtempSync(join(tmpdir(), 'kit-doctor-notion-'))
-  const kit = Object.fromEntries(['@aspiralabs/ui', '@aspiralabs/config', '@aspiralabs/kit', '@aspiralabs/agents'].map((name) => [name, KIT_VERSION]))
+  const kit = Object.fromEntries(declared.map((name) => [name, KIT_VERSION]))
   writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'app', devDependencies: kit }))
   writeFileSync(join(root, 'aspira.json'), JSON.stringify(config))
   const app = readApp(root)
-  mkdirSync(join(root, 'node_modules', '@aspiralabs', 'agents'), { recursive: true })
-  writeFileSync(join(root, 'node_modules', '@aspiralabs', 'agents', 'package.json'), JSON.stringify({ name: '@aspiralabs/agents', version: KIT_VERSION }))
-  mkdirSync(join(root, 'node_modules', '@aspiralabs', 'kit'), { recursive: true })
-  writeFileSync(join(root, 'node_modules', '@aspiralabs', 'kit', 'package.json'), JSON.stringify({ name: '@aspiralabs/kit', version: KIT_VERSION }))
+  for (const name of declared) {
+    mkdirSync(join(root, 'node_modules', '@aspiralabs', name.split('/')[1]!), { recursive: true })
+    writeFileSync(join(root, 'node_modules', '@aspiralabs', name.split('/')[1]!, 'package.json'), JSON.stringify({ name, version: KIT_VERSION }))
+  }
   writeFileSync(join(root, 'eslint.config.mjs'), "export { default } from '@aspiralabs/config/eslint'\n")
   writeFileSync(join(root, 'tsconfig.json'), JSON.stringify({ extends: '@aspiralabs/config/tsconfig' }))
   mkdirSync(join(root, 'app'), { recursive: true })
@@ -194,5 +195,38 @@ describe('kit doctor checks NOTION_TOKEN, in order: process env, the app\'s .env
     const { lines, log } = logs()
     doctor(root, log, undefined, { check: okChecker, env: { NOTION_TOKEN: 'ntn_env' } })
     expect(lines.some((line) => line.includes('ok') && /process environment/i.test(line) && line.includes('NOTION_TOKEN'))).toBe(true)
+  })
+})
+
+describe('kit doctor checks the one @aspiralabs/ai package (T8, F3)', () => {
+  const env = { NOTION_TOKEN: TOKEN }
+  const check: UrlChecker = (checks) => Object.fromEntries(checks.map(({ key }) => [key, { ok: true } as CheckResult]))
+  const run = (declared?: string[]) => {
+    project({ board: BOARD }, declared)
+    const { lines, log } = logs()
+    return { code: doctor(root, log, undefined, { check, env }), lines }
+  }
+
+  it('passes a healthy project and names neither @aspiralabs/kit nor @aspiralabs/agents', () => {
+    const { code, lines } = run()
+    expect(code).toBe(0)
+    expect(lines.filter((line) => line.includes('@aspiralabs/kit') || line.includes('@aspiralabs/agents'))).toEqual([])
+    expect(lines.filter((line) => line.startsWith('ok   .claude/skills/aspira-') && line.endsWith('matches @aspiralabs/ai'))).toHaveLength(11)
+  })
+
+  it('fails with "missing @aspiralabs/ai" when it is not declared, and when ui or config is missing', () => {
+    const noAi = run(['@aspiralabs/ui', '@aspiralabs/config'])
+    expect(noAi.code).not.toBe(0)
+    expect(noAi.lines).toContain('missing @aspiralabs/ai')
+    expect(run(['@aspiralabs/config', '@aspiralabs/ai']).lines).toContain('missing @aspiralabs/ui')
+    expect(run(['@aspiralabs/ui', '@aspiralabs/ai']).lines).toContain('missing @aspiralabs/config')
+    expect(run(['@aspiralabs/ui', '@aspiralabs/ai']).code).not.toBe(0)
+  })
+
+  it('reports a 0.15-only project (kit and agents declared) as missing @aspiralabs/ai, never asking for the old two', () => {
+    const { code, lines } = run(['@aspiralabs/ui', '@aspiralabs/config', '@aspiralabs/kit', '@aspiralabs/agents'])
+    expect(code).not.toBe(0)
+    expect(lines).toContain('missing @aspiralabs/ai')
+    expect(lines.some((line) => line.startsWith('missing') && (line.includes('@aspiralabs/kit') || line.includes('@aspiralabs/agents')))).toBe(false)
   })
 })

@@ -1,24 +1,24 @@
 // The release workflow's version step, dry-run on a fixture: the repo's changesets config over
 // minimal copies of every workspace package, one changeset, `changeset version`. Every package in
-// the fixed group ends on one version: ui, config, kit, the eight agent packages and @aspiralabs/agents.
+// the fixed group ends on one version: ui, config and ai. No workflow retires the old packages.
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
 
 const repo = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))))
-const PACKAGES = ['ui', 'config', 'kit', 'agents/common', 'agents/spec-writer', 'agents/spec-reviewer', 'agents/planner', 'agents/implementor', 'agents/code-analyzer', 'agents/pr-reviewer', 'agents/groomer', 'agents/build-feature', 'agents/visual-verify', 'agents/meta']
+const PACKAGES = ['ui', 'config', 'ai']
 
-it('bumps all fourteen published packages to one version from a single changeset', () => {
+it('bumps the three published packages to one version from a single changeset', () => {
   const config = JSON.parse(readFileSync(join(repo, '.changeset', 'config.json'), 'utf8')) as { fixed: string[][]; ignore: string[] }
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kit-release-')))
   mkdirSync(join(dir, '.changeset'))
   writeFileSync(join(dir, '.changeset', 'config.json'), JSON.stringify({ ...config, changelog: false }))
-  writeFileSync(join(dir, '.changeset', 'fixture.md'), "---\n'@aspiralabs/kit': minor\n---\n\nA fixture change.\n")
+  writeFileSync(join(dir, '.changeset', 'fixture.md'), "---\n'@aspiralabs/ai': minor\n---\n\nA fixture change.\n")
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fixture-root', private: true }))
-  writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n  - packages/agents/*\n  - apps/*\n')
+  writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n  - apps/*\n')
   // The docs site is the one workspace package the release ignores.
   mkdirSync(join(dir, 'apps', 'docs'), { recursive: true })
   writeFileSync(join(dir, 'apps', 'docs', 'package.json'), JSON.stringify({ name: 'docs', version: '0.0.0', private: true }))
@@ -40,14 +40,23 @@ it('bumps all fourteen published packages to one version from a single changeset
     return [manifest.name, manifest.version]
   }))
   expect(Object.keys(after).sort()).toEqual([...names].sort())
-  expect(names).toContain('@aspiralabs/groomer')
+  expect(names).toEqual(['@aspiralabs/ui', '@aspiralabs/config', '@aspiralabs/ai'])
   expect(config.fixed[0]?.slice().sort()).toEqual([...names].sort())
   expect(config.ignore).not.toEqual(expect.arrayContaining(names))
   const versions = new Set(Object.values(after))
   expect(versions.size).toBe(1)
   const [version] = [...versions]
-  expect(version).not.toBe(before['@aspiralabs/kit'])
+  expect(version).not.toBe(before['@aspiralabs/ai'])
   // A minor bump of the highest version in the group, which every member takes.
-  const [major, minor] = before['@aspiralabs/kit']!.split('.').map(Number)
+  const [major, minor] = before['@aspiralabs/ai']!.split('.').map(Number)
   expect(version).toBe(`${major}.${minor! + 1}.0`)
+})
+
+it('no workflow deprecates, unpublishes or deletes the retired packages', () => {
+  const dir = join(repo, '.github', 'workflows')
+  for (const file of readdirSync(dir)) {
+    const text = readFileSync(join(dir, file), 'utf8')
+    expect(text, file).not.toMatch(/npm deprecate|pnpm deprecate|unpublish/)
+    expect(text, file).not.toMatch(/-X\s+DELETE[^\n]*packages|DELETE[^\n]*\/packages\//)
+  }
 })

@@ -50,32 +50,30 @@ function repository(base?: string): { root: string; app: string } {
   const root = base ?? realpathSync(mkdtempSync(join(tmpdir(), 'kit-app-')))
   const app = join(root, 'apps', 'web')
   mkdirSync(join(app, 'app'), { recursive: true })
-  writeFileSync(join(app, 'package.json'), JSON.stringify({ name: 'web', private: true, dependencies: { '@aspiralabs/ui': VERSION }, devDependencies: { '@aspiralabs/config': VERSION, '@aspiralabs/kit': VERSION, '@aspiralabs/agents': VERSION } }))
+  writeFileSync(join(app, 'package.json'), JSON.stringify({ name: 'web', private: true, dependencies: { '@aspiralabs/ui': VERSION }, devDependencies: { '@aspiralabs/config': VERSION, '@aspiralabs/ai': VERSION } }))
   writeFileSync(join(app, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n')
   writeFileSync(join(app, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true } }))
   writeFileSync(join(app, 'app', 'globals.css'), '@import "tailwindcss";\n')
   writeFileSync(join(root, '.gitignore'), 'node_modules\n')
   writeFileSync(join(root, 'AGENTS.md'), '# nomnomzz\n\n## About this project\n\nRecipes.\n')
   const scope = join(app, 'node_modules', '@aspiralabs')
-  const store = join(app, 'node_modules', '.pnpm', `@aspiralabs+agents@${VERSION}`, 'node_modules', '@aspiralabs')
   const pkg = (dir: string, name: string) => {
     mkdirSync(dir, { recursive: true })
     // The agents are ES modules run straight from TypeScript source; "type" is what lets amaro's hook see them as such.
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: `@aspiralabs/${name}`, version: VERSION, type: 'module' }))
   }
-  for (const name of ['ui', 'config', 'kit']) pkg(join(scope, name), name)
-  // The hooks as the installed package ships them, so the settings' commands can be run from the root.
-  cpSync(join(kit, 'hooks'), join(scope, 'kit', 'hooks'), { recursive: true })
+  for (const name of ['ui', 'config', 'ai']) pkg(join(scope, name), name)
+  // The hooks and the kit's own skills as the installed package ships them, so the settings' commands can be run from the root.
+  cpSync(join(kit, 'hooks'), join(scope, 'ai', 'hooks'), { recursive: true })
+  cpSync(join(kit, 'skills'), join(scope, 'ai', 'skills'), { recursive: true })
   mkdirSync(join(scope, 'ui', 'bin'), { recursive: true })
   writeFileSync(join(scope, 'ui', 'bin', 'mcp.js'), '#!/usr/bin/env node\n')
-  pkg(join(store, 'agents'), 'agents')
-  symlinkSync(join(store, 'agents'), join(scope, 'agents'))
-  for (const agent of [...AGENTS, 'agent-common'] as const) {
-    pkg(join(store, agent), agent)
-    if (agent === 'agent-common') continue
-    mkdirSync(join(store, agent, 'skill', `aspira-${agent}`, 'scripts'), { recursive: true })
-    writeFileSync(join(store, agent, 'skill', `aspira-${agent}`, 'SKILL.md'), `---\nname: aspira-${agent}\n---\n`)
-    writeFileSync(join(store, agent, 'skill', `aspira-${agent}`, 'scripts', `${agent}.sh`), '#!/bin/bash\necho hi\n')
+  // The agents live inside the one package, each in its own folder with its skill.
+  for (const agent of AGENTS) {
+    const skill = join(scope, 'ai', agent, 'skill', `aspira-${agent}`)
+    mkdirSync(join(skill, 'scripts'), { recursive: true })
+    writeFileSync(join(skill, 'SKILL.md'), `---\nname: aspira-${agent}\n---\n`)
+    writeFileSync(join(skill, 'scripts', `${agent}.sh`), '#!/bin/bash\necho hi\n')
   }
   return { root, app }
 }
@@ -96,6 +94,79 @@ async function init(root: string, extra: { app?: string; board?: string; dryRun?
   }
   return lines
 }
+
+describe('kit init --stack next hooks and install lines under @aspiralabs/ai (T7, T9)', () => {
+  type Groups = Array<{ hooks: Array<{ command: string }> }>
+  const commands = (groups: Groups | undefined) => (groups ?? []).map((g) => g.hooks.map((h) => h.command))
+  // A token and a Notion check that passes, so the hooks are the only thing that can fail doctor.
+  const notion = { env: { NOTION_TOKEN: 'ntn_test' }, check: (checks: { key: string }[]) => Object.fromEntries(checks.map(({ key }) => [key, { ok: true as const }])) }
+  const read = (root: string) => JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf8')) as Settings
+  /** A single-app project: the app's files moved up to the root. */
+  function singleApp(): string {
+    const { root, app } = repository()
+    cpSync(app, root, { recursive: true })
+    return root
+  }
+
+  it('writes the hooks under node_modules/@aspiralabs/ai/hooks on a fresh init, with the apps/web/ prefix for --app', async () => {
+    const single = singleApp()
+    await init(single, { board: BOARD })
+    expect(commands(read(single).hooks.SessionStart)).toEqual([['sh node_modules/@aspiralabs/ai/hooks/session-start.sh']])
+    expect(commands(read(single).hooks.PreToolUse)).toEqual([['sh node_modules/@aspiralabs/ai/hooks/deny-tier3.sh', 'sh node_modules/@aspiralabs/ai/hooks/audit-log.sh']])
+    const { root } = repository()
+    await init(root, { app: 'apps/web', board: BOARD })
+    expect(commands(read(root).hooks.SessionStart)).toEqual([['sh apps/web/node_modules/@aspiralabs/ai/hooks/session-start.sh']])
+    expect(commands(read(root).hooks.PreToolUse)).toEqual([['sh apps/web/node_modules/@aspiralabs/ai/hooks/deny-tier3.sh', 'sh apps/web/node_modules/@aspiralabs/ai/hooks/audit-log.sh']])
+  })
+
+  it('migrates 0.15 settings: the three hooks once under @aspiralabs/ai, the project hook kept, no old paths, and a re-run changes nothing', async () => {
+    for (const app of [undefined, 'apps/web'] as const) {
+      const root = app === undefined ? singleApp() : repository().root
+      const prefix = app === undefined ? '' : 'apps/web/'
+      mkdirSync(join(root, '.claude'), { recursive: true })
+      const group = (command: string) => ({ matcher: '', hooks: [{ command }] })
+      writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify({
+        hooks: {
+          SessionStart: [group(`sh ${prefix}node_modules/@aspiralabs/kit/hooks/session-start.sh`), group('echo mine')],
+          PreToolUse: [group(`sh ${prefix}node_modules/@aspiralabs/kit/hooks/deny-tier3.sh`), group(`sh ${prefix}node_modules/@aspiralabs/kit/hooks/audit-log.sh`), group(`sh ${prefix}node_modules/@aspiralabs/config/agent/hooks/guard.sh`)],
+        },
+      }))
+      await init(root, { ...(app === undefined ? {} : { app }), board: BOARD })
+      const settings = read(root)
+      const all = Object.values(settings.hooks).flatMap((groups) => commands(groups).flat())
+      for (const name of ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh']) {
+        expect(all.filter((c) => c === `sh ${prefix}node_modules/@aspiralabs/ai/hooks/${name}`), name).toHaveLength(1)
+      }
+      expect(all).toContain('echo mine')
+      expect(all.filter((c) => c.includes('@aspiralabs/kit/hooks') || c.includes('@aspiralabs/config/agent/hooks'))).toEqual([])
+      const first = readFileSync(join(root, '.claude', 'settings.json'), 'utf8')
+      await init(root, { ...(app === undefined ? {} : { app }) })
+      expect(readFileSync(join(root, '.claude', 'settings.json'), 'utf8')).toBe(first)
+      expect(doctor(root, () => {}, undefined, notion)).toBe(0)
+    }
+  })
+
+  it('doctor\'s hooks check passes against the new hook path', async () => {
+    const root = singleApp()
+    await init(root, { board: BOARD })
+    const { lines, log } = logs()
+    doctor(root, log, undefined, notion)
+    expect(commands(read(root).hooks.SessionStart)).toEqual([['sh node_modules/@aspiralabs/ai/hooks/session-start.sh']])
+    expect(lines.some((l) => l.startsWith('ok   ') && l.includes('.claude/settings.json has the hooks'))).toBe(true)
+  })
+
+  it('a dry run prints the app install lines for ui, config and ai and never names the retired packages', async () => {
+    for (const make of [singleApp, () => workspace().root]) {
+      const root = make()
+      const lines = await init(root, { ...(make === singleApp ? {} : { app: 'apps/web' }), board: BOARD, dryRun: true })
+      const version = (JSON.parse(readFileSync(join(kit, 'package.json'), 'utf8')) as { version: string }).version
+      const runs = lines.filter((l) => l.startsWith('run '))
+      expect(runs.some((l) => l.startsWith(`run    pnpm add @aspiralabs/ui@${version}`))).toBe(true)
+      expect(runs.some((l) => l.startsWith(`run    pnpm add -D @aspiralabs/config@${version} @aspiralabs/ai@${version} eslint prettier typescript`))).toBe(true)
+      expect(runs.filter((l) => l.includes('@aspiralabs/kit') || l.includes('@aspiralabs/agents'))).toEqual([])
+    }
+  })
+})
 
 describe('kit init --stack next --app apps/web at the repository root', () => {
   it('writes the package files in the app and the Claude-facing files at the root, with paths pointing into the app', async () => {
@@ -125,8 +196,8 @@ describe('kit init --stack next --app apps/web at the repository root', () => {
     expect(mcp.mcpServers['aspiralabs-ui']).toEqual({ command: 'node', args: ['apps/web/node_modules/@aspiralabs/ui/bin/mcp.js'] })
     expect(existsSync(join(root, mcp.mcpServers['aspiralabs-ui']!.args[0]!))).toBe(true)
     const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf8')) as Settings
-    expect(settings.hooks.SessionStart!.map((g) => g.hooks.map((h) => h.command))).toEqual([['sh apps/web/node_modules/@aspiralabs/kit/hooks/session-start.sh']])
-    expect(settings.hooks.PreToolUse!.map((g) => g.hooks.map((h) => h.command))).toEqual([['sh apps/web/node_modules/@aspiralabs/kit/hooks/deny-tier3.sh', 'sh apps/web/node_modules/@aspiralabs/kit/hooks/audit-log.sh']])
+    expect(settings.hooks.SessionStart!.map((g) => g.hooks.map((h) => h.command))).toEqual([['sh apps/web/node_modules/@aspiralabs/ai/hooks/session-start.sh']])
+    expect(settings.hooks.PreToolUse!.map((g) => g.hooks.map((h) => h.command))).toEqual([['sh apps/web/node_modules/@aspiralabs/ai/hooks/deny-tier3.sh', 'sh apps/web/node_modules/@aspiralabs/ai/hooks/audit-log.sh']])
     for (const agent of AGENTS) {
       expect(readFileSync(join(skillDir(root, agent), '.kit-version'), 'utf8')).toBe(`${VERSION}\n`)
       expect(existsSync(join(app, '.claude'))).toBe(false)
@@ -152,13 +223,13 @@ describe('kit init --stack next --app apps/web at the repository root', () => {
     const settingsPath = join(root, '.claude', 'settings.json')
     const settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as Settings & { permissions?: unknown }
     settings.permissions = { allow: ['Bash(pnpm test)'] }
-    settings.hooks.SessionStart!.push({ matcher: 'startup', hooks: [{ command: 'sh node_modules/@aspiralabs/kit/hooks/session-start.sh' }] }, { matcher: 'startup', hooks: [{ command: 'echo mine' }] })
+    settings.hooks.SessionStart!.push({ matcher: 'startup', hooks: [{ command: 'sh node_modules/@aspiralabs/ai/hooks/session-start.sh' }] }, { matcher: 'startup', hooks: [{ command: 'echo mine' }] })
     writeFileSync(settingsPath, JSON.stringify(settings))
     writeFileSync(join(root, '.mcp.json'), JSON.stringify({ mcpServers: { 'aspiralabs-ui': { command: 'npx', args: ['--no', 'aspiralabs-ui-mcp'] }, notion: { command: 'npx', args: ['notion-mcp'] } } }))
     await init(root, { app: 'apps/web' })
     const merged = JSON.parse(readFileSync(settingsPath, 'utf8')) as Settings & { permissions?: unknown }
     expect(merged.permissions).toEqual({ allow: ['Bash(pnpm test)'] })
-    expect(merged.hooks.SessionStart!.map((g) => g.hooks.map((h) => h.command))).toEqual([['echo mine'], ['sh apps/web/node_modules/@aspiralabs/kit/hooks/session-start.sh']])
+    expect(merged.hooks.SessionStart!.map((g) => g.hooks.map((h) => h.command))).toEqual([['echo mine'], ['sh apps/web/node_modules/@aspiralabs/ai/hooks/session-start.sh']])
     expect(JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf8'))).toEqual({ mcpServers: { notion: { command: 'npx', args: ['notion-mcp'] }, 'aspiralabs-ui': { command: 'node', args: ['apps/web/node_modules/@aspiralabs/ui/bin/mcp.js'] } } })
     expect(JSON.parse(readFileSync(join(root, 'aspira.json'), 'utf8'))).toEqual({ board: BOARD, app: 'apps/web' })
   })
@@ -188,7 +259,7 @@ describe('kit init --stack next --app apps/web at the repository root', () => {
     expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).not.toContain('**The app:**')
     expect((JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf8')) as Mcp).mcpServers['aspiralabs-ui']).toEqual({ command: 'npx', args: ['--no', 'aspiralabs-ui-mcp'] })
     const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf8')) as Settings
-    expect(settings.hooks.SessionStart![0]!.hooks[0]!.command).toBe('sh node_modules/@aspiralabs/kit/hooks/session-start.sh')
+    expect(settings.hooks.SessionStart![0]!.hooks[0]!.command).toBe('sh node_modules/@aspiralabs/ai/hooks/session-start.sh')
     expect(JSON.parse(readFileSync(join(root, 'aspira.json'), 'utf8'))).toEqual({ board: BOARD })
     expect(readApp(root)).toBeUndefined()
     expect(doctor(root, () => {})).toBe(0)
@@ -399,8 +470,8 @@ describe('kit doctor with an app', () => {
     expect(flagged.lines).toContain('ok   .gitignore ignores .aspira/ (the audit log the hooks write)')
     expect(flagged.lines).toContain('ok   aspira.json names the Feature Board and the app (apps/web)')
     const skillLines = flagged.lines.filter((l) => l.startsWith('ok   .claude/skills/aspira-'))
-    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/agents')).length).toBe(8)
-    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/kit')).length).toBe(3)
+    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/ai')).length).toBe(11)
+    expect(skillLines.filter((l) => l.includes('matches @aspiralabs/kit') || l.includes('matches @aspiralabs/agents')).length).toBe(0)
     expect(flagged.lines.at(-1)).toBe('healthy')
     // Without the flag: the app comes from aspira.json.
     const fromConfig = logs()
@@ -432,7 +503,7 @@ describe('kit doctor with an app', () => {
 })
 
 describe('kit next with an app', () => {
-  it('resolves the ticket with the agents installed under the app named in aspira.json, or by --app', () => {
+  it('resolves the ticket with @aspiralabs/ai installed under the app named in aspira.json, or by --app', () => {
     const { root } = repository()
     writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/web' }))
     const seen: string[][] = []
@@ -464,14 +535,15 @@ describe('kit next with an app', () => {
     })
   })
 
-  const amaro = join(dirname(dirname(kit)), 'packages', 'agents', 'implementor', 'node_modules', 'amaro')
-  it.skipIf(!existsSync(amaro))('runs the installed agent-common resolve script from the app, with the app\'s .env.local', () => {
+  const amaro = [join(kit, 'node_modules', 'amaro'), join(dirname(dirname(kit)), 'node_modules', 'amaro'), join(dirname(dirname(kit)), 'packages', 'agents', 'implementor', 'node_modules', 'amaro')].find((dir) => existsSync(dir)) ?? ''
+  it.skipIf(amaro === '')('runs the installed common resolve script from the app, with the app\'s .env.local', () => {
     const { root, app } = repository()
     writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/web' }))
-    const store = join(app, 'node_modules', '.pnpm', `@aspiralabs+agents@${VERSION}`, 'node_modules')
-    symlinkSync(realpathSync(amaro), join(store, 'amaro'))
-    mkdirSync(join(store, '@aspiralabs', 'agent-common', 'scripts'), { recursive: true })
-    writeFileSync(join(store, '@aspiralabs', 'agent-common', 'scripts', 'resolve-ticket.ts'), "const ref: string = process.argv[2]!\nconsole.log(`id=${ref}\\ntitle=Explore pagination\\nurl=https://www.notion.so/nom-4\\nstatus=${process.env.FAKE_STATUS ?? 'Idea'}`)\n")
+    const installed = join(app, 'node_modules', '@aspiralabs', 'ai')
+    mkdirSync(join(installed, 'node_modules'), { recursive: true })
+    symlinkSync(realpathSync(amaro), join(installed, 'node_modules', 'amaro'))
+    mkdirSync(join(installed, 'common', 'scripts'), { recursive: true })
+    writeFileSync(join(installed, 'common', 'scripts', 'resolve-ticket.ts'), "const ref: string = process.argv[2]!\nconsole.log(`id=${ref}\\ntitle=Explore pagination\\nurl=https://www.notion.so/nom-4\\nstatus=${process.env.FAKE_STATUS ?? 'Idea'}`)\n")
     writeFileSync(join(app, '.env.local'), 'FAKE_STATUS=In Review: Spec\n')
     const { lines, log } = logs()
     expect(next(root, 'NOM-4', log, liveResolver)).toBe(0)

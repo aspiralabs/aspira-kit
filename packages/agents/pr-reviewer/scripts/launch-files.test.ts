@@ -1,9 +1,10 @@
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { LAUNCH_FILES, PACKAGE_DIR, PACKAGE_NAME, packageDirFrom, packageFile } from '../agent/lib/package-dir.ts'
+import { LAUNCH_FILES, PACKAGE_DIR, packageDirFrom, packageFile } from '../agent/lib/package-dir.ts'
 import { SEATS, type Reviewer } from '../agent/lib/review.ts'
 
 const root = dirname(dirname(new URL(import.meta.url).pathname))
@@ -23,7 +24,7 @@ type SnapshotModule = {
 // requires every declared launch file to exist there. Rename one and it fails here, not in load-pr.
 describe('files the runtime reads at launch', () => {
   it('resolves the real package directory from inside eve\'s snapshot plan, and finds every launch file there', async () => {
-    const snapshot = (await import(pathToFileURL(join(root, 'node_modules', 'eve', 'dist', 'src', 'internal', 'nitro', 'dev-runtime-source-snapshot.js')).href)) as SnapshotModule
+    const snapshot = (await import(pathToFileURL(join(dirname(root), 'node_modules', 'eve', 'dist', 'src', 'internal', 'nitro', 'dev-runtime-source-snapshot.js')).href)) as SnapshotModule
     await mkdir(join(root, '.eve', 'dev-runtime', 'snapshots'), { recursive: true })
     const snapshotRoot = await mkdtemp(join(root, '.eve', 'dev-runtime', 'snapshots', 'launch-test-'))
     try {
@@ -49,10 +50,36 @@ describe('files the runtime reads at launch', () => {
     }
   })
 
-  it('resolves the package from the source layout and from a build directory, and refuses anything else', () => {
+  it('resolves the pr-reviewer folder of @aspiralabs/ai from the source, installed and cloud-copy layouts, and refuses anything else', async () => {
     expect(packageDirFrom(pathToFileURL(join(root, 'agent', 'tools', 'load-pr.ts')).href)).toBe(root)
     expect(packageDirFrom(pathToFileURL(join(root, '.eve', 'builds', 'x', 'output', 'server', 'index.mjs')).href)).toBe(root)
     expect(packageDirFrom(pathToFileURL(join(root, '.eve', 'compile', 'authored-modules', 'x.mjs')).href)).toBe(root)
-    expect(() => packageDirFrom(pathToFileURL('/tmp/nowhere/index.mjs').href)).toThrow(PACKAGE_NAME)
+    const tmp = await mkdtemp(join(tmpdir(), 'package-dir-'))
+    try {
+      const file = async (dir: string, manifest?: object) => {
+        await mkdir(join(dir, 'agent', 'lib'), { recursive: true })
+        if (manifest) await writeFile(join(dir, 'package.json'), JSON.stringify(manifest))
+        return pathToFileURL(join(dir, 'agent', 'lib', 'x.ts')).href
+      }
+      const source = join(tmp, 'packages', 'ai')
+      await writeFile((await mkdir(source, { recursive: true }), join(source, 'package.json')), JSON.stringify({ name: '@aspiralabs/ai' }))
+      const sourceUrl = await file(join(source, 'pr-reviewer'))
+      const installed = join(tmp, 'app', 'node_modules', '@aspiralabs', 'ai')
+      await mkdir(installed, { recursive: true })
+      await writeFile(join(installed, 'package.json'), JSON.stringify({ name: '@aspiralabs/ai' }))
+      const installedUrl = await file(join(installed, 'pr-reviewer'))
+      const copy = join(tmp, 'app', '.work', '.agents', 'pr-reviewer@0.16.0')
+      await mkdir(join(copy, '.eve', 'compile', 'agent', 'lib'), { recursive: true })
+      await writeFile(join(copy, 'package.json'), JSON.stringify({ name: 'pr-reviewer' }))
+      const copyUrl = pathToFileURL(join(copy, '.eve', 'compile', 'agent', 'lib', 'x.ts')).href
+      const otherUrl = await file(join(tmp, 'other'))
+      expect(packageDirFrom(sourceUrl)).toBe(join(source, 'pr-reviewer'))
+      expect(packageDirFrom(installedUrl)).toBe(join(installed, 'pr-reviewer'))
+      expect(packageDirFrom(copyUrl)).toBe(copy)
+      expect(() => packageDirFrom(otherUrl)).toThrow(/pr-reviewer folder of @aspiralabs\/ai/)
+    } finally {
+      await rm(tmp, { recursive: true, force: true })
+    }
+    expect(() => packageDirFrom(pathToFileURL('/tmp/nowhere/index.mjs').href)).toThrow(/pr-reviewer folder of @aspiralabs\/ai/)
   })
 })
