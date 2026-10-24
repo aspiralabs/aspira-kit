@@ -62,7 +62,7 @@ export type Board = {
   moveTicket(page: Ticket | string, from: string, to: string): Promise<{ id: string; before: string; after: string }>
   setProperty(page: Ticket | string, name: string, value: string): Promise<void>
   /** Creates the child page with that title, or replaces the content of the one that exists (its URL stays). */
-  pushPage(page: Ticket | string, title: string, markdown: string): Promise<{ id: string; url: string; created: boolean }>
+  pushPage(page: Ticket | string, title: string, markdown: string): Promise<{ id: string; url: string; created: boolean; lastEditedAt: string }>
   /** The child page with that title as plain markdown, or undefined when there is none. */
   pullPage(page: Ticket | string, title: string): Promise<(TicketPage & { markdown: string }) | undefined>
   /** Creates a child page with that title and the markdown as its blocks, whether or not one with that title exists. */
@@ -546,12 +546,15 @@ export function board(options: BoardOptions): BoardWithPageMarkdown {
       const pageId = pageIdOf(page)
       const blocks = markdownToBlocks(markdown)
       const existing = childPages(await children(pageId)).pages[title]
+      let pushed: { id: string; url: string; created: boolean }
       if (existing !== undefined) {
         for (const block of await children(existing.id)) if (block.id !== undefined) await call(`/blocks/${block.id}`, 'DELETE')
         await append(existing.id, blocks)
-        return { id: existing.id, url: existing.url, created: false }
-      }
-      return { ...(await create(pageId, title, blocks)), created: true }
+        pushed = { id: existing.id, url: existing.url, created: false }
+      } else pushed = { ...(await create(pageId, title, blocks)), created: true }
+      // The page's own last-edited time after the write, for ticket.md's Pages table (the next pull compares against it).
+      const object = await parsed(PageShape, `/pages/${pushed.id}`)
+      return { ...pushed, url: object.url, lastEditedAt: object.last_edited_time }
     },
 
     async pullPage(page, title) {
