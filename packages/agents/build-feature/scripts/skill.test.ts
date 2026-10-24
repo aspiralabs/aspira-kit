@@ -79,7 +79,7 @@ describe('T40 F44 F5: SKILL.md is mechanics only', () => {
 
   it('copies no step command and no Board rule sentence', async () => {
     const text = await readFile(skill, 'utf8').catch(() => null)
-    const copied = ['/aspira-groomer', '/aspira-spec-writer', '/aspira-spec-reviewer', '/aspira-planner', '/aspira-implementor', '/aspira-code-analyzer', '/aspira-pr-reviewer', 'Only a human moves a card into a Ready column', 'No agent does this', 'Stop when nothing critical or high is left']
+    const copied = ['/aspira-groomer', '/aspira-spec-writer', '/aspira-spec-reviewer', '/aspira-planner', '/aspira-implementor', '/aspira-code-analyzer', '/aspira-pr-reviewer', 'Only a human moves a card into a Ready column', 'No agent does this', 'Stop when nothing medium or above is left']
     expect({ exists: text !== null, copied: copied.filter((phrase) => text?.includes(phrase) === true) }).toEqual({ exists: true, copied: [] })
   })
 })

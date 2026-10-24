@@ -36,7 +36,7 @@ export const modeLine = (mode: Mode, autonomous = false): string =>
     : "Mode: --cloud (every step ran its skill with --cloud: the step's own agent, started and waited on)"
 
 /** The later-phase modules, in run order. */
-export const PHASES = ['visual-verify', 'gate', 'step8', 'step10', 'review', 'release-row'] as const
+export const PHASES = ['visual-verify', 'gate', 'step8', 'step10', 'review', 'release-row', 'merge'] as const
 export type PhaseName = (typeof PHASES)[number]
 
 /** The Ready moves a human used to make by hand, which the run makes on its run-start approval (F15, F16). */
@@ -45,6 +45,9 @@ export const READY_MOVES: readonly { from: string; to: string }[] = [
   { from: 'In Review: Spec', to: 'Ready: Spec' },
   { from: 'In Review: Plan', to: 'Ready: Plan' },
 ]
+
+/** The move after the run merged the PR itself (BOARD-004 as revised 2026-10-23), on its run-start approval. */
+export const MERGE_MOVE = { from: 'In Review: Implementation', to: 'Ready: Implementation' } as const
 
 /** The one move Step 8 makes, after the PR property reads back (BOARD-005). */
 export const STEP8_MOVE = { from: 'In Progress: Implementation', to: 'In Review: Implementation' } as const
@@ -78,6 +81,8 @@ export type RouteFacts = {
   mode?: Mode
   /** --autonomous (KIT-24): the groomer runs with --autonomous, in the default mode only. */
   autonomous?: boolean
+  /** This ticket's PR was merged by a build-feature run (state.phases.merge). */
+  merged?: boolean
 }
 
 /** The end of an exhaustive switch over a union (TS-008). */
@@ -133,6 +138,11 @@ export function stepCommand(status: string, facts: Pick<RouteFacts, 'id' | 'app'
 /** The app directories the analyzer runs on: the ones the build changed, else aspira.json's app (KIT-39). */
 export const analyzerApps = (facts: Pick<RouteFacts, 'app' | 'apps'>): string[] => (facts.apps?.length ? facts.apps : [facts.app])
 
+/** One analyzer step per app directory the build changed (KIT-39), each done when its own run ended ready since the last build. */
+function analyzerSteps(facts: RouteFacts): (StepRoute & { done: boolean })[] {
+  return analyzerApps(facts).map((app) => ({ ...stepCommand('In Progress: Implementation', { ...facts, app }), done: facts.apps?.length ? (facts.analyzed ?? []).includes(app) : facts.analyzerReady }))
+}
+
 /** What the run does for a live Status. */
 export function routeStatus(status: string, facts: RouteFacts): Route {
   const row = nextStep(status)
@@ -159,27 +169,33 @@ export function routeStatus(status: string, facts: RouteFacts): Route {
       if (facts.implementor !== 'ready') return stepCommand('Ready: Plan', facts)
       return {
         kind: 'sequence',
-        // One analyzer step per app directory the build changed (KIT-39), each done when its own run ended ready.
-        items: [
-          { kind: 'phase', phase: 'visual-verify' },
-          { kind: 'phase', phase: 'gate' },
-          ...analyzerApps(facts).map((app) => ({ ...stepCommand(named, { ...facts, app }), done: facts.apps?.length ? (facts.analyzed ?? []).includes(app) : facts.analyzerReady })),
-          { kind: 'phase', phase: 'step8' },
-        ],
+        items: [{ kind: 'phase', phase: 'visual-verify' }, { kind: 'phase', phase: 'gate' }, ...analyzerSteps(facts), { kind: 'phase', phase: 'step8' }],
         then: { kind: 'end', reason: 'unsettled', message: `${facts.id} is still in In Progress: Implementation after Step 8; resolve it again` },
       }
     }
-    case 'In Review: Implementation':
+    case 'In Review: Implementation': {
+      // A card that reached In Review without the gate and a clean analyzer run on its last build (moved by
+      // hand after a stop, or by the cloud implementor's own PR) gets both here first; Step 8 then commits and
+      // pushes the analyzer's fixes on the open PR (NOM-38: the run went straight from the build to the review).
+      const steps = analyzerSteps(facts)
+      // Step 8 stays in the sequence: it does nothing once the last analyzer result is committed.
+      const late: SequenceItem[] = facts.implementor === 'ready' && steps.some((step) => !step.done) ? [{ kind: 'phase', phase: 'gate' }, ...steps] : []
       return {
         kind: 'sequence',
         items: [
+          ...late,
+          { kind: 'phase', phase: 'step8' },
           { kind: 'phase', phase: 'step10' },
           { kind: 'phase', phase: 'review' },
           { kind: 'phase', phase: 'release-row' },
+          { kind: 'phase', phase: 'merge' },
         ],
-        then: { kind: 'end', reason: 'finished', message: `${facts.id}: the PR is reviewed and ready for a human to merge (BOARD-004); the run never merges and never moves the card to Ready: Implementation` },
+        then: { kind: 'end', reason: 'unsettled', message: `${facts.id} is still in In Review: Implementation after the merge; resolve it again` },
       }
+    }
     case 'Ready: Implementation':
+      if (facts.merged === true) return { kind: 'end', reason: 'finished', message: `${facts.id}: the review left nothing medium or above, the run merged the PR and moved the card to Ready: Implementation` }
+      return { kind: 'end', reason: 'nothing-to-do', message: `nothing to do: ${facts.id} is in ${named}; ${row.step}` }
     case 'Released':
       return { kind: 'end', reason: 'nothing-to-do', message: `nothing to do: ${facts.id} is in ${named}; ${row.step}` }
     case 'Dropped':

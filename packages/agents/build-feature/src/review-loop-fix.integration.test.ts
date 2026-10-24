@@ -75,7 +75,7 @@ describe('T33 F30 F31: Step 10 and the release row', () => {
     expect({ section: (write.stage?.write as { whatItFixed?: string } | undefined)?.whatItFixed, says: String(write.stage?.instructions ?? '').includes('no `## What it fixed` section') }).toEqual({ section: undefined, says: true })
   }, SLOW)
 
-  it('skips the release row without releases, says so, and never merges or moves to Ready: Implementation', async () => {
+  it('skips the release row without releases, says so, then merges once and moves the card to Ready: Implementation', async () => {
     const { h, review } = await reviewing()
     await h.report(review.stage, 'complete', { findings: [] })
     const end = await h.advance()
@@ -86,7 +86,7 @@ describe('T33 F30 F31: Step 10 and the release row', () => {
       skipped,
       readyImplementation: h.stages.filter((stage) => stage.to === 'Ready: Implementation').length,
       merges: await ghRan(h, 'merge'),
-    }).toEqual({ end: 'end', releaseRows: 0, skipped: true, readyImplementation: 0, merges: 0 })
+    }).toEqual({ end: 'end', releaseRows: 0, skipped: true, readyImplementation: 1, merges: 1 })
   }, SLOW)
 })
 

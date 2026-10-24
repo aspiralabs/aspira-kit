@@ -144,6 +144,26 @@ export async function fallbackGate(repo: string, app: string): Promise<Gate | nu
   return { commands, cwds: commands.map(() => appDir), cwd: appDir, source: `${app === '.' ? '' : `${app}/`}package.json scripts` }
 }
 
+/** The package.json script a `<manager> [run] <script>` command runs, or null for any other command. */
+function scriptOf(command: string): string | null {
+  const words = command.trim().split(/\s+/)
+  if (!['pnpm', 'npm', 'yarn', 'bun'].includes(words[0] ?? '')) return null
+  const name = words[1] === 'run' ? words[2] : words[1]
+  return name === undefined || name.startsWith('-') ? null : name
+}
+
+/**
+ * Where a command the repository's AGENTS.md names runs: in the app (aspira.json `app`) when it runs a
+ * package.json script the app has and the repository root does not, else at the root. NOM-38 ran
+ * `pnpm check` at the root of a repo whose scripts live in apps/web, and the gate failed on
+ * "Command check not found".
+ */
+function cwdOf(command: string, repo: string, app: string, appScripts: Record<string, string> | null, rootScripts: Record<string, string> | null): string {
+  const script = scriptOf(command)
+  if (app === '.' || script === null || appScripts?.[script] === undefined || rootScripts?.[script] !== undefined) return repo
+  return join(repo, app)
+}
+
 /** The gate aspira.json configures, else the one the project's AGENTS.md names (the app's first, then the repository's), else the fallback, else null. */
 export async function findGate(repo: string, app: string, gates?: readonly ConfiguredGate[]): Promise<Gate | null> {
   const configured = configuredGate(repo, gates)
@@ -153,7 +173,12 @@ export async function findGate(repo: string, app: string, gates?: readonly Confi
     const text = await readFile(file, 'utf8').catch(() => null)
     if (text === null) continue
     const commands = gateCommandsIn(text)
-    if (commands.length > 0) return { commands, cwds: commands.map(() => dirname(file)), cwd: dirname(file), source: file.slice(repo.length + 1) }
+    if (commands.length === 0) continue
+    if (dirname(file) !== repo) return { commands, cwds: commands.map(() => dirname(file)), cwd: dirname(file), source: file.slice(repo.length + 1) }
+    const appScripts = scriptsIn(await readFile(join(repo, app, 'package.json'), 'utf8').catch(() => null))
+    const rootScripts = scriptsIn(await readFile(join(repo, 'package.json'), 'utf8').catch(() => null))
+    const cwds = commands.map((command) => cwdOf(command, repo, app, appScripts, rootScripts))
+    return { commands, cwds, cwd: cwds[0]!, source: file.slice(repo.length + 1) }
   }
   return fallbackGate(repo, app)
 }
@@ -283,8 +308,8 @@ async function dirtyTracked(context: PhaseContext): Promise<string[]> {
 const withRecord = (state: RunState, record: GateRecord): RunState => ({ ...state, phases: { ...state.phases, gate: record } })
 
 /** Gate stage after an implementor 'complete': nothing when this build's gate is recorded, else the commands to run. */
-export async function gateStage(context: PhaseContext, state: RunState): Promise<PhaseResult> {
-  const key = await buildKey(context.folder, state)
+export async function gateStage(context: PhaseContext, state: RunState, buildOf?: string): Promise<PhaseResult> {
+  const key = buildOf ?? (await buildKey(context.folder, state))
   const recorded = gateRecordOf(state)
   if (recorded !== null && recorded.key === key && recorded.status !== 'failed') return { kind: 'done', state }
   const app = context.aspira.app ?? '.'
@@ -342,6 +367,6 @@ async function acceptGate(context: PhaseContext, state: RunState, pending: Pendi
 
 /** The driver's gate phase (PHASE_MODULES.gate). */
 export const gatePhase: Phase = {
-  next: gateStage,
+  next: (context, state) => gateStage(context, state),
   accept: (context, state, pending, answer) => (pending.data?.part === 'scripts' ? acceptScripts(context, state, pending, answer) : acceptGate(context, state, pending, answer)),
 }

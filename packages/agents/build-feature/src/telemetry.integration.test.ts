@@ -106,7 +106,8 @@ describe('KIT-19 T23 F6 F7 F8 F14: one telemetry file for a build-feature run wi
       steps: steps.map((span) => durationOf(span)),
       orchestration: numberAttr(orchestration, 'aspira.orchestration.duration_ms'),
       segments: segments.reduce((total, span) => total + (durationOf(span) ?? 0), 0),
-    }).toEqual({ root: 2_400_000, steps: [600_000, 600_000], orchestration: 1_200_000, segments: 1_200_000 })
+      // The fixture's build reached In Review unanalyzed, so the late code-analyzer step (09:00-09:05) runs before the first review.
+    }).toEqual({ root: 2_400_000, steps: [300_000, 600_000, 600_000], orchestration: 900_000, segments: 900_000 })
   })
 
   it('places the fix under the orchestration segment it ran in, not under the orchestration span or a step', () => {

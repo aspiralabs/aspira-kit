@@ -60,18 +60,19 @@ import { PACKET_STEPS, writeRunPacket } from '#src/packet-file.ts'
 import { BACKWARD_MOVES_SKILL_MAY_MAKE, decideOverrides, findOverrides, overridesStage, recordOverrides } from '#src/overrides.ts'
 import { renderPrBody } from '#src/pr-body.ts'
 import { acceptResolution, cardDifferences, resolveStage, resolveWithToken, type Resolution } from '#src/resolve.ts'
-import { assertNever, launcherFor, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, STEPS, type EndRoute, type Mode, type PhaseName, type StepName } from '#src/route.ts'
+import { mergePhase, mergeRecordOf } from '#src/merge.ts'
+import { assertNever, launcherFor, MERGE_MOVE, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, STEPS, type EndRoute, type Mode, type PhaseName, type StepName } from '#src/route.ts'
 import { reviewPhase } from '#src/review-loop.ts'
 import { readRunState, stateDirOf, writeRunState, type Card, type Failure, type Pending, type PhaseRecord, type RunState, type Usage } from '#src/run-state.ts'
 import { analyzedApps, analyzerReady, commandApp, readImplementorApps, readImplementorStatus, readSpecCoverage, readStepResult, readStepUsage, stepReportSchema, stepResultTable } from '#src/step-results.ts'
-import { releaseRowPhase, step10Phase } from '#src/step10.ts'
+import { RELEASE_SKIPPED, releaseRowPhase, step10Phase } from '#src/step10.ts'
 import { step8Phase } from '#src/step8.ts'
 import { renderBuildSummary } from '#src/summary.ts'
 import { shown, system } from '#src/system.ts'
 import { runSpans } from '#src/telemetry.ts'
 import { carryTicketFolder, existingWorktree, insideWorktree, locate, prepareWorktree, ticketTypeOf, worktreePath, type Place } from '#src/worktree.ts'
 
-export const STAGE_KINDS = ['resolve', 'approval', 'overrides', 'worktree', 'step', 'ask', 'move', 'set-pr', 'visual-verify', 'gate', 'step10', 'fix', 'release-row', 'summary', 'telemetry', 'end'] as const
+export const STAGE_KINDS = ['resolve', 'approval', 'overrides', 'worktree', 'step', 'ask', 'move', 'set-pr', 'visual-verify', 'gate', 'step10', 'fix', 'release-row', 'merge', 'summary', 'telemetry', 'end'] as const
 export type StageKind = (typeof STAGE_KINDS)[number]
 /** One stage as printed: `nonce` and `output` when it needs an answer. Only the worktree stage that sends a new invocation into the worktree carries no runId. */
 export type Stage = { stage: StageKind; runId?: string; nonce?: string; output?: string; [key: string]: unknown }
@@ -99,7 +100,7 @@ export type DriverInput = {
   env: NodeJS.ProcessEnv
 }
 
-const aspiraSchema = z.looseObject({ board: z.string().optional(), repository: z.string().optional(), app: z.string().optional(), releases: z.string().optional(), models: z.unknown().optional(), gates: z.array(z.object({ cwd: z.string().optional(), command: z.string().min(1) })).optional(), dev: devServerSchema.optional() })
+const aspiraSchema = z.looseObject({ board: z.string().optional(), repository: z.string().optional(), app: z.string().optional(), releases: z.string().optional(), knowledge: z.string().optional(), models: z.unknown().optional(), gates: z.array(z.object({ cwd: z.string().optional(), command: z.string().min(1) })).optional(), dev: devServerSchema.optional() })
 export type Aspira = z.infer<typeof aspiraSchema>
 
 /** What every handler works from. */
@@ -139,6 +140,7 @@ export const PHASES: Readonly<Record<PhaseName, Phase>> = {
   step10: step10Phase,
   review: reviewPhase,
   'release-row': releaseRowPhase,
+  merge: mergePhase,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -183,8 +185,8 @@ function checkNotion(stage: Stage): void {
 }
 
 const allowedMove = (from: string, to: string) =>
-  [...READY_MOVES, STEP8_MOVE, ...BACKWARD_MOVES_SKILL_MAY_MAKE].some((move) => move.from === from && move.to === to)
-const isReadyMove = (from: string, to: string) => READY_MOVES.some((move) => move.from === from && move.to === to)
+  [...READY_MOVES, STEP8_MOVE, MERGE_MOVE, ...BACKWARD_MOVES_SKILL_MAY_MAKE].some((move) => move.from === from && move.to === to)
+const isReadyMove = (from: string, to: string) => [...READY_MOVES, MERGE_MOVE].some((move) => move.from === from && move.to === to)
 
 /** A run id from the start time, unique among the ticket's runs (the fallback when the telemetry reservation cannot be made). */
 function newRunId(state: RunState, now: string): string {
@@ -694,7 +696,7 @@ function printMove(ctx: Ctx, state: RunState, move: { from: string; to: string }
 /** A move the route or a phase asks for: allowed moves only, Ready moves only on the run's approval, re-resolved first. */
 async function requestMove(ctx: Ctx, state: RunState, move: { from: string; to: string }, expect: Pick<Card, 'status' | 'pr' | 'dev'>, phase?: string): Promise<Out> {
   if (!allowedMove(move.from, move.to)) {
-    const message = `the run will not move ${ctx.input.id} ${move.from} -> ${move.to}: a run makes only the three Ready moves and Step 8's move`
+    const message = `the run will not move ${ctx.input.id} ${move.from} -> ${move.to}: a run makes only the three Ready moves, Step 8's move and the move after its own merge`
     return stop(ctx, state, message, { stopped: true, reason: { kind: 'move' }, failure: { action: 'move', message } })
   }
   if (isReadyMove(move.from, move.to) && approvalFor(state, ctx.runId) === null) {
@@ -769,6 +771,7 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
     analyzed: analyzedApps(state, await readImplementorApps(ctx.folder)),
     mode: ctx.mode,
     autonomous: ctx.autonomous,
+    merged: mergeRecordOf(state) !== null,
   }
   const next = routeStatus(card.status, facts)
   switch (next.kind) {
@@ -793,6 +796,8 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
       return endRoute(ctx, current, notes.length === 0 ? next.then : { ...next.then, message: [next.then.message, ...notes].join('\n') })
     }
     case 'end':
+      // The merge ends the run through its move, past the sequence that collected the release row's skip note.
+      if (next.reason === 'finished' && facts.merged && (ctx.aspira?.releases ?? '').trim() === '') return endRoute(ctx, state, { ...next, message: `${next.message}\n${RELEASE_SKIPPED}` })
       return endRoute(ctx, state, next)
     default:
       return assertNever(next)
@@ -858,7 +863,7 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
   await checkKitVersion(ctx.input.repo)
   // The engineering guidelines once per ticket and the run packet (KIT-48) go to the in-session launchers only:
   // a cloud launcher's `start` refuses --guidelines, --knowledge and --packet, and its agent loads its own.
-  const shared = ctx.mode === 'local' ? await ensureKnowledge(started, { env: ctx.input.env, repo: ctx.input.repo, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }), folder: ctx.folder, now: ctx.input.now }) : { state: started, knowledge: null, note: null }
+  const shared = ctx.mode === 'local' ? await ensureKnowledge(started, { env: ctx.input.env, repo: ctx.input.repo, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }), ...(ctx.aspira?.knowledge === undefined ? {} : { page: ctx.aspira.knowledge }), folder: ctx.folder, now: ctx.input.now }) : { state: started, knowledge: null, note: null }
   const state = shared.note === null ? shared.state : { ...shared.state, phases: { ...shared.state.phases, knowledgeNote: shared.note } }
   const packet = ctx.mode === 'local' && PACKET_STEPS.includes(step) ? await writeRunPacket({ repo: ctx.input.repo, folder: ctx.folder, aspira: ctx.aspira, knowledgeDir: shared.knowledge?.dir ?? null }) : null
   // The stored command stays the routed one; the run's own flags ride only on what is printed, like --parent-run.

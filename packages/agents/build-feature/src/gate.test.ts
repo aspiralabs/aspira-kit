@@ -66,6 +66,15 @@ describe('findGate: AGENTS.md first, then the package.json fallback', () => {
     expect(await findGate(repo, 'apps/web')).toEqual({ commands: ['pnpm test'], cwds: [join(repo, 'apps/web')], cwd: join(repo, 'apps/web'), source: 'apps/web/AGENTS.md' })
   })
 
+  it("runs a command the repository's AGENTS.md names in the app when only the app has that script (NOM-38)", async () => {
+    const repo = await tree({
+      'AGENTS.md': 'Package commands run in apps/web: `pnpm check`, `pnpm test`, `pnpm lint`.\n',
+      'package.json': scripts({ lint: 'eslint .' }),
+      'apps/web/package.json': scripts({ check: 'tsc --noEmit', test: 'vitest run', lint: 'eslint src' }),
+    })
+    expect(await findGate(repo, 'apps/web')).toEqual({ commands: ['pnpm check', 'pnpm test', 'pnpm lint'], cwds: [join(repo, 'apps/web'), join(repo, 'apps/web'), repo], cwd: join(repo, 'apps/web'), source: 'AGENTS.md' })
+  })
+
   it('falls through to the package.json scripts when AGENTS.md names no command', async () => {
     const repo = await tree({ 'AGENTS.md': '# Nothing to run\n', 'package.json': scripts({ test: 'vitest run' }), 'pnpm-lock.yaml': '' })
     expect(await findGate(repo, '.')).toEqual({ commands: ['pnpm run test'], cwds: [repo], cwd: repo, source: 'package.json scripts' })

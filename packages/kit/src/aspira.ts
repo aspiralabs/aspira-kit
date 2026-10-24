@@ -8,11 +8,13 @@ import { readJson, writeJson, type Log } from './fs.js'
 
 export const ASPIRA_FILE = 'aspira.json'
 
-export type AspiraConfig = { board: string; releases?: string; glossary?: string; decisions?: string; app?: string }
+export type AspiraConfig = { board: string; releases?: string; glossary?: string; decisions?: string; app?: string; knowledge?: string }
 
 /** aspira.json's Notion keys that `kit doctor` resolves by id: the Feature Board (a database or,
- * for a collection:// value, a data source) and three pages, once those keys exist. */
-export const NOTION_KEYS = ['board', 'releases', 'glossary', 'decisions'] as const
+ * for a collection:// value, a data source) and four pages, once those keys exist. `knowledge` is
+ * the engineering guidelines' index page (Agent Instructions): the run's KNOWLEDGE_PAGE when the
+ * environment has none. */
+export const NOTION_KEYS = ['board', 'releases', 'glossary', 'decisions', 'knowledge'] as const
 export type NotionKey = (typeof NOTION_KEYS)[number]
 export type NotionTarget = { key: NotionKey; url: string; kind: 'database' | 'page' | 'data_source' }
 
@@ -156,6 +158,7 @@ export function checkAspira(projectRoot: string): { ok: boolean; reason?: string
   }
   if (!isNotionUrl(config?.board)) return { ok: false, reason: `${ASPIRA_FILE} has no "board" Notion URL; run kit init --board <Feature Board URL>` }
   if (config?.releases !== undefined && !isNotionUrl(config.releases)) return { ok: false, reason: `${ASPIRA_FILE} "releases" is not a Notion URL` }
+  if (config?.knowledge !== undefined && !isNotionUrl(config.knowledge)) return { ok: false, reason: `${ASPIRA_FILE} "knowledge" is not a Notion URL` }
   if (config?.app !== undefined) {
     if (typeof config.app !== 'string' || config.app === '') return { ok: false, reason: `${ASPIRA_FILE} "app" is not a directory` }
     if (!existsSync(join(projectRoot, config.app, 'package.json'))) return { ok: false, reason: `${ASPIRA_FILE} "app" is ${config.app}, but ${config.app}/package.json does not exist` }

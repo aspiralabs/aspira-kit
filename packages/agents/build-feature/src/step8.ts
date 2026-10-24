@@ -270,6 +270,14 @@ const stopWith = (state: RunState, outcome: { message: string; failure: Failure 
 const moveAfter = (context: PhaseContext, state: RunState, url: string): PhaseResult => ({ kind: 'move', state, from: STEP8_MOVE.from, to: STEP8_MOVE.to, expect: { status: context.card.status, pr: url, dev: context.card.dev } })
 
 async function step8Next(context: PhaseContext, state: RunState, sys: System = system): Promise<PhaseResult> {
+  if (context.card.status === STEP8_MOVE.to) {
+    // A late analyzer run in In Review (route.ts): commit its fixes and push them to the open PR, no move.
+    if (recordOf(state).committedFor === analyzerKey(state)) return { kind: 'done', state }
+    const committed = await commitAnalyzerChanges(context, state, sys)
+    if (!committed.ok) return stopWith(state, committed)
+    const pushed = await pushGuarded(context, committed.value, sys)
+    return pushed.ok ? { kind: 'done', state: pushed.value } : stopWith(committed.value, pushed)
+  }
   if (context.card.status !== STEP8_MOVE.from) return { kind: 'done', state }
   const allowed = await guard(context, sys)
   if (!allowed.ok) return stopWith(state, allowed)
