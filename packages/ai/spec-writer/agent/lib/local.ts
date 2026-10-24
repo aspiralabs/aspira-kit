@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 import { openDecisions } from '@aspiralabs/ai/common/lib/decisions'
 import type { SessionModel } from '@aspiralabs/ai/common/lib/session-model'
+import { taskModel, type Effort } from '@aspiralabs/ai/common/lib/model-config'
 import type { Call } from '@aspiralabs/ai/spec-reviewer/lib/pipeline'
 import { lenses, reviewSchema, synthesisSchema, systemPrompt as reviewSystemPrompt } from '@aspiralabs/ai/spec-reviewer/lib/review'
 import { writeArtifacts } from './artifacts.ts'
@@ -30,10 +31,17 @@ export type LocalInput = Omit<RunInput, 'guidelinesPath'> & { guidelinesPath?: s
 export type LocalDeps = { agentDir?: string; env?: Env; fetch?: (url: string, init?: RequestInit) => Promise<Response>; api?: string }
 
 /** A phase for the session to run: prompt and output are file paths; `model` the session model it runs on (KIT-48). */
-export type LocalTask = { phase: string; prompt: string; output: string; model: SessionModel; error?: string }
+export type LocalTask = { phase: string; prompt: string; output: string; model: SessionModel; effort?: Effort; error?: string }
 
 /** Explorers and specialists on Sonnet, the draft, research and reconciliation on Opus (KIT-48). */
 export const modelForPhase = (phase: string): SessionModel => (phase === 'explore' || phase.startsWith('explore:') || (phase in lenses) ? 'sonnet' : 'opus')
+/**
+ * The phase's model and effort: aspira.json `models` spec-writer.<family>, where the family is explore,
+ * draft, research, specialists (every review lens) or reconciliation; else modelForPhase.
+ */
+export const taskModelForPhase = (phase: string, repo: string): { model: SessionModel; effort?: Effort } =>
+  taskModel(`spec-writer.${phase in lenses ? 'specialists' : phase.split(':')[0]!}`, modelForPhase(phase), repo)
+
 type LocalCall = { phase: string; prompt: string; output?: unknown; error?: string }
 
 const STAGES = ['explore', 'draft', 'research', 'specialists', 'reconciliation'] as const
@@ -171,7 +179,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     }
     const promptFile = join(work, 'prompts', `${phase.replaceAll('/', '_').replaceAll(':', '-')}.md`)
     await writeFile(promptFile, renderPhasePrompt(phase, prompt, output, repoRoot, knowledge, mode))
-    tasks.push({ phase, prompt: promptFile, output, model: modelForPhase(phase), ...(error ? { error } : {}) })
+    tasks.push({ phase, prompt: promptFile, output, ...taskModelForPhase(phase, repoRoot), ...(error ? { error } : {}) })
     throw new Error('pending in the session')
   }
 

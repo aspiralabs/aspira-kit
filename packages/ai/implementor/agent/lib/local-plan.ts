@@ -19,7 +19,7 @@ export const PLAN = z.looseObject({
         featureIds: ids.default([]),
         dependsOn: ids.default([]),
         testIds: ids.default([]),
-        changes: z.array(z.looseObject({ operation: z.enum(['create', 'modify', 'delete']), path: text })).default([]),
+        changes: z.array(z.looseObject({ operation: z.enum(['create', 'modify', 'delete', 'move']), path: text, from: text.optional() })).default([]),
         commands: ids.default([]),
       }),
     )
@@ -219,14 +219,39 @@ export function baselineWaves(plan: Plan): string[][] | null {
   return waves
 }
 
-/** Paths a create must not find, and a modify or delete must find, checked by the caller's exists. */
+/**
+ * Paths a create must not find, and a modify or delete must find, checked by the caller's exists
+ * against the repository as the tasks before it leave it: a file an earlier task creates exists, one
+ * it deletes does not, and a move puts `from` (a file or a whole directory) at its new path.
+ */
 export function targetProblems(plan: Plan, exists: (path: string) => boolean): string[] {
   const problems: string[] = []
+  const created = new Set<string>()
+  const gone = new Set<string>()
+  const moves: { from: string; to: string }[] = []
+  // A path as it was in the repository before the plan, undoing the moves made so far, newest first.
+  const original = (path: string): string => {
+    let at = path
+    for (const move of [...moves].reverse()) if (at === move.to || at.startsWith(`${move.to}/`)) at = `${move.from}${at.slice(move.to.length)}`
+    return at
+  }
+  const there = (path: string): boolean => created.has(path) || (!gone.has(path) && ![...gone].some((dir) => path.startsWith(`${dir}/`)) && exists(original(path)))
   for (const task of plan.tasks) {
     for (const change of task.changes) {
-      const there = exists(change.path)
-      if (change.operation === 'create' && there) problems.push(`${task.id} creates ${change.path}, which already exists.`)
-      if (change.operation !== 'create' && !there) problems.push(`${task.id} ${change.operation}s ${change.path}, which does not exist.`)
+      if (change.operation === 'move') {
+        const from = change.from ?? ''
+        if (!there(from)) problems.push(`${task.id} moves ${from}, which does not exist.`)
+        if (there(change.path)) problems.push(`${task.id} moves ${from} to ${change.path}, which already exists.`)
+        moves.push({ from: original(from), to: change.path })
+        gone.add(from)
+        gone.delete(change.path)
+        continue
+      }
+      const present = there(change.path)
+      if (change.operation === 'create' && present) problems.push(`${task.id} creates ${change.path}, which already exists.`)
+      if (change.operation !== 'create' && !present) problems.push(`${task.id} ${change.operation}s ${change.path}, which does not exist.`)
+      if (change.operation === 'delete') { created.delete(change.path); gone.add(change.path) }
+      else { created.add(change.path); gone.delete(change.path) }
     }
   }
   return problems

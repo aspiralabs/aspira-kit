@@ -135,3 +135,37 @@ describe('checks', () => {
     expect(plan.indexOf('- **critical** · planning: provider down')).toBeLessThan(plan.indexOf('- **medium** · Uncovered guideline: TEST-001'))
   })
 })
+
+describe('a move (KIT-65: a directory move made every later target look missing)', () => {
+  /** P2 moves src/ to lib/ and then edits the moved file at its new path, citing its current one. */
+  const moved = () => {
+    const plan = validPlan()
+    plan.tasks[1]!.changes = [
+      { operation: 'move', from: 'src', path: 'lib', symbols: ['the src directory'], instructions: 'Move the whole directory.', evidence: ['src/items.ts:1'] },
+      { operation: 'modify', path: 'lib/items.ts', symbols: ['save'], instructions: 'Persist by unique item key.', evidence: ['src/items.ts:1'] },
+    ]
+    return plan
+  }
+
+  it('lets later changes name files at their new path, for a whole directory in one change', () => {
+    expect(validatePlan(moved(), spec, files)).toEqual([])
+  })
+
+  it('still calls a file missing when no earlier change moves it there', () => {
+    const plan = moved()
+    plan.tasks[1]!.changes = [plan.tasks[1]!.changes[1]!, plan.tasks[1]!.changes[0]!]
+    expect(validatePlan(plan, spec, files)).toContain('Missing modify target: lib/items.ts')
+  })
+
+  it('refuses a move from a path that does not exist, onto one that does, or with no citation under its source', () => {
+    const plan = moved()
+    plan.tasks[1]!.changes[0] = { ...plan.tasks[1]!.changes[0]!, from: 'gone', path: 'tests', evidence: ['package.json:1'] }
+    expect(validatePlan(plan, spec, files)).toEqual(expect.arrayContaining(['Missing move source: gone', 'Move target already exists: tests', 'No valid source evidence: P2/gone']))
+  })
+
+  it('renders a move with its source, and refuses "from" on anything but a move', () => {
+    expect(renderPlan(moved(), 'ready', { specPath: '/spec.md', commit: 'abc', dirty: false }, [])).toContain('move `src` to `lib`')
+    const plan = validPlan()
+    expect(planSchema.safeParse({ ...plan, tasks: [plan.tasks[0], { ...plan.tasks[1]!, changes: [{ ...plan.tasks[1]!.changes[0]!, from: 'src' }] }, plan.tasks[2]] }).success).toBe(false)
+  })
+})

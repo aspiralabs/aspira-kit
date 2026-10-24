@@ -13,6 +13,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { KNOWLEDGE_ENV, pageIdFrom } from '@aspiralabs/ai/common/lib/knowledge'
 import type { SessionModel } from '@aspiralabs/ai/common/lib/session-model'
+import { taskModel, type Effort } from '@aspiralabs/ai/common/lib/model-config'
 import { parseProvenance, verifyKnowledgeDir, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
 import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
@@ -224,7 +225,7 @@ export type LocalDeps = { agentDir?: string; env?: NodeJS.ProcessEnv; progress?:
 
 /** One batch for the session: run the prompt file as a subagent, which writes its JSON to `output`. */
 /** `model` (KIT-48): the session model the fix task runs on; the fixer is mechanical work, so Haiku. */
-export type LocalTask = { id: string; prompt: string; output: string; files: string[]; diagnostics: number; model: SessionModel; error?: string; retry?: boolean }
+export type LocalTask = { id: string; prompt: string; output: string; files: string[]; diagnostics: number; model: SessionModel; effort?: Effort; error?: string; retry?: boolean }
 
 /** A fix stage for the session to run, at most `parallel` subagents at a time. */
 export type LocalPending = {
@@ -517,7 +518,7 @@ async function writeFixStage(state: State, executor: Executor, work: string, fix
     await writeFile(prompt, renderTaskPrompt({ id, root: state.root, output, system: fixer.systemPrompt, task, schema }))
     await rm(output, { force: true })
     tasks.tasks.push({ id, batch: index + 1, files: batch.files, diagnostics: batch.diagnostics, prompt, output })
-    out.push({ id, prompt, output, files: batch.files, diagnostics: batch.diagnostics.length, model: 'haiku' })
+    out.push({ id, prompt, output, files: batch.files, diagnostics: batch.diagnostics.length, ...taskModel('code-analyzer.fix', 'haiku' as SessionModel, state.gitRoot) })
   }
   const snapshot: Snapshot = { hashes: {}, contents: {} }
   for (const file of await trackedFiles(executor, state)) {
@@ -569,7 +570,7 @@ async function collectFixStage(state: State, executor: Executor, work: string, f
       await rename(task.output, join(work, 'outputs', `${task.id}.rejected-${rejected.length + 1}.json`))
       retry = rejected.length + 1 < 2
     }
-    waiting.push({ id: task.id, prompt: task.prompt, output: task.output, files: task.files, diagnostics: task.diagnostics.length, model: 'haiku', ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) })
+    waiting.push({ id: task.id, prompt: task.prompt, output: task.output, files: task.files, diagnostics: task.diagnostics.length, ...taskModel('code-analyzer.fix', 'haiku' as SessionModel, state.gitRoot), ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) })
   }
   if (waiting.length > 0) return waiting
 

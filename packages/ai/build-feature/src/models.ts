@@ -4,10 +4,9 @@
 // project can override a role in aspira.json `models`; the override is validated at the boundary
 // (PATTERN-012) and an unknown role or model name is refused, naming it.
 
-import { z } from 'zod'
+import { parseModelChoices, phaseKey, type Effort, type ModelChoice, type ModelName } from '@aspiralabs/ai/common/lib/model-config'
 
-export const MODEL_NAMES = ['fable', 'opus', 'sonnet', 'haiku'] as const
-export type ModelName = (typeof MODEL_NAMES)[number]
+export { MODEL_NAMES, EFFORTS, type ModelName, type Effort } from '@aspiralabs/ai/common/lib/model-config'
 
 export const ROLES = [
   'orchestrator',
@@ -44,33 +43,40 @@ export const MODELS: Readonly<Record<Role, ModelName>> = {
 
 const RETIRED_ROLES = ['spec-reviewer'] as const
 const isRole = (value: string): value is Role => (ROLES as readonly string[]).includes(value)
-const isModel = (value: string): value is ModelName => (MODEL_NAMES as readonly string[]).includes(value)
 
-/** aspira.json `models`: role → model name, every key a known role and every value a known model. */
-export const modelsSchema = z
-  .record(z.string(), z.string())
-  .superRefine((models, ctx) => {
-    for (const [role, model] of Object.entries(models)) {
-      // A role an earlier kit knew (spec-reviewer, folded into spec-writer by KIT-48) is ignored, not refused.
-      if ((RETIRED_ROLES as readonly string[]).includes(role)) continue
-      if (!isRole(role)) ctx.addIssue({ code: 'custom', path: [role], message: `unknown role "${role}" in aspira.json models; the roles are ${ROLES.join(', ')}` })
-      if (!isModel(model)) ctx.addIssue({ code: 'custom', path: [role], message: `unknown model "${model}" for ${role} in aspira.json models; the models are ${MODEL_NAMES.join(', ')}` })
-    }
-  })
-  .transform((models) => Object.fromEntries(Object.entries(models).filter(([role]) => !(RETIRED_ROLES as readonly string[]).includes(role))) as Partial<Record<Role, ModelName>>)
-export type ModelOverrides = z.infer<typeof modelsSchema>
+export type ModelOverrides = Partial<Record<Role, ModelChoice>>
 
-/** The overrides in aspira.json `models`, or a thrown error naming the unknown role or model. */
+/**
+ * The role entries of aspira.json `models` (common/lib/model-config.ts), every value and phase key
+ * validated there and every role key here: an unknown role is refused, naming it; a role an earlier kit
+ * knew (spec-reviewer, folded into spec-writer by KIT-48) is ignored. `<step>.<phase>` keys are the
+ * step's own tasks and are not roles.
+ */
 export function parseModels(models: unknown): ModelOverrides {
-  if (models === undefined) return {}
-  const parsed = modelsSchema.safeParse(models)
-  if (!parsed.success) throw new Error(parsed.error.issues.map((issue) => issue.message).join('; '))
-  return parsed.data
+  const keys = typeof models === 'object' && models !== null && !Array.isArray(models) ? Object.keys(models) : []
+  const problems = keys
+    .filter((key) => phaseKey(key) === null && !(RETIRED_ROLES as readonly string[]).includes(key) && !isRole(key))
+    .map((key) => `unknown role "${key}" in aspira.json models; the roles are ${ROLES.join(', ')}, or <step>.<phase> for a step's tasks`)
+  let choices: ReturnType<typeof parseModelChoices> = {}
+  try {
+    choices = parseModelChoices(models)
+  } catch (error) {
+    problems.push(error instanceof Error ? error.message : String(error))
+  }
+  if (problems.length > 0) throw new Error(problems.join('; '))
+  const out: ModelOverrides = {}
+  for (const [key, choice] of Object.entries(choices)) if (isRole(key)) out[key] = choice
+  return out
 }
 
 /** The model a role runs on: the aspira.json override when there is one, else the table. */
 export function modelFor(role: Role, aspira: { models?: unknown } | null = null): ModelName {
-  return parseModels(aspira?.models)[role] ?? MODELS[role]
+  return parseModels(aspira?.models)[role]?.model ?? MODELS[role]
+}
+
+/** The reasoning effort a role runs at when aspira.json sets one; undefined keeps the Agent tool's default. */
+export function effortFor(role: Role, aspira: { models?: unknown } | null = null): Effort | undefined {
+  return parseModels(aspira?.models)[role]?.effort
 }
 
 /** The line a step prompt carries about the models the step's own subagents use. */
@@ -78,5 +84,5 @@ export function subagentModels(step: string, aspira: { models?: unknown } | null
   const fetches = `knowledge fetches ${modelFor('knowledge', aspira)}, Notion page pushes ${modelFor('notion-push', aspira)}`
   if (step === 'implementor') return `Its lane workers run on ${modelFor('implementor', aspira)}; ${fetches}.`
   if (step === 'pr-reviewer') return `Its review seats run on ${modelFor('pr-reviewer', aspira)} and its verifier on ${modelFor('pr-reviewer-verifier', aspira)}; ${fetches}.`
-  return `Its own tasks name their model (research and reconciliation on opus, explorers and specialists on sonnet); ${fetches}.`
+  return `Its own tasks name their model and, when aspira.json sets one, their effort (by default research and reconciliation on opus, explorers and specialists on sonnet); ${fetches}.`
 }

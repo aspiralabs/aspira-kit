@@ -3,7 +3,8 @@
 // The orchestrator itself stays on Fable; research and synthesis run on Opus, explorers and
 // specialists on Sonnet, mechanical work on Haiku. The names are the Agent tool's.
 
-export const SESSION_MODELS = ['opus', 'sonnet', 'haiku'] as const
+// fable is never a default task model; aspira.json `models` may name it for an experiment (model-config.ts).
+export const SESSION_MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 export type SessionModel = (typeof SESSION_MODELS)[number]
 
 /** The session model closest to a gateway model id (`anthropic/claude-haiku-4.5`, `openai/gpt-6.1-sol`): haiku and sonnet by name, everything else opus. */

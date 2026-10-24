@@ -84,7 +84,7 @@ Puts a Next.js project on the kit. `next` is the only stack so far. Without `--a
 | `.claude/skills/aspira-<agent>/` | One folder per agent (groomer, spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer): a copy of the installed package's `skill/aspira-<agent>/` (`SKILL.md` and `scripts/`) plus `.kit-version`, the installed `@aspiralabs/ai` version. Commit them. A re-run after a bump rewrites them |
 | `.claude/skills/aspira-{cleanup,next,worktree}/` | The three kit-owned skills, copied from this package's `skills/` with `.kit-version` set to the installed `@aspiralabs/ai` version, written even when `@aspiralabs/ai` is not installed. Each is a launcher that runs the matching `kit` command and relays it: `/aspira-cleanup` lists, confirms in chat and reruns with `--yes --only`; `/aspira-next` offers to run the next command on a yes; `/aspira-worktree` moves the session into the new worktree |
 | `.gitignore` | Adds `.work/` (the per-ticket working folder) and `.aspira/` (the audit log the hooks write, `.aspira/audit.jsonl`), whichever is missing; `.worktrees/` (ticket worktrees) to the git repository root's `.gitignore`; and `.env.local` unless `git check-ignore` already reports it ignored (a `.env*.local` glob counts) |
-| `aspira.json` | With `--board`: the project's Feature Board URL and, with `--releases`, its Releases page. The `/aspira-*` skills and `kit next` read it. With `--app`: `"app": "<dir>"`, which `kit doctor`, `kit next` and the skill launchers read to find the installed packages. Without `--board` the board is left as it is, and a project without one has no board: every skill then needs `--no-ticket`. Add `"knowledge": "<Agent Instructions URL>"` by hand so a build-feature run builds the guidelines without `KNOWLEDGE_PAGE` in its environment |
+| `aspira.json` | With `--board`: the project's Feature Board URL and, with `--releases`, its Releases page. The `/aspira-*` skills and `kit next` read it. With `--app`: `"app": "<dir>"`, which `kit doctor`, `kit next` and the skill launchers read to find the installed packages. Without `--board` the board is left as it is, and a project without one has no board: every skill then needs `--no-ticket`. Add `"knowledge": "<Agent Instructions URL>"` by hand so a build-feature run builds the guidelines without `KNOWLEDGE_PAGE` in its environment. Add `"models"` by hand to try other models or reasoning effort (see [Models](#models-per-stage-and-phase)) |
 
 ### `--app`: a repository whose app is not the root
 
@@ -104,6 +104,27 @@ Every path inside the root files points into the app, relative to the root where
 The `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and settings templates ship in this package (`templates/agent/`), and the hooks in `hooks/`, so re-running `init` after an upgrade brings them up to that version. The managed `AGENTS.md` block and the session-start hook only point at the rules in Notion; they restate none.
 
 ### The agent skills
+
+### Models per stage and phase
+
+`aspira.json` `models` sets which model, and how much reasoning, each part of a run gets. It is for experiments: a key left out keeps the kit's default, so an empty map changes nothing. Two kinds of key:
+
+- **A build-feature role**: `groomer`, `spec-writer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer`, `pr-reviewer-verifier`, `fix`, `knowledge`, `notion-push`, `orchestrator`. It sets the step's own subagent.
+- **`<step>.<phase>`**: one kind of task a step prints. The phases are `groomer.round` and `groomer.summary`; `spec-writer.explore`, `spec-writer.draft`, `spec-writer.research`, `spec-writer.specialists` and `spec-writer.reconciliation`; `planner.research`, `planner.planning` and `planner.repair`; `implementor.orchestrator` and `implementor.worker`; `code-analyzer.fix`; and `pr-reviewer.<seat>`.
+
+A value is a model (`fable`, `opus`, `sonnet`, `haiku`) or `{ "model": …, "effort": … }`, either field optional. `effort` is the Agent tool's reasoning effort: `low`, `medium`, `high`, `xhigh` or `max`. `low` is the closest to reasoning off. A build-feature run refuses an unknown role, step, model or effort before its first step.
+
+```json
+{
+  "board": "https://app.notion.com/p/…",
+  "models": {
+    "planner": "opus",
+    "planner.planning": { "model": "opus", "effort": "medium" },
+    "planner.repair": { "model": "sonnet", "effort": "low" },
+    "spec-writer.explore": "haiku"
+  }
+}
+```
 
 `@aspiralabs/ai` is one dependency that brings every agent (the folders `groomer`, `spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer`, `build-feature`, `visual-verify` and `common`) into the project at the kit's version. Each agent's skill is copied into `.claude/skills/aspira-<agent>/`, so `/aspira-planner` and friends run the agent installed in `node_modules`, never a source checkout. The launcher resolves its agent as `<AGENT>_AGENT_DIR` (kit development only; the run says so), then the installed package under the app named in the root's `aspira.json` (`--app`), then walking up from the working directory, then from its own location; `$ASPIRA_KIT` is not consulted. Agent environment comes from the project's `.env.local` (`AI_GATEWAY_API_KEY`, `NOTION_TOKEN`, `KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`), then the agent's own folder.
 

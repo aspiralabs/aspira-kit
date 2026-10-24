@@ -16,9 +16,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { writeArtifacts } from '@aspiralabs/ai/common/lib/artifacts'
 import type { DecisionRecord } from '@aspiralabs/ai/common/lib/decisions'
 import type { SessionModel } from '@aspiralabs/ai/common/lib/session-model'
+import { taskModel, type Effort } from '@aspiralabs/ai/common/lib/model-config'
 import { z } from 'zod'
 import { fingerprintKnowledge, KnowledgeBlocked, knowledgeConfig, knowledgeFiles, knowledgeSource, loadKnowledge, REQUIRED_NAME, verifyGuidelines, type KnowledgeConfig, type KnowledgeFile } from './local-knowledge.ts'
-import { planSchema, readAnswers, researchSchema, type Plan, type Research } from './plan.ts'
+import { applyPlanPatch, planPatchSchema, planSchema, readAnswers, researchSchema, type Plan, type PlanPatch, type Research } from './plan.ts'
 import { assertPlannableSpec, assessPlan, type GuidelinePage, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, ticketFolderFor, uncoveredRules, type PreparedPlan } from './runner.ts'
 import { renderFactsBlock, reviewFacts, type ReviewFactsResult } from './review-facts.ts'
 
@@ -48,10 +49,13 @@ export type LocalDeps = { env?: Record<string, string | undefined>; packageDir?:
 export type PhaseId = 'research' | 'planning' | `repair-${number}`
 
 /** A task as printed for the session: the prompt and output are file paths; `model` the session model it runs on (KIT-48). */
-export type LocalTask = { id: PhaseId; prompt: string; output: string; schema: string; model: SessionModel; reads?: string; error?: string; retry?: boolean }
+export type LocalTask = { id: PhaseId; prompt: string; output: string; schema: string; model: SessionModel; effort?: Effort; reads?: string; error?: string; retry?: boolean }
 
 /** Research and planning on Opus, the correction passes on Sonnet (KIT-48). */
 export const modelForPhase = (id: PhaseId): SessionModel => (id.startsWith('repair-') ? 'sonnet' : 'opus')
+
+/** The phase's model and effort: aspira.json `models` planner.research, planner.planning or planner.repair, else modelForPhase. */
+export const taskModelForPhase = (id: PhaseId, repo: string): { model: SessionModel; effort?: Effort } => taskModel(`planner.${id.startsWith('repair-') ? 'repair' : id}`, modelForPhase(id), repo)
 
 /** A stage for the session to run. */
 export type LocalPending = { pending: true; status: 'pending'; stage: Stage; workDir: string; router: string; instructions: string; tasks: LocalTask[] }
@@ -230,7 +234,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     }
     const promptFile = join(work, 'prompts', `${id}.md`)
     await writeFile(promptFile, renderTaskPrompt({ id, system: id === 'research' ? prompts.researchSystem : prompts.system, prompt, output, reads: readsFile, repo: resolve(input.repoPath), knowledge: topics, schema }))
-    return { task: { id, prompt: promptFile, output, schema: id === 'research' ? 'researchSchema' : 'planSchema', model: modelForPhase(id), ...(readsFile === null ? {} : { reads: readsFile }), ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) } }
+    return { task: { id, prompt: promptFile, output, schema: id === 'research' ? 'researchSchema' : id.startsWith('repair-') ? 'planPatchSchema' : 'planSchema', ...taskModelForPhase(id, resolve(input.repoPath)), ...(readsFile === null ? {} : { reads: readsFile }), ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) } }
   }
 
   const coversRules = (value: Research) => {
@@ -252,13 +256,26 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     for (let round = 1; plan !== null && round <= REPAIR_ROUNDS; round++) {
       const issues = planIssues({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan })
       if (!issues.length) break
-      const repaired = await resolvePhase(`repair-${round}`, repairPrompt(context, research, plan, issues, prompts.repairInstructions, pages), planSchema)
+      // A correction pass answers with a patch of only what it changes (planPatchSchema), merged into the plan here.
+      const before: Plan = plan
+      const repaired = await resolvePhase(`repair-${round}`, repairPrompt(context, research, plan, issues, prompts.repairInstructions, pages), planPatchSchema, (patch) => mergeProblem(before, patch))
       if (repaired.task !== undefined) return { ...base, stage: 'planning', tasks: [repaired.task] }
-      if (repaired.value === undefined || planIssues({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan: repaired.value }).length >= issues.length) break
-      plan = repaired.value
+      const merged = repaired.value === undefined ? undefined : applyPlanPatch(before, repaired.value)
+      if (merged === undefined || planIssues({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan: merged }).length >= issues.length) break
+      plan = merged
     }
   }
   return exportPlan({ input, prepared, prompts, knowledge, state, calls, research, plan, work, facts })
+}
+
+/** Why a correction pass's patch cannot be merged into the plan (a task left with no changes, a broken reference), or undefined. */
+function mergeProblem(plan: Plan, patch: PlanPatch): string | undefined {
+  try {
+    applyPlanPatch(plan, patch)
+    return undefined
+  } catch (error) {
+    return `The patch does not merge into the previous plan: ${error instanceof z.ZodError ? z.prettifyError(error).slice(0, 2000) : message(error)}`
+  }
 }
 
 /** The work directory is this run's scratch space, not repository evidence the agent would have seen. */
