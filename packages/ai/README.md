@@ -110,7 +110,7 @@ The `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and settings templates ship in this pa
 `aspira.json` `models` sets which model, and how much reasoning, each part of a run gets. It is for experiments: a key left out keeps the kit's default, so an empty map changes nothing. Two kinds of key:
 
 - **A build-feature role**: `groomer`, `spec-writer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer`, `pr-reviewer-verifier`, `fix`, `knowledge`, `notion-push`, `orchestrator`. It sets the step's own subagent.
-- **`<step>.<phase>`**: one kind of task a step prints. The phases are `groomer.round` and `groomer.summary`; `spec-writer.explore`, `spec-writer.draft`, `spec-writer.research`, `spec-writer.specialists` and `spec-writer.reconciliation`; `planner.research`, `planner.planning` and `planner.repair`; `implementor.orchestrator` and `implementor.worker`; `code-analyzer.fix`; and `pr-reviewer.<seat>`.
+- **`<step>.<phase>`**: one kind of task a step prints. The phases are `groomer.round` and `groomer.summary`; `spec-writer.explore`, `spec-writer.draft`, `spec-writer.research`, `spec-writer.specialists` and `spec-writer.reconciliation`; `planner.explore`, `planner.research`, `planner.planning` and `planner.repair`; `implementor.orchestrator` and `implementor.worker`; `code-analyzer.fix`; and `pr-reviewer.<seat>`.
 
 A value is a model (`fable`, `opus`, `sonnet`, `haiku`) or `{ "model": …, "effort": … }`, either field optional. `effort` is the Agent tool's reasoning effort: `low`, `medium`, `high`, `xhigh` or `max`. `low` is the closest to reasoning off. A build-feature run refuses an unknown role, step, model or effort before its first step.
 
