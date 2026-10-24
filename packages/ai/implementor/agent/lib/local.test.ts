@@ -1,0 +1,373 @@
+import { execFile } from 'node:child_process'
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
+import { DEFAULT_REQUIRED } from '@aspiralabs/ai/common/lib/knowledge'
+import { afterEach, describe, expect, it } from 'vitest'
+import { inspectKnowledge, knowledgeConfig } from './local-knowledge.ts'
+import { runLocal, workerBriefTemplate, type LocalResult, exportDirOf } from './local.ts'
+import { rewriteNotesFile } from './notes.ts'
+import { writeSnapshot } from './snapshot.test-helper.ts'
+
+const exec = promisify(execFile)
+const PACKAGE = join(dirname(fileURLToPath(import.meta.url)), '../..')
+const PROCEDURE = 'agent/skills/aspira-implementor/SKILL.md'
+const INSTRUCTIONS = 'agent/instructions.md'
+
+const id = (n: number) => `3e73e59b2258${String(n).padStart(20, '0')}`
+const url = (n: number) => `https://app.notion.com/p/${id(n)}`
+const header = (title: string, n: number) => `<!-- ${title} · ${url(n)} · fetched 2026-10-05T00:00:00.000Z -->\n\n`
+const INDEX = url(1)
+
+const temps: string[] = []
+afterEach(async () => {
+  for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true })
+})
+
+async function fixture() {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'implementor-local-')))
+  temps.push(dir)
+  // A copy of the agent's own files, so a test can edit them without touching the package.
+  const pkg = join(dir, 'pkg')
+  await mkdir(join(pkg, 'agent/skills/aspira-implementor'), { recursive: true })
+  await cp(join(PACKAGE, PROCEDURE), join(pkg, PROCEDURE))
+  await cp(join(PACKAGE, INSTRUCTIONS), join(pkg, INSTRUCTIONS))
+  const repo = join(dir, 'repo')
+  await exec('git', ['init', '-q', '-b', 'feat/cart', repo])
+  const git = (...args: string[]) => exec('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=t', ...args])
+  await git('config', 'init.defaultBranch', 'main')
+  await mkdir(join(repo, 'specs/cart'), { recursive: true })
+  await mkdir(join(repo, 'src'))
+  await writeFile(join(repo, 'AGENTS.md'), '# Project\n')
+  await writeFile(join(repo, 'specs/cart/spec.md'), '# Cart\n\n- [ ] F1: totals\n- [ ] F2: badge\n')
+  await writeFile(join(repo, 'src/price.ts'), 'export const price = 1\n')
+  await writeFile(join(repo, 'package.json'), JSON.stringify({ name: 'cart', dependencies: { zod: '4.5.4' } }))
+  await git('add', '.')
+  await git('commit', '-qm', 'init')
+  const env = { KNOWLEDGE_PAGE: INDEX }
+  const spec = join(repo, 'specs/cart/spec.md')
+  const work = join(repo, 'specs/cart/implementation')
+  const knowledge = join(work, 'implementation.local/knowledge')
+  const step = (extra: Partial<Parameters<typeof runLocal>[0]> = {}, envOverride: Record<string, string | undefined> = env) => runLocal({ source: spec, ...extra }, { packageDir: pkg, env: envOverride })
+  return { dir, pkg, repo, git, spec, work, knowledge, env, step }
+}
+
+async function writeKnowledge(dir: string, options: { topics?: boolean } = {}) {
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, 'INDEX.md'), `${header('Engineering', 1)}<page url="${url(2)}">Agent Instructions</page>\n`)
+  await writeFile(
+    join(dir, 'agent-instructions.md'),
+    `${header('Agent Instructions', 2)}TS-001 MUST be typed.\n<table header-row="true">\n<tr><td>Any code change</td><td><mention-page url="${url(10)}"/>, <mention-page url="${url(11)}"/></td></tr>\n</table>\nLessons go to <mention-page url="${url(99)}"/>.\n`,
+  )
+  await writeFile(join(dir, 'review-verification.md'), `${header('Review Verification', 3)}REV-001 read gotchas.\n`)
+  if (options.topics !== false) {
+    await writeFile(join(dir, 'common-patterns.md'), `${header('Common Patterns', 10)}CP-001 small functions.\n`)
+    await writeFile(join(dir, 'testing-standards.md'), `${header('Testing Standards', 11)}TEST-001 tests first.\n`)
+    await writeFile(join(dir, 'approved-technologies.md'), `${header('Approved Technologies', 12)}| Name | Status |\n| --- | --- |\n| Zod | Adopt |\n| MSW | Trial |\n`)
+  }
+}
+
+function pending(result: LocalResult) {
+  if (!result.pending) throw new Error(`expected a pending stage, got ${JSON.stringify(result)}`)
+  return result
+}
+function staged(result: LocalResult) {
+  return pending(result)
+}
+
+const plan = {
+  summary: 'Cart totals and badge.',
+  tests: [
+    { id: 'T1', kind: 'unit', path: 'src/price.test.ts', featureIds: ['F1'], setup: 's', action: 'a', assertions: ['x'] },
+    { id: 'T2', kind: 'unit', path: 'src/badge.test.ts', featureIds: ['F2'], setup: 's', action: 'a', assertions: ['y'] },
+  ],
+  tasks: [
+    { id: 'P1', title: 'price tests', kind: 'tests', featureIds: ['F1'], dependsOn: [], testIds: ['T1'], changes: [{ operation: 'create', path: 'src/price.test.ts', symbols: ['t'], instructions: 'i', evidence: ['e'] }], commands: ['vitest src/price.test.ts'], outcome: 'red' },
+    { id: 'P2', title: 'badge tests', kind: 'tests', featureIds: ['F2'], dependsOn: [], testIds: ['T2'], changes: [{ operation: 'create', path: 'src/badge.test.ts', symbols: ['t'], instructions: 'i', evidence: ['e'] }], commands: ['vitest src/badge.test.ts'], outcome: 'red' },
+    { id: 'P3', title: 'price', kind: 'implementation', featureIds: ['F1'], dependsOn: ['P1'], testIds: ['T1'], changes: [{ operation: 'modify', path: 'src/price.ts', symbols: ['price'], instructions: 'i', evidence: ['src/price.ts:1'] }], commands: ['vitest src/price.test.ts'], outcome: 'green' },
+    { id: 'P4', title: 'badge', kind: 'implementation', featureIds: ['F2'], dependsOn: ['P2'], testIds: ['T2'], changes: [{ operation: 'create', path: 'src/badge.ts', symbols: ['badge'], instructions: 'i', evidence: ['src/price.ts:1'] }], commands: ['vitest src/badge.test.ts'], outcome: 'green' },
+    { id: 'P5', title: 'verify', kind: 'verification', featureIds: ['F1', 'F2'], dependsOn: ['P3', 'P4'], testIds: [], changes: [], commands: ['pnpm test'], outcome: 'all green' },
+  ],
+  checks: [],
+  decisions: [],
+  gaps: [],
+}
+
+it('refuses to start without the Notion rules: with no folder and no NOTION_TOKEN the run ends blocked, naming the token and the project env file', async () => {
+  const { step, knowledge, work, repo } = await fixture()
+  const first = await step()
+  expect(first).toMatchObject({ pending: false, status: 'blocked', export: null })
+  const reason = first.pending ? '' : (first.reason ?? '')
+  expect(reason).toContain('NOTION_TOKEN')
+  expect(reason).toContain(join(repo, '.env.local'))
+  expect(reason).not.toMatch(/Notion MCP/i)
+  // No prompt is written and no plan stage is offered until the rules are there.
+  expect(await readdir(join(work, 'implementation.local')).catch(() => [])).not.toContain('prompts')
+  await expect(readdir(knowledge)).rejects.toThrow()
+  expect(await step({ finish: true })).toMatchObject({ pending: false, status: 'blocked' })
+  // No KNOWLEDGE_PAGE either: both are named.
+  const none = await step({}, {})
+  expect(none.pending ? '' : none.reason).toMatch(/NOTION_TOKEN[\s\S]*KNOWLEDGE_PAGE/)
+})
+
+it('takes the required pages from KNOWLEDGE_REQUIRED, as load-knowledge does, and the topic pages from their routing tables', async () => {
+  const { step, knowledge } = await fixture()
+  // A folder missing a configured required page is not the rules: the run stops, naming the page.
+  await writeKnowledge(knowledge)
+  await expect(step({}, { KNOWLEDGE_PAGE: INDEX, KNOWLEDGE_REQUIRED: 'Agent Instructions, Security Rules' })).rejects.toThrow('Security Rules')
+  expect(knowledgeConfig({ KNOWLEDGE_PAGE: INDEX, KNOWLEDGE_REQUIRED: 'Agent Instructions, Security Rules' }).required).toEqual(['Agent Instructions', 'Security Rules'])
+  expect(knowledgeConfig({ KNOWLEDGE_PAGE: INDEX }).required).toEqual(DEFAULT_REQUIRED)
+
+  // A topic page the folder lacks is listed, not required (F47); the two pages in the routing
+  // table are the topics, the Slop Repo link outside the table is not.
+  const bare = await fixture()
+  await writeKnowledge(bare.knowledge, { topics: false })
+  const state = await inspectKnowledge(bare.knowledge, knowledgeConfig(bare.env))
+  const routed = state.pages.filter((p) => p.role === 'topic')
+  expect(routed.map((p) => p.url)).toEqual([url(10), url(11)])
+  expect(routed.every((p) => !p.present)).toBe(true)
+  expect(staged(await bare.step()).stage).toBe('plan')
+})
+
+it('builds REQUIRED.md like load-knowledge, then writes a plan prompt that embeds the live bytes of the agent files', async () => {
+  const { step, knowledge, pkg, work } = await fixture()
+  await writeKnowledge(knowledge)
+  const result = staged(await step())
+  expect(result.stage).toBe('plan')
+  const required = await readFile(join(knowledge, 'REQUIRED.md'), 'utf8')
+  expect(required).toContain('# Agent Instructions')
+  expect(required.indexOf('# Agent Instructions')).toBeLessThan(required.indexOf('# Review Verification'))
+  const task = result.tasks[0]!
+  expect(task).toMatchObject({ id: 'plan', agent: 'orchestrator', output: join(work, 'plan.json'), schema: 'PLAN' })
+  const prompt = await readFile(task.prompt, 'utf8')
+  expect(prompt).toContain(await readFile(join(pkg, PROCEDURE), 'utf8'))
+  expect(prompt).toContain(await readFile(join(pkg, INSTRUCTIONS), 'utf8'))
+  expect(prompt).toContain(required)
+  expect(prompt).toContain(join(knowledge, 'common-patterns.md'))
+  expect(prompt).toContain('## 3. Draft the plan')
+
+  // The agent's file changes: the next step's prompt changes with it. Nothing is cached.
+  await writeFile(join(pkg, PROCEDURE), `${await readFile(join(pkg, PROCEDURE), 'utf8')}\nA NEW RULE ADDED TODAY.\n`)
+  const again = staged(await step())
+  expect(await readFile(again.tasks[0]!.prompt, 'utf8')).toContain('A NEW RULE ADDED TODAY.')
+})
+
+it('uses the package files when no package is injected', async () => {
+  const { spec, knowledge, env } = await fixture()
+  await writeKnowledge(knowledge)
+  const result = staged(await runLocal({ source: spec }, { env }))
+  const prompt = await readFile(result.tasks[0]!.prompt, 'utf8')
+  expect(prompt).toContain(await readFile(join(PACKAGE, PROCEDURE), 'utf8'))
+})
+
+it('refuses a knowledge folder that changed after the run started', async () => {
+  const { step, knowledge } = await fixture()
+  await writeKnowledge(knowledge)
+  staged(await step())
+  await writeFile(join(knowledge, 'common-patterns.md'), `${header('Common Patterns', 10)}CP-001 changed.\n`)
+  await expect(step()).rejects.toThrow(/knowledge.*changed/i)
+})
+
+it('accepts a --guidelines snapshot load-knowledge wrote instead of live Notion, and refuses any other file (F50)', async () => {
+  const { step, dir, knowledge } = await fixture()
+  const plain = join(dir, 'plain.md')
+  await writeFile(plain, '<!-- Required reading -->\n# Agent Instructions\nTS-001.\n')
+  await expect(step({ guidelines: plain }, {})).rejects.toThrow(/load-knowledge/)
+  const snapshot = join(dir, 'REQUIRED.md')
+  await writeSnapshot(snapshot)
+  const result = staged(await step({ guidelines: snapshot }, {}))
+  expect(result.stage).toBe('plan')
+  expect(await readFile(join(knowledge, 'REQUIRED.md'), 'utf8')).toBe(await readFile(snapshot, 'utf8'))
+})
+
+it('gates a reviewed plan: incomplete is refused, drift is refused as plan-drift', async () => {
+  const { repo, git, env, pkg } = await fixture()
+  const review = join(repo, 'specs/cart/plan.review')
+  await mkdir(join(review, 'trace'), { recursive: true })
+  await writeFile(join(review, 'plan.reviewed.md'), '# Plan\n')
+  await writeFile(join(review, 'trace/plan.json'), JSON.stringify(plan))
+  const head = (await git('rev-parse', 'HEAD')).stdout.trim()
+  await writeFile(join(review, 'trace/review.json'), JSON.stringify({ status: 'incomplete', problems: ['no tests for F2'], repoCommit: head }))
+  await writeKnowledge(join(review, 'implementation.local/knowledge'))
+  const refused = await runLocal({ source: review }, { packageDir: pkg, env })
+  expect(refused).toMatchObject({ pending: false, status: 'refused' })
+  expect(JSON.stringify(refused)).toContain('no tests for F2')
+
+  await writeFile(join(review, 'trace/review.json'), JSON.stringify({ status: 'ready', problems: [], repoCommit: 'f'.repeat(40) }))
+  await writeFile(join(repo, 'src/badge.ts'), 'export const badge = 1\n')
+  // Plan drift is an input that failed its gate: refused with reasonCode plan-drift, not blocked (spec Run statuses).
+  const drifted = await runLocal({ source: join(review, 'plan.reviewed.md') }, { packageDir: pkg, env })
+  expect(drifted).toMatchObject({ pending: false, status: 'refused', reasonCode: 'plan-drift' })
+  expect(JSON.stringify(drifted)).toContain('src/badge.ts')
+})
+
+it('runs the plan in waves: worker briefs from the procedure, schema checks with one retry, commits, verification and an export that records the rules', async () => {
+  const { step, knowledge, work, repo, git, pkg } = await fixture()
+  await writeKnowledge(knowledge)
+  await mkdir(work, { recursive: true })
+  await writeFile(join(work, 'plan.json'), JSON.stringify(plan))
+  await writeFile(join(work, 'plan.md'), '# Plan\n')
+
+  const par = staged(await step())
+  expect(par.stage).toBe('parallelize')
+  const parPrompt = await readFile(par.tasks[0]!.prompt, 'utf8')
+  expect(parPrompt).toContain('## 4. Analyze the plan and decide how to parallelize')
+  // The baseline: P1, P2 first; P3, P4 next; P5 last.
+  expect(parPrompt).toContain('"P1"')
+
+  // Two lanes writing the same file in one wave is refused.
+  const clash = { waves: [{ lanes: [{ id: 'A', tasks: ['P1', 'P3'], worker: true, writeScope: ['src/price.test.ts', 'src/price.ts'], rules: [] }, { id: 'B', tasks: ['P2', 'P4'], worker: true, writeScope: ['src/badge.test.ts', 'src/badge.ts', 'src/price.ts'], rules: [] }] }, { lanes: [{ id: 'V', tasks: ['P5'], worker: false, writeScope: [] }] }] }
+  await writeFile(par.tasks[0]!.output, JSON.stringify(clash))
+  const retried = staged(await step())
+  expect(retried.stage).toBe('parallelize')
+  expect(retried.tasks[0]!.error).toContain('src/price.ts')
+  expect(retried.tasks[0]!.retry).toBe(true)
+
+  const lanes = { waves: [{ lanes: [{ id: 'A', tasks: ['P1', 'P3'], worker: true, writeScope: ['src/price.test.ts', 'src/price.ts'], rules: ['TS-001 MUST be typed.'] }, { id: 'B', tasks: ['P2', 'P4'], worker: true, writeScope: ['src/badge.test.ts', 'src/badge.ts'], rules: [] }] }, { lanes: [{ id: 'V', tasks: ['P5'], worker: false, writeScope: [] }] }] }
+  await writeFile(par.tasks[0]!.output, JSON.stringify(lanes))
+  const wave = staged(await step())
+  expect(wave).toMatchObject({ stage: 'wave', wave: 1, parallel: true })
+  expect(wave.tasks.map((t) => t.id)).toEqual(['wave-1-A', 'wave-1-B'])
+  expect(wave.tasks.every((t) => t.agent === 'worker')).toBe(true)
+  const brief = await readFile(wave.tasks[0]!.prompt, 'utf8')
+  expect(brief).toContain(workerBriefTemplate(await readFile(join(pkg, PROCEDURE), 'utf8')))
+  expect(brief).toContain('src/price.ts')
+  expect(brief).toContain('TS-001 MUST be typed.')
+  expect(brief).toContain(join(knowledge, 'REQUIRED.md'))
+  expect(brief).toContain(join(repo, 'AGENTS.md'))
+  expect(brief).toContain('"id": "P3"')
+  expect(brief).not.toContain('"id": "P4"')
+
+  const report = (task: string) => ({ tasks: [{ id: task, status: 'done' }], filesChanged: [], red: 'failed as planned', green: [{ command: 'vitest', exitCode: 0 }], deviations: [], blockers: [] })
+  await writeFile(wave.tasks[0]!.output, JSON.stringify({ ...report('P1'), tasks: [{ id: 'P1', status: 'done' }, { id: 'P3', status: 'done' }] }))
+  await writeFile(wave.tasks[1]!.output, '{"tasks": "nope"}')
+  const resend = staged(await step())
+  expect(resend.tasks.map((t) => t.id)).toEqual(['wave-1-B'])
+  expect(resend.tasks[0]!.retry).toBe(true)
+  await writeFile(resend.tasks[0]!.output, JSON.stringify({ ...report('P2'), tasks: [{ id: 'P2', status: 'done' }, { id: 'P4', status: 'done' }] }))
+
+  const commit = staged(await step())
+  expect(commit).toMatchObject({ stage: 'wave-commit', wave: 1 })
+  expect(commit.tasks[0]).toMatchObject({ id: 'wave-1', agent: 'orchestrator', schema: 'WAVE_RESULT' })
+  await writeFile(commit.tasks[0]!.output, JSON.stringify({ status: 'committed', commit: 'f'.repeat(40), tasks: [{ id: 'P1', status: 'done' }, { id: 'P2', status: 'done' }, { id: 'P3', status: 'done' }, { id: 'P4', status: 'done' }] }))
+  const unknownCommit = staged(await step())
+  expect(unknownCommit.tasks[0]!.error).toMatch(/commit/)
+  await writeFile(join(repo, 'src/badge.ts'), 'export const badge = 1\n')
+  // The wave added a dependency the plan did not name, and the lanes left handoff notes that name a symbol that no longer exists.
+  await writeFile(join(repo, 'package.json'), JSON.stringify({ name: 'cart', dependencies: { zod: '4.5.4', 'left-pad': '1.3.0' }, devDependencies: { msw: '2.0.0' } }))
+  await mkdir(join(repo, 'node_modules/left-pad/ios'), { recursive: true })
+  await writeFile(join(work, 'handoff-notes.md'), '# Handoff\n\nLane A exports `price` from `src/price.ts`. Lane B reads `badgeCount` from `src/badge.ts`.\n')
+  await git('add', 'src', 'package.json')
+  await git('commit', '-qm', 'wave 1')
+  const sha = (await git('rev-parse', 'HEAD')).stdout.trim()
+  await writeFile(commit.tasks[0]!.output, JSON.stringify({ status: 'committed', commit: sha, tasks: [{ id: 'P1', status: 'done' }, { id: 'P2', status: 'done' }, { id: 'P3', status: 'done' }, { id: 'P4', status: 'done' }] }))
+
+  // Wave 2 has no worker lane: the orchestrator runs it in its commit step.
+  const second = staged(await step())
+  expect(second).toMatchObject({ stage: 'wave-commit', wave: 2 })
+  await writeFile(second.tasks[0]!.output, JSON.stringify({ status: 'committed', commit: sha, tasks: [{ id: 'P5', status: 'done' }] }))
+
+  const verify = staged(await step())
+  expect(verify.stage).toBe('verification')
+  const verifyPrompt = await readFile(verify.tasks[0]!.prompt, 'utf8')
+  expect(verifyPrompt).toContain('## 6. Final verification')
+  // The three requirements of the final verification, in the procedure's words, and the driver's own findings for them.
+  for (const requirement of ['Every dependency the build added is listed, with its native and approval flags', 'rewritten from the code at HEAD or deleted', 'The report cannot be done with the section empty or missing']) expect(verifyPrompt).toContain(requirement)
+  expect(verifyPrompt).toContain('`left-pad` 1.3.0 (root, runtime): native (ios/); approval: not listed.')
+  expect(verifyPrompt).toContain('`msw` 2.0.0 (root, dev): native unknown (not installed); approval: Trial.')
+  expect(verifyPrompt).toContain(join(work, 'handoff-notes.md'))
+  expect(verifyPrompt).toContain('badgeCount')
+  expect(verifyPrompt).toContain('"Testing Standards"')
+  const features = [{ id: 'F1', tasks: ['P3'], tests: ['T1'], passing: true }, { id: 'F2', tasks: ['P4'], tests: ['T2'], passing: true }]
+  const summary = { status: 'done', features, deviations: [], blockers: [], assumptions: [] }
+  // Without the three fields the output fails the schema like any other.
+  await writeFile(verify.tasks[0]!.output, JSON.stringify(summary))
+  const noFields = staged(await step())
+  expect(noFields.tasks[0]!.error).toContain('dependenciesAdded')
+  expect(noFields.tasks[0]!.retry).toBe(true)
+  // With them, the driver checks them against the tree: the additions it found, the notes files it found, the log's sections.
+  const claimed = { ...summary, dependenciesAdded: [], notesRewritten: [], slopEntries: [], slopJustification: 'None: no bugs were found and fixed' }
+  await writeFile(verify.tasks[0]!.output, JSON.stringify(claimed))
+  const unchecked = staged(await step())
+  expect(unchecked.tasks[0]!.error).toContain('left-pad')
+  expect(unchecked.tasks[0]!.error).toContain('handoff-notes.md')
+  expect(unchecked.tasks[0]!.error).toContain('implementation.md')
+  expect(unchecked.tasks[0]!.retry).toBe(false)
+  const dependenciesAdded = [{ name: 'left-pad', version: '1.3.0', app: 'root', scope: 'runtime', native: true, approval: 'not listed' }, { name: 'msw', version: '2.0.0', app: 'root', scope: 'dev', native: false, approval: 'Trial' }]
+  const notesRewritten = [{ file: join(work, 'handoff-notes.md'), action: 'rewritten' }]
+  await writeFile(join(work, 'implementation.md'), '# Implementation\n\n## What it fixed\n\nScope: web.\n\n1. Members could not see their badge count.\n   - Before: no badge.\n   - Now: the header shows it.\n\n## Dependencies added\n\n- `left-pad`\n\n## Mid-build notes\n\n- handoff-notes.md: rewritten\n\n## Proposed Slop Repo entries\n\nNone: no bugs were found and fixed\n')
+  // A notes file that still names a missing symbol, or carries no header, is not rewritten.
+  await writeFile(verify.tasks[0]!.output, JSON.stringify({ ...claimed, dependenciesAdded, notesRewritten, slopEntries: [{ rule: 'x', area: 'Nowhere', whatWentWrong: 'y', source: 'z' }] }))
+  const stale = staged(await step())
+  expect(stale.tasks[0]!.error).toContain('badgeCount')
+  expect(stale.tasks[0]!.error).toContain('Nowhere')
+  await rewriteNotesFile({ repo, file: join(work, 'handoff-notes.md'), sha })
+  const assumption = { question: 'Round the badge count?', options: ['Show 99+', 'Show the exact count'], recommended: 'Show 99+', reasoning: 'the header has room for three characters', whyYours: 'it is what members see on every page' }
+  await writeFile(verify.tasks[0]!.output, JSON.stringify({ ...claimed, dependenciesAdded, notesRewritten, assumptions: [assumption] }))
+
+  const done = await step()
+  expect(done).toMatchObject({ pending: false, status: 'ready' })
+  if (done.pending) return
+  expect(done.verification).toMatchObject({ dependenciesAdded, notesRewritten, slopEntries: [], slopJustification: 'None: no bugs were found and fixed', assumptions: [assumption] })
+  // The assumption is a decision the human can reverse: taken, ticked, with the other option open.
+  const decisions = await readFile(join(work, 'trace/decisions.md'), 'utf8')
+  expect(decisions).toContain('1 decision: 0 open · 1 answered')
+  expect(decisions).toContain('## A1 — Round the badge count?')
+  expect(decisions).toContain('- [x] Show 99+ _(recommended, taken by the agent: the header has room for three characters)_\n- [ ] Show the exact count')
+  const log = await readFile(join(work, 'implementation.md'), 'utf8')
+  for (const section of ['## What it fixed', '## Dependencies added', '## Mid-build notes', '## Proposed Slop Repo entries']) expect(log).toContain(section)
+  const exported = JSON.parse(await readFile(done.export!, 'utf8'))
+  expect(exported.knowledge.source).toBe('notion')
+  expect(exported.knowledge.pages.map((p: { title: string }) => p.title)).toEqual(expect.arrayContaining(['Agent Instructions', 'Review Verification', 'Common Patterns', 'Testing Standards']))
+  expect(exported.calls.map((c: { id: string }) => c.id)).toEqual(['plan', 'parallelize', 'wave-1-A', 'wave-1-B', 'wave-1', 'wave-2', 'verification'])
+  expect(exported.rejections.parallelize).toHaveLength(1)
+  expect(exported.rejections.verification).toHaveLength(3)
+  await expect(readdir(join(work, 'implementation.local'))).rejects.toThrow()
+})
+
+it('refuses to build on the default branch', async () => {
+  const { step, knowledge, work, git } = await fixture()
+  await writeKnowledge(knowledge)
+  await mkdir(work, { recursive: true })
+  await writeFile(join(work, 'plan.json'), JSON.stringify(plan))
+  const par = staged(await step())
+  await writeFile(par.tasks[0]!.output, JSON.stringify({ waves: [{ lanes: [{ id: 'A', tasks: ['P1', 'P2', 'P3', 'P4', 'P5'], worker: false, writeScope: ['src/price.test.ts', 'src/badge.test.ts', 'src/price.ts', 'src/badge.ts'] }] }] }))
+  await git('switch', '-q', '-c', 'main')
+  // The default branch is refused before any build stage, as a run status, not a crash (F22).
+  const refused = await step()
+  expect(refused).toMatchObject({ pending: false, status: 'refused', export: null })
+  expect(refused.pending ? '' : refused.reason).toMatch(/default branch main/)
+})
+
+it('--finish exports what exists as incomplete, with the missing stages listed', async () => {
+  const { step, knowledge, work } = await fixture()
+  await writeKnowledge(knowledge)
+  await mkdir(work, { recursive: true })
+  await writeFile(join(work, 'plan.json'), JSON.stringify(plan))
+  staged(await step())
+  const done = await step({ finish: true })
+  expect(done).toMatchObject({ pending: false, status: 'incomplete' })
+  if (done.pending) return
+  expect(done.missing.map((m) => m.id)).toContain('parallelize')
+})
+
+it('quotes procedure headings verbatim, on one line', async () => {
+  const { procedureHeading } = await import('./local.ts')
+  const procedure = await readFile(join(PACKAGE, PROCEDURE), 'utf8')
+  expect(procedureHeading(procedure, 'Run to completion')).toBe('## Run to completion')
+  expect(procedureHeading(procedure, 4)).toBe('## 4. Analyze the plan and decide how to parallelize')
+  expect(() => procedureHeading(procedure, 9)).toThrow('## 9.')
+})
+
+describe('where a finished run writes its board trace', () => {
+  it('is the run\'s work folder, not the exported trace file inside it', () => {
+    const workDir = '/repo/.work/kit-8-x/plan.review'
+    expect(exportDirOf({ pending: false, status: 'ready', workDir, export: `${workDir}/trace/implementation-local.json`, missing: [] })).toBe(workDir)
+  })
+
+  it('is nothing for a run that exported nothing', () => {
+    expect(exportDirOf({ pending: false, status: 'refused', workDir: '/repo/plan.review', export: null, missing: [] })).toBeNull()
+  })
+})

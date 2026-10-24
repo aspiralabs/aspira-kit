@@ -1,6 +1,5 @@
 packages:
   - packages/*
-  - packages/agents/*
   - apps/*
 
 # pnpm 12 refuses to install unless every dependency with build scripts is listed here

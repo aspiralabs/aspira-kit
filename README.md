@@ -6,10 +6,9 @@ The Aspira Labs development kit. One repo that says everything the organization 
 |---|---|---|
 | `@aspiralabs/ui` | Components, `tokens.css`, component docs (MDX), and an MCP server that serves those docs to agents | `pnpm add @aspiralabs/ui` |
 | `@aspiralabs/config` | `eslint/next`, `eslint/base`, `eslint/library`, `tsconfig/*`, `prettier`, and `agent/*` (constraints, guides, hooks, personas, templates) | `pnpm add -D @aspiralabs/config` |
-| `@aspiralabs/kit` | The CLI. `kit init --stack next` wires a project, `kit add auth` scaffolds Better Auth, `kit doctor` reports its kit version and drift. [Reference](packages/kit/README.md) | `pnpm add -D @aspiralabs/kit` |
-| `@aspiralabs/agents` | The agents, in one dependency: `groomer`, `spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer` (each its own `@aspiralabs/<agent>` package) and `agent-common`, plus the skill-only `@aspiralabs/build-feature` and its `/aspira-build-feature` skill, which orchestrates the others end to end. `kit init` adds it and installs their `/aspira-*` skills into the project. [Reference](packages/agents/README.md) | `pnpm add -D @aspiralabs/agents` (via `kit init`) |
+| `@aspiralabs/ai` | Everything AI in one package: the `kit` CLI (`kit init --stack next` wires a project, `kit add auth` scaffolds Better Auth, `kit doctor` reports its version and drift), the agents (`groomer`, `spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer`) and the skill-only `build-feature` and `visual-verify`, with their `/aspira-*` skills. Install it globally per engineer and as a devDependency of each project; `kit` checks once a day for a newer version. [Reference](packages/ai/README.md) | `pnpm add -g @aspiralabs/ai` and `pnpm add -D @aspiralabs/ai` |
 
-Every package is published to **GitHub Packages** under the `aspiralabs` org and versioned in lockstep: one version number across the kit, agents included.
+Every package is published to **GitHub Packages** under the `aspiralabs` org and versioned in lockstep: one version number across the three packages.
 
 ## Use the kit in an app
 
@@ -32,14 +31,14 @@ Then in the project, committed:
 ```
 
 ```bash
-pnpm add -D @aspiralabs/kit
-pnpm kit init --stack next        # installs ui + config + agents, writes eslint/prettier/tsconfig wiring,
+pnpm add -D @aspiralabs/ai
+pnpm kit init --stack next        # installs ui + config + ai, writes eslint/prettier/tsconfig wiring,
                                   # globals.css imports, AGENTS.md, CLAUDE.md, .mcp.json, hooks, .claude/skills/aspira-*
 pnpm kit add auth                 # optional: base Better Auth setup the project then owns
 pnpm kit doctor                   # what version you are on, what is wired
 ```
 
-Every command, flag and file the CLI writes is in the [kit README](packages/kit/README.md).
+Every command, flag and file the CLI writes is in the [ai README](packages/ai/README.md).
 
 What `init` leaves you with, if you would rather do it by hand:
 
@@ -96,7 +95,7 @@ pnpm check          # build, typecheck, lint, unit tests, smoke tests, for every
 **Releases are decoupled from merges.** You can merge as many PRs into `main` as you like before cutting a release.
 
 1. In a PR that changes a package, run `pnpm changeset`, pick the bump (patch, minor, major), write one line. That file is the release note. A PR that does not need a release note (docs site, CI, refactors with no behavior change) skips this and merges normally.
-2. On every merge to `main`, `release.yml` looks for pending changesets. If there are any, it opens or updates **one** pull request titled "Release: version packages" that bumps every package in lockstep (ui, config, kit, the agents and `@aspiralabs/agents`) and writes the changelogs. That PR stays open and accumulates as more changesets merge.
+2. On every merge to `main`, `release.yml` looks for pending changesets. If there are any, it opens or updates **one** pull request titled "Release: version packages" that bumps every package in lockstep (`@aspiralabs/ui`, `@aspiralabs/config` and `@aspiralabs/ai`) and writes the changelogs. That PR stays open and accumulates as more changesets merge.
 3. **Cutting a release is merging that PR.** The workflow then builds, publishes every package to GitHub Packages, tags `v<version>`, and creates a GitHub Release from the changelog. It uses the built-in `GITHUB_TOKEN`; there are no personal tokens in the publish path.
 
 The published packages appear at https://github.com/orgs/aspiralabs/packages. Each release is tagged `@aspiralabs/<pkg>@<version>` and listed under the repo's Releases.
@@ -108,8 +107,7 @@ The version PR is opened by the Actions bot. With GitHub's default policy every 
 ```
 packages/ui        @aspiralabs/ui        src/components, src/primitives, src/layout, tokens.css, docs/*.mdx, bin/mcp.js
 packages/config    @aspiralabs/config    eslint/, tsconfig/, prettier/, agent/
-packages/kit       @aspiralabs/kit       src/cli.ts, src/stacks/ (next.ts, next-auth.ts), src/doctor.ts, src/skills.ts, templates/
-packages/agents    @aspiralabs/<agent>   one eve agent per folder with its skill/aspira-<agent>/; common/ is @aspiralabs/agent-common, meta/ is @aspiralabs/agents
+packages/ai        @aspiralabs/ai        src/cli.ts (the kit), src/stacks/, templates/, skills/, one eve agent per folder (groomer/, planner/, ...), common/ (shared by the agents)
 apps/docs          the design-system site (private, not published)
 .github/workflows  ci.yml, release.yml, kit-checks.yml (reusable; products can call it)
 .changeset         lockstep config and pending changesets
