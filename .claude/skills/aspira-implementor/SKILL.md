@@ -38,7 +38,7 @@ The default builds the local checkout in this session, a ticket included. Use `-
 <skill-dir>/scripts/implementor.sh local [<ticket> | <plan.review | plan.reviewed.md | spec.md> --no-ticket] [--force-pull] [--repo DIR] [--guidelines FILE] [--max-parallel N] [--serial] [--work DIR] [--finish] [--verify] [--parent-run RUN:NONCE] [--attach JSON]
 ```
 
-Each `local` call makes no model call. It prints one JSON stage, and you do what it lists, then call `local` again with the same source and options. Repeat until it prints `"pending": false`.
+Each `local` call makes no model call. It prints one JSON stage, and you do what it lists, then call `local` again with the same source and options. Repeat until it prints `"pending": false`. Every task a stage prints names its `model`, and its `effort` when aspira.json `models` sets one for `<step>.<phase>`: launch that task's subagent on that model, passing that reasoning effort to the Agent tool when the task has one.
 
 The Notion rules come first and nothing else runs without them: `local` runs `load-knowledge` itself, once per run, with `NOTION_TOKEN` from the environment, the app's `.env.local` or the project's `.env.local`, loading the pages the agent's own knowledge configuration names (`KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`). This session never fetches guidelines; a truncated or missing page stops the run, naming it, and with no token the run ends `blocked`. `--guidelines` takes only a `REQUIRED.md` that `load-knowledge` wrote, still where it wrote it; any other file, a `trace/` copy included, is refused, and the run records that live Notion was not read.
 
