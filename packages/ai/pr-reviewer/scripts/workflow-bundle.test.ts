@@ -6,7 +6,7 @@ import { expect, it } from 'vitest'
 
 const exec = promisify(execFile)
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
-const eve = join(root, 'node_modules/eve/bin/eve.js')
+const eve = join(root, '../node_modules/eve/bin/eve.js')
 
 // `eve info` compiles the agent but never bundles the workflow; `eve invoke` and `eve dev` do, at
 // startup, and that bundle refuses any Node.js builtin reachable from a workflow body (pr-debator

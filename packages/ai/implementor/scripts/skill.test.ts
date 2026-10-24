@@ -12,8 +12,8 @@ const skillDir = join(root, 'skill/aspira-implementor')
 const launcher = join(skillDir, 'scripts/implementor.sh')
 const exec = promisify(execFile)
 // What the launcher puts in front of every agent script: amaro as the type-stripping hook, then the env files that exist.
-const loader = join(root, 'node_modules/amaro/dist/register-strip.mjs')
-const eve = join(root, 'node_modules/eve/bin/eve.js')
+const loader = join(root, '../node_modules/amaro/dist/register-strip.mjs')
+const eve = join(root, '../node_modules/eve/bin/eve.js')
 const prefix = ['--import', loader, '--experimental-strip-types']
 const command = (args: string[]) => args.filter((a) => !a.startsWith('--env-file='))
 
@@ -91,16 +91,16 @@ it('launches the agent on a GitHub repository with the same prompt the remote la
   const started = await exec('bash', [launcher, 'start', 'docs/plans/my feature/plan.review', '--no-ticket', '--repo', 'aspiralabs/nomnomzz', '--ref', 'develop'], { cwd: dir, env })
   const args = await captured()
   expect(args.slice(0, 5)).toEqual([...prefix, eve, 'invoke'])
-  expect(started.stdout).toContain('agent: @aspiralabs/implementor@')
-  expect(started.stderr).toContain(`implementor: running kit source at ${root}, not the installed @aspiralabs/implementor`)
+  expect(started.stdout).toContain('agent: implementor@')
+  expect(started.stderr).toContain(`implementor: running kit source at ${root}, not the installed @aspiralabs/ai`)
   // Byte for byte what implement-remote.sh sent: the default path's prompt is unchanged.
   expect(args[5]).toBe(`Implement docs/plans/my feature/plan.review in the GitHub repository aspiralabs/nomnomzz, starting from branch develop. Follow the aspira-implementor skill. Push the branch; do not open a pull request. ${tail}`)
   const run = started.stdout.match(/^run: (.+)$/m)![1]!
   // What status and wait report, and the export records: the agent package, version, where it ran from.
-  expect(JSON.parse(await readFile(join(run, 'agent.json'), 'utf8'))).toEqual({ name: '@aspiralabs/implementor', version: expect.stringMatching(/^\d+\.\d+\.\d+/), path: root, source: 'package', installed: false })
+  expect(JSON.parse(await readFile(join(run, 'agent.json'), 'utf8'))).toEqual({ name: 'implementor', version: expect.stringMatching(/^\d+\.\d+\.\d+/), path: root, source: 'package', installed: false })
   const waited = (await exec('bash', [launcher, 'wait', run, '--max', '5'], { env })).stdout
   expect(waited).toContain('finished')
-  expect(waited).toContain('agent: @aspiralabs/implementor@')
+  expect(waited).toContain('agent: implementor@')
   await exec('bash', [launcher, 'start', 'specs/x.md', '--no-ticket', '--repo', 'https://github.com/aspiralabs/nomnomzz', '--pr'], { cwd: dir, env })
   expect((await captured()).at(-1)).toBe(`Implement specs/x.md in the GitHub repository https://github.com/aspiralabs/nomnomzz. Follow the aspira-implementor skill. Push the branch and open a draft pull request. ${tail}`)
   await expect(exec('bash', [launcher, 'start', '/abs/specs/x.md', '--no-ticket', '--repo', 'aspiralabs/nomnomzz'], { cwd: dir, env })).rejects.toThrow('path inside the repository')
@@ -210,20 +210,19 @@ it('start with a ticket runs the board step first, builds the pulled plan, and f
 it('resolves the agent in order: IMPLEMENTOR_AGENT_DIR, the package installed under the project, then its own location; never $ASPIRA_KIT', async () => {
   const { dir, env, captured } = await stubs()
   const local = { ...env, AI_GATEWAY_API_KEY: '' }
-  // A project with @aspiralabs/agents installed by pnpm: the agents sit beside the meta-package in the store.
+  // A project with @aspiralabs/ai installed by pnpm: the agent is a folder of the package in the store.
   const app = join(dir, 'app')
-  const store = join(app, 'node_modules/.pnpm/@aspiralabs+agents@9.9.9/node_modules')
-  const installed = join(store, '@aspiralabs/implementor')
-  for (const [name, path] of [['@aspiralabs/agents', join(store, '@aspiralabs/agents')], ['@aspiralabs/implementor', installed]] as const) {
-    await mkdir(path, { recursive: true })
-    await writeFile(join(path, 'package.json'), JSON.stringify({ name, version: '9.9.9' }, null, 2))
-  }
-  await mkdir(join(installed, 'scripts'))
+  const store = join(app, 'node_modules/.pnpm/@aspiralabs+ai@9.9.9/node_modules')
+  const aiPackage = join(store, '@aspiralabs/ai')
+  const installed = join(aiPackage, 'implementor')
+  await mkdir(join(installed, 'scripts'), { recursive: true })
+  await mkdir(join(installed, 'skill'))
+  await writeFile(join(aiPackage, 'package.json'), JSON.stringify({ name: '@aspiralabs/ai', version: '9.9.9' }, null, 2))
   await writeFile(join(installed, 'scripts/local.ts'), '')
   await mkdir(join(store, 'amaro/dist'), { recursive: true })
   await writeFile(join(store, 'amaro/dist/register-strip.mjs'), '')
   await mkdir(join(app, 'node_modules/@aspiralabs'), { recursive: true })
-  await symlink(join(store, '@aspiralabs/agents'), join(app, 'node_modules/@aspiralabs/agents'))
+  await symlink(aiPackage, join(app, 'node_modules/@aspiralabs/ai'))
   await writeFile(join(app, 'package.json'), '{"name":"app"}')
   await mkdir(join(app, 'specs'))
   await writeFile(join(app, 'specs/x.md'), '# X\n')
@@ -237,7 +236,7 @@ it('resolves the agent in order: IMPLEMENTOR_AGENT_DIR, the package installed un
   await writeFile(join(elsewhere, 'specs/x.md'), '# X\n')
   const own = await exec('bash', [launcher, 'local', 'specs/x.md', '--no-ticket'], { cwd: elsewhere, env: local })
   expect((await captured())[3]).toBe(join(root, 'scripts/local.ts'))
-  expect(own.stderr).toContain(`implementor: running kit source at ${root}, not the installed @aspiralabs/implementor`)
+  expect(own.stderr).toContain(`implementor: running kit source at ${root}, not the installed @aspiralabs/ai`)
   const override = await exec('bash', [copy, 'local', 'specs/x.md', '--no-ticket'], { cwd: app, env: { ...local, IMPLEMENTOR_AGENT_DIR: root } })
   expect((await captured())[3]).toBe(join(root, 'scripts/local.ts'))
   expect(override.stderr).toContain(`IMPLEMENTOR_AGENT_DIR is set: running kit source at ${root}`)
@@ -246,21 +245,20 @@ it('resolves the agent in order: IMPLEMENTOR_AGENT_DIR, the package installed un
 it('resolves the agent under the app named in the root aspira.json: a multi-app repository where Claude Code runs at the root and apps/web owns node_modules', async () => {
   const { dir, env, captured } = await stubs()
   const local = { ...env, AI_GATEWAY_API_KEY: '' }
-  // nomnomzz: no root package.json; apps/web has package.json and a pnpm node_modules with the agents beside @aspiralabs/agents.
+  // nomnomzz: no root package.json; apps/web has package.json and a pnpm node_modules with @aspiralabs/ai installed.
   const repo = join(dir, 'nomnomzz')
   const web = join(repo, 'apps/web')
-  const store = join(web, 'node_modules/.pnpm/@aspiralabs+agents@9.9.9/node_modules')
-  const installed = join(store, '@aspiralabs/implementor')
-  for (const [name, path] of [['@aspiralabs/agents', join(store, '@aspiralabs/agents')], ['@aspiralabs/implementor', installed]] as const) {
-    await mkdir(path, { recursive: true })
-    await writeFile(join(path, 'package.json'), JSON.stringify({ name, version: '9.9.9' }, null, 2))
-  }
-  await mkdir(join(installed, 'scripts'))
+  const store = join(web, 'node_modules/.pnpm/@aspiralabs+ai@9.9.9/node_modules')
+  const aiPackage = join(store, '@aspiralabs/ai')
+  const installed = join(aiPackage, 'implementor')
+  await mkdir(join(installed, 'scripts'), { recursive: true })
+  await mkdir(join(installed, 'skill'))
+  await writeFile(join(aiPackage, 'package.json'), JSON.stringify({ name: '@aspiralabs/ai', version: '9.9.9' }, null, 2))
   await writeFile(join(installed, 'scripts/local.ts'), '')
   await mkdir(join(store, 'amaro/dist'), { recursive: true })
   await writeFile(join(store, 'amaro/dist/register-strip.mjs'), '')
   await mkdir(join(web, 'node_modules/@aspiralabs'), { recursive: true })
-  await symlink(join(store, '@aspiralabs/agents'), join(web, 'node_modules/@aspiralabs/agents'))
+  await symlink(aiPackage, join(web, 'node_modules/@aspiralabs/ai'))
   await writeFile(join(web, 'package.json'), '{"name":"web"}')
   await writeFile(join(web, '.env.local'), 'NOTION_TOKEN=x\n')
   await mkdir(join(repo, 'specs'))
@@ -286,5 +284,5 @@ it('resolves the agent under the app named in the root aspira.json: a multi-app 
   await writeFile(join(repo, 'aspira.json'), JSON.stringify({ board: 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6' }))
   await exec('bash', [copy, 'local', '../../specs/x.md', '--no-ticket'], { cwd: web, env: local })
   expect((await captured())[3]).toBe(join(installed, 'scripts/local.ts'))
-  await expect(exec('bash', [copy, 'local', 'specs/x.md', '--no-ticket'], { cwd: repo, env: local })).rejects.toThrow('cannot find @aspiralabs/implementor: install @aspiralabs/agents in the project (kit init)')
+  await expect(exec('bash', [copy, 'local', 'specs/x.md', '--no-ticket'], { cwd: repo, env: local })).rejects.toThrow('cannot find implementor: install @aspiralabs/ai in the project and run kit init')
 })

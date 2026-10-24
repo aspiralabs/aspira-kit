@@ -11,7 +11,7 @@
 // Every expected value here is copied from the spec (spec.reviewed/spec.reviewed.md F8) and the
 // plan's own P20 task description, never recomputed the way resolve_agent would compute it (TEST-006).
 import { execFileSync, spawnSync } from 'node:child_process'
-import { access, chmod, cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -64,6 +64,7 @@ async function makeProject(launcher: Launcher): Promise<{ project: string; scrip
 
   const stubDir = join(aiDir, launcher.name)
   await mkdir(join(stubDir, 'scripts'), { recursive: true })
+  await mkdir(join(stubDir, 'skill'), { recursive: true })
   await writeFile(join(stubDir, 'scripts', 'local.ts'), STUB_LOCAL_TS)
 
   // The kit-development override points at a kit source checkout, never at node_modules: Node's
@@ -71,6 +72,7 @@ async function makeProject(launcher: Launcher): Promise<{ project: string; scrip
   // no-op stub here) lifts that, so an override aimed at the installed stub could never run it.
   const sourceDir = join(project, 'aspira-kit', 'packages', 'ai', launcher.name)
   await mkdir(join(sourceDir, 'scripts'), { recursive: true })
+  await mkdir(join(sourceDir, 'skill'), { recursive: true })
   await writeFile(join(project, 'aspira-kit', 'packages', 'ai', 'package.json'), JSON.stringify({ name: '@aspiralabs/ai', version: SKILL_KIT_VERSION }, null, 2))
   await writeFile(join(sourceDir, 'scripts', 'local.ts'), STUB_LOCAL_TS)
 
@@ -130,8 +132,13 @@ describe.each(LAUNCHERS)('$name .kit-version vs. installed @aspiralabs/ai (T67, 
     const made = await makeProject(launcher)
     project = made.project
     await writeFile(join(project, '.claude', 'skills', `aspira-${launcher.name}`, '.kit-version'), `${AI_VERSION}\n`)
+    // Node refuses to strip types from a .ts under node_modules unless the real amaro hook is loaded
+    // (the stub amaro here is a no-op), so the installed folder is a symlink to the kit source: the
+    // launcher resolves it to its real path (pwd -P), still takes it as the installed agent, and runs it.
+    await rm(made.stubDir, { recursive: true, force: true })
+    await symlink(made.sourceDir, made.stubDir)
     const result = runLocal(project, made.scriptPath, launcher.args, launcher.envVar)
-    expect(await ran(made.stubDir)).toBe(true)
+    expect(await ran(made.sourceDir)).toBe(true)
     expect(result.stdout).not.toContain('@aspiralabs/agents')
   })
 

@@ -16,16 +16,17 @@ const AI_PACKAGE = '@aspiralabs/ai'
 /** The eve directories a running module may sit under; the real package root is what precedes them. */
 const EVE_RUNTIME_SEGMENTS = ['/.eve/dev-runtime/snapshots/', '/.eve/compile/', '/.eve/builds/']
 
-const isThisPackage = (dir: string): boolean => {
+const manifestName = (file: string): unknown => {
   try {
-    const name = (file: string): unknown => (JSON.parse(readFileSync(file, 'utf8')) as { name?: unknown }).name
-    // The cloud copy's root names itself pr-reviewer; the source and installed folder sits in @aspiralabs/ai.
-    if (name(join(dir, 'package.json')) === PACKAGE_NAME) return true
-    return basename(dir) === PACKAGE_NAME && name(join(dir, '..', 'package.json')) === AI_PACKAGE
+    return (JSON.parse(readFileSync(file, 'utf8')) as { name?: unknown }).name
   } catch {
-    return false
+    return undefined
   }
 }
+
+const isThisPackage = (dir: string): boolean =>
+  // The cloud copy's root names itself pr-reviewer; the source and installed folder sits in @aspiralabs/ai.
+  manifestName(join(dir, 'package.json')) === PACKAGE_NAME || (basename(dir) === PACKAGE_NAME && manifestName(join(dir, '..', 'package.json')) === AI_PACKAGE)
 
 /**
  * The package directory for a module at `moduleUrl` (its `import.meta.url`): the app root before

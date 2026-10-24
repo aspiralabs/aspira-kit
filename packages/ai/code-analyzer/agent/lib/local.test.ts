@@ -51,7 +51,7 @@ const blocked = async (promise: Promise<unknown>): Promise<KnowledgeBlocked> => 
 async function agentCopy(edit?: (fixer: string) => string): Promise<string> {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'sa-local-agent-')))
   await cp(join(PACKAGE_DIR, 'agent'), join(dir, 'agent'), { recursive: true })
-  await symlink(join(PACKAGE_DIR, 'node_modules'), join(dir, 'node_modules'))
+  await symlink(join(PACKAGE_DIR, '..', 'node_modules'), join(dir, 'node_modules'))
   if (edit) {
     const path = join(dir, 'agent', 'lib', 'fixer.ts')
     await writeFile(path, edit(await readFile(path, 'utf8')))

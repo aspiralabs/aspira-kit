@@ -231,7 +231,7 @@ describe('one cached prefix, eve prompt builder', () => {
     // eve's own placement, imported from its harness: on the Anthropic-direct path the marker goes on
     // the last system message; through the Gateway, caching: auto places the provider's breakpoint at
     // the same boundary. Either way the boundary is the end of our one system message.
-    const cache = (await import(pathToFileURL(join(import.meta.dirname, '..', '..', 'node_modules', 'eve', 'dist', 'src', 'harness', 'prompt-cache.js')).href)) as {
+    const cache = (await import(pathToFileURL(join(import.meta.dirname, '..', '..', '..', 'node_modules', 'eve', 'dist', 'src', 'harness', 'prompt-cache.js')).href)) as {
       applySystemCacheBreakpoint: (instructions: { role: 'system'; content: string }[], marker: unknown) => { role: 'system'; content: string; providerOptions?: Record<string, unknown> }[]
       getAnthropicCacheMarker: () => Record<string, unknown>
       detectPromptCachePath: (model: string) => { kind: string }

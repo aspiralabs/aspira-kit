@@ -618,7 +618,6 @@ describe('telemetry', () => {
       const root = fileURLToPath(new URL('../../../../../', import.meta.url))
       const folders = [
         ...(await readdir(join(root, 'packages'))).map((name) => join(root, 'packages', name)),
-        ...(await readdir(join(root, 'packages', 'agents'))).map((name) => join(root, 'packages', 'agents', name)),
       ]
       const manifests = folders.map((folder) => join(folder, 'package.json')).filter((file) => existsSync(file))
       const names = await Promise.all(manifests.map(async (file) => {

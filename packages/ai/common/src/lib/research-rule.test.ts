@@ -9,7 +9,7 @@ const ROOT = join(import.meta.dirname, '..', '..', '..', '..', '..')
 const AGENTS = ['groomer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'spec-writer']
 
 it('every cloud agent\'s instructions.md carries the research rule verbatim', () => {
-  const missing = AGENTS.filter((agent) => !readFileSync(join(ROOT, 'packages', 'agents', agent, 'agent', 'instructions.md'), 'utf8').includes(RESEARCH_RULE))
+  const missing = AGENTS.filter((agent) => !readFileSync(join(ROOT, 'packages', 'ai', agent, 'agent', 'instructions.md'), 'utf8').includes(RESEARCH_RULE))
   expect(missing).toEqual([])
   expect(RESEARCH_RULE.startsWith(RESEARCH_RULE_MARKER)).toBe(true)
 })

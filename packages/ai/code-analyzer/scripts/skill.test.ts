@@ -10,8 +10,8 @@ const exec = promisify(execFile)
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const launcher = join(root, 'skill/aspira-code-analyzer/scripts/code-analyzer.sh')
 // What the launcher puts in front of every agent script: amaro as the type-stripping hook, then the env files that exist.
-const loader = join(root, 'node_modules/amaro/dist/register-strip.mjs')
-const eve = join(root, 'node_modules/eve/bin/eve.js')
+const loader = join(root, '../node_modules/amaro/dist/register-strip.mjs')
+const eve = join(root, '../node_modules/eve/bin/eve.js')
 const prefix = ['--import', loader, '--experimental-strip-types']
 const command = (args: string[]) => args.filter((a) => !a.startsWith('--env-file='))
 
@@ -57,14 +57,14 @@ it('routes a local path to the CLI and a remote repository to the eve entry poin
   expect(await captured()).toEqual([...prefix, join(root, 'scripts/static-analysis.ts'), sub, '--output', join(sub, '.static-analysis'), '--max-rounds', '3'])
   expect(local.stdout).toContain('mode: local')
   expect(local.stdout).toContain(`source: ${sub}\n`)
-  expect(local.stdout).toContain('agent: @aspiralabs/code-analyzer@')
-  expect(local.stderr).toContain(`code-analyzer: running kit source at ${root}, not the installed @aspiralabs/code-analyzer`)
+  expect(local.stdout).toContain('agent: code-analyzer@')
+  expect(local.stderr).toContain(`code-analyzer: running kit source at ${root}, not the installed @aspiralabs/ai`)
   const run = local.stdout.match(/^run: (.+)$/m)![1]!
   // What status and wait report, and the export records: the agent package, version, where it ran from.
-  expect(JSON.parse(await readFile(join(run, 'agent.json'), 'utf8'))).toEqual({ name: '@aspiralabs/code-analyzer', version: expect.stringMatching(/^\d+\.\d+\.\d+/), path: root, source: 'package', installed: false })
+  expect(JSON.parse(await readFile(join(run, 'agent.json'), 'utf8'))).toEqual({ name: 'code-analyzer', version: expect.stringMatching(/^\d+\.\d+\.\d+/), path: root, source: 'package', installed: false })
   const status = await exec('bash', [launcher, 'status', run], { cwd: repo, env })
   expect(status.stdout).toContain(`${join(sub, '.static-analysis')}/report.md`)
-  expect(status.stdout).toContain('agent: @aspiralabs/code-analyzer@')
+  expect(status.stdout).toContain('agent: code-analyzer@')
   await exec('bash', [launcher, 'start', repo, '--no-ticket'], { cwd: repo, env })
   expect(await captured()).toEqual([...prefix, join(root, 'scripts/static-analysis.ts'), repo, '--output', join(repo, '.static-analysis')])
   // A path without --no-ticket is refused, naming the flag.
@@ -149,18 +149,17 @@ it('resolves the agent in order: CODE_ANALYZER_AGENT_DIR, the package installed 
   const { dir, bin, capture, captured } = await stubs('static-analysis-skill-resolve-')
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CAPTURE: capture, CODE_ANALYZER_AGENT_DIR: '', STATIC_ANALYSIS_AGENT_DIR: '', ASPIRA_KIT: '', AI_GATEWAY_API_KEY: '', TMPDIR: dir }
   const app = join(dir, 'app')
-  const store = join(app, 'node_modules/.pnpm/@aspiralabs+agents@9.9.9/node_modules')
-  const installed = join(store, '@aspiralabs/code-analyzer')
-  for (const [name, path] of [['@aspiralabs/agents', join(store, '@aspiralabs/agents')], ['@aspiralabs/code-analyzer', installed]] as const) {
-    await mkdir(path, { recursive: true })
-    await writeFile(join(path, 'package.json'), JSON.stringify({ name, version: '9.9.9' }, null, 2))
-  }
+  const store = join(app, 'node_modules/.pnpm/@aspiralabs+ai@9.9.9/node_modules')
+  const installed = join(store, '@aspiralabs/ai/code-analyzer')
+  await mkdir(installed, { recursive: true })
+  await writeFile(join(store, '@aspiralabs/ai/package.json'), JSON.stringify({ name: '@aspiralabs/ai', version: '9.9.9' }, null, 2))
+  await mkdir(join(installed, 'skill'))
   await mkdir(join(installed, 'scripts'))
   await writeFile(join(installed, 'scripts/local.ts'), '')
   await mkdir(join(store, 'amaro/dist'), { recursive: true })
   await writeFile(join(store, 'amaro/dist/register-strip.mjs'), '')
   await mkdir(join(app, 'node_modules/@aspiralabs'), { recursive: true })
-  await symlink(join(store, '@aspiralabs/agents'), join(app, 'node_modules/@aspiralabs/agents'))
+  await symlink(join(store, '@aspiralabs/ai'), join(app, 'node_modules/@aspiralabs/ai'))
   await writeFile(join(app, 'package.json'), '{"name":"app"}')
   await exec('git', ['init', '-q', app])
   const copy = join(app, '.claude/skills/aspira-code-analyzer/scripts/code-analyzer.sh')
@@ -173,7 +172,7 @@ it('resolves the agent in order: CODE_ANALYZER_AGENT_DIR, the package installed 
   await exec('git', ['init', '-q', elsewhere])
   const own = await exec('bash', [launcher, 'local', '.', '--no-ticket'], { cwd: elsewhere, env })
   expect((await captured())[3]).toBe(join(root, 'scripts/local.ts'))
-  expect(own.stderr).toContain(`code-analyzer: running kit source at ${root}, not the installed @aspiralabs/code-analyzer`)
+  expect(own.stderr).toContain(`code-analyzer: running kit source at ${root}, not the installed @aspiralabs/ai`)
   const override = await exec('bash', [copy, 'local', '.', '--no-ticket'], { cwd: app, env: { ...env, CODE_ANALYZER_AGENT_DIR: root } })
   expect((await captured())[3]).toBe(join(root, 'scripts/local.ts'))
   expect(override.stderr).toContain(`CODE_ANALYZER_AGENT_DIR is set: running kit source at ${root}`)
