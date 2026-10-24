@@ -39,7 +39,8 @@ const IN_REVIEW = 'In Review: Implementation'
 
 const SECTION = /^## (.+?)\s*$/
 const ENTRY = /^### \[([^\]]+)\]\s*(.*)$/
-const LOCATION = /^\s*[-*]\s*(?:\*\*)?Location(?:\*\*)?:?/i
+// The PR reviewer writes `Location: ...` as its own line; a bulleted `- **Location:**` reads the same.
+const LOCATION = /^\s*(?:[-*]\s*)?(?:\*\*)?Location(?:\*\*)?:/i
 const CITED = /`([^`\s]+?)(?::\d+(?:[-:]\d+)*)?`/g
 
 export const findingSchema = z.object({ id: z.string().trim().min(1), severity: z.enum(BLOCKING), title: z.string().trim().min(1), files: z.array(z.string().min(1)) })

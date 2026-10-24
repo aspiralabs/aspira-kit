@@ -55,3 +55,23 @@ describe('a PR diff too large for the API', () => {
     })
   })
 })
+
+describe('the limits of the file-list rebuild', () => {
+  it('refuses a PR at GitHub\'s 3,000-file listing limit instead of reviewing a cut diff, naming the limit', async () => {
+    const { request } = github(Array.from({ length: 3000 }, (_, i) => ({ filename: `f${i}.ts`, status: 'modified', patch: '@@ -1 +1 @@\n-a\n+b' })))
+    const message = await fetchPrDiff(pr, 'tok', request).then(() => 'no refusal', (error: unknown) => String(error))
+    expect([message.includes('3000'), message.includes('aspiralabs/aspira-kit#163')]).toEqual([true, true])
+  })
+
+  it('names the status when GitHub refuses the file list too', async () => {
+    const request: Fetch = async (_url, init) => new Response('nope', { status: new Headers(init?.headers).get('accept') === 'application/vnd.github.diff' ? 406 : 403 })
+    const message = await fetchPrDiff(pr, 'tok', request).then(() => 'no refusal', (error: unknown) => String(error))
+    expect([message.includes('403'), message.includes('listing the files')]).toEqual([true, true])
+  })
+
+  it('keeps the old error on a 406 for a re-review, which is not rebuilt', async () => {
+    const { request } = github(many)
+    const message = await fetchPrDiff(pr, 'tok', request, { sha: 'a'.repeat(40), headSha: 'b'.repeat(40) }).then(() => 'no refusal', (error: unknown) => String(error))
+    expect(message.includes('406')).toBe(true)
+  })
+})

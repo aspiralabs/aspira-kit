@@ -181,7 +181,7 @@ export async function fetchPrDiff(pr: GithubPr, token: string | undefined, reque
 
 type PrFile = { filename: string; previous_filename?: string; status: string; patch?: string }
 
-/** GitHub lists at most this many files of a PR; a longer list is cut there. */
+/** GitHub lists at most this many files of a PR; a PR that reaches it is refused rather than reviewed in part. */
 const PR_FILES_LIMIT = 3000
 
 /**
@@ -198,6 +198,8 @@ export async function fetchPrDiffFromFiles(pr: GithubPr, token: string | undefin
     files.push(...batch)
     if (batch.length < 100) break
   }
+  // At the limit GitHub may have cut the list: a review of part of the PR would read as a review of all of it.
+  if (files.length >= PR_FILES_LIMIT) throw new Error(`${pr.owner}/${pr.name}#${pr.number} changes at least ${PR_FILES_LIMIT} files, the most GitHub lists, and its diff is too large for the API, so it cannot be reviewed whole. Split the PR.`)
   const blocks = files.map((file) => {
     const before = file.previous_filename ?? file.filename
     const lines = [
