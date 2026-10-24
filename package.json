@@ -5,12 +5,12 @@
   "packageManager": "pnpm@12.4.1",
   "scripts": {
     "dev": "pnpm -r --parallel --filter @aspiralabs/ui --filter docs dev",
-    "build": "pnpm -r --filter './packages/*' --filter './packages/agents/*' build",
+    "build": "pnpm -r --filter './packages/*' build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "check": "pnpm build && pnpm typecheck && pnpm lint && pnpm test && pnpm test:build",
     "changeset": "changeset",
-    "test": "env -u NOTION_TOKEN -u NOTION_API_KEY pnpm -r --filter @aspiralabs/ui --filter @aspiralabs/kit --filter @aspiralabs/build-feature --filter @aspiralabs/visual-verify test",
+    "test": "env -u NOTION_TOKEN -u NOTION_API_KEY pnpm -r --filter @aspiralabs/ui --filter @aspiralabs/ai test",
     "test:build": "node packages/ui/scripts/mcp-smoke.mjs && pnpm -r --filter \"./packages/*\" --filter \"./packages/agents/*\" exec pnpm pack --pack-destination \"$PWD/.packs\"",
     "changeset:version": "changeset version && pnpm install --lockfile-only",
     "changeset:publish": "changeset publish"
@@ -18,7 +18,6 @@
   "devDependencies": {
     "@changesets/cli": "^2.29.0",
     "typescript": "^5.9.0",
-    "@aspiralabs/agents": "workspace:*",
-    "@aspiralabs/kit": "workspace:*"
+    "@aspiralabs/ai": "workspace:*"
   }
 }

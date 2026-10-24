@@ -6,18 +6,7 @@
     [
       "@aspiralabs/ui",
       "@aspiralabs/config",
-      "@aspiralabs/kit",
-      "@aspiralabs/agents",
-      "@aspiralabs/agent-common",
-      "@aspiralabs/spec-writer",
-      "@aspiralabs/spec-reviewer",
-      "@aspiralabs/planner",
-      "@aspiralabs/implementor",
-      "@aspiralabs/code-analyzer",
-      "@aspiralabs/pr-reviewer",
-      "@aspiralabs/groomer",
-      "@aspiralabs/build-feature",
-      "@aspiralabs/visual-verify"
+      "@aspiralabs/ai"
     ]
   ],
   "access": "public",

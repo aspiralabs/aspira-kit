@@ -3,7 +3,7 @@
 // the NOVA1.1 direction inside it (common/ never imports the kit's code, T3) and that no shipped
 // file still names a retired package (T4).
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const ROOT = join(import.meta.dirname, '..', '..', '..')
@@ -48,7 +48,7 @@ describe('the kit is three packages (F1)', () => {
 
   it('fixes one version group of exactly the three packages and drops the packages/agents/* glob', () => {
     const config = readJson<{ fixed: string[][] }>(join(ROOT, '.changeset', 'config.json'))
-    expect([...config.fixed[0]].sort()).toEqual(['@aspiralabs/ai', '@aspiralabs/config', '@aspiralabs/ui'])
+    expect([...(config.fixed[0] ?? [])].sort()).toEqual(['@aspiralabs/ai', '@aspiralabs/config', '@aspiralabs/ui'])
     expect(readFileSync(join(ROOT, 'pnpm-workspace.yaml'), 'utf8')).not.toContain('packages/agents/*')
   })
 
@@ -108,8 +108,15 @@ describe('@aspiralabs/ai holds the moved packages as folders (F2)', () => {
 
 describe('common/ never reaches into the kit code (NOVA1.1, F2)', () => {
   it('no file under common/ imports the playbook export, dist or the package src/dist', () => {
-    const pattern = /@aspiralabs\/ai\/(playbook|dist)|from ['"](\.\.?\/)+(src|dist)\/|import\(['"](\.\.?\/)+(src|dist)\//
-    const offenders = [...sourceFiles(join(AI, 'common', 'src')), ...sourceFiles(join(AI, 'common', 'scripts'))].filter((file) => pattern.test(readFileSync(file, 'utf8')))
+    const specifier = /(?:from\s+|import\()['"]([^'"]+)['"]/g
+    const reachesKit = (file: string): boolean =>
+      [...readFileSync(file, 'utf8').matchAll(specifier)].some(([, spec = ""]) => {
+        if (/^@aspiralabs\/ai\/(playbook|dist)/.test(spec)) return true
+        if (!spec.startsWith('.')) return false
+        const target = resolve(dirname(file), spec)
+        return target.startsWith(join(AI, 'src')) || target.startsWith(join(AI, 'dist'))
+      })
+    const offenders = [...sourceFiles(join(AI, 'common', 'src')), ...sourceFiles(join(AI, 'common', 'scripts'))].filter(reachesKit)
     expect(offenders).toEqual([])
   })
 

@@ -1,0 +1,109 @@
+{
+  "name": "@aspiralabs/ai",
+  "version": "0.15.0",
+  "description": "The Aspira Labs AI package: the agents and /aspira-* skills (groomer, spec-writer, planner, implementor, code-analyzer, pr-reviewer, build-feature, visual-verify) and the kit command that installs them into a project. Install it globally per engineer and as a devDependency of each project.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "kit": "./dist/cli.js"
+  },
+  "exports": {
+    "./playbook": {
+      "types": "./dist/playbook.d.ts",
+      "default": "./dist/playbook.js"
+    },
+    "./package.json": "./package.json",
+    "./common/tools/*": "./common/src/tools/*.ts",
+    "./common/lib/*.json": "./common/src/lib/*.json",
+    "./common/lib/*": "./common/src/lib/*.ts",
+    "./spec-reviewer/lib/*": "./spec-reviewer/agent/lib/*.ts",
+    "./pr-reviewer/models": "./pr-reviewer/agent/lib/models.ts"
+  },
+  "imports": {
+    "#build-feature/*": "./build-feature/src/*",
+    "#visual-verify/*": "./visual-verify/src/*"
+  },
+  "scripts": {
+    "build:kit": "tsc -p tsconfig.json",
+    "build": "pnpm build:kit && (cd code-analyzer && eve build) && (cd groomer && eve build) && (cd implementor && eve build) && (cd planner && eve build) && (cd spec-writer && eve build)",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p build-feature/tsconfig.json --noEmit && tsc -p code-analyzer/tsconfig.json --noEmit && tsc -p common/tsconfig.json --noEmit && tsc -p groomer/tsconfig.json --noEmit && tsc -p implementor/tsconfig.json --noEmit && tsc -p planner/tsconfig.json --noEmit && tsc -p pr-reviewer/tsconfig.json --noEmit && tsc -p spec-reviewer/tsconfig.json --noEmit && tsc -p spec-writer/tsconfig.json --noEmit && tsc -p visual-verify/tsconfig.json --noEmit",
+    "lint": "eslint src && (cd build-feature && eslint src scripts) && (cd code-analyzer && eslint agent scripts) && (cd common && eslint src) && (cd groomer && eslint agent scripts) && (cd implementor && eslint agent scripts) && (cd planner && eslint agent scripts) && (cd pr-reviewer && eslint agent scripts) && (cd spec-reviewer && eslint agent scripts) && (cd spec-writer && eslint agent scripts) && (cd visual-verify && eslint scripts)",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@vercel/connect": "2.2.0",
+    "ai": "^7.0.105",
+    "amaro": "^1.2.1",
+    "eve": "^0.63.0",
+    "undici": "^7.29.1",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@aspiralabs/config": "workspace:*",
+    "@types/node": "^24",
+    "eslint": "^9.39.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "dist",
+    "templates",
+    "hooks",
+    "skills",
+    "README.md",
+    ".env.example",
+    "common/src",
+    "common/scripts",
+    "build-feature/src",
+    "build-feature/scripts",
+    "build-feature/skill",
+    "visual-verify/src",
+    "visual-verify/scripts",
+    "visual-verify/skill",
+    "spec-reviewer/agent",
+    "spec-reviewer/scripts",
+    "code-analyzer/agent",
+    "code-analyzer/skill",
+    "code-analyzer/scripts",
+    "code-analyzer/vercel.json",
+    "code-analyzer/.env.example",
+    "groomer/agent",
+    "groomer/skill",
+    "groomer/scripts",
+    "groomer/vercel.json",
+    "groomer/.env.example",
+    "implementor/agent",
+    "implementor/skill",
+    "implementor/scripts",
+    "implementor/vercel.json",
+    "implementor/.env.example",
+    "planner/agent",
+    "planner/skill",
+    "planner/scripts",
+    "planner/vercel.json",
+    "planner/.env.example",
+    "pr-reviewer/agent",
+    "pr-reviewer/skill",
+    "pr-reviewer/scripts",
+    "pr-reviewer/vercel.json",
+    "pr-reviewer/.env.example",
+    "spec-writer/agent",
+    "spec-writer/skill",
+    "spec-writer/scripts",
+    "spec-writer/vercel.json",
+    "spec-writer/.env.example"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aspiralabs/aspira-kit.git",
+    "directory": "packages/ai"
+  },
+  "homepage": "https://github.com/aspiralabs/aspira-kit/tree/main/packages/ai",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}
