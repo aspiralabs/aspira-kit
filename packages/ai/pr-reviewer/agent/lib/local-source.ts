@@ -168,11 +168,47 @@ export async function fetchPrMeta(pr: GithubPr, token: string | undefined, reque
 export async function fetchPrDiff(pr: GithubPr, token: string | undefined, request: Fetch, since?: { sha: string; headSha: string }): Promise<RawDiff> {
   const url = since === undefined ? prApiUrl(pr.owner, pr.name, pr.number) : compareApiUrl(pr.owner, pr.name, since.sha, since.headSha)
   const response = await request(url, { headers: headers(token, 'application/vnd.github.diff') })
+  // GitHub refuses a whole-PR diff past its size limit (406) but still lists the PR's files with
+  // each file's patch: the diff is rebuilt from that list instead of ending the review.
+  if (response.status === 406 && since === undefined) return fetchPrDiffFromFiles(pr, token, request)
   if (!response.ok) {
     const hint = response.status === 406 ? ' (GitHub does not serve diffs this large through the API)' : since !== undefined && response.status === 404 ? ` (the previous head ${since.sha.slice(0, 7)} is not in the repository any more; was the branch rewritten?)` : ''
     throw new Error(`GitHub API ${response.status} fetching the diff of ${pr.owner}/${pr.name}#${pr.number}${hint}`)
   }
   const patch = await response.text()
+  return { patch, changed: changedFromPatch(patch) }
+}
+
+type PrFile = { filename: string; previous_filename?: string; status: string; patch?: string }
+
+/** GitHub lists at most this many files of a PR; a longer list is cut there. */
+const PR_FILES_LIMIT = 3000
+
+/**
+ * The PR's diff rebuilt from its paged file list (`/pulls/<n>/files`, 100 a page), one
+ * `diff --git` block per file. A file GitHub sends no patch for (binary or too large) keeps its
+ * header and a note, so it is still listed as changed.
+ */
+export async function fetchPrDiffFromFiles(pr: GithubPr, token: string | undefined, request: Fetch): Promise<RawDiff> {
+  const files: PrFile[] = []
+  for (let page = 1; files.length < PR_FILES_LIMIT; page++) {
+    const response = await request(`${prApiUrl(pr.owner, pr.name, pr.number)}/files?per_page=100&page=${page}`, { headers: headers(token, 'application/vnd.github+json') })
+    if (!response.ok) throw new Error(`GitHub API ${response.status} listing the files of ${pr.owner}/${pr.name}#${pr.number} (its diff is too large for the API, so it is rebuilt from the file list)`)
+    const batch = (await response.json()) as PrFile[]
+    files.push(...batch)
+    if (batch.length < 100) break
+  }
+  const blocks = files.map((file) => {
+    const before = file.previous_filename ?? file.filename
+    const lines = [
+      `diff --git a/${before} b/${file.filename}`,
+      file.status === 'added' ? '--- /dev/null' : `--- a/${before}`,
+      file.status === 'removed' ? '+++ /dev/null' : `+++ b/${file.filename}`,
+      file.patch ?? (file.status === 'renamed' && before !== file.filename ? `renamed from ${before}` : 'GitHub sent no patch for this file (binary or too large)'),
+    ]
+    return lines.join('\n')
+  })
+  const patch = blocks.length === 0 ? '' : `${blocks.join('\n')}\n`
   return { patch, changed: changedFromPatch(patch) }
 }
 
