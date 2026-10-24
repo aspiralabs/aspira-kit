@@ -138,7 +138,7 @@ describe('kit init --stack next hooks and install lines under @aspiralabs/ai (T7
         expect(all.filter((c) => c === `sh ${prefix}node_modules/@aspiralabs/ai/hooks/${name}`), name).toHaveLength(1)
       }
       expect(all).toContain('echo mine')
-      expect(all.filter((c) => c.includes('@aspiralabs/ai/hooks') || c.includes('@aspiralabs/config/agent/hooks'))).toEqual([])
+      expect(all.filter((c) => c.includes('@aspiralabs/kit/hooks') || c.includes('@aspiralabs/config/agent/hooks'))).toEqual([])
       const first = readFileSync(join(root, '.claude', 'settings.json'), 'utf8')
       await init(root, { ...(app === undefined ? {} : { app }) })
       expect(readFileSync(join(root, '.claude', 'settings.json'), 'utf8')).toBe(first)

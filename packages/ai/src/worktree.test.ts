@@ -393,13 +393,13 @@ describe('kit worktree: refusing a card', () => {
     expect(isRegistered(main, handlePath(main, 'FEATURE-KIT-13'))).toBe(true)
   })
 
-  it('T53 refuses when the installed agent-common reports no Type, naming the version mismatch', async () => {
+  it('T53 refuses when the installed @aspiralabs/ai reports no Type, naming the version mismatch', async () => {
     const { main } = fixture()
     const before = branches(main)
     const result = await run(main, 'KIT-13', feature({ type: undefined, folder: undefined }))
     expect(result.code).toBe(1)
-    expect(result.out).toContain('@aspiralabs/agent-common')
-    expect(result.out).toContain('install @aspiralabs/agents')
+    expect(result.out).toContain('the installed @aspiralabs/ai does not report')
+    expect(result.out).toContain('install @aspiralabs/ai')
     expect(result.out).toContain('kit init')
     expect(existsSync(join(main, '.worktrees'))).toBe(false)
     expect(branches(main)).toEqual(before)

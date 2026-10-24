@@ -64,7 +64,7 @@ const exec = promisify(execFile)
 
 export const PACKAGE = dirname(dirname(fileURLToPath(import.meta.url)))
 export const DRIVER = join(PACKAGE, 'scripts/local.ts')
-const LOADER = join(PACKAGE, 'node_modules/amaro/dist/register-strip.mjs')
+const LOADER = join(PACKAGE, '..', 'node_modules/amaro/dist/register-strip.mjs')
 
 export const ID = 'KIT-11'
 export const TITLE = 'X'
@@ -93,7 +93,7 @@ export const BOARD_RULES_WITH_TELEMETRY =
   '# Feature Board\n\n**BOARD-003 — MUST** push outputs as child pages under fixed titles: Spec, Spec Reviewed, Spec Review Decisions, Plan, Implementation, PR Review, Grooming Decisions, Build Summary. Every /aspira-* run on the ticket may also append one run telemetry file block, holding its <run-id>.json, at the end of the ticket page body.\n'
 
 /** This package's version: what kit init writes into every step skill's .kit-version. */
-const PACKAGE_VERSION = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8'))).version
+const PACKAGE_VERSION = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(PACKAGE, '..', 'package.json'), 'utf8'))).version
 /** The seven step skills, whose .kit-version the driver checks before a run's first step (KIT-19). */
 export const STEP_SKILLS = ['groomer', 'spec-writer', 'spec-reviewer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'visual-verify']
 

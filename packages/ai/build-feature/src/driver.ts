@@ -296,7 +296,7 @@ const packageSchema = z.object({ version: z.string().min(1) })
 
 /** This package's version: the kit version every step skill's .kit-version must name, and the file's service.version. */
 async function driverVersion(): Promise<string> {
-  return packageSchema.parse(JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))).version
+  return packageSchema.parse(JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'))).version
 }
 
 /** Skills the driver runs that are not steps (KIT-58): their .kit-version is checked like a step's, but they have no step result. */

@@ -154,7 +154,10 @@ runtime_agent() {
   if [ ! -f "$stamp" ] || [ "$(cat "$stamp")" != "$AGENT" ] || [ ! -d "$copy/.output" ]; then
     rm -rf "$copy"
     mkdir -p "$copy"
-    cp -R "$AGENT/agent" "$AGENT/scripts" "$AGENT/../package.json" "$copy/"
+    cp -R "$AGENT/agent" "$AGENT/scripts" "$copy/"
+    # The copy's manifest: this folder's name, the package's version, type and dependencies; no exports, imports, bin or
+    # files, so '@aspiralabs/ai/...' resolves through the linked node_modules, not to the copy root.
+    node -e 'const p=require(process.argv[1]);require("fs").writeFileSync(process.argv[3],JSON.stringify({name:process.argv[2],version:p.version,type:p.type,dependencies:p.dependencies},null,2)+"\n")' "$AGENT/../package.json" "$NAME" "$copy/package.json"
     [ ! -f "$AGENT/.env.local" ] || cp "$AGENT/.env.local" "$copy/.env.local"
     ln -s "$deps" "$copy/node_modules"
     echo "$NAME: building the cloud agent once in $copy" >&2

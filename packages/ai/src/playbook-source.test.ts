@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { commandFor, nextStep, PLAYBOOK } from './playbook.js'
 
 const SRC = dirname(fileURLToPath(import.meta.url))
-const COMMON_TABLE = join(SRC, '..', '..', 'agents', 'common', 'src', 'lib', 'playbook.json')
+const COMMON_TABLE = join(SRC, '..', 'common', 'src', 'lib', 'playbook.json')
 
 describe("kit's Playbook table is agent-common's playbook.json (NOVA1.1)", () => {
   it('PLAYBOOK equals the rows in agent-common', () => {

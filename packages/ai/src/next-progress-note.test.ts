@@ -29,7 +29,7 @@ const SLUG = 'nom-4-explore-pagination'
 
 /** The real file agent-common publishes (DEX2.1): read as it is, with no stand-in, so a missing or
  * unreadable file fails this test loudly instead of being papered over. */
-const SHAPES_SOURCE = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), 'agents', 'common', 'src', 'lib', 'progress-note-shapes.json')
+const SHAPES_SOURCE = join(dirname(dirname(fileURLToPath(import.meta.url))), 'common', 'src', 'lib', 'progress-note-shapes.json')
 const SHAPES = readFileSync(SHAPES_SOURCE, 'utf8')
 const FIXTURE = JSON.parse(SHAPES) as { commands: string[]; examples: { good: string[]; rejected: string[] } }
 
@@ -58,10 +58,10 @@ const progressMd = (opts: { id: string; title: string; status: string; expectedS
 }
 
 function installAgentCommon(appDir: string) {
-  const dir = join(appDir, 'node_modules', '@aspiralabs', 'agent-common')
-  mkdirSync(join(dir, 'src', 'lib'), { recursive: true })
-  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: '@aspiralabs/agent-common', version: '0.1.0', type: 'module' }))
-  writeFileSync(join(dir, 'src', 'lib', 'progress-note-shapes.json'), SHAPES)
+  const dir = join(appDir, 'node_modules', '@aspiralabs', 'ai')
+  mkdirSync(join(dir, 'common', 'src', 'lib'), { recursive: true })
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: '@aspiralabs/ai', version: '0.1.0', type: 'module' }))
+  writeFileSync(join(dir, 'common', 'src', 'lib', 'progress-note-shapes.json'), SHAPES)
 }
 
 const resolverFor = (status: string): Resolver => (board, ref) => (board === BOARD && /^nom-4$/i.test(ref) ? { id: 'NOM-4', title: 'Explore pagination', url: 'https://www.notion.so/x', status } : null)

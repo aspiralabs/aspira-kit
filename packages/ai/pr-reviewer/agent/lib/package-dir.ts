@@ -6,7 +6,7 @@
 // exactly that. Every host-side read of a package file resolves through here instead.
 
 import { existsSync, readFileSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Reviewer } from './review.ts'
 
@@ -42,6 +42,10 @@ export function packageDirFrom(moduleUrl: string): string {
       if (isThisPackage(root)) return root
     }
   }
+  // eve evaluates an authored module at build time from its own cache, under the node_modules the cloud copy links to
+  // (<store>/node_modules/.cache/eve/authored-modules/): no ancestor of that path is the package, but the build runs
+  // with the copy as the working directory.
+  if (path.includes(`${sep}.cache${sep}eve${sep}authored-modules${sep}`) && isThisPackage(process.cwd())) return process.cwd()
   let dir = dirname(path)
   for (;;) {
     if (isThisPackage(dir)) return dir

@@ -408,7 +408,7 @@ describe('kit cleanup never loses work', () => {
     }).toEqual({ folder: [true, true], locked: [true, true, true], otherRemoved: true, code: 1 })
   })
 
-  it('T32: keeps a worktree whose TYPE differs from the card\'s Type, and one whose agent-common reports no Type, with distinct reasons', async () => {
+  it('T32: keeps a worktree whose TYPE differs from the card\'s Type, and one whose @aspiralabs/ai reports no Type, with distinct reasons', async () => {
     const repo = repository()
     const mismatch = worktree(repo, 'FEATURE-KIT-3', 'feat/kit-3-x')
     const skew = worktree(repo, 'FEATURE-KIT-4', 'feat/kit-4-x')
@@ -416,7 +416,7 @@ describe('kit cleanup never loses work', () => {
     const skewLine = listed(lines, skew)
     expect({
       mismatch: [listed(lines, mismatch).includes('Type mismatch'), existsSync(mismatch)],
-      skew: [skewLine.includes("@aspiralabs/agent-common does not report the card's Type"), /Type mismatch|no Type/.test(skewLine), existsSync(skew)],
+      skew: [skewLine.includes("@aspiralabs/ai does not report the card's Type"), /Type mismatch|no Type/.test(skewLine), existsSync(skew)],
     }).toEqual({ mismatch: [true, true], skew: [true, false, true] })
   })
 })
@@ -539,16 +539,17 @@ describe('kit cleanup --only', () => {
 })
 
 describe('kit cleanup and the board', () => {
-  const amaro = join(dirname(dirname(kit)), 'packages', 'agents', 'implementor', 'node_modules', 'amaro')
+  const amaro = join(dirname(dirname(kit)), 'packages', 'ai', 'node_modules', 'amaro')
   it.skipIf(!existsSync(amaro))('T39: reaches the board only through the resolve script, with <ref> --board <board URL>', async () => {
     const repo = repository()
     workFolder(repo.root, 'kit-1-done', { id: 'KIT-1' })
     workFolder(repo.root, 'kit-2-open', { id: 'KIT-2' })
     const modules = join(repo.root, 'node_modules')
-    const common = join(modules, '@aspiralabs', 'agent-common')
+    const ai = join(modules, '@aspiralabs', 'ai')
+    const common = join(ai, 'common')
     mkdirSync(join(common, 'scripts'), { recursive: true })
     symlinkSync(realpathSync(amaro), join(modules, 'amaro'))
-    writeFileSync(join(common, 'package.json'), JSON.stringify({ name: '@aspiralabs/agent-common', version: '0.0.0', type: 'module' }))
+    writeFileSync(join(ai, 'package.json'), JSON.stringify({ name: '@aspiralabs/ai', version: '0.0.0', type: 'module' }))
     const calls = join(repo.tmp, 'resolver-calls.log')
     const script = join(common, 'scripts', 'resolve-ticket.ts')
     writeFileSync(

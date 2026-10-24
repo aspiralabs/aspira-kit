@@ -1,4 +1,4 @@
-// lookupTicket and liveResolver over the installed agent-common resolve script. The script is the
+// lookupTicket and liveResolver over the installed @aspiralabs/ai common resolve script. The script is the
 // process boundary (TEST-007): each case writes a fake scripts/resolve-ticket.ts into a pnpm-style
 // node_modules layout, as app.test.ts does, and runs it for real with node and amaro.
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -10,7 +10,7 @@ import { liveResolver, next } from './next.js'
 import { lookupTicket } from './ticket-lookup.js'
 
 const kit = dirname(dirname(fileURLToPath(import.meta.url)))
-const amaro = join(dirname(dirname(kit)), 'packages', 'agents', 'implementor', 'node_modules', 'amaro')
+const amaro = join(dirname(dirname(kit)), 'packages', 'ai', 'node_modules', 'amaro')
 const hasAmaro = existsSync(amaro)
 const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6'
 const VERSION = '0.9.0'
@@ -29,36 +29,32 @@ const resolveScript = ({ stdout, stderr, exit = 0 }: Fake): string =>
 type Layout = { root: string; app: string; common: string }
 
 /**
- * A project whose app owns node_modules with @aspiralabs/agents laid out as pnpm does (agents and its
- * dependencies side by side in the store, amaro beside them). `common` decides what agent-common holds:
- * a fake resolve script, a package without the script, or no package at all.
+ * A project whose app owns node_modules with @aspiralabs/ai laid out as pnpm does (the package and its
+ * dependencies side by side in the store, amaro beside them). `common` decides what the package's common folder
+ * holds: a fake resolve script, a package without the script, or no @aspiralabs/ai at all.
  */
 function layout(common: Fake | 'no script' | 'absent'): Layout {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kit-lookup-')))
   const app = join(root, 'apps', 'web')
   mkdirSync(app, { recursive: true })
-  writeFileSync(join(app, 'package.json'), JSON.stringify({ name: 'web', private: true, devDependencies: { '@aspiralabs/agents': VERSION } }))
+  writeFileSync(join(app, 'package.json'), JSON.stringify({ name: 'web', private: true, devDependencies: { '@aspiralabs/ai': VERSION } }))
   writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/web' }))
-  const store = join(app, 'node_modules', '.pnpm', `@aspiralabs+agents@${VERSION}`, 'node_modules')
-  const pkg = (name: string): string => {
-    const dir = join(store, '@aspiralabs', name)
-    mkdirSync(dir, { recursive: true })
-    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: `@aspiralabs/${name}`, version: VERSION, type: 'module' }))
-    return dir
-  }
-  pkg('agents')
-  mkdirSync(join(app, 'node_modules', '@aspiralabs'), { recursive: true })
-  symlinkSync(join(store, '@aspiralabs', 'agents'), join(app, 'node_modules', '@aspiralabs', 'agents'))
-  if (hasAmaro) symlinkSync(realpathSync(amaro), join(store, 'amaro'))
-  const commonDir = join(store, '@aspiralabs', 'agent-common')
+  const store = join(app, 'node_modules', '.pnpm', `@aspiralabs+ai@${VERSION}`, 'node_modules')
+  const aiDir = join(store, '@aspiralabs', 'ai')
+  const commonDir = join(aiDir, 'common')
   if (common !== 'absent') {
-    pkg('agent-common')
+    mkdirSync(aiDir, { recursive: true })
+    writeFileSync(join(aiDir, 'package.json'), JSON.stringify({ name: '@aspiralabs/ai', version: VERSION, type: 'module' }))
+    mkdirSync(join(app, 'node_modules', '@aspiralabs'), { recursive: true })
+    symlinkSync(aiDir, join(app, 'node_modules', '@aspiralabs', 'ai'))
+    if (hasAmaro) symlinkSync(realpathSync(amaro), join(store, 'amaro'))
+    mkdirSync(commonDir, { recursive: true })
     if (common !== 'no script') {
       mkdirSync(join(commonDir, 'scripts'), { recursive: true })
       writeFileSync(join(commonDir, 'scripts', 'resolve-ticket.ts'), resolveScript(common))
     }
   }
-  return { root, app, common: commonDir }
+  return { root, app, common: join(app, 'node_modules', '@aspiralabs', 'ai', 'common') }
 }
 
 const lookup = ({ root, app }: Layout, ref = 'KIT-13') => lookupTicket(BOARD, ref, root, app)
@@ -112,14 +108,14 @@ describe('lookupTicket: why there is no ticket', () => {
     expect(result).toMatchObject({ reason: 'board unreachable', detail: expect.stringContaining('hello=world') })
   })
 
-  it('no agent-common installed is an unreachable board caused by the kit, naming agent-common and where it looked', () => {
+  it('no @aspiralabs/ai installed is an unreachable board caused by the kit, naming the package and where it looked', () => {
     const project = layout('absent')
     const result = lookup(project)
-    expect(result).toMatchObject({ reason: 'board unreachable', cause: 'kit', detail: expect.stringContaining('agent-common') })
+    expect(result).toMatchObject({ reason: 'board unreachable', cause: 'kit', detail: expect.stringContaining('@aspiralabs/ai') })
     expect(result).toMatchObject({ detail: expect.stringContaining(project.app) })
   })
 
-  it('agent-common without its resolve script names the script path', () => {
+  it('@aspiralabs/ai without its resolve script names the script path', () => {
     const project = layout('no script')
     const result = lookup(project)
     expect(result).toMatchObject({ reason: 'board unreachable', cause: 'kit', detail: expect.stringContaining(join(project.common, 'scripts', 'resolve-ticket.ts')) })
@@ -152,8 +148,8 @@ describe('kit next names the cause before "see the error above"', () => {
     expect(code).toBe(1)
   }
 
-  it('when agent-common is not installed', () => {
-    check(layout('absent'), 'agent-common')
+  it('when @aspiralabs/ai is not installed', () => {
+    check(layout('absent'), '@aspiralabs/ai')
   })
 
   it.skipIf(!hasAmaro)('when the resolver answers without an id', () => {

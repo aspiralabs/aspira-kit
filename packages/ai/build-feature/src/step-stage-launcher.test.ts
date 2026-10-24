@@ -34,7 +34,7 @@ async function seedReadySpecRun(): Promise<{ repo: string; folder: string; runId
   await writeFile(join(skillDir, 'SKILL.md'), '# aspira-planner\n')
   await writeFile(join(skillDir, 'scripts/planner.sh'), '#!/bin/bash\necho planner\n', { mode: 0o755 })
   // KIT-19: the driver refuses a step when any step skill's .kit-version is missing or differs from its own version.
-  const kitVersion = (JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8')) as { version: string }).version
+  const kitVersion = (JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', 'package.json'), 'utf8')) as { version: string }).version
   for (const step of STEP_SKILLS) {
     await mkdir(join(repo, '.claude/skills', `aspira-${step}`), { recursive: true })
     await writeFile(join(repo, '.claude/skills', `aspira-${step}`, '.kit-version'), `${kitVersion}\n`)

@@ -25,7 +25,7 @@ import { SLOW } from './driver.integration.shared.ts'
 
 afterAll(cleanup)
 
-const VERSION = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8'))).version
+const VERSION = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(PACKAGE, '..', 'package.json'), 'utf8'))).version
 const SKILL_VERSION_FILE = '.claude/skills/aspira-visual-verify/.kit-version'
 /** The .kit-version of the new skill, committed on main so every worktree has it (the helper's STEP_SKILLS may not list it yet). */
 const KIT_FILES = { [SKILL_VERSION_FILE]: `${VERSION}\n` }

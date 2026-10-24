@@ -50,8 +50,9 @@ export function liveUrlChecker(projectRoot: string, appDir: string): UrlChecker 
     if (ai === undefined) return unreachable('@aspiralabs/ai is not installed; cannot check Notion')
     const common = join(ai, 'common')
     const script = join(common, 'scripts', 'check-notion-urls.ts')
+    if (!existsSync(script)) return unreachable(`${script} is missing`)
     const amaro = findUpModule(realpathSync(common), join('amaro', 'dist', 'register-strip.mjs')) ?? findUpModule(realpathSync(appDir), join('amaro', 'dist', 'register-strip.mjs'))
-    if (!existsSync(script) || amaro === undefined) return unreachable(existsSync(script) ? 'amaro (the TypeScript loader the agents ship with) is not installed' : `${script} is missing`)
+    if (amaro === undefined) return unreachable('amaro (the TypeScript loader the agents ship with) is not installed')
     const envFiles = [...new Set([join(projectRoot, '.env.local'), join(appDir, '.env.local')])].filter((file) => existsSync(file))
     const args = ['--import', amaro, '--experimental-strip-types', ...envFiles.map((file) => `--env-file=${file}`), script, ...checks.map((check) => `${check.key}=${check.url}`)]
     const run = spawnSync('node', args, { cwd: projectRoot, encoding: 'utf8' })

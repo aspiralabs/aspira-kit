@@ -217,7 +217,8 @@ describe('a global install and the bootstrap', () => {
     const home = join(scratch, 'global')
     const env: NodeJS.ProcessEnv = { ...process.env, PNPM_HOME: join(home, 'pnpm'), XDG_DATA_HOME: join(home, 'data'), XDG_CONFIG_HOME: join(home, 'config'), XDG_CACHE_HOME: join(home, 'cache'), XDG_STATE_HOME: join(home, 'state') }
     mkdirSync(env.PNPM_HOME!, { recursive: true })
-    env.PATH = `${env.PNPM_HOME}:${process.env.PATH}`
+    mkdirSync(join(env.PNPM_HOME!, 'bin'), { recursive: true })
+    env.PATH = `${join(env.PNPM_HOME!, 'bin')}:${env.PNPM_HOME}:${process.env.PATH}`
     run('pnpm', ['add', '-g', `file:${tarball}`], scratch, env)
     const empty = mkdtempSync(join(scratch, 'empty-'))
     const playbook = spawnSync('kit', ['playbook'], { cwd: empty, env, encoding: 'utf8' })
