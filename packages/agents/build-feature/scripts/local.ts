@@ -6,9 +6,9 @@
 // its run status (A2); a refusal prints its message on stderr and exits 1. Time comes from BUILD_FEATURE_NOW when set (tests), else the clock.
 
 import { parseArgs } from 'node:util'
-import { exitCodeFor, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
-import { buildRunStatus } from '#src/build-status.ts'
-import { nextStage, Refusal } from '#src/driver.ts'
+import { exitCodeFor, type RunStatus } from '@aspiralabs/ai/common/lib/run-status'
+import { buildRunStatus } from '#build-feature/build-status.ts'
+import { nextStage, Refusal } from '#build-feature/driver.ts'
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const { values, positionals } = parseArgs({

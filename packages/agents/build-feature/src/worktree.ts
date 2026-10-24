@@ -12,10 +12,10 @@ import { existsSync, lstatSync, symlinkSync } from 'node:fs'
 import { appendFile, cp, readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import { z } from 'zod'
-import { tail } from '@aspiralabs/agent-common/lib/redact'
-import { TICKET_TYPES, ticketBranch, ticketTypeOf, type TicketType } from '@aspiralabs/agent-common/lib/ticket-branch'
-import { stateDirOf } from '#src/run-state.ts'
-import { GIT_ARGS, packageManagerOf, shown, system, type CommandResult, type System, type SystemOptions } from '#src/system.ts'
+import { tail } from '@aspiralabs/ai/common/lib/redact'
+import { TICKET_TYPES, ticketBranch, ticketTypeOf, type TicketType } from '@aspiralabs/ai/common/lib/ticket-branch'
+import { stateDirOf } from '#build-feature/run-state.ts'
+import { GIT_ARGS, packageManagerOf, shown, system, type CommandResult, type System, type SystemOptions } from '#build-feature/system.ts'
 
 /** Re-exported so existing build-feature imports of this module keep compiling; the definitions now live in agent-common. */
 export { TICKET_TYPES, ticketBranch, ticketTypeOf, type TicketType }

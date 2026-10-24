@@ -7,11 +7,11 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { countsFromFindings } from '@aspiralabs/agent-common/lib/findings-counts'
-import { readRunStatus, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
-import type { SourceKind } from '@aspiralabs/agent-common/lib/telemetry-sources'
-import type { StepName } from '#src/route.ts'
-import { subagentUsageSchema, usageSchema, type RunState, type SubagentUsage, type Usage } from '#src/run-state.ts'
+import { countsFromFindings } from '@aspiralabs/ai/common/lib/findings-counts'
+import { readRunStatus, type RunStatus } from '@aspiralabs/ai/common/lib/run-status'
+import type { SourceKind } from '@aspiralabs/ai/common/lib/telemetry-sources'
+import type { StepName } from '#build-feature/route.ts'
+import { subagentUsageSchema, usageSchema, type RunState, type SubagentUsage, type Usage } from '#build-feature/run-state.ts'
 
 /**
  * The report the session writes for a step stage. nonce, step, status and resultLine are strict;

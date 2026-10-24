@@ -7,8 +7,8 @@ import { files, spec, validPlan } from './fixtures.test-helper.ts'
 
 const retention = { question: 'Choose retention duration before implementing deletion?', options: ['Keep forever', 'Delete after 30 days'], recommended: 'Keep forever', reasoning: 'nothing else in the app expires', whyYours: 'storage cost is a product choice' }
 const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [] as unknown[], close: vi.fn() }))
-vi.mock('@aspiralabs/agent-common/lib/repository', () => ({ repository: async () => ({ files, instructions: '', packet: () => 'src/items.ts:1: existing save', gaps: [], commit: 'abc', dirty: false, tools: { read_files: {} } }), allowedPath: (path: string) => !path.includes('.env') }))
-vi.mock('@aspiralabs/agent-common/lib/mcp', () => ({ connectReadTools: async () => ({ tools: state.guidelineTool ? { notion__read_guideline: { execute: async () => ({ content: [{ type: 'text', text: JSON.stringify({ source: 'https://www.notion.so/topic', markdown: 'TEST-001 Write the failing test first.' }) }] }) } } : {}, reads: [], sources: [], close: state.close }) }))
+vi.mock('@aspiralabs/ai/common/lib/repository', () => ({ repository: async () => ({ files, instructions: '', packet: () => 'src/items.ts:1: existing save', gaps: [], commit: 'abc', dirty: false, tools: { read_files: {} } }), allowedPath: (path: string) => !path.includes('.env') }))
+vi.mock('@aspiralabs/ai/common/lib/mcp', () => ({ connectReadTools: async () => ({ tools: state.guidelineTool ? { notion__read_guideline: { execute: async () => ({ content: [{ type: 'text', text: JSON.stringify({ source: 'https://www.notion.so/topic', markdown: 'TEST-001 Write the failing test first.' }) }] }) } } : {}, reads: [], sources: [], close: state.close }) }))
 vi.mock('ai', async (original) => {
   const actual = await original<typeof import('ai')>()
   const mock = { ...actual, gateway: vi.fn(() => ({})), generateText: vi.fn(async (args: { tools?: ToolSet; toolChoice?: unknown; messages?: unknown[]; output?: unknown; onStepStart: (value: { stepNumber: number; messages: unknown[] }) => void; onStepEnd: (value: { usage: { inputTokens: number; outputTokens: number }; providerMetadata: unknown; finishReason: string; text: string; toolCalls: unknown[]; toolResults: unknown[] }) => void }) => {
@@ -56,7 +56,7 @@ vi.mock('ai', async (original) => {
     return { output: run.then((value) => value.output), consumeStream: () => run.then(() => undefined) }
   }) }
 })
-import { CLOUD_RESEARCH_TOOLS, RESEARCH_RULE } from '@aspiralabs/agent-common/lib/research-rule'
+import { CLOUD_RESEARCH_TOOLS, RESEARCH_RULE } from '@aspiralabs/ai/common/lib/research-rule'
 import { runPlan } from './runner.ts'
 
 beforeEach(() => { Object.assign(state, { failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [] }); state.close.mockClear() })

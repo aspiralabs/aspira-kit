@@ -7,7 +7,7 @@
 // short, or it ran to completion) are never themselves reported as this module's run status.
 
 import { z } from 'zod'
-import { RUN_STATUSES, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
+import { RUN_STATUSES, type RunStatus } from '@aspiralabs/ai/common/lib/run-status'
 
 /** The stop kinds that need nothing but their name. */
 const BARE_STOPS = [

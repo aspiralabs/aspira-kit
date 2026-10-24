@@ -8,8 +8,8 @@
 
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { applyAnswers, parseTickedDecisions, type DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
-import type { OverrideRecord, RunState } from '#src/run-state.ts'
+import { applyAnswers, parseTickedDecisions, type DecisionRecord } from '@aspiralabs/ai/common/lib/decisions'
+import type { OverrideRecord, RunState } from '#build-feature/run-state.ts'
 
 /** Backward moves a skill may make itself. Empty: Board rules allow none today. */
 export const BACKWARD_MOVES_SKILL_MAY_MAKE: readonly { from: string; to: string }[] = []

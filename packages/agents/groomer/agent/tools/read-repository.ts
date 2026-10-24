@@ -1,7 +1,7 @@
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
-import { connectReadTools } from '@aspiralabs/agent-common/lib/mcp'
-import { repository } from '@aspiralabs/agent-common/lib/repository'
+import { connectReadTools } from '@aspiralabs/ai/common/lib/mcp'
+import { repository } from '@aspiralabs/ai/common/lib/repository'
 import { requireBound } from '../lib/bound.ts'
 
 // The groomer's only window on the repository (spec Round zero): `repository()`'s list_files,

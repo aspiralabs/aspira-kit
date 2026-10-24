@@ -11,8 +11,8 @@ import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { touchesUi } from '@aspiralabs/agent-common/lib/plan'
-import { credentialNames, devServerSchema, localDevUrl, planChangesSchema, visualVerifyAnswerSchema, visualVerifyReport, withoutCredentials, type SkipReason, type VisualVerifyResult } from '@aspiralabs/agent-common/lib/visual-verify'
+import { touchesUi } from '@aspiralabs/ai/common/lib/plan'
+import { credentialNames, devServerSchema, localDevUrl, planChangesSchema, visualVerifyAnswerSchema, visualVerifyReport, withoutCredentials, type SkipReason, type VisualVerifyResult } from '@aspiralabs/ai/common/lib/visual-verify'
 
 const ACCEPTED = ['In Progress: Implementation', 'In Review: Implementation'] as const
 const REFUSED_EXIT = 3

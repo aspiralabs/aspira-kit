@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { renderGroomPage } from '@aspiralabs/agent-common/lib/decisions'
+import { renderGroomPage } from '@aspiralabs/ai/common/lib/decisions'
 import { applyRound, frontier, roundSchema, roundZeroReport, seedBranches } from './rounds.ts'
 
 /** The seeded branch ids, written out: the Grooming exit criteria, the spec template sections, then the six review lenses. */

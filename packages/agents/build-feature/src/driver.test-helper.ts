@@ -58,7 +58,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { z } from 'zod'
-import type { usageSchema } from '#src/run-state.ts'
+import type { usageSchema } from '#build-feature/run-state.ts'
 
 const exec = promisify(execFile)
 

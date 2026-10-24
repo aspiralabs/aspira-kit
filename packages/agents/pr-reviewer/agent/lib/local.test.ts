@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
-import { writeKnowledgeFolder, type WalkResult } from '@aspiralabs/agent-common/lib/knowledge-walk'
+import { writeKnowledgeFolder, type WalkResult } from '@aspiralabs/ai/common/lib/knowledge-walk'
 import { REVIEW_COMMENT_MARKER } from './github-comment.ts'
 import { KnowledgeBlocked, KnowledgeRequired, knowledgeConfig, planStep, runLocal, workDirFor, type LocalDeps, type LocalInput, type LocalResult, type LocalTask, type PendingPlan } from './local.ts'
 import {

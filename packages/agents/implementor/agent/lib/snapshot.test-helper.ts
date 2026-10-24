@@ -4,8 +4,8 @@
 
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { pageIdFrom, renderRequired, type LoadedPage } from '@aspiralabs/agent-common/lib/knowledge'
-import { renderProvenance } from '@aspiralabs/agent-common/lib/knowledge-snapshot'
+import { pageIdFrom, renderRequired, type LoadedPage } from '@aspiralabs/ai/common/lib/knowledge'
+import { renderProvenance } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 
 /** The knowledge root the snapshots below were "loaded" from. */
 export const SNAPSHOT_ROOT = 'https://www.notion.so/Engineering-0123456789abcdef0123456789abcdef'

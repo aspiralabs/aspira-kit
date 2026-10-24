@@ -1,9 +1,9 @@
 # @aspiralabs/agent-common
 
-Tools and pure helpers shared by the eve agents under `packages/agents/`. Source-only, published with the kit: an agent adds it as a workspace dependency and mounts a tool by re-exporting it from its own `agent/tools/`, which is where eve discovers tools. `lib/agent-version` is how every --local driver names the agent package that ran and records it in an export's trace.
+Tools and pure helpers shared by the eve agents under `packages/ai/`. Source-only, published with the kit: an agent adds it as a workspace dependency and mounts a tool by re-exporting it from its own `agent/tools/`, which is where eve discovers tools. `lib/agent-version` is how every --local driver names the agent package that ran and records it in an export's trace.
 
 ```ts
-// packages/agents/<agent>/agent/tools/load-knowledge.ts
+// packages/ai/<agent>/agent/tools/load-knowledge.ts
 export { default } from '@aspiralabs/agent-common/tools/load-knowledge'
 ```
 

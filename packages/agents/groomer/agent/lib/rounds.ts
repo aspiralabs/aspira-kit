@@ -4,8 +4,8 @@
 // Grooming Decisions renderer unvalidated (SEC-001, SEC-010).
 
 import { z } from 'zod'
-import { compareIds } from '@aspiralabs/agent-common/lib/decisions'
-import { factSchema, GROOM_BRANCHES, groomDecisionSchema, type Fact, type GroomDecision, type GroomRecord } from '@aspiralabs/agent-common/lib/groom-record'
+import { compareIds } from '@aspiralabs/ai/common/lib/decisions'
+import { factSchema, GROOM_BRANCHES, groomDecisionSchema, type Fact, type GroomDecision, type GroomRecord } from '@aspiralabs/ai/common/lib/groom-record'
 
 /** One seeded branch: a Grooming exit criterion, a spec template section or a spec-reviewer lens. */
 export type GroomBranchId = (typeof GROOM_BRANCHES)[number]

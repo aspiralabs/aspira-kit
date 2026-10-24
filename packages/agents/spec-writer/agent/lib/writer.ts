@@ -1,9 +1,9 @@
 import { z } from 'zod'
-import { RESEARCH_RULE } from '@aspiralabs/agent-common/lib/research-rule'
-import { SETTLED_DECISIONS_RULE, type Answer } from '@aspiralabs/agent-common/lib/decisions'
-import { markedDecisions } from '@aspiralabs/agent-common/lib/groom-record'
-import { runPipeline, type Call, type PipelineResult } from '@aspiralabs/spec-reviewer/lib/pipeline'
-import { checkContract } from '@aspiralabs/spec-reviewer/lib/review'
+import { RESEARCH_RULE } from '@aspiralabs/ai/common/lib/research-rule'
+import { SETTLED_DECISIONS_RULE, type Answer } from '@aspiralabs/ai/common/lib/decisions'
+import { markedDecisions } from '@aspiralabs/ai/common/lib/groom-record'
+import { runPipeline, type Call, type PipelineResult } from '@aspiralabs/ai/spec-reviewer/lib/pipeline'
+import { checkContract } from '@aspiralabs/ai/spec-reviewer/lib/review'
 
 // Two writer phases (explore, draft), then the unchanged spec-reviewer pipeline on the draft.
 // Code owns ordering, validation and status; the review half is the reviewer's own code.

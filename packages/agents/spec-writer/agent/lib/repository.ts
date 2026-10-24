@@ -1,1 +1,1 @@
-export * from '@aspiralabs/agent-common/lib/repository'
+export * from '@aspiralabs/ai/common/lib/repository'

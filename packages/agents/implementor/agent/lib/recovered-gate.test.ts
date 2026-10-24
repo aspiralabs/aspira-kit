@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { renderTicketMd } from '@aspiralabs/agent-common/lib/ticket'
+import { renderTicketMd } from '@aspiralabs/ai/common/lib/ticket'
 import { afterEach, describe, expect, it } from 'vitest'
 import { runLocal, type LocalResult } from './local.ts'
 

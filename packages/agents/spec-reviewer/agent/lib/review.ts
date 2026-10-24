@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import { RESEARCH_RULE } from '@aspiralabs/agent-common/lib/research-rule'
-import { DECISION_RULE, SETTLED_DECISIONS_RULE, decisionSchema } from '@aspiralabs/agent-common/lib/decisions'
-import type { Lens } from '@aspiralabs/agent-common/lib/lenses'
-import { WHAT_THIS_MEANS_RULE, severitySchema, whatThisMeansSchema } from '@aspiralabs/agent-common/lib/severity'
+import { RESEARCH_RULE } from '@aspiralabs/ai/common/lib/research-rule'
+import { DECISION_RULE, SETTLED_DECISIONS_RULE, decisionSchema } from '@aspiralabs/ai/common/lib/decisions'
+import type { Lens } from '@aspiralabs/ai/common/lib/lenses'
+import { WHAT_THIS_MEANS_RULE, severitySchema, whatThisMeansSchema } from '@aspiralabs/ai/common/lib/severity'
 
 const evidence = z.array(z.string().min(1))
 /** One finding: the title, how bad it is, what it means to a human, the verified evidence, the exact correction. */
@@ -46,7 +46,7 @@ export function openGapsOf(gaps: readonly Gap[], synthesis: Pick<Synthesis, 'gap
 
 export type Synthesis = Omit<z.infer<typeof synthesisSchema>, 'gapResolutions' | 'dispositions'> & { gapResolutions?: z.infer<typeof synthesisSchema>['gapResolutions']; dispositions: (Omit<Disposition, 'decision'> & { decision?: Disposition['decision'] })[] }
 
-export { checkBusinessSpec as checkContract } from '@aspiralabs/agent-common/lib/spec'
+export { checkBusinessSpec as checkContract } from '@aspiralabs/ai/common/lib/spec'
 
 export function applyEdits(spec: string, edits: Synthesis['edits']): string {
   const spans = edits.map((edit) => {

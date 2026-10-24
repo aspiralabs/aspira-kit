@@ -11,9 +11,9 @@ import { mkdtemp, readFile, readdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseEnv } from 'node:util'
-import { KNOWLEDGE_ENV, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, pageIdFrom, parseRequired } from '@aspiralabs/agent-common/lib/knowledge'
-import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
-import { notionToken } from '@aspiralabs/agent-common/lib/notion-token'
+import { KNOWLEDGE_ENV, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, pageIdFrom, parseRequired } from '@aspiralabs/ai/common/lib/knowledge'
+import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
+import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
 import type { Knowledge } from './fixer.ts'
 
 /** The Notion pages the agent's knowledge configuration names, without the token. */

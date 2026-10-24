@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LENSES } from '@aspiralabs/agent-common/lib/lenses'
+import { LENSES } from '@aspiralabs/ai/common/lib/lenses'
 import { authorDecisionsOf } from './pipeline.ts'
 import { applyEdits, checkContract, checkedRuleIds, findingSchema, lenses, ruleIds, synthesisSchema, validateReview, type Finding, type Synthesis } from './review.ts'
 

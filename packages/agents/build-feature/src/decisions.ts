@@ -6,10 +6,10 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { compareIds, decisionSchema, takenDecision, type DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
-import { groomDecisionSchema } from '@aspiralabs/agent-common/lib/groom-record'
-import { STEPS } from '#src/route.ts'
-import type { QueuedAsk, RunState, TakenKey } from '#src/run-state.ts'
+import { compareIds, decisionSchema, takenDecision, type DecisionRecord } from '@aspiralabs/ai/common/lib/decisions'
+import { groomDecisionSchema } from '@aspiralabs/ai/common/lib/groom-record'
+import { STEPS } from '#build-feature/route.ts'
+import type { QueuedAsk, RunState, TakenKey } from '#build-feature/run-state.ts'
 
 /** The steps (and the Step 9 fix subagent) whose decisions the run lists. */
 export type DecisionStep = 'groomer' | 'spec-writer' | 'planner' | 'implementor' | 'fix'

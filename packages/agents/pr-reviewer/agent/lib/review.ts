@@ -2,7 +2,7 @@
 // the seats, prompts, schemas, and the verdict can be tested without a runtime.
 
 import { z } from 'zod'
-import { SEVERITIES, WHAT_THIS_MEANS_RULE, type Counts, type Severity } from '@aspiralabs/agent-common/lib/severity'
+import { SEVERITIES, WHAT_THIS_MEANS_RULE, type Counts, type Severity } from '@aspiralabs/ai/common/lib/severity'
 import { DEFAULT_MAX_SEAT_CALLS } from './call-cap.ts'
 import { reviewedLine, type ReviewTarget } from './target.ts'
 

@@ -10,7 +10,7 @@ const fixture = vi.hoisted(() => ({
 }))
 vi.mock('./repository.ts', () => ({ repository: async () => ({ instructions: '', packet: () => 'source.ts:1: evidence', gaps: [], files: new Map(), commit: 'abc', dirty: false, tools: { read_files: {} } }) }))
 vi.mock('./mcp.ts', () => ({ connectReadTools: async () => ({ tools: {}, sources: [], reads: [], close: async () => {} }) }))
-vi.mock('@aspiralabs/agent-common/lib/gateway', async (original) => ({ ...await original<typeof import('@aspiralabs/agent-common/lib/gateway')>(), gateway: vi.fn((model: string) => { fixture.models.push(model); return {} }) }))
+vi.mock('@aspiralabs/ai/common/lib/gateway', async (original) => ({ ...await original<typeof import('@aspiralabs/ai/common/lib/gateway')>(), gateway: vi.fn((model: string) => { fixture.models.push(model); return {} }) }))
 vi.mock('ai', async (original) => {
   const actual = await original<typeof import('ai')>()
   const mock = { ...actual, generateText: vi.fn(async (args: { prompt: string; tools?: ToolSet; output?: unknown; onStepStart: (value: { stepNumber: number; messages: unknown[] }) => void; onStepEnd: (value: { usage: { inputTokens: number; outputTokens: number }; finishReason: string; text: string; toolCalls: unknown[]; toolResults: unknown[] }) => void }) => {

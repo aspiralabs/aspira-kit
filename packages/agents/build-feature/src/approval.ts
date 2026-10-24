@@ -9,7 +9,7 @@
 // upgraded: its answer is still read once.
 
 import { z } from 'zod'
-import type { Approval, RunState } from '#src/run-state.ts'
+import type { Approval, RunState } from '#build-feature/run-state.ts'
 
 const nonce = z.string().min(1)
 

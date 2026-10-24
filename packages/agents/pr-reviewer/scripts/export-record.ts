@@ -11,8 +11,8 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
-import { countsFromFindings } from '@aspiralabs/agent-common/lib/findings-counts'
-import { exitCodeFor, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
+import { countsFromFindings } from '@aspiralabs/ai/common/lib/findings-counts'
+import { exitCodeFor, type RunStatus } from '@aspiralabs/ai/common/lib/run-status'
 import { verdictFrom } from '../agent/lib/review.ts'
 
 const usage = 'Usage: node scripts/export-record.ts --output <export-dir> --exit-code <N>'

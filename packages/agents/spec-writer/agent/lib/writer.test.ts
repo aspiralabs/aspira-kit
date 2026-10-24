@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SETTLED_DECISIONS_RULE } from '@aspiralabs/agent-common/lib/decisions'
-import type { Call } from '@aspiralabs/spec-reviewer/lib/pipeline'
+import { SETTLED_DECISIONS_RULE } from '@aspiralabs/ai/common/lib/decisions'
+import type { Call } from '@aspiralabs/ai/spec-reviewer/lib/pipeline'
 import { draftPrompt, explorePrompt, ideaDecisions, writePipeline, writerSystemPrompt } from './writer.ts'
 
 const draft = '# Save items\n## Intent\nLet people save items.\n## Acceptance criteria\n### Features\n- [ ] F1: A saved item appears in the list.\n'

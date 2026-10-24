@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { z } from 'zod'
-import { readTicketMd } from '@aspiralabs/agent-common/lib/ticket-flow'
+import { readTicketMd } from '@aspiralabs/ai/common/lib/ticket-flow'
 
 const exec = promisify(execFile)
 

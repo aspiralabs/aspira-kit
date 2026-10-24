@@ -1,9 +1,9 @@
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
-import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
-import { exitCodeFor, type RunStatus } from '@aspiralabs/agent-common/lib/run-status'
-import { afterRun, attachArg, beforeRun, handleRunError, KnowledgePrerequisiteError, sessionUsageStep, UsageError, verifyRun, type DriverContext, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
-import { writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
+import { agentVersion, recordAgentVersion } from '@aspiralabs/ai/common/lib/agent-version'
+import { exitCodeFor, type RunStatus } from '@aspiralabs/ai/common/lib/run-status'
+import { afterRun, attachArg, beforeRun, handleRunError, KnowledgePrerequisiteError, sessionUsageStep, UsageError, verifyRun, type DriverContext, type DriverTicketArgs } from '@aspiralabs/ai/common/lib/ticket-driver'
+import { writeBoardTrace } from '@aspiralabs/ai/common/lib/ticket-flow'
 import { runLocal } from '../agent/lib/local.ts'
 
 // One step of a --local plan. The ticket comes first: the `board` stage (resolve, pull, claim) is

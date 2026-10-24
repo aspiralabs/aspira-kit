@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { afterEach, expect, it } from 'vitest'
-import { renderTicketMd } from '@aspiralabs/agent-common/lib/ticket'
+import { renderTicketMd } from '@aspiralabs/ai/common/lib/ticket'
 
 const exec = promisify(execFile)
 const PACKAGE = join(dirname(fileURLToPath(import.meta.url)), '..')

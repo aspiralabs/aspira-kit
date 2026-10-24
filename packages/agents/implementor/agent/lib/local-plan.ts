@@ -3,7 +3,7 @@
 // with the procedure the session follows; this file only checks that the result is coherent.
 
 import { z } from 'zod'
-import { decisionSchema, renderDecisions, takenDecision, type Decision } from '@aspiralabs/agent-common/lib/decisions'
+import { decisionSchema, renderDecisions, takenDecision, type Decision } from '@aspiralabs/ai/common/lib/decisions'
 
 const text = z.string().trim().min(1)
 const ids = z.array(text)

@@ -1,11 +1,11 @@
 // The live Status picks what the run does next, through the Playbook's own table
-// (@aspiralabs/kit/playbook): a step (the row's command with the ID filled in), a Ready move for
+// (@aspiralabs/ai/playbook): a step (the row's command with the ID filled in), a Ready move for
 // the rows a human used to do by hand, the later phases (visual verify, gate, Step 8, Step 10, the review loop,
 // the release row), or the end of the run. What the rows cannot say is decided here, from facts
 // the driver reads: whether a review covers the current spec.md, what the implementor's last
 // result was, and whether the analyzer finished clean.
 
-import { commandFor, nextStep } from '@aspiralabs/kit/playbook'
+import { commandFor, nextStep } from '@aspiralabs/ai/playbook'
 
 /** The steps, in Playbook order. */
 export const STEPS = ['groomer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer'] as const

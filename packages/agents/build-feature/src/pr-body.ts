@@ -13,10 +13,10 @@ import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { renderPrBody as renderSharedPrBody } from '@aspiralabs/agent-common/lib/pr-body'
-import { orderedTaken } from '#src/decisions.ts'
-import type { RunState } from '#src/run-state.ts'
-import { visualVerifyRecordOf } from '#src/visual-verify.ts'
+import { renderPrBody as renderSharedPrBody } from '@aspiralabs/ai/common/lib/pr-body'
+import { orderedTaken } from '#build-feature/decisions.ts'
+import type { RunState } from '#build-feature/run-state.ts'
+import { visualVerifyRecordOf } from '#build-feature/visual-verify.ts'
 
 const exec = promisify(execFile)
 

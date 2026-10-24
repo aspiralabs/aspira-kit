@@ -1,1 +1,1 @@
-export * from '@aspiralabs/agent-common/lib/notion'
+export * from '@aspiralabs/ai/common/lib/notion'

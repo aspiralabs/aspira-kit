@@ -14,14 +14,14 @@ Research, parallel audits, reconciliation and preparation have no elapsed-time l
 
 Code assigns finding IDs, checks every disposition and evidence-gap resolution, applies exact original-text edits and renders artifacts. A missing finding, missing rule coverage, invalid edit, failed phase or missing UI evidence returns `incomplete`. An evidence gap nobody closed does not (KIT-53): it is listed under "Evidence gaps left open" in `trace/findings.md` and `trace/checks.md` for the human approving the spec. Unresolved product choices return `needs-author`. `ready` means the review checks passed, not that a human approved the spec or its tests were run. Semantic evidence quality remains a model judgment; deterministic checks cannot prove that a proposed fix resolves a business issue.
 
-`agent/lib` is exported as `@aspiralabs/spec-reviewer/lib/*`. The spec writer (`packages/agents/spec-writer`) runs its review phases through `pipeline`, `review` and `models`, so a change to those modules changes both agents; run both packages' tests.
+`agent/lib` is exported as `@aspiralabs/ai/spec-reviewer/lib/*`. The spec writer (`packages/ai/spec-writer`) runs its review phases through `pipeline`, `review` and `models`, so a change to those modules changes both agents; run both packages' tests.
 
 ## Run
 
 Node 24+, dependencies installed with `pnpm install`. The direct CLI needs no Docker or eve server. `pnpm review` loads the shared `.env.local` and optional package `.env.development.local` for MCP/model settings. It accepts a local Git repository and a complete required-guidelines markdown snapshot. The snapshot is loaded once and included in every review context; repo data is indexed once, with paths and line numbers available to read-only tools.
 
 ```bash
-cd packages/agents/spec-reviewer
+cd packages/ai/spec-reviewer
 pnpm review \
   /absolute/spec.md /absolute/repository /absolute/REQUIRED.md /absolute/output
 ```
@@ -38,7 +38,7 @@ Without a supplied snapshot, the eve router calls the existing `load-knowledge` 
 
 ## Calling skill
 
-None since KIT-48. `/aspira-spec-writer` runs this pipeline: on its draft from Ready: Idea, and again on the answered spec from In Review: Spec. See `packages/agents/spec-writer`.
+None since KIT-48. `/aspira-spec-writer` runs this pipeline: on its draft from Ready: Idea, and again on the answered spec from In Review: Spec. See `packages/ai/spec-writer`.
 
 ## MCP and UI
 

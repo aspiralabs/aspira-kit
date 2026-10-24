@@ -5,8 +5,8 @@ import { execFile } from 'node:child_process'
 import { stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { renderPacket } from '@aspiralabs/agent-common/lib/packet'
-import type { StepName } from '#src/route.ts'
+import { renderPacket } from '@aspiralabs/ai/common/lib/packet'
+import type { StepName } from '#build-feature/route.ts'
 
 const exec = promisify(execFile)
 

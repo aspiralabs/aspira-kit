@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
-import { readRunStatus } from '@aspiralabs/agent-common/lib/run-status'
+import { readRunStatus } from '@aspiralabs/ai/common/lib/run-status'
 
 // The separate-process implementor (implementor.sh's RUNNER) captures the whole invoke run into a
 // log file and greps it for a bare status line (implementor.sh:262-271). This is the same idea

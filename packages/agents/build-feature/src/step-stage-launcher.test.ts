@@ -14,8 +14,8 @@ import { tmpdir } from 'node:os'
 import { STEP_SKILLS } from './driver.test-helper.ts'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { nextStage, type DriverInput } from '#src/driver.ts'
-import { runStateSchema, stateDirOf, writeRunState } from '#src/run-state.ts'
+import { nextStage, type DriverInput } from '#build-feature/driver.ts'
+import { runStateSchema, stateDirOf, writeRunState } from '#build-feature/run-state.ts'
 
 const NOW = '2026-10-15T00:00:00.000Z'
 const temps: string[] = []

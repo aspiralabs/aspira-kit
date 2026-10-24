@@ -11,8 +11,8 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { parseNextAction, writeProgressNote } from '@aspiralabs/agent-common/lib/progress-note'
-import { APPROVER, cleanup, ID, project, RESUME, TITLE, writeStepExport, type Project, type Result } from '#src/driver.test-helper.ts'
+import { parseNextAction, writeProgressNote } from '@aspiralabs/ai/common/lib/progress-note'
+import { APPROVER, cleanup, ID, project, RESUME, TITLE, writeStepExport, type Project, type Result } from '#build-feature/driver.test-helper.ts'
 
 afterAll(cleanup)
 

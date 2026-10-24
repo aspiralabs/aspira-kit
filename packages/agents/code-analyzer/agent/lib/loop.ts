@@ -1,4 +1,4 @@
-import type { ReasonCode } from '@aspiralabs/agent-common/lib/run-status'
+import type { ReasonCode } from '@aspiralabs/ai/common/lib/run-status'
 import type { Analyzer } from './analyzers.ts'
 import { batch, errors, sameSet, type Batch, type Diagnostic } from './diagnostics.ts'
 import type { Executor } from './executor.ts'

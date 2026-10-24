@@ -9,10 +9,10 @@
 // number, a time or a closed-set word; the free-text fields of a record (command, resultLine,
 // labels, nonce) are never read.
 
-import { spanName, type SpanAttributes, type SpanInput, type SpanUsage } from '@aspiralabs/agent-common/lib/telemetry'
-import { subagentSpans, USAGE_SCOPES, type SessionUsage } from '@aspiralabs/agent-common/lib/telemetry-sources'
-import { isStep, STEPS } from '#src/route.ts'
-import type { PhaseRecord, RunState, StepRecord, Usage } from '#src/run-state.ts'
+import { spanName, type SpanAttributes, type SpanInput, type SpanUsage } from '@aspiralabs/ai/common/lib/telemetry'
+import { subagentSpans, USAGE_SCOPES, type SessionUsage } from '@aspiralabs/ai/common/lib/telemetry-sources'
+import { isStep, STEPS } from '#build-feature/route.ts'
+import type { PhaseRecord, RunState, StepRecord, Usage } from '#build-feature/run-state.ts'
 
 /** The parts of a run state the tree is built from (the Build Summary's state carries at least these). */
 export type TelemetryState = Pick<RunState, 'runs' | 'steps'>

@@ -20,11 +20,11 @@ import {
   parseRequired,
   resolveRequired,
   type LoadedPage,
-} from '@aspiralabs/agent-common/lib/knowledge'
-import { parseProvenance, verifySnapshot } from '@aspiralabs/agent-common/lib/knowledge-snapshot'
-import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
-import { notionToken } from '@aspiralabs/agent-common/lib/notion-token'
-import { KnowledgePrerequisiteError } from '@aspiralabs/agent-common/lib/ticket-driver'
+} from '@aspiralabs/ai/common/lib/knowledge'
+import { parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
+import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
+import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 
 /** load-knowledge's file names, without its sandbox prefix. */
 export const INDEX_NAME = 'INDEX.md'

@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
-import { notionReader } from '@aspiralabs/agent-common/lib/notion'
+import { notionReader } from '@aspiralabs/ai/common/lib/notion'
 
 const { root, read } = notionReader(process.env.NOTION_TOKEN ?? '', process.env.KNOWLEDGE_PAGE ?? '')
 

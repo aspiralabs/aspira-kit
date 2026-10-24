@@ -7,8 +7,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { ensureKnowledge, knowledgeFlag, knowledgeRecordOf } from '#src/knowledge.ts'
-import { emptyRunState } from '#src/run-state.ts'
+import { ensureKnowledge, knowledgeFlag, knowledgeRecordOf } from '#build-feature/knowledge.ts'
+import { emptyRunState } from '#build-feature/run-state.ts'
 
 type PageDef = { title: string; markdown: string }
 const fakeId = (n: number) => `${'0'.repeat(31)}${n}`.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, '$1-$2-$3-$4-$5')

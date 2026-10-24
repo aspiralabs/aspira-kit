@@ -1,1 +1,1 @@
-export * from '@aspiralabs/agent-common/lib/run-analysis'
+export * from '@aspiralabs/ai/common/lib/run-analysis'

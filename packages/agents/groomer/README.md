@@ -17,7 +17,7 @@ Results go to `.work/<id>-<slug>/groom/`: `round-<n>.json`, `idea-summary.md` on
 Node 24+, `pnpm install`, and the shared `../.env.local` (symlinked as `.env.local`).
 
 ```bash
-cd packages/agents/groomer
+cd packages/ai/groomer
 pnpm groom /absolute/.work/<id>-<slug> /absolute/repository /absolute/REQUIRED.md
 ```
 

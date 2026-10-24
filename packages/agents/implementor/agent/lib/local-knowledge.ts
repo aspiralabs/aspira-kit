@@ -19,10 +19,10 @@ import {
   renderRequired,
   resolveRequired,
   type LoadedPage,
-} from '@aspiralabs/agent-common/lib/knowledge'
-import { parseProvenance, verifySnapshot } from '@aspiralabs/agent-common/lib/knowledge-snapshot'
-import { notionToken } from '@aspiralabs/agent-common/lib/notion-token'
-import { KnowledgePrerequisiteError } from '@aspiralabs/agent-common/lib/ticket-driver'
+} from '@aspiralabs/ai/common/lib/knowledge'
+import { parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
+import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 
 /** The pages the agent's configuration names: the index page (or null when unset) and the required entries. */
 export type KnowledgeConfig = { indexPage: string | null; required: string[]; from: string[] }

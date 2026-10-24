@@ -16,8 +16,8 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { writeGroomRecord } from '@aspiralabs/agent-common/lib/groom-record'
-import { renderTicketMd } from '@aspiralabs/agent-common/lib/ticket'
+import { writeGroomRecord } from '@aspiralabs/ai/common/lib/groom-record'
+import { renderTicketMd } from '@aspiralabs/ai/common/lib/ticket'
 import { runLocal, type LocalDeps } from './local.ts'
 
 type FutureDeps = LocalDeps & { fetch?: typeof fetch; api?: string }

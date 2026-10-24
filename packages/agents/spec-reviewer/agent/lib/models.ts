@@ -1,6 +1,6 @@
 import { generateText, Output, hasToolCall, tool, stepCountIs, type ToolSet } from 'ai'
-import { gateway, streamStructured } from '@aspiralabs/agent-common/lib/gateway'
-import { CLOUD_RESEARCH_TOOLS } from '@aspiralabs/agent-common/lib/research-rule'
+import { gateway, streamStructured } from '@aspiralabs/ai/common/lib/gateway'
+import { CLOUD_RESEARCH_TOOLS } from '@aspiralabs/ai/common/lib/research-rule'
 import type { z } from 'zod'
 import type { Call } from './pipeline.ts'
 import { reviewSchema, synthesisSchema, systemPrompt } from './review.ts'

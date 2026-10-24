@@ -8,8 +8,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { z } from 'zod'
-import { GAPS, TIME_BASES, TOOL_COUNT_BASES, USAGE_SCOPE_VALUES } from '@aspiralabs/agent-common/lib/telemetry'
-import { buildStopSchema } from '#src/build-status.ts'
+import { GAPS, TIME_BASES, TOOL_COUNT_BASES, USAGE_SCOPE_VALUES } from '@aspiralabs/ai/common/lib/telemetry'
+import { buildStopSchema } from '#build-feature/build-status.ts'
 
 /** Where the driver keeps its files inside the ticket's working folder. */
 export const stateDirOf = (folder: string): string => join(folder, '.local', 'build-feature')

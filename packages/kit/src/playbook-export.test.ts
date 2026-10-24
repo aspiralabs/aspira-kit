@@ -1,12 +1,12 @@
 // The Playbook is the one source the "what to run next" table and the installed build-feature
 // skill both read from. This imports it the way an installed package would: by the kit package's
 // own name, through its public `./playbook` export, not a relative path into src/. It only runs
-// after `pnpm --filter @aspiralabs/kit build` (the export resolves against dist, and self-reference
+// after `pnpm --filter @aspiralabs/ai build:kit` (the export resolves against dist, and self-reference
 // needs the package's own "exports" map).
 import { describe, expect, it } from 'vitest'
-import { PLAYBOOK_STEPS, commandFor, nextStep } from '@aspiralabs/kit/playbook'
+import { PLAYBOOK_STEPS, commandFor, nextStep } from '@aspiralabs/ai/playbook'
 
-describe('the @aspiralabs/kit/playbook export', () => {
+describe('the @aspiralabs/ai/playbook export', () => {
   it('resolves nextStep, commandFor and PLAYBOOK_STEPS by the package name', () => {
     expect(commandFor(nextStep('Ready: Spec')!, 'KIT-11')).toBe('/aspira-planner KIT-11')
     expect(nextStep('Shortlist')?.command).toBeNull()

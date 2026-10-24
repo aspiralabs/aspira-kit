@@ -28,7 +28,7 @@ Warnings are reported, not fixed, unless `STATIC_ANALYSIS_WARNINGS=fix` or `fixW
 ## Run
 
 ```bash
-cd packages/agents/code-analyzer
+cd packages/ai/code-analyzer
 pnpm analyze /absolute/repository [--knowledge DIR | --guidelines FILE] [--output DIR] [--max-rounds N] [--max-cost USD] [--fix-warnings]   # local only, no eve or Docker
 pnpm exec eve invoke "Run static analysis on /absolute/repository"
 pnpm exec eve invoke "Run static analysis on owner/name and open a pull request"

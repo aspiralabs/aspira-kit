@@ -10,10 +10,10 @@
 
 import { join } from 'node:path'
 import { z } from 'zod'
-import type { Phase, PhaseContext, PhaseResult } from '#src/driver.ts'
-import { MERGE_MOVE } from '#src/route.ts'
-import type { Pending, RunState } from '#src/run-state.ts'
-import { GH_ARGS, shown, system, type System } from '#src/system.ts'
+import type { Phase, PhaseContext, PhaseResult } from '#build-feature/driver.ts'
+import { MERGE_MOVE } from '#build-feature/route.ts'
+import type { Pending, RunState } from '#build-feature/run-state.ts'
+import { GH_ARGS, shown, system, type System } from '#build-feature/system.ts'
 
 const IN_REVIEW = 'In Review: Implementation'
 

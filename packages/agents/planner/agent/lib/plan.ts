@@ -1,17 +1,17 @@
 import { z } from 'zod'
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
-import { decisionSchema, parseTickedDecisions, renderDecisions, type Answer, type DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
-import { mergeDecisions, planSchema, problemSeverity, renderPlan, touchesUi, type Plan } from '@aspiralabs/agent-common/lib/plan'
-import { allowedPath } from '@aspiralabs/agent-common/lib/repository'
-import { countBySeverity, findingsHeader, severityHeading, sortBySeverity } from '@aspiralabs/agent-common/lib/severity'
-import { specFeatures } from '@aspiralabs/agent-common/lib/spec'
+import { decisionSchema, parseTickedDecisions, renderDecisions, type Answer, type DecisionRecord } from '@aspiralabs/ai/common/lib/decisions'
+import { mergeDecisions, planSchema, problemSeverity, renderPlan, touchesUi, type Plan } from '@aspiralabs/ai/common/lib/plan'
+import { allowedPath } from '@aspiralabs/ai/common/lib/repository'
+import { countBySeverity, findingsHeader, severityHeading, sortBySeverity } from '@aspiralabs/ai/common/lib/severity'
+import { specFeatures } from '@aspiralabs/ai/common/lib/spec'
 
 const text = z.string().trim().min(1)
 /** A product question for the spec's author: the question, the options, the recommended one and why it is theirs. */
 export { decisionSchema }
 // planSchema, Plan, renderPlan, mergeDecisions and problemSeverity now live in
-// @aspiralabs/agent-common/lib/plan (the implementor's plan-block recovery needs them without
+// @aspiralabs/ai/common/lib/plan (the implementor's plan-block recovery needs them without
 // depending on this package); re-exported here unchanged so every existing import of './plan.ts' keeps working.
 export { planSchema, renderPlan, mergeDecisions, problemSeverity, touchesUi }
 export type { Plan }

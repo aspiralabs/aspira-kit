@@ -8,7 +8,7 @@
 // Nothing in this file restates their rules.
 
 import { execFile } from 'node:child_process'
-import { RESEARCH_RULE, sessionResearchTools } from '@aspiralabs/agent-common/lib/research-rule'
+import { RESEARCH_RULE, sessionResearchTools } from '@aspiralabs/ai/common/lib/research-rule'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
@@ -16,13 +16,13 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { z } from 'zod'
-import { changedApps } from '@aspiralabs/agent-common/lib/changed-apps'
-import type { SessionModel } from '@aspiralabs/agent-common/lib/session-model'
-import { readRunStatus, type ReasonCode } from '@aspiralabs/agent-common/lib/run-status'
-import { parseTicketMd, TICKET_FILE } from '@aspiralabs/agent-common/lib/ticket'
+import { changedApps } from '@aspiralabs/ai/common/lib/changed-apps'
+import type { SessionModel } from '@aspiralabs/ai/common/lib/session-model'
+import { readRunStatus, type ReasonCode } from '@aspiralabs/ai/common/lib/run-status'
+import { parseTicketMd, TICKET_FILE } from '@aspiralabs/ai/common/lib/ticket'
 import { dependenciesAdded, renderDependencies, type DependencyReport } from './dependencies.ts'
-import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
-import { KnowledgePrerequisiteError } from '@aspiralabs/agent-common/lib/ticket-driver'
+import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
+import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 import {
   agentEnv,
   hasProvenance,

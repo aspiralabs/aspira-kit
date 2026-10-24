@@ -1,7 +1,7 @@
 // KIT-36: the reviewed spec carries every decided author decision under ## Decisions, in the form the
 // planner's settled-decisions rule reads, so the next step never raises them again.
 import { describe, expect, it } from 'vitest'
-import { parseDecisionsList } from '@aspiralabs/agent-common/lib/decisions'
+import { parseDecisionsList } from '@aspiralabs/ai/common/lib/decisions'
 import { withSettledDecisions } from './report.ts'
 
 const SPEC = '# Feature\n\n## Intent\n\nPersist a named item.\n\n## Acceptance criteria\n\n### Features\n\n- [ ] F1: Save an item once.\n'

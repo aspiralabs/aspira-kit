@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { localStateDir } from '@aspiralabs/agent-common/lib/ticket-flow'
+import { localStateDir } from '@aspiralabs/ai/common/lib/ticket-flow'
 
 /** The child page the groomer keeps on the card. */
 export const GROOM_PAGE = 'Grooming Decisions'

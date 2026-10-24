@@ -1,5 +1,5 @@
-import { connectReadTools } from '@aspiralabs/agent-common/lib/mcp'
-import { childPagesOf } from '@aspiralabs/agent-common/lib/knowledge'
+import { connectReadTools } from '@aspiralabs/ai/common/lib/mcp'
+import { childPagesOf } from '@aspiralabs/ai/common/lib/knowledge'
 const controller = new AbortController()
 process.once('SIGINT', () => controller.abort(new Error('Cancelled')))
 process.once('SIGTERM', () => controller.abort(new Error('Cancelled')))

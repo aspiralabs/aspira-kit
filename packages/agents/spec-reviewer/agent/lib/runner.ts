@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { notionReadToolsFromEnv } from '@aspiralabs/agent-common/lib/notion-read'
+import { notionReadToolsFromEnv } from '@aspiralabs/ai/common/lib/notion-read'
 import { readFile } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import { writeArtifacts } from './artifacts.ts'

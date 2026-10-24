@@ -11,7 +11,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { PrChecks } from '@aspiralabs/agent-common/lib/pr-step'
+import type { PrChecks } from '@aspiralabs/ai/common/lib/pr-step'
 
 export type CommandResult = { code: number; stdout: string; stderr: string }
 /** Where a command runs: the checkout, and the environment whose PATH finds git and gh. */

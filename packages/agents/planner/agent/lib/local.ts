@@ -9,13 +9,13 @@
 // code the agent uses.
 
 import { createHash } from 'node:crypto'
-import { RESEARCH_RULE, sessionResearchTools } from '@aspiralabs/agent-common/lib/research-rule'
+import { RESEARCH_RULE, sessionResearchTools } from '@aspiralabs/ai/common/lib/research-rule'
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { writeArtifacts } from '@aspiralabs/agent-common/lib/artifacts'
-import type { DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
-import type { SessionModel } from '@aspiralabs/agent-common/lib/session-model'
+import { writeArtifacts } from '@aspiralabs/ai/common/lib/artifacts'
+import type { DecisionRecord } from '@aspiralabs/ai/common/lib/decisions'
+import type { SessionModel } from '@aspiralabs/ai/common/lib/session-model'
 import { z } from 'zod'
 import { fingerprintKnowledge, KnowledgeBlocked, knowledgeConfig, knowledgeFiles, knowledgeSource, loadKnowledge, REQUIRED_NAME, verifyGuidelines, type KnowledgeConfig, type KnowledgeFile } from './local-knowledge.ts'
 import { planSchema, readAnswers, researchSchema, type Plan, type Research } from './plan.ts'

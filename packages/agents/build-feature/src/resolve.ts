@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { z } from 'zod'
-import type { Card } from '#src/run-state.ts'
+import type { Card } from '#build-feature/run-state.ts'
 
 const exec = promisify(execFile)
 
@@ -62,7 +62,7 @@ export function cardDifferences(expected: Pick<Card, 'status' | 'pr' | 'dev'>, a
 
 /** agent-common's resolve-ticket script, which reads the board with NOTION_TOKEN. */
 function resolveScript(): string {
-  const board = fileURLToPath(import.meta.resolve('@aspiralabs/agent-common/lib/board'))
+  const board = fileURLToPath(import.meta.resolve('@aspiralabs/ai/common/lib/board'))
   return join(dirname(board), '..', '..', 'scripts', 'resolve-ticket.ts')
 }
 

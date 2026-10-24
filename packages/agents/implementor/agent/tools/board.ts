@@ -1,1 +1,1 @@
-export { default } from '@aspiralabs/agent-common/tools/board'
+export { default } from '@aspiralabs/ai/common/tools/board'

@@ -7,7 +7,7 @@ Converts a reviewed business spec into a concrete implementation plan. Research 
 Use Node 24+ and install workspace dependencies with `pnpm install`.
 
 ```bash
-pnpm -C /absolute/ASPIRA_KIT/packages/agents/planner plan \
+pnpm -C /absolute/ASPIRA_KIT/packages/ai/planner plan \
   /absolute/feature/spec.reviewed/spec.reviewed.md \
   /absolute/repository /absolute/REQUIRED.md
 ```
@@ -17,7 +17,7 @@ An optional fourth argument selects an output directory. The default is `plan.re
 The eve entry point accepts the same inputs:
 
 ```bash
-pnpm -C /absolute/ASPIRA_KIT/packages/agents/planner exec eve invoke \
+pnpm -C /absolute/ASPIRA_KIT/packages/ai/planner exec eve invoke \
   "Plan implementation of /absolute/feature/spec.reviewed/spec.reviewed.md against /absolute/repository; required guidelines snapshot: /absolute/REQUIRED.md"
 ```
 

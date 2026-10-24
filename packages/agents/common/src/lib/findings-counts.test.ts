@@ -2,7 +2,7 @@
 // (F27; KIT-11 plan P2 T7). Pure: text in, counts out.
 
 import { describe, expect, it } from 'vitest'
-import { countsFromFindings } from '@aspiralabs/agent-common/lib/findings-counts'
+import { countsFromFindings } from '@aspiralabs/ai/common/lib/findings-counts'
 
 describe('counting findings by severity (T7)', () => {
   const findings = [

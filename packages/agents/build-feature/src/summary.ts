@@ -9,17 +9,17 @@
 // composed document is never redacted whole, which would also mangle its own headings, code
 // fences and Mermaid blocks.
 
-import { compareIds } from '@aspiralabs/agent-common/lib/decisions'
-import { redact, tail } from '@aspiralabs/agent-common/lib/redact'
-import { allowedPath } from '@aspiralabs/agent-common/lib/repository'
-import { SEVERITIES } from '@aspiralabs/agent-common/lib/severity'
-import { orderedTaken } from '#src/decisions.ts'
-import { gateSummaryLines } from '#src/gate.ts'
-import { visualVerifySummaryLines } from '#src/visual-verify.ts'
-import { MODELS, type ModelName } from '#src/models.ts'
-import { modeLine, RESUME, STEPS } from '#src/route.ts'
-import type { RunState, StepRecord } from '#src/run-state.ts'
-import { tableRows, type Cell } from '#src/telemetry.ts'
+import { compareIds } from '@aspiralabs/ai/common/lib/decisions'
+import { redact, tail } from '@aspiralabs/ai/common/lib/redact'
+import { allowedPath } from '@aspiralabs/ai/common/lib/repository'
+import { SEVERITIES } from '@aspiralabs/ai/common/lib/severity'
+import { orderedTaken } from '#build-feature/decisions.ts'
+import { gateSummaryLines } from '#build-feature/gate.ts'
+import { visualVerifySummaryLines } from '#build-feature/visual-verify.ts'
+import { MODELS, type ModelName } from '#build-feature/models.ts'
+import { modeLine, RESUME, STEPS } from '#build-feature/route.ts'
+import type { RunState, StepRecord } from '#build-feature/run-state.ts'
+import { tableRows, type Cell } from '#build-feature/telemetry.ts'
 
 export type BuildSummaryTicket = { id: string; title: string; url: string }
 /** A run state as a caller hands it to the renderer: the fields this module never reads (card, overrides, queue, afterAsks, phases) are optional, since a run that stopped before its first resolution, or a hand-built fixture, may not carry them. */

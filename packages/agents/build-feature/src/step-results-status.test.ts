@@ -12,9 +12,9 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { routeStatus, type RouteFacts } from '#src/route.ts'
-import { emptyRunState, type RunState } from '#src/run-state.ts'
-import { readStepResult, type ResultPaths, type StepReport } from '#src/step-results.ts'
+import { routeStatus, type RouteFacts } from '#build-feature/route.ts'
+import { emptyRunState, type RunState } from '#build-feature/run-state.ts'
+import { readStepResult, type ResultPaths, type StepReport } from '#build-feature/step-results.ts'
 
 const NOW = '2026-10-15T00:00:00.000Z'
 

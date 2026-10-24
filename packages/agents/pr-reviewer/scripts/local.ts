@@ -1,10 +1,10 @@
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
-import { agentVersion, recordAgentVersion } from '@aspiralabs/agent-common/lib/agent-version'
-import { exitCodeFor } from '@aspiralabs/agent-common/lib/run-status'
-import { TicketArgumentError } from '@aspiralabs/agent-common/lib/ticket'
-import { afterRun, attachArg, beforeRun, handleRunError, sessionUsageStep, verifyRun, UsageError, type DriverTicketArgs } from '@aspiralabs/agent-common/lib/ticket-driver'
-import { FlowRefused, writeBoardTrace } from '@aspiralabs/agent-common/lib/ticket-flow'
+import { agentVersion, recordAgentVersion } from '@aspiralabs/ai/common/lib/agent-version'
+import { exitCodeFor } from '@aspiralabs/ai/common/lib/run-status'
+import { TicketArgumentError } from '@aspiralabs/ai/common/lib/ticket'
+import { afterRun, attachArg, beforeRun, handleRunError, sessionUsageStep, verifyRun, UsageError, type DriverTicketArgs } from '@aspiralabs/ai/common/lib/ticket-driver'
+import { FlowRefused, writeBoardTrace } from '@aspiralabs/ai/common/lib/ticket-flow'
 import { runLocal } from '../agent/lib/local.ts'
 
 // One step of a --local review. The ticket comes first: the `board` stage (resolve, pull) is printed

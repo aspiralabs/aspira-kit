@@ -1,1 +1,1 @@
-export * from '@aspiralabs/agent-common/lib/mcp'
+export * from '@aspiralabs/ai/common/lib/mcp'

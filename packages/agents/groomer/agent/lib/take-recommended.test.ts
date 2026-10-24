@@ -10,9 +10,9 @@ import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { beforeEach, expect, it, vi } from 'vitest'
-import { renderGroomPage } from '@aspiralabs/agent-common/lib/decisions'
-import { readGroomRecord, writeGroomRecord } from '@aspiralabs/agent-common/lib/groom-record'
-import { renderTicketMd } from '@aspiralabs/agent-common/lib/ticket'
+import { renderGroomPage } from '@aspiralabs/ai/common/lib/decisions'
+import { readGroomRecord, writeGroomRecord } from '@aspiralabs/ai/common/lib/groom-record'
+import { renderTicketMd } from '@aspiralabs/ai/common/lib/ticket'
 import { runLocal, type LocalInput } from './local.ts'
 
 // The --local driver never calls Notion; an empty token makes sure no path through it can.

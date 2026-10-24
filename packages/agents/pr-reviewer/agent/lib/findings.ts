@@ -3,8 +3,8 @@
 // file, the PR comment and the counts the verdict is computed from always agree
 // (specs/agents-human-lists.md F1, F2). Pure: text in, text out.
 
-import { SEVERITIES, countsLine, severityHeading, severityRank, totalFindings, type Severity } from '@aspiralabs/agent-common/lib/severity'
-import { countsFromFindings } from '@aspiralabs/agent-common/lib/findings-counts'
+import { SEVERITIES, countsLine, severityHeading, severityRank, totalFindings, type Severity } from '@aspiralabs/ai/common/lib/severity'
+import { countsFromFindings } from '@aspiralabs/ai/common/lib/findings-counts'
 
 export { countsFromFindings }
 

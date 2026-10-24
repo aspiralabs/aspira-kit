@@ -12,11 +12,11 @@ import { createHash } from 'node:crypto'
 import { readFile, readdir } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseEnv } from 'node:util'
-import { INDEX_FILE, KNOWLEDGE_ENV, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED_FILE, pageIdFrom, parseRequired } from '@aspiralabs/agent-common/lib/knowledge'
-import { parseProvenance, verifySnapshot } from '@aspiralabs/agent-common/lib/knowledge-snapshot'
-import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
-import { notionToken } from '@aspiralabs/agent-common/lib/notion-token'
-import { KnowledgePrerequisiteError } from '@aspiralabs/agent-common/lib/ticket-driver'
+import { INDEX_FILE, KNOWLEDGE_ENV, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED_FILE, pageIdFrom, parseRequired } from '@aspiralabs/ai/common/lib/knowledge'
+import { parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
+import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
+import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 
 /** Environment variables as the agent sees them. */
 export type Env = Record<string, string | undefined>

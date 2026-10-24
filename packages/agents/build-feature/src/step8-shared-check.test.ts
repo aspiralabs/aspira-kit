@@ -16,9 +16,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterAll, describe, expect, it } from 'vitest'
-import type { PhaseContext } from '#src/driver.ts'
-import { emptyRunState, type RunState } from '#src/run-state.ts'
-import { step8Phase } from '#src/step8.ts'
+import type { PhaseContext } from '#build-feature/driver.ts'
+import { emptyRunState, type RunState } from '#build-feature/run-state.ts'
+import { step8Phase } from '#build-feature/step8.ts'
 
 const exec = promisify(execFile)
 

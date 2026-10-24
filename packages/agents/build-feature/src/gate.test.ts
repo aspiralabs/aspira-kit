@@ -10,8 +10,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterAll, describe, expect, it } from 'vitest'
-import { changedGateScripts, credentialNames, fallbackGate, findGate, gateCommandsIn, withoutCredentials } from '#src/gate.ts'
-import { packageManagerOf } from '#src/system.ts'
+import { changedGateScripts, credentialNames, fallbackGate, findGate, gateCommandsIn, withoutCredentials } from '#build-feature/gate.ts'
+import { packageManagerOf } from '#build-feature/system.ts'
 
 const temps: string[] = []
 afterAll(async () => {

@@ -7,7 +7,7 @@ import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { renderBuildSummary } from '#src/summary.ts'
+import { renderBuildSummary } from '#build-feature/summary.ts'
 
 const temps: string[] = []
 afterAll(async () => {

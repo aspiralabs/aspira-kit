@@ -1,1 +1,1 @@
-export { default } from '@aspiralabs/agent-common/tools/load-knowledge'
+export { default } from '@aspiralabs/ai/common/tools/load-knowledge'

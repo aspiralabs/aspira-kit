@@ -17,7 +17,7 @@ Default models: Claude Opus 5.5 for explore, draft and review research; OpenAI G
 Node 24+, `pnpm install`, and the shared `../.env.local` (symlinked as `.env.local`).
 
 ```bash
-cd packages/agents/spec-writer
+cd packages/ai/spec-writer
 pnpm write /absolute/idea.md /absolute/repository /absolute/REQUIRED.md [/absolute/output]
 ```
 

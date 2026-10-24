@@ -18,4 +18,4 @@ export default next
 export { default } from '@aspiralabs/config/prettier'
 ```
 
-The engineering rules live in Notion (Engineering Central). This package carries no agent files; the `AGENTS.md` block, the MCP config and the session hooks are written by `@aspiralabs/kit`.
+The engineering rules live in Notion (Engineering Central). This package carries no agent files; the `AGENTS.md` block, the MCP config and the session hooks are written by `@aspiralabs/ai` (`kit init`).

@@ -1,4 +1,4 @@
-import { SETTLED_DECISIONS_RULE, applyAnswers, normalizeQuestion, openDecisions, parseDecisionsList, takenDecision, type Answer, type DecisionRecord, type DecisionsListItem } from '@aspiralabs/agent-common/lib/decisions'
+import { SETTLED_DECISIONS_RULE, applyAnswers, normalizeQuestion, openDecisions, parseDecisionsList, takenDecision, type Answer, type DecisionRecord, type DecisionsListItem } from '@aspiralabs/ai/common/lib/decisions'
 import { applyEdits, openGapsOf, checkContract, checkedRuleIds, lenses, lensRules, reviewSchema, ruleIds, synthesisSchema, validateReview, type Finding, type Review, type Synthesis, type Lens } from './review.ts'
 
 export type Request = { phase: string; prompt: string; signal: AbortSignal }

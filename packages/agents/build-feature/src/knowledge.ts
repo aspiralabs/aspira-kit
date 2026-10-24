@@ -11,12 +11,12 @@
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { z } from 'zod'
-import { KNOWLEDGE_ENV, parseRequired, REQUIRED_ENV } from '@aspiralabs/agent-common/lib/knowledge'
-import { compareSnapshot } from '@aspiralabs/agent-common/lib/knowledge-snapshot'
-import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/agent-common/lib/knowledge-walk'
-import { notionToken } from '@aspiralabs/agent-common/lib/notion-token'
-import type { StepName } from '#src/route.ts'
-import type { RunState } from '#src/run-state.ts'
+import { KNOWLEDGE_ENV, parseRequired, REQUIRED_ENV } from '@aspiralabs/ai/common/lib/knowledge'
+import { compareSnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
+import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
+import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import type { StepName } from '#build-feature/route.ts'
+import type { RunState } from '#build-feature/run-state.ts'
 
 export type Fetch = (url: string, init?: RequestInit) => Promise<Response>
 

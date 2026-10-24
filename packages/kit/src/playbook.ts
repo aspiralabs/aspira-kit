@@ -1,11 +1,11 @@
 // The Playbook: which step comes next for a ticket, from its Feature Board Status. `kit next` reads
 // it to answer "what is the next step", and `kit playbook` renders it as the markdown of the
 // "Playbook: what to run next" section of From Idea to Release in Notion, so the page and the
-// command cannot drift apart. The Status table itself lives in @aspiralabs/agent-common
-// (`src/lib/playbook.json`), read here as plain JSON, never agent-common's TypeScript (PATTERN-012),
+// command cannot drift apart. The Status table itself lives in @aspiralabs/ai/common
+// (`src/lib/playbook.json`), read here as plain JSON, never agent-common's TypeScript (NOVA1.1),
 // so the agents never depend on this CLI (NOVA1.1). The steps under the table are kit's own.
 import { z } from 'zod'
-import table from '@aspiralabs/agent-common/lib/playbook.json' with { type: 'json' }
+import table from '@aspiralabs/ai/common/lib/playbook.json' with { type: 'json' }
 
 /** One row of the Status table. `command` has `<ID>` where the ticket ID goes; null when the step
  * is done by hand or has no single command (its `manual` text, when given, replaces "by hand" in

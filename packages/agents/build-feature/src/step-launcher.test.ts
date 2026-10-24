@@ -5,9 +5,9 @@
 // `wait` line). This file pins that translation against every Playbook row that has a command, so
 // it fails for that reason until P23 lands it.
 
-import { PLAYBOOK } from '@aspiralabs/kit/playbook'
+import { PLAYBOOK } from '@aspiralabs/ai/playbook'
 import { describe, expect, it } from 'vitest'
-import { stepCommand, type StepRoute } from '#src/route.ts'
+import { stepCommand, type StepRoute } from '#build-feature/route.ts'
 
 const ID = 'KIT-2'
 const APP = 'apps/web'

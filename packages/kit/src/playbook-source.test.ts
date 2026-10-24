@@ -16,10 +16,10 @@ describe("kit's Playbook table is agent-common's playbook.json (NOVA1.1)", () =>
     expect(PLAYBOOK).toEqual(rows)
   })
 
-  it('playbook.ts keeps no row of its own and imports the table from @aspiralabs/agent-common', () => {
+  it('playbook.ts keeps no row of its own and imports the table from @aspiralabs/ai/common', () => {
     const source = readFileSync(join(SRC, 'playbook.ts'), 'utf8')
     expect(source).not.toMatch(/statuses: \[/)
-    expect(source).toContain("from '@aspiralabs/agent-common/lib/playbook.json'")
+    expect(source).toContain("from '@aspiralabs/ai/common/lib/playbook.json'")
   })
 
   it('nextStep and commandFor read that table', () => {

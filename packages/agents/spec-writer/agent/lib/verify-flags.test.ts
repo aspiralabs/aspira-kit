@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { renderTicketMd, workFolderName } from '@aspiralabs/agent-common/lib/ticket'
+import { renderTicketMd, workFolderName } from '@aspiralabs/ai/common/lib/ticket'
 import { afterEach, expect, it } from 'vitest'
 
 const exec = promisify(execFile)

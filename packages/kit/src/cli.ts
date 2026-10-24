@@ -6,16 +6,19 @@
 // kit cleanup [--yes] [--only <path>...] [--app <dir>] [--cwd <path>]
 // kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
 // kit playbook
-import { resolve } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { existsSync, realpathSync } from 'node:fs'
+import { join, resolve, sep } from 'node:path'
 import { createInterface } from 'node:readline/promises'
-import { resolveProjectRoot, writeAspira } from './aspira.js'
+import { appRoot, readApp, resolveProjectRoot, writeAspira } from './aspira.js'
 import { cleanup, type Ask } from './cleanup.js'
 import { parseCleanupArgs, parseWorktreeArgs } from './command-args.js'
 import { doctor } from './doctor.js'
 import { next } from './next.js'
 import { renderPlaybook } from './playbook.js'
-import { initNext } from './stacks/next.js'
+import { initNext, KIT_VERSION } from './stacks/next.js'
 import { addAuthNext } from './stacks/next-auth.js'
+import { checkVersion } from './version-check.js'
 import { worktree } from './worktree.js'
 
 const argv = process.argv.slice(2)
@@ -136,8 +139,55 @@ function terminalAsk(): Ask | undefined {
   }
 }
 
+/**
+ * Inside a project whose app has its own kit (node_modules/.bin/kit), a global kit hands over to that copy, so
+ * the project's pinned version runs. Returns the copy's exit code, or undefined to carry on with this copy.
+ */
+function projectCopyExit(): number | undefined {
+  if (process.env.ASPIRA_KIT_REEXEC !== undefined || command === 'version-check') return undefined
+  try {
+    const root = explicitCwd ?? resolveProjectRoot(process.cwd())
+    if (!existsSync(join(root, 'aspira.json'))) return undefined
+    const appDir = appRoot(root, typeof appFlag === 'string' ? appFlag : readApp(root))
+    const bin = join(appDir, 'node_modules', '.bin', 'kit')
+    if (!existsSync(bin) || process.argv[1] === undefined) return undefined
+    const running = realpathSync(process.argv[1])
+    if (running === realpathSync(bin)) return undefined
+    for (const dir of [appDir, root]) {
+      const modules = join(dir, 'node_modules')
+      if (existsSync(modules) && running.startsWith(realpathSync(modules) + sep)) return undefined
+    }
+    const result = spawnSync(bin, argv, { stdio: 'inherit', env: { ...process.env, ASPIRA_KIT_REEXEC: '1' } })
+    if (result.error) return undefined
+    return result.status ?? 1
+  } catch {
+    return undefined
+  }
+}
+
+/** The daily upgrade notice, on stderr after the command's own output. Never changes anything else. */
+async function printNotice(): Promise<void> {
+  try {
+    if (KIT_VERSION === undefined) return
+    const notice = await checkVersion({ surface: 'kit', running: KIT_VERSION })
+    if (notice) process.stderr.write(`${notice}\n`)
+  } catch {
+    // the check is best effort
+  }
+}
+
 try {
-  process.exit(await main())
+  const handedOver = projectCopyExit()
+  if (handedOver !== undefined) process.exit(handedOver)
+  if (command === 'version-check') {
+    // The SessionStart hook's entry point: the notice on stdout, nothing else, always exit 0.
+    const notice = KIT_VERSION === undefined ? undefined : await checkVersion({ surface: 'hook', running: KIT_VERSION })
+    if (notice) process.stdout.write(`${notice}\n`)
+    process.exit(0)
+  }
+  const code = await main()
+  if (command !== 'playbook') await printNotice()
+  process.exit(code)
 } catch (err) {
   console.error(`error  ${err instanceof Error ? err.message : String(err)}`)
   process.exit(1)

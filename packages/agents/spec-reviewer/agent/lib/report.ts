@@ -4,8 +4,8 @@
 
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { parseTickedDecisions, renderDecisions, type Answer, type DecisionRecord } from '@aspiralabs/agent-common/lib/decisions'
-import { countBySeverity, findingsHeader, sortBySeverity } from '@aspiralabs/agent-common/lib/severity'
+import { parseTickedDecisions, renderDecisions, type Answer, type DecisionRecord } from '@aspiralabs/ai/common/lib/decisions'
+import { countBySeverity, findingsHeader, sortBySeverity } from '@aspiralabs/ai/common/lib/severity'
 import { openGapsOf, type Finding, type Gap, type Synthesis } from './review.ts'
 
 /** The findings in the order a human reads them: critical first; within a severity, the order they were confirmed. */

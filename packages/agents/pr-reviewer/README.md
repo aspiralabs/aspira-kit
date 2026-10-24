@@ -42,7 +42,7 @@ Seven model calls a round, all but one on Opus. A review that settles in two rou
 Needs Node 24 and a Vercel AI Gateway key in `.env.local` (copy `.env.example`). `GITHUB_TOKEN` in the environment for private repos and for API rate limits.
 
 ```bash
-KIT=/path/to/ASPIRA_KIT/packages/agents/pr-reviewer
+KIT=/path/to/ASPIRA_KIT/packages/ai/pr-reviewer
 
 pnpm -C $KIT dev                    # TUI
 pnpm -C $KIT exec eve invoke "Review https://github.com/owner/name/pull/123"
@@ -98,6 +98,6 @@ agent/
 └── subagents/          ava · cole · nova · reba · dex · iris · quinn — all hidden, all sharing the root's sandbox
 ```
 
-`lib/usage.ts` and `lib/usage-hook.ts` were copied from the former spec debate implementation. `packages/agents/README.md` says shared logic belongs in `@aspiralabs/config`; moving them there changes a published package's public API, so it is recorded as debt in the spec rather than done here.
+`lib/usage.ts` and `lib/usage-hook.ts` were copied from the former spec debate implementation. `packages/ai/README.md` says shared logic belongs in `@aspiralabs/config`; moving them there changes a published package's public API, so it is recorded as debt in the spec rather than done here.
 
-The package directory is what selects the agent — eve loads the one root agent under the app root it finds from the working directory, and `-C` sets that directory for you. `pnpm --filter @aspiralabs/pr-reviewer exec eve ...` works too, but only from inside the monorepo; see `packages/agents/README.md`.
+The package directory is what selects the agent — eve loads the one root agent under the app root it finds from the working directory, and `-C` sets that directory for you. `pnpm --filter @aspiralabs/pr-reviewer exec eve ...` works too, but only from inside the monorepo; see `packages/ai/README.md`.

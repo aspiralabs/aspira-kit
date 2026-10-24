@@ -1,4 +1,4 @@
-import { exitCodeFor } from '@aspiralabs/agent-common/lib/run-status'
+import { exitCodeFor } from '@aspiralabs/ai/common/lib/run-status'
 import { runGroom } from '../agent/lib/runner.ts'
 
 const [folder, repoPath, guidelinesPath] = process.argv.slice(2)

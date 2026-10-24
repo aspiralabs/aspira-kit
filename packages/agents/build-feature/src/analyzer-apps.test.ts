@@ -2,9 +2,9 @@
 // with its own --app, and is done only when every one of them ended ready; with no record of changed
 // apps, aspira.json's app alone, as before.
 import { describe, expect, it } from 'vitest'
-import { analyzerApps, routeStatus, type RouteFacts } from '#src/route.ts'
-import { emptyRunState, type RunState } from '#src/run-state.ts'
-import { analyzedApps, analyzerStepApps, commandApp } from '#src/step-results.ts'
+import { analyzerApps, routeStatus, type RouteFacts } from '#build-feature/route.ts'
+import { emptyRunState, type RunState } from '#build-feature/run-state.ts'
+import { analyzedApps, analyzerStepApps, commandApp } from '#build-feature/step-results.ts'
 
 const facts: RouteFacts = { id: 'KIT-11', app: 'tools/aspira', specCovered: true, implementor: 'ready', analyzerReady: false, mode: 'local' }
 const step = (name: string, command: string, status: string): RunState['steps'][number] => ({ step: name, runId: 'run-1', command, status, startedAt: 'now', endedAt: 'now', usage: null })

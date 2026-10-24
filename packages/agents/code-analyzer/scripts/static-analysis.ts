@@ -1,4 +1,4 @@
-import { exitCodeFor } from '@aspiralabs/agent-common/lib/run-status'
+import { exitCodeFor } from '@aspiralabs/ai/common/lib/run-status'
 import { runStaticAnalysis } from '../agent/lib/runner.ts'
 
 const args = process.argv.slice(2)

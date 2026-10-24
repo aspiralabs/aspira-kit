@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
-import { SETTLED_DECISIONS_RULE } from '@aspiralabs/agent-common/lib/decisions'
+import { SETTLED_DECISIONS_RULE } from '@aspiralabs/ai/common/lib/decisions'
 import { PINNED_RULES, PINNED_SKILL_RULES } from './pinned-rules.ts'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))

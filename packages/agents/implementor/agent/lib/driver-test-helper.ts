@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { parseTicketMd, renderTicketMd, workFolderName, type TicketRecord } from '@aspiralabs/agent-common/lib/ticket'
+import { parseTicketMd, renderTicketMd, workFolderName, type TicketRecord } from '@aspiralabs/ai/common/lib/ticket'
 import { writeSnapshot } from './snapshot.test-helper.ts'
 
 const exec = promisify(execFile)
