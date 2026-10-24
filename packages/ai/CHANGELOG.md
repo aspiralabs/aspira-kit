@@ -1,5 +1,39 @@
 # @aspiralabs/kit
 
+## 0.16.0
+
+### Minor Changes
+
+- 2b6e14f: Aspira Labs now publishes three packages: `@aspiralabs/ui`, `@aspiralabs/config` and `@aspiralabs/ai`. `@aspiralabs/ai` holds everything AI-related in one package: the eleven `/aspira-*` skills, the agents behind them (groomer, spec-writer, planner, implementor, code-analyzer, pr-reviewer, build-feature, visual-verify) and the `kit` command. It replaces the former `@aspiralabs/kit`, `@aspiralabs/agents` and the per-agent packages, which stop receiving releases (their history stays in this changelog).
+
+  Install it globally per engineer (`pnpm add -g @aspiralabs/ai`) and as a devDependency of each project; inside a project the project's copy runs, and `kit init` copies the skills pinned to that version. `kit` and the session-start hook now check once a day whether a newer version exists and print the upgrade commands, staying silent when offline. The engineer setup guide and the 0.15 to 0.16 migration guide in Notion describe the steps.
+
+- 7d002ee: The planner stops re-reading what research already read.
+
+  - A plan change may cite its evidence as `path#symbol`: the checker finds the symbol in the file, so planning no longer opens files only to copy a line number.
+  - Research lists every file the change touches (`touches`: operation, symbols, line window, why), and planning writes its changes from that list.
+  - Planning and repair get the source packet's index (paths and line counts) instead of the whole packet, and are told research is settled evidence.
+  - When the spec's source spans two or more areas of the repository, explorers read the areas in parallel before research (`stage: "explore"` in the session, parallel calls in the cloud), and research builds on their findings. `planner.explore` in aspira.json `models` sets their model and effort.
+
+- 86c3404: Planner speed and model experiments.
+
+  - `aspira.json` `models` takes a reasoning effort as well as a model (`{ "model", "effort" }`), and `<step>.<phase>` keys set the tasks inside a step (`planner.planning`, `spec-writer.explore`, `implementor.worker`, …). Unset keys keep the defaults.
+  - Plans can `move` a file or a whole directory in one change; the planner's checker and the implementor's target check follow the move, so later tasks name files at their new paths.
+  - A planner correction pass returns only the tasks and tests it changes, merged into the plan, instead of rewriting the whole plan.
+  - Planning keeps each change's instructions and each test to its intent, so the plan is shorter to write and to read.
+
+### Patch Changes
+
+- c1fa8df: In-session runs push their pages (Plan, Spec, Implementation, PR Review…) through the Notion API with the markdown converter when NOTION_TOKEN is set, instead of having the session retype each page through the Notion MCP. A failed API push falls back to the session push action.
+- 6b3d376: The in-session groomer takes a Confirm ticked on Grooming Decisions as the Confirm when the round leaves nothing to ask, instead of asking it again in chat. A build-feature run resumed after the human ticked Confirm on the page no longer stops a second time for the same Confirm.
+
+  The run marker ("Run: … in progress") on a pulled Grooming Decisions page is never carried into the Notes of the next rendering, so a verbatim page replace no longer puts it back after the unmark action removed it.
+
+- 63fd5e5: Condense Packages (KIT-65)
+- d81d1ba: The in-session PR reviewer reviews a pull request whose diff GitHub refuses through the API (406, too large): the diff is rebuilt from the PR's paged file list instead of ending the review incomplete. A PR at GitHub's 3,000-file listing limit is refused with a message to split it, never reviewed in part.
+
+  build-feature reads the files a review finding cites from a `Location:` line written without a list bullet, the way the PR reviewer writes it, so a fix of that finding is no longer refused as editing files outside the findings.
+
 ## 0.15.0
 
 ### Minor Changes
