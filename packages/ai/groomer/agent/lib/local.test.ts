@@ -302,6 +302,33 @@ describe('resuming after an interruption', () => {
   })
 })
 
+describe('Confirm ticked on the page between rounds', () => {
+  /** Round 1 left `decisions` and the human ticked Confirm on the page; round 2 pulled it and composed a round asking `asked`. */
+  async function tickedBetweenRounds(decisions: (ReturnType<typeof question> | ReturnType<typeof confirmed>)[], asked: ReturnType<typeof question>[]) {
+    const ws = await workspace()
+    const after = groomRecord(1, decisions)
+    await writeGroomRecord(ws.folder, after)
+    const rendered = renderGroomPage(after, { date: '2026-10-11', notes: [] })
+    await writeText(decisionsFile(ws.folder), rendered.replace('- [ ] Confirm', '- [x] Confirm'))
+    await writeJson(join(ws.folder, '.local', 'groomer', 'board.json'), { round: 2 })
+    await writeJson(roundFile(ws.folder, 2), { round: 2, searched: ['cart limit'], facts: [], questions: asked, branches: [] })
+    return ws
+  }
+
+  it('takes the page tick as the Confirm when nothing is left to ask, without asking in chat', async () => {
+    const { folder, input } = await tickedBetweenRounds([confirmed('Q1', 'problem', 'A')], [])
+    const step = await runLocal(input, deps)
+    const answers = JSON.parse(await readFile(answersFile(folder, 2), 'utf8')) as unknown
+    expect({ stage: step.stage, answers }).toEqual({ stage: 'summary', answers: [{ id: 'CONFIRM', question: 'Grooming is complete', answer: 'Confirm' }] })
+  })
+
+  it('still asks in chat while a question is open, and writes no answers for the human', async () => {
+    const { folder, input } = await tickedBetweenRounds([confirmed('Q1', 'problem', 'A'), question('Q2', 'who')], [question('Q2', 'who')])
+    const step = await runLocal(input, deps)
+    expect({ stage: step.stage, written: (await filesUnder(join(folder, 'groom.local'))).includes('answers-2.json') }).toEqual({ stage: 'answers', written: false })
+  })
+})
+
 describe('the one consolidated round (KIT-48)', () => {
   it('refuses a round 1 that leaves a branch neither asked nor closed, naming the branches', async () => {
     const ws = await workspace()

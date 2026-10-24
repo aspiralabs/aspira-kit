@@ -636,3 +636,33 @@ describe('Grooming Decisions page', () => {
     })
   })
 })
+
+describe('the run marker on a pulled page', () => {
+  const MARKER = 'Run: 2026-10-24T02:26:24.421Z local in progress'
+  const page = [
+    '# Grooming Decisions',
+    '',
+    'Tick one option per question. Only ticks are read as answers: anything else you write on this page is kept under the Notes block at the end and never read as an answer. Ticks made while a run is writing (the "Run: ... in progress" line is present) may need to be made again.',
+    '',
+    '## CONFIRM — Grooming is complete',
+    '',
+    '- [ ] Confirm',
+    '',
+    '## Notes',
+    '',
+    'A paragraph a person wrote.',
+    '',
+    MARKER,
+    '',
+    'Round 1 · written 2026-10-24 · 0 open',
+    '',
+    MARKER,
+    '',
+  ].join('\n')
+
+  it('is never carried as a note, wherever the page holds it, while a person\'s note still is', () => {
+    const carried = parseGroomPage(page, []).carried.map((note) => note.text)
+    const classified = classifyRenderings(page).carried
+    expect({ carried, classified }).toEqual({ carried: ['A paragraph a person wrote.'], classified: ['A paragraph a person wrote.'] })
+  })
+})
