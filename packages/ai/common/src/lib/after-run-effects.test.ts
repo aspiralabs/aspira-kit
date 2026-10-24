@@ -32,7 +32,7 @@ function fakeBoard(): Board & { calls: string[] } {
       state.calls.push(`push ${title}`)
       const page = { id: `page-${title}`, title, url: `https://www.notion.so/page-${encodeURIComponent(title)}`, lastEditedAt: new Date().toISOString() }
       pages[title] = page
-      return { id: page.id, url: page.url, created: true }
+      return { id: page.id, url: page.url, created: true, lastEditedAt: page.lastEditedAt }
     },
     async pullPage(_page: Ticket | string, title: string) {
       return pages[title] === undefined ? undefined : { ...pages[title]!, markdown: '' }

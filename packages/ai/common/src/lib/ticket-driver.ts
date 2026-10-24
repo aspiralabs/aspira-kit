@@ -12,6 +12,7 @@ import { join, relative } from 'node:path'
 import { promisify } from 'node:util'
 import { z } from 'zod'
 import { agentVersion } from './agent-version.ts'
+import { BOARD_ENV, board as makeBoard } from './board.ts'
 import { analyzedApps } from './changed-apps.ts'
 import { readGroomRecord } from './groom-record.ts'
 import { appendRefusal, nextAction, PROGRESS_NOTE_FILE, writeProgressNote, writeStep8PrBody, type NextAction, type ProgressNote } from './progress-note.ts'
@@ -292,7 +293,11 @@ export async function writeHandRunTelemetry(run: { skill: Skill; folder: string;
  * its run: the next round reserves a new run id.
  */
 export async function afterRun(context: DriverContext, before: BeforeRun & { kind: 'ticket' }, run: { status: RunStatus; reasonCode?: ReasonCode | null; exportDir: string; verifyCommand: string; round?: number; sessionUsage?: string }) {
-  const board = GATES[context.skill].record === undefined ? undefined : (await readAspira(context.repo))?.board
+  const aspira = await readAspira(context.repo)
+  const board = GATES[context.skill].record === undefined ? undefined : aspira?.board
+  // With a Notion token the pages are pushed through the API from their files; without one the session pushes them.
+  const token = process.env[BOARD_ENV]
+  const push = token === undefined || token === '' || aspira?.board === undefined ? undefined : makeBoard({ board: aspira.board, token }).pushPage
   const stateDir = boardStateDir(before.folder, context.skill)
   const runStatus = run.status
   const endedAt = new Date().toISOString()
@@ -322,6 +327,7 @@ export async function afterRun(context: DriverContext, before: BeforeRun & { kin
     ...(run.round === undefined ? {} : { round: run.round }),
     ...(board === undefined ? {} : { board }),
     ...(telemetry === undefined ? {} : { telemetry }),
+    ...(push === undefined ? {} : { push }),
   })
   if (GATES[context.skill].record !== undefined && local?.runId !== undefined) await writeLocalRun(stateDir, {})
   await note(context, before.folder, async () => {

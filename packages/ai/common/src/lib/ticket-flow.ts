@@ -1156,6 +1156,13 @@ export type LocalBoardEndOptions = {
   board?: string
   /** A hand run's telemetry file, already written: the session reads the board rules and attaches it (KIT-19). */
   telemetry?: { runId: string; file: string }
+  /**
+   * Pushes a page through the Notion API (the board client's pushPage, with NOTION_TOKEN). When given, the
+   * end stage pushes every page itself instead of handing the session a push action: the session would
+   * otherwise retype the whole file through the Notion MCP, which takes minutes for a large Plan.
+   * A push that fails falls back to the session's push action.
+   */
+  push?: (page: string, title: string, markdown: string) => Promise<{ id: string; url: string; created: boolean; lastEditedAt: string }>
 }
 
 /** Where the --local session saves the board rules for the attach check: beside the export's board trace. */
@@ -1207,6 +1214,18 @@ export async function localBoardEnd(options: LocalBoardEndOptions): Promise<Loca
       missing = true
       trace.actions.push(entry('check', `${push.title} from ${file}: the file is missing, nothing to push`, ticket.status, ticket.status, false, 'file missing'))
       continue
+    }
+    if (options.push !== undefined) {
+      try {
+        const pushed = await options.push(ticket.url, push.title, await readFile(file, 'utf8'))
+        ticket.pages[push.title] = { id: pushed.id, title: push.title, url: pushed.url, lastEditedAt: pushed.lastEditedAt }
+        await writeInto(join(options.folder, TICKET_FILE), renderTicketMd(ticket))
+        trace.pushed.push({ title: push.title, url: pushed.url })
+        trace.actions.push(entry('push', `${push.title} from ${file} (${pushed.created ? 'created' : 'replaced'} through the Notion API)`, ticket.status, ticket.status))
+        continue
+      } catch (error) {
+        trace.actions.push(entry('push', `${push.title} from ${file} through the Notion API; the session pushes it instead`, ticket.status, ticket.status, false, message(error)))
+      }
     }
     actions.push({ action: 'push', page: ticket.url, title: push.title, file, then: `add or update the "${push.title}" row of the Pages table in ${join(options.folder, TICKET_FILE)} with the page URL and its last-edited time` })
   }

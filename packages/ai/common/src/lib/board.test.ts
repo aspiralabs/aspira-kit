@@ -365,9 +365,10 @@ describe('setProperty', () => {
 describe('pushPage', () => {
   it('replaces the content of the existing child page with that title and keeps its id', async () => {
     const ticket = await client.resolveTicket('NOM-4')
+    pageObjects.set(SPEC_REVIEWED, { object: 'page', id: SPEC_REVIEWED, url: 'https://www.notion.so/3ec3e59b22588123961cce4ccd8e662a', last_edited_time: '2026-10-24T05:00:00.000Z' })
     calls = []
     const result = await client.pushPage(ticket, 'Spec Reviewed', '## Intent\n\nShorter.\n\n- [ ] F1: done\n')
-    expect(result).toEqual({ id: SPEC_REVIEWED, url: 'https://www.notion.so/3ec3e59b22588123961cce4ccd8e662a', created: false })
+    expect(result).toEqual({ id: SPEC_REVIEWED, url: 'https://www.notion.so/3ec3e59b22588123961cce4ccd8e662a', created: false, lastEditedAt: pageObjects.get(SPEC_REVIEWED)?.last_edited_time })
     expect(requests()).toEqual([
       `GET /v1/blocks/${PAGE}/children?page_size=100`,
       `GET /v1/blocks/${SPEC_REVIEWED}/children?page_size=100`,
@@ -375,14 +376,15 @@ describe('pushPage', () => {
       'DELETE /v1/blocks/b2',
       'DELETE /v1/blocks/b3',
       `PATCH /v1/blocks/${SPEC_REVIEWED}/children`,
+      `GET /v1/pages/${SPEC_REVIEWED}`,
     ])
-    expect(calls.at(-1)?.body).toEqual({ children: markdownToBlocks('## Intent\n\nShorter.\n\n- [ ] F1: done\n') })
+    expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({ children: markdownToBlocks('## Intent\n\nShorter.\n\n- [ ] F1: done\n') })
     expect(stored.get(SPEC_REVIEWED)?.map((b) => b.type)).toEqual(['heading_2', 'paragraph', 'to_do'])
   })
 
   it('creates the child page when no page has that title, with the markdown as its blocks', async () => {
     const result = await client.pushPage(PAGE, 'PR Review', '# Review\n\nLooks good.\n')
-    expect(result).toEqual({ id: 'page-1', url: 'https://www.notion.so/page-1', created: true })
+    expect(result).toEqual({ id: 'page-1', url: 'https://www.notion.so/page-1', created: true, lastEditedAt: pageObjects.get('page-1')?.last_edited_time })
     const create = calls.find((call) => call.method === 'POST' && call.path === '/v1/pages')?.body
     expect(create).toEqual({
       parent: { page_id: PAGE },

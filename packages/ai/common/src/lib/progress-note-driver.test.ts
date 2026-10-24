@@ -89,7 +89,7 @@ function fakeBoard(): Board {
     },
     moveTicket: async (_page, from, to) => ({ id: 'KIT-2', before: from, after: to }),
     setProperty: async () => undefined,
-    pushPage: async (_page, title) => ({ ...page(title), created: true }),
+    pushPage: async (_page, title) => ({ ...page(title), created: true, lastEditedAt: '2026-10-24T00:00:00.000Z' }),
     pullPage: async () => undefined,
     createPage: async (_page, title) => page(title),
     appendParagraph: async () => ({ id: 'block-1' }),
