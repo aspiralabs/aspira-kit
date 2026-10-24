@@ -8,7 +8,7 @@ import { renderGroomPage } from './decisions'
 import type { GroomDecision, GroomRecord } from './groom-record'
 import { ticketCli } from './ticket-cli'
 import { afterRun, beforeRun, boardStateDir, verifyRun, type DriverContext } from './ticket-driver'
-import { FlowRefused, finishFlow, findWorkFolders, inputFileFor, localBoardVerify, readAspira, readBoardTrace, readTicketMd, startFlow, type FlowFinish } from './ticket-flow'
+import { FlowRefused, finishFlow, findWorkFolders, inputFileFor, localBoardEnd, localBoardVerify, readAspira, readBoardTrace, readTicketMd, startFlow, type FlowFinish } from './ticket-flow'
 import { TICKET_FILE, renderTicketMd, type BoardAction, type RunStatus, type Skill } from './ticket'
 import type { ReasonCode } from './run-status'
 import type { GroomRunStatus } from './groom-record.ts'
@@ -88,11 +88,11 @@ function fakeBoard(status: string, pages: Record<string, string> = { Spec: SPEC,
         existing.markdown = markdown
         existing.blocks = blocksOf(markdown, state.botId)
         existing.page.lastEditedAt = new Date().toISOString()
-        return { id: existing.page.id, url: existing.page.url, created: false }
+        return { id: existing.page.id, url: existing.page.url, created: false, lastEditedAt: existing.page.lastEditedAt }
       }
       const page = { id: `page-${title}`, title, url: `https://www.notion.so/page-${encodeURIComponent(title)}`, lastEditedAt: new Date().toISOString() }
       state.pages[title] = { page, markdown, blocks: blocksOf(markdown, state.botId) }
-      return { id: page.id, url: page.url, created: true }
+      return { id: page.id, url: page.url, created: true, lastEditedAt: page.lastEditedAt }
     },
     async pullPage(_page, title) {
       state.calls.push(`pull ${title}`)
@@ -466,6 +466,53 @@ describe('the --local board stage (planner against a stub session)', () => {
     expect(trace.verified).toBe(true)
     expect(trace.actions.filter((a) => a.action === 'move').map((a) => [a.statusBefore, a.statusAfter])).toEqual([['Ready: Spec', 'In Progress: Plan'], ['In Progress: Plan', 'In Review: Plan']])
     expect(client.status).toBe('In Review: Plan')
+  })
+
+  /** The planner ticket claimed and in progress, its export holding the Plan file: what the end stage sees. */
+  async function plannerReady(client: ReturnType<typeof fakeBoard>) {
+    const ctx = { ...context, repo }
+    for (let i = 0; i < 4; i++) {
+      const next = await beforeRun(ctx, { positional: 'NOM-4' })
+      if (next.kind !== 'stage') break
+      await session.perform(client, next.stage.actions)
+    }
+    const exportDir = join(folderOf(), 'plan.review')
+    await mkdir(join(exportDir, 'trace'), { recursive: true })
+    await writeFile(join(exportDir, 'plan.reviewed.md'), '# Plan\n\nP1: do it.\n')
+    return { exportDir, stateDir: boardStateDir(folderOf(), 'planner') }
+  }
+
+  it('pushes the page through the API when given a push, records it, and leaves only the move to the session', async () => {
+    const client = fakeBoard('Ready: Spec')
+    const { exportDir, stateDir } = await plannerReady(client)
+    const pushed: string[] = []
+    const end = await localBoardEnd({
+      skill: 'planner', folder: folderOf(), runStatus: 'ready', exportDir, stateDir, verifyCommand: 'planner.sh local NOM-4 --verify',
+      push: async (_page, title, markdown) => {
+        pushed.push(`${title}: ${markdown}`)
+        return { id: 'plan-page', url: 'https://www.notion.so/plan-page', created: true, lastEditedAt: '2026-10-24T05:20:00.000Z' }
+      },
+    })
+    expect(pushed).toEqual(['Plan: # Plan\n\nP1: do it.\n'])
+    expect(end.actions.map((a) => a.action)).toEqual(['move'])
+    expect((await readTicketMd(folderOf()))!.pages.Plan).toMatchObject({ title: 'Plan', url: 'https://www.notion.so/plan-page', lastEditedAt: '2026-10-24T05:20:00.000Z' })
+    const trace = (await readBoardTrace(exportDir))!.trace
+    expect(trace.pushed).toEqual([{ title: 'Plan', url: 'https://www.notion.so/plan-page' }])
+    expect(trace.pushing).toEqual([])
+    await session.perform(client, end.actions)
+    expect((await verifyRun({ ...context, repo }, {}, () => exportDir)).verified).toBe(true)
+  })
+
+  it('hands the push back to the session when the API push fails, and records the failure', async () => {
+    const client = fakeBoard('Ready: Spec')
+    const { exportDir, stateDir } = await plannerReady(client)
+    const end = await localBoardEnd({
+      skill: 'planner', folder: folderOf(), runStatus: 'ready', exportDir, stateDir, verifyCommand: 'planner.sh local NOM-4 --verify',
+      push: async () => { throw new Error('Notion 502 (bad_gateway)') },
+    })
+    expect(end.actions.map((a) => a.action)).toEqual(['push', 'move'])
+    const failed = (await readBoardTrace(exportDir))!.trace.actions.find((a) => a.action === 'push')
+    expect(failed).toMatchObject({ ok: false, error: 'Notion 502 (bad_gateway)' })
   })
 
   it('a failed run lists no push and no move, and the ticket stays In Progress', async () => {
