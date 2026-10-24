@@ -322,6 +322,22 @@ function mergePage(args: { record: GroomRecord; answers: Answer[]; pageFile: str
   return { decisions, notes, carried, changedByPage, stopTicked: parse.stopTicked, confirmTicked: parse.confirmTicked }
 }
 
+/**
+ * Whether the page pulled at round start (`decisions`) carries a ticked Confirm while the round leaves
+ * nothing to ask: no question to ask, none open, every branch visited. A page that does not parse is
+ * not a Confirm; the round then asks in chat as before.
+ */
+async function confirmTickedOnPage(decisions: string, record: GroomRecord, idea: string): Promise<boolean> {
+  if (frontier(record, idea).length > 0 || record.decisions.some((decision) => decision.decidedBy === 'open') || !allBranchesVisited(record)) return false
+  const page = await readText(decisions)
+  if (page === null) return false
+  try {
+    return mergePage({ record, answers: [], pageFile: decisions, page }).confirmTicked
+  } catch {
+    return false
+  }
+}
+
 type Pending = { pending: true; status: 'pending'; round: number; orchestrator: string }
 
 /** One step of a --local run. Throws KnowledgeRequired before anything starts, and an Error on any refusal (answers, summary, page). */
@@ -375,6 +391,13 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     // and the next round goes on visiting branches.
     const confirm = frontier(applied, idea).length === 0 && applied.decisions.every((decision) => decision.decidedBy !== 'open') && allBranchesVisited(applied)
     rawAnswers = JSON.stringify(confirm ? [CONFIRM_ANSWER] : [])
+    await mkdir(dirname(answersFile), { recursive: true })
+    await writeFile(answersFile, rawAnswers)
+  }
+  if (rawAnswers === null && input.finish !== true && (await confirmTickedOnPage(paths.decisions, applied, idea))) {
+    // Confirm ticked on Grooming Decisions as the board stage pulled it at round start, with nothing left
+    // to ask: the human already confirmed on the page, so the round is not asked to confirm again in chat.
+    rawAnswers = JSON.stringify([CONFIRM_ANSWER])
     await mkdir(dirname(answersFile), { recursive: true })
     await writeFile(answersFile, rawAnswers)
   }
@@ -442,7 +465,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   else if (control === 'CONFIRM') {
     if (open === 0 && allBranchesVisited(applied) && !merged.changedByPage) status = 'ready'
     else notes.push(open > 0 ? `Confirm was ticked but ${open} question(s) are open; it is re-offered when they are answered` : 'a tick on Grooming Decisions changed a decision during this round; Confirm is re-offered')
-  } else if (merged.confirmTicked) notes.push('Confirm is ticked on Grooming Decisions; in the session it is asked in chat, at the end of the next round')
+  } else if (merged.confirmTicked) notes.push('Confirm is ticked on Grooming Decisions; the next round takes it as the Confirm once nothing is left to ask, without asking in chat')
   const reason = status === 'ready' ? null
     : reasonCode === 'paused' ? 'Stop grooming was ticked on the Grooming Decisions page'
       : `${open} decision${open === 1 ? '' : 's'} still open on the Grooming Decisions page`
