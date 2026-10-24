@@ -1,5 +1,5 @@
 #!/bin/bash
-# The /aspira-worktree launcher: runs `kit worktree` from the project's installed @aspiralabs/kit with
+# The /aspira-worktree launcher: runs `kit worktree` from the project's installed @aspiralabs/ai with
 # the arguments it was given, relays its output and exits with its code. It has no rules of its own.
 set -euo pipefail
 
@@ -25,5 +25,5 @@ APP=""
 OWNER=$ROOT
 if [ -n "$APP" ] && [ "$APP" != . ]; then OWNER="$ROOT/$APP"; fi
 KIT="$OWNER/node_modules/.bin/kit"
-[ -x "$KIT" ] || die "cannot find $KIT: install @aspiralabs/kit in ${APP:-the project} and run kit init"
+[ -x "$KIT" ] || die "cannot find $KIT: install @aspiralabs/ai in ${APP:-the project} and run kit init"
 exec "$KIT" "$NAME" "$@"

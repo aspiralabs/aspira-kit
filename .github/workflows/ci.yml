@@ -14,7 +14,7 @@ jobs:
       # The agents' eve build needs Node 24 (their engines); products keep kit-checks' default.
       node-version: "24"
       # apps/docs typechecks against @aspiralabs/ui's dist, and the kit's install test packs
-      # @aspiralabs/kit from its dist; nothing else needs a build before lint, typecheck or test.
-      prepare: pnpm --filter @aspiralabs/ui --filter @aspiralabs/kit build
+      # @aspiralabs/ai from its kit build (dist); nothing else needs a build before lint, typecheck or test.
+      prepare: pnpm --filter @aspiralabs/ui build && pnpm --filter @aspiralabs/ai build:kit
       test-shards: "[1, 2, 3, 4, 5, 6]"
       runs-on: starsling-ubuntu-24.04

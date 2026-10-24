@@ -6,7 +6,7 @@ argument-hint: [<ticket ID>]
 
 # What is next for a ticket
 
-This skill is a launcher for `kit next` and has no rules of its own. The Playbook in `@aspiralabs/kit` (the "Playbook: what to run next" section of From Idea to Release) decides the step; this file covers only running it and acting on its answer.
+This skill is a launcher for `kit next` and has no rules of its own. The Playbook in `@aspiralabs/ai` (the "Playbook: what to run next" section of From Idea to Release) decides the step; this file covers only running it and acting on its answer.
 
 ## Run
 

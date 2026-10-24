@@ -4,18 +4,17 @@
 set -euo pipefail
 
 NAME=pr-reviewer
-PKG=@aspiralabs/pr-reviewer
 die() { echo "$NAME: $*" >&2; exit 1; }
-is_agent() { grep -qs "\"name\": \"$PKG\"" "$1/package.json"; }
-# The agent under DIR/node_modules: installed directly, or beside @aspiralabs/agents (pnpm keeps a
-# package's dependencies next to it, not in the project's own node_modules).
+# The agent folder of @aspiralabs/ai: named $NAME, with skill/ and agent/, src/ or scripts/, under a
+# package.json that names @aspiralabs/ai (recognised by path).
+is_agent() {
+  [ "$(basename "$1")" = "$NAME" ] && [ -d "$1/skill" ] && { [ -d "$1/agent" ] || [ -d "$1/src" ] || [ -d "$1/scripts" ]; } \
+    && grep -qs '"name": "@aspiralabs/ai"' "$1/../package.json"
+}
+# The agent folder under DIR/node_modules/@aspiralabs/ai.
 installed_in() {
-  local nm=$1/node_modules/@aspiralabs sibling
-  if is_agent "$nm/$NAME"; then (cd "$nm/$NAME" && pwd -P); return; fi
-  if [ -d "$nm/agents" ]; then
-    sibling="$(cd -P "$nm/agents" 2>/dev/null && cd .. && pwd -P)/$NAME"
-    if is_agent "$sibling"; then (cd "$sibling" && pwd -P); return; fi
-  fi
+  local dir=$1/node_modules/@aspiralabs/ai/$NAME
+  if is_agent "$dir"; then (cd "$dir" && pwd -P); return; fi
   return 1
 }
 # The project the agent serves, when it is not the one the agent is installed in: the nearest
@@ -46,16 +45,16 @@ configured_app() {
   done
 }
 # Which pr-reviewer runs, in this order: PR_REVIEWER_AGENT_DIR (kit development only; the report says so),
-# the @aspiralabs/pr-reviewer installed under the project (the app named in the root's aspira.json, then
+# the pr-reviewer folder of @aspiralabs/ai installed under the project (the app named in the root's aspira.json, then
 # walking up from the working directory, then from this script's location), then this script's own package. $ASPIRA_KIT is never consulted.
 # Sets AGENT, AGENT_SOURCE (env | installed | package), AGENT_VERSION and PROJECT.
 resolve_agent() {
-  local here dir app_dir own skill_kit_version agents_version
+  local here dir app_dir own skill_kit_version ai_version
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   AGENT="" AGENT_SOURCE="" PROJECT=""
   for dir in "${PR_REVIEWER_AGENT_DIR:-}"; do
     [ -n "$dir" ] || continue
-    is_agent "$dir" || die "PR_REVIEWER_AGENT_DIR is not the $PKG package: $dir"
+    is_agent "$dir" || die "PR_REVIEWER_AGENT_DIR is not the $NAME folder of @aspiralabs/ai: $dir"
     AGENT=$(cd "$dir" && pwd -P); AGENT_SOURCE=env; break
   done
   if [ -z "$AGENT" ]; then
@@ -79,36 +78,36 @@ resolve_agent() {
     done
   fi
   if [ -z "$AGENT" ] && is_agent "$here/../../.."; then AGENT=$(cd "$here/../../.." && pwd -P); AGENT_SOURCE=package; fi
-  [ -n "$AGENT" ] || die "cannot find $PKG: install @aspiralabs/agents in the project (kit init), or set PR_REVIEWER_AGENT_DIR for kit development"
+  [ -n "$AGENT" ] || die "cannot find $NAME: install @aspiralabs/ai in the project and run kit init, or set PR_REVIEWER_AGENT_DIR for kit development"
   [ -n "$PROJECT" ] || PROJECT=$(project_root)
-  AGENT_VERSION=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$AGENT/package.json" | head -n 1)
+  AGENT_VERSION=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$AGENT/../package.json" | head -n 1)
   case $AGENT_SOURCE:$AGENT in
-    env:*) echo "$NAME: PR_REVIEWER_AGENT_DIR is set: running kit source at $AGENT, not the installed $PKG" >&2 ;;
+    env:*) echo "$NAME: PR_REVIEWER_AGENT_DIR is set: running kit source at $AGENT, not the installed @aspiralabs/ai" >&2 ;;
     *:*/node_modules/*) ;;
-    *) echo "$NAME: running kit source at $AGENT, not the installed $PKG" >&2 ;;
+    *) echo "$NAME: running kit source at $AGENT, not the installed @aspiralabs/ai" >&2 ;;
   esac
-  # kit init pins the installed skill to the @aspiralabs/agents version it was copied from
+  # kit init pins the installed skill to the @aspiralabs/ai version it was copied from
   # (.kit-version, packages/kit/src/skills.ts). An installed launcher whose pin no longer matches
   # what is installed is blocked before anything starts; running from source (env or package) only
   # warns, since kit development deliberately runs ahead of (or without) an installed pin (F8).
   if [ -f "$here/../.kit-version" ]; then
     skill_kit_version=$(tr -d '[:space:]' < "$here/../.kit-version")
-    agents_version=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$PROJECT/node_modules/@aspiralabs/agents/package.json" 2>/dev/null | head -n 1)
-    if [ -n "$agents_version" ] && [ "$skill_kit_version" != "$agents_version" ]; then
+    ai_version=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$PROJECT/node_modules/@aspiralabs/ai/package.json" 2>/dev/null | head -n 1)
+    if [ -n "$ai_version" ] && [ "$skill_kit_version" != "$ai_version" ]; then
       if [ "$AGENT_SOURCE" = installed ]; then
-        die "blocked: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; run kit init to update the skill"
+        die "blocked: this skill is pinned to @aspiralabs/ai $skill_kit_version but $PROJECT has $ai_version installed; run kit init to update the skill"
       else
-        echo "$NAME: mismatch: this skill is pinned to @aspiralabs/agents $skill_kit_version but $PROJECT has $agents_version installed; continuing from $AGENT_SOURCE" >&2
+        echo "$NAME: mismatch: this skill is pinned to @aspiralabs/ai $skill_kit_version but $PROJECT has $ai_version installed; continuing from $AGENT_SOURCE" >&2
       fi
     fi
   fi
 }
-agent_line() { printf 'agent: %s@%s (%s, %s)\n' "$PKG" "$AGENT_VERSION" "$AGENT_SOURCE" "$AGENT"; }
+agent_line() { printf 'agent: %s@%s (%s, %s)\n' "$NAME" "$AGENT_VERSION" "$AGENT_SOURCE" "$AGENT"; }
 json_string() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 # true when the agent runs from an installed package. A function, not an inline `$(case …)`: bash 3.2
 # (macOS /bin/bash) mis-parses the pattern's `)` inside a command substitution and reports a syntax error.
 agent_installed() { case $AGENT in */node_modules/*) echo true ;; *) echo false ;; esac; }
-agent_json() { printf '{"name":"%s","version":"%s","path":"%s","source":"%s","installed":%s}\n' "$PKG" "$(json_string "$AGENT_VERSION")" "$(json_string "$AGENT")" "$AGENT_SOURCE" "$(agent_installed)"; }
+agent_json() { printf '{"name":"%s","version":"%s","path":"%s","source":"%s","installed":%s}\n' "$NAME" "$(json_string "$AGENT_VERSION")" "$(json_string "$AGENT")" "$AGENT_SOURCE" "$(agent_installed)"; }
 # The first <ancestor of DIR>/node_modules/RELATIVE, as Node would resolve it from the agent.
 find_up_module() {
   local dir=$1
@@ -126,7 +125,7 @@ node_args() {
   local loader
   NODE_ARGS=()
   if loader=$(find_up_module "$AGENT" amaro/dist/register-strip.mjs); then NODE_ARGS+=(--import "$loader")
-  else case $AGENT in */node_modules/*) die "amaro is not installed beside $AGENT; reinstall @aspiralabs/agents" ;; esac
+  else case $AGENT in */node_modules/*) die "amaro is not installed beside $AGENT; reinstall @aspiralabs/ai" ;; esac
   fi
   NODE_ARGS+=(--experimental-strip-types)
   local file
@@ -137,7 +136,7 @@ agent_node() {  # agent_node SCRIPT ARG...: run an agent script with node, from 
   node_args
   (cd "$AGENT" && exec node "${NODE_ARGS[@]}" "$AGENT/$script" "$@")
 }
-eve_bin() { find_up_module "$AGENT" eve/bin/eve.js || die "eve is not installed beside $AGENT; reinstall @aspiralabs/agents"; }
+eve_bin() { find_up_module "$AGENT" eve/bin/eve.js || die "eve is not installed beside $AGENT; reinstall @aspiralabs/ai"; }
 
 # An installed package lives under node_modules, where eve compiles no workflow tool (the executor stays
 # missing) and Node strips no types. The cloud agent therefore runs from a copy of the package's files
@@ -149,13 +148,16 @@ runtime_agent() {
   case $AGENT in */node_modules/*) ;; *) return 0 ;; esac
   local deps copy stamp
   # pnpm: <store>/<pkg>@<version>/node_modules holds the package and every dependency beside it; npm: the app's node_modules.
-  deps=$(cd "$AGENT/../.." && pwd -P)
+  deps=$(cd "$AGENT/../../.." && pwd -P)
   copy="${REPO:-$PROJECT}/.work/.agents/$NAME@$AGENT_VERSION"
   stamp="$copy/.built-from"
   if [ ! -f "$stamp" ] || [ "$(cat "$stamp")" != "$AGENT" ] || [ ! -d "$copy/.output" ]; then
     rm -rf "$copy"
     mkdir -p "$copy"
-    cp -R "$AGENT/agent" "$AGENT/scripts" "$AGENT/package.json" "$copy/"
+    cp -R "$AGENT/agent" "$AGENT/scripts" "$copy/"
+    # The copy's manifest: this folder's name, the package's version, type and dependencies; no exports, imports, bin or
+    # files, so '@aspiralabs/ai/...' resolves through the linked node_modules, not to the copy root.
+    node -e 'const p=require(process.argv[1]);require("fs").writeFileSync(process.argv[3],JSON.stringify({name:process.argv[2],version:p.version,type:p.type,dependencies:p.dependencies},null,2)+"\n")' "$AGENT/../package.json" "$NAME" "$copy/package.json"
     [ ! -f "$AGENT/.env.local" ] || cp "$AGENT/.env.local" "$copy/.env.local"
     ln -s "$deps" "$copy/node_modules"
     echo "$NAME: building the cloud agent once in $copy" >&2
@@ -415,7 +417,7 @@ cmd_load_knowledge() {
   node_args
   command -v node >/dev/null || die "node is not installed"
   local common
-  common=$(find_up_module "$AGENT" @aspiralabs/agent-common) || die "agent-common is not installed beside $AGENT; reinstall @aspiralabs/agents"
+  common="$AGENT/../common"; [ -d "$common" ] || die "common is missing beside $AGENT; reinstall @aspiralabs/ai"
   node "${NODE_ARGS[@]}" "$common/scripts/load-knowledge.ts" --out "$out"
 }
 cmd_wait() {
