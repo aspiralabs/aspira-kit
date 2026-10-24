@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/visual-verify",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "/aspira-visual-verify: opens a UI-touching build in a real browser before the gate (a build-feature phase) or on its own as a report-only run, and reports what it saw.",
   "type": "module",
   "imports": {

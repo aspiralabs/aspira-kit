@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/spec-reviewer",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "The spec review pipeline (research, concurrent specialist audits, deterministic reconciliation), as a library the spec writer runs on its draft and on an answered spec. No skill or agent of its own since KIT-48.",
   "type": "module",
   "exports": {
