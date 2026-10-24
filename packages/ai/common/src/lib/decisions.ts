@@ -330,6 +330,9 @@ export function readGroomPage(markdown: string, knownIds?: readonly string[]): G
   const P = GROOM_LINE_PATTERNS
   for (const [at, line] of markdown.split('\n').entries()) {
     if (line.trim() === '') continue
+    // The run marker is the groomer's own line wherever the page holds it (the mark action may append it
+    // after the trailer or the Notes): never a person's note, so it is never carried into a rendering.
+    if (P.run.test(line)) continue
     if (region.kind !== 'after') {
       const trailer = line.match(P.trailer)
       if (trailer !== null) {
@@ -375,7 +378,7 @@ export function readGroomPage(markdown: string, knownIds?: readonly string[]): G
     }
     const todo = line.match(P.todo)
     if (region.kind === 'head') {
-      if (P.intro.test(line) || P.rebuilt.test(line) || P.run.test(line)) continue
+      if (P.intro.test(line) || P.rebuilt.test(line)) continue
       read.carried.push({ text: line, at })
     } else if (region.kind === 'question') {
       const block = region.block
