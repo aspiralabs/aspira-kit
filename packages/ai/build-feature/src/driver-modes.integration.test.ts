@@ -14,7 +14,7 @@ import { mergePhase } from '#build-feature/merge.ts'
 import { reviewPhase } from '#build-feature/review-loop.ts'
 import { releaseRowPhase, step10Phase } from '#build-feature/step10.ts'
 import { step8Phase } from '#build-feature/step8.ts'
-import { RESUME, RESUME_CLOUD, cleanup, ofKind, project, taken, type DecisionFixture, type Project } from './driver.test-helper.ts'
+import { BOARD, RESUME, RESUME_CLOUD, cleanup, ofKind, project, taken, type DecisionFixture, type Project } from './driver.test-helper.ts'
 import { SLOW, returnOn, lastLine, commandOf, told } from './driver.integration.shared.ts'
 
 afterAll(cleanup)
@@ -137,4 +137,22 @@ describe('NOVA1.2: the later phases are bound statically, never found by a runti
   it('binds every phase name to the module export that ships with the package', () => {
     expect(PHASES).toStrictEqual({ 'visual-verify': visualVerifyPhase, gate: gatePhase, step8: step8Phase, step10: step10Phase, review: reviewPhase, 'release-row': releaseRowPhase, merge: mergePhase })
   })
+})
+
+describe('aspira.json models: model and effort per stage', () => {
+  it('prints the configured model and effort on the step stage and in its prompt, and no effort when none is set', async () => {
+    const h = await project({ status: 'Ready: Idea', aspira: { board: BOARD, repository: 'aspiralabs/fixture', models: { 'spec-writer': { model: 'sonnet', effort: 'low' }, 'planner.planning': { effort: 'medium' } } } })
+    const step = await h.advance({}, await h.start())
+    const prompt = await readFile(String(step.stage?.prompt), 'utf8')
+    expect({ model: step.stage?.model, effort: step.stage?.effort, line: prompt.includes('You run on sonnet at low effort.') }).toEqual({ model: 'sonnet', effort: 'low', line: true })
+    const plain = await project({ status: 'Ready: Idea' })
+    const plainStep = await plain.advance({}, await plain.start())
+    expect({ model: plainStep.stage?.model, hasEffort: plainStep.stage != null && 'effort' in plainStep.stage }).toEqual({ model: 'opus', hasEffort: false })
+  }, SLOW)
+
+  it('refuses an unknown role or effort before any stage, naming it', async () => {
+    const h = await project({ status: 'Ready: Idea', aspira: { board: BOARD, repository: 'aspiralabs/fixture', models: { planer: 'opus', planner: { effort: 'none' } } } })
+    const result = await h.start()
+    expect([result.code !== 0, /unknown role \\?"planer\\?"/.test(result.text), /effort one of low/.test(result.text)], result.text).toEqual([true, true, true])
+  }, SLOW)
 })

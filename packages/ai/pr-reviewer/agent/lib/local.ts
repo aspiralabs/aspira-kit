@@ -12,6 +12,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { INDEX_FILE, KNOWLEDGE_ENV, KNOWLEDGE_PATH, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED_FILE, pageIdFrom, parseRequired } from '@aspiralabs/ai/common/lib/knowledge'
 import { sessionModel, type SessionModel } from '@aspiralabs/ai/common/lib/session-model'
+import { taskModel, type Effort } from '@aspiralabs/ai/common/lib/model-config'
 import { parseProvenance, verifyKnowledgeDir } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
 import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
@@ -105,7 +106,7 @@ export type LocalDeps = {
 
 /** A task as printed for the session: the prompt and output are file paths. */
 /** `model` (KIT-48): the session model the task runs on, from the seat's own model map. */
-export type LocalTask = { id: string; agent: Reviewer; prompt: string; output: string; schema: string; model: SessionModel; error?: string; retry?: boolean }
+export type LocalTask = { id: string; agent: Reviewer; prompt: string; output: string; schema: string; model: SessionModel; effort?: Effort; error?: string; retry?: boolean }
 
 /** The comment outcome, as comment-on-pr reports it. */
 export type CommentResult = { posted: true; action: 'created' | 'updated'; url: string } | { posted: false; reason: string }
@@ -658,7 +659,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       const system = sources.seat(task.agent)
       const document = DOCUMENT_TURNS.find((turn) => turn.id === task.id)
       await writeFile(prompt, renderTaskPrompt(task, output, { path: system, text: await readFile(system, 'utf8') }, pr, document && paths.files[document.file]))
-      tasks.push({ id: task.id, agent: task.agent, prompt, output, schema: SCHEMA_NAMES[task.kind], model: sessionModel(MODELS[task.agent] ?? MODELS['pr-reviewer']), ...(task.error === undefined ? {} : { error: task.error }), ...(retry === undefined ? {} : { retry }) })
+      tasks.push({ id: task.id, agent: task.agent, prompt, output, schema: SCHEMA_NAMES[task.kind], ...taskModel(`pr-reviewer.${task.agent}`, sessionModel(MODELS[task.agent] ?? MODELS['pr-reviewer'])), ...(task.error === undefined ? {} : { error: task.error }), ...(retry === undefined ? {} : { retry }) })
     }
     await writeFile(stateFile, JSON.stringify(state, null, 2))
     return { pending: true, status: 'pending', stage: plan.stage, round: plan.round, maxRounds: state.maxRounds, workDir: work, orchestrator: sources.orchestrator, target: state.target, packet: state.packet, tasks }

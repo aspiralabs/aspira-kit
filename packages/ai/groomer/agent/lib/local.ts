@@ -9,6 +9,7 @@ import { GROOMER_MARKER_PREFIX, groomRecordSchema, readGroomRecord, rebuildGroom
 import { allowedPath } from '@aspiralabs/ai/common/lib/repository'
 import { type ReasonCode } from '@aspiralabs/ai/common/lib/run-status'
 import type { SessionModel } from '@aspiralabs/ai/common/lib/session-model'
+import { taskModel, type Effort } from '@aspiralabs/ai/common/lib/model-config'
 import { readTicketMd } from '@aspiralabs/ai/common/lib/ticket-flow'
 import { GROOM_PAGE, groomPaths, type GroomPaths as Paths } from './paths.ts'
 import { KnowledgeBlocked, knowledgeConfig, loadKnowledge, snapshotKnowledge, type Env, type Knowledge, type KnowledgePlan, type KnowledgeRequired } from './local-knowledge.ts'
@@ -42,7 +43,7 @@ export type LocalInput = { folder: string; repoPath: string; guidelinesPath?: st
 /** Seams for tests: the agent package whose files and env are read, and the knowledge walk's own fetch/API base. */
 export type LocalDeps = { agentDir?: string; env?: Env; fetch?: (url: string, init?: RequestInit) => Promise<Response>; api?: string }
 
-export type LocalTask = { prompt: string; output: string; /** The session model the task runs on (KIT-48). */ model: SessionModel; error?: string }
+export type LocalTask = { prompt: string; output: string; /** The session model the task runs on (KIT-48). */ model: SessionModel; /** aspira.json `models` groomer.round or groomer.summary. */ effort?: Effort; error?: string }
 
 /** The two control entries an answers file may carry, besides the answers. */
 export const STOP_ANSWER: Answer = { id: 'STOP', question: 'Stop grooming', answer: 'Stop grooming' }
@@ -358,7 +359,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     await mkdir(paths.prompts, { recursive: true })
     const prompt = join(paths.prompts, `round-${n}.md`)
     await writeFile(prompt, renderRoundPrompt({ n, output: paths.round(n), agentDir, repo, paths, knowledge, record: base, titleOnly: idea.trim() === '' }))
-    const task: LocalTask = { prompt, output: paths.round(n), model: 'opus', ...(read.error === null ? {} : { error: read.error }) }
+    const task: LocalTask = { prompt, output: paths.round(n), ...taskModel('groomer.round', 'opus' as SessionModel, repo), ...(read.error === null ? {} : { error: read.error }) }
     return { ...pending(), stage: 'round' as const, task }
   }
   files.round = 'valid'
@@ -416,7 +417,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     await mkdir(paths.prompts, { recursive: true })
     const prompt = join(paths.prompts, `summary-${n}.md`)
     await writeFile(prompt, renderSummaryPrompt({ agentDir, paths, record: answered, repo }))
-    return { ...pending(), stage: 'summary' as const, task: { prompt, output: paths.summary, model: 'sonnet' } satisfies LocalTask }
+    return { ...pending(), stage: 'summary' as const, task: { prompt, output: paths.summary, ...taskModel('groomer.summary', 'sonnet' as SessionModel, repo) } satisfies LocalTask }
   }
 
   const pageFile = paths.page(n)

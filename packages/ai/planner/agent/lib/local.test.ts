@@ -191,12 +191,30 @@ it('refuses research that leaves a required rule out, and runs the agent\'s corr
   const broken = validPlan(); broken.tasks[1]!.dependsOn = []
   await writeFile(planning.tasks[0]!.output, JSON.stringify(broken))
   const repair = pending(await runLocal(args, { env: {} }))
-  expect(repair).toMatchObject({ stage: 'planning', tasks: [{ id: 'repair-1' }] })
+  expect(repair).toMatchObject({ stage: 'planning', tasks: [{ id: 'repair-1', schema: 'planPatchSchema' }] })
   expect(await readFile(repair.tasks[0]!.prompt, 'utf8')).toContain('PLAN CHECKS:\n- Implementation P2 needs an earlier test dependency for F1')
-  await writeFile(repair.tasks[0]!.output, JSON.stringify(validPlan()))
+  // The correction pass answers with only the task it fixes; the rest of the plan stays as planning wrote it.
+  await writeFile(repair.tasks[0]!.output, JSON.stringify({ tasks: [validPlan().tasks[1]] }))
   const done = await runLocal(args, { env: {} })
   if (done.pending) throw new Error('expected export')
   expect(done.status).toBe('ready')
+  expect(JSON.parse(await readFile(join(done.dir, 'trace', 'plan.json'), 'utf8')).tasks.map((task: { id: string; dependsOn: string[] }) => [task.id, task.dependsOn])).toEqual([['P1', []], ['P2', ['P1']], ['P3', ['P2']]])
+})
+
+it('sends back a correction patch that does not merge into the plan, naming why', async () => {
+  const f = await fixture()
+  const snapshot = join(f.dir, 'REQUIRED.md')
+  await writeSnapshot(snapshot)
+  const args = { specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir, guidelinesPath: snapshot }
+  const research = pending(await runLocal(args, { env: {} }))
+  await writeFile(research.tasks[0]!.output, JSON.stringify({ facts: [], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] }))
+  const planning = pending(await runLocal(args, { env: {} }))
+  const broken = validPlan(); broken.tasks[1]!.dependsOn = []
+  await writeFile(planning.tasks[0]!.output, JSON.stringify(broken))
+  const repair = pending(await runLocal(args, { env: {} }))
+  await writeFile(repair.tasks[0]!.output, JSON.stringify({ removeTaskIds: ['P1', 'P2', 'P3'] }))
+  const again = pending(await runLocal(args, { env: {} }))
+  expect(again.tasks[0]).toMatchObject({ id: 'repair-1', retry: true, error: expect.stringContaining('does not merge into the previous plan') })
 })
 
 it('reads the option the author ticked in trace/decisions.md on the rerun and records it as theirs', async () => {

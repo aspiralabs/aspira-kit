@@ -31,7 +31,7 @@ The analyzer runs only from `In Progress: Implementation` or `In Review: Impleme
 <skill-dir>/scripts/code-analyzer.sh local [<ticket> [--app DIR] | <repo-path | app-dir> --no-ticket] [--force-pull] [--knowledge DIR | --guidelines FILE] [--max-rounds N] [--fix-warnings] [--no-fix] [--output DIR] [--finish] [--parent-run RUN:NONCE] [--attach JSON]
 ```
 
-Each `local` call is one step and makes no model call. Pass the same ticket (or path) and options on every call. It prints JSON:
+Each `local` call is one step and makes no model call. Pass the same ticket (or path) and options on every call. It prints JSON: Every task a stage prints names its `model`, and its `effort` when aspira.json `models` sets one for `<step>.<phase>`: launch that task's subagent on that model, passing that reasoning effort to the Agent tool when the task has one.
 
 0. **Board** (first, with a ticket). The board work for this session to perform with the Notion MCP, listed as data in `actions`. A `resolve` action names the ticket and the board: fetch the ticket and write `ticket.md` at `write` in exactly the `format` given. A `pull` action names a child page and the file to write it to as plain markdown. Perform every action, then call `local` again; the driver reads `ticket.md`, refuses when its Status is not one the analyzer runs from, and lists what is still missing until the folder is in sync. The analyzer lists no `set` or `move`: never move a card anywhere the stage does not list.
 1. **Knowledge.** `local`'s own `load-knowledge` step already built the folder, or `blocked` names what to set; a rare `knowledge` stage names a folder problem to fix by hand. Run `local` again either way, or pass `--knowledge DIR`.

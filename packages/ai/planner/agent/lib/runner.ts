@@ -13,7 +13,7 @@ import { type RunStatus } from '@aspiralabs/ai/common/lib/run-status'
 import { checkBusinessSpec } from '@aspiralabs/ai/common/lib/spec'
 import { pageIdFrom } from '@aspiralabs/ai/common/lib/knowledge'
 import type { Answer, DecisionRecord } from '@aspiralabs/ai/common/lib/decisions'
-import { mergeDecisions, planSchema, readAnswers, renderChecks, renderDecisionsFile, renderPlan, researchSchema, touchesUi, validatePlan, type Plan, type Research } from './plan.ts'
+import { applyPlanPatch, mergeDecisions, planPatchSchema, planSchema, readAnswers, renderChecks, renderDecisionsFile, renderPlan, researchSchema, touchesUi, validatePlan, type Plan, type Research } from './plan.ts'
 import { system, researchSystem, researchInstructions, planningInstructions, repairInstructions } from './prompts.ts'
 import { notionReadToolsFromEnv } from '@aspiralabs/ai/common/lib/notion-read'
 import { CLOUD_RESEARCH_TOOLS, RESEARCH_RULE } from '@aspiralabs/ai/common/lib/research-rule'
@@ -343,7 +343,14 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         const issues = planIssues({ spec, guidelines, repo, research, plan })
         if (!issues.length) break
         options.progress?.(`repair-${round}`)
-        const revised = await draftPlan(`repair-${round}`, repairPrompt(context, research, plan, issues, repairInstructions, pages))
+        const before = plan
+        const fix = repairPrompt(context, research, before, issues, repairInstructions, pages)
+        // A correction pass submits only what it changes (planPatchSchema), merged into the plan here.
+        const patch = await trace.invoke({ phase: `repair-${round}`, model: models.planning, prompt: fix }, async (signal, hooks) => {
+          const output = await structuredWithTools({ model: gateway(models.planning), system: planningSystem, prompt: `${fix}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: planPatchSchema, tools: planningTools, maxSteps: PLANNING_MAX_STEPS, maxOutputTokens: 24_000, reasoning: 'medium', submitName: 'submit_plan', abortSignal: signal, ...hooks })
+          return applyPlanPatch(before, planPatchSchema.parse(output))
+        })
+        const revised = patch
         if (!revised || planIssues({ spec, guidelines, repo, research, plan: revised }).length >= issues.length) break
         plan = revised
       }

@@ -55,7 +55,7 @@ import { addTaken, collectTakenDecisions, isDecisionStep, openDecisions, takenKe
 import { gatePhase } from '#build-feature/gate.ts'
 import { visualVerifyPhase } from '#build-feature/visual-verify.ts'
 import { ensureKnowledge, knowledgeFlag } from '#build-feature/knowledge.ts'
-import { modelFor, parseModels, subagentModels, type Role } from '#build-feature/models.ts'
+import { effortFor, modelFor, parseModels, subagentModels, type Role } from '#build-feature/models.ts'
 import { PACKET_STEPS, writeRunPacket } from '#build-feature/packet-file.ts'
 import { BACKWARD_MOVES_SKILL_MAY_MAKE, decideOverrides, findOverrides, overridesStage, recordOverrides } from '#build-feature/overrides.ts'
 import { renderPrBody } from '#build-feature/pr-body.ts'
@@ -870,6 +870,7 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
   const command = routed
   const runFlags = [...(shared.knowledge === null ? [] : [knowledgeFlag(step, shared.knowledge)]), ...(packet === null ? [] : [`--packet ${packet}`])].map((flag) => ` ${flag}`).join('')
   const model = modelFor(STEP_ROLE[step], ctx.aspira)
+  const effort = effortFor(STEP_ROLE[step], ctx.aspira)
   const promptDir = join(ctx.dir, 'prompts')
   await mkdir(promptDir, { recursive: true })
   const launcher = launcherFor(command, ctx.mode)
@@ -891,6 +892,8 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
       mode: ctx.mode,
       cwd: ctx.input.repo,
       model,
+      // aspira.json `models` may set the step subagent's reasoning effort; absent, the Agent tool's default.
+      ...(effort === undefined ? {} : { effort }),
       prompt: join(promptDir, `${step}-${ctx.runId}.md`),
       notion: [{ op: 'read', target: 'ticket' }, ...STEP_NOTION[step]],
       report: { output, fields: ['nonce', 'step', 'status', 'resultLine', 'usage'] },
@@ -915,9 +918,9 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
           '',
         ]
       : []),
-    `You run on ${model}. ${subagentModels(step, ctx.aspira)}`,
+    `You run on ${model}${effort === undefined ? '' : ` at ${effort} effort`}. ${subagentModels(step, ctx.aspira)}`,
     '',
-    "Every task the step's `local` stage prints names the model it runs on (`model`): launch that task's subagent on that model, never on your own by default (KIT-48).",
+    "Every task the step's `local` stage prints names the model it runs on (`model`) and, when set, its reasoning effort (`effort`): launch that task's subagent on that model, passing `effort` to the Agent tool when the task has one, never on your own by default (KIT-48).",
     '',
     `${RESEARCH_RULE} Pass that on to every subagent you launch: the session's research tools are the repository (Read, Grep, Glob), the Notion MCP (notion-fetch, notion-search, notion-query-data-sources) and the web (WebFetch, WebSearch), read-only.`,
     '',

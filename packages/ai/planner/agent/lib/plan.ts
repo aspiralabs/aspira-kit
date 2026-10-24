@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { decisionSchema, parseTickedDecisions, renderDecisions, type Answer, type DecisionRecord } from '@aspiralabs/ai/common/lib/decisions'
-import { mergeDecisions, planSchema, problemSeverity, renderPlan, touchesUi, type Plan } from '@aspiralabs/ai/common/lib/plan'
+import { applyPlanPatch, mergeDecisions, planPatchSchema, planSchema, problemSeverity, renderPlan, touchesUi, type Plan, type PlanPatch } from '@aspiralabs/ai/common/lib/plan'
 import { allowedPath } from '@aspiralabs/ai/common/lib/repository'
 import { countBySeverity, findingsHeader, severityHeading, sortBySeverity } from '@aspiralabs/ai/common/lib/severity'
 import { specFeatures } from '@aspiralabs/ai/common/lib/spec'
@@ -13,7 +13,7 @@ export { decisionSchema }
 // planSchema, Plan, renderPlan, mergeDecisions and problemSeverity now live in
 // @aspiralabs/ai/common/lib/plan (the implementor's plan-block recovery needs them without
 // depending on this package); re-exported here unchanged so every existing import of './plan.ts' keeps working.
-export { planSchema, renderPlan, mergeDecisions, problemSeverity, touchesUi }
+export { applyPlanPatch, planPatchSchema, planSchema, renderPlan, mergeDecisions, problemSeverity, touchesUi, type PlanPatch }
 export type { Plan }
 export const researchSchema = z.object({ facts: z.array(text), checks: z.array(z.object({ rule: text, evidence: text })), gaps: z.array(text), decisions: z.array(decisionSchema), notes: z.array(text).optional() })
 export type Research = z.infer<typeof researchSchema>
@@ -76,6 +76,24 @@ export function validatePlan(plan: Plan, spec: string, files: Map<string, string
     }
     for (const change of task.changes) {
       if (!writablePath(change.path)) { errors.push(`Unsafe path: ${change.path}`); continue }
+      if (change.operation === 'move') {
+        // A move relocates a file or a whole directory: every path under `from` exists at `path` for later tasks.
+        const from = change.from ?? ''
+        if (!writablePath(from)) { errors.push(`Unsafe path: ${from}`); continue }
+        const moved = [...existing].filter((path) => path === from || path.startsWith(`${from}/`))
+        if (!moved.length) errors.push(`Missing move source: ${from}`)
+        if ([...existing].some((path) => path === change.path || path.startsWith(`${change.path}/`))) errors.push(`Move target already exists: ${change.path}`)
+        const cited = change.evidence.some((citation) => {
+          const match = citation.match(/^(.+?):(\d+)/)
+          return match !== null && files.has(match[1]!) && (match[1] === from || match[1]!.startsWith(`${from}/`))
+        })
+        if (!cited) errors.push(`No valid source evidence: ${task.id}/${from}`)
+        for (const path of moved) {
+          existing.delete(path)
+          existing.add(`${change.path}${path.slice(from.length)}`)
+        }
+        continue
+      }
       if (change.operation === 'create' && existing.has(change.path)) errors.push(`Create target already exists: ${change.path}`)
       if (change.operation !== 'create' && !existing.has(change.path)) {
         const directory = [...existing].some((path) => path.startsWith(`${change.path}/`))

@@ -18,6 +18,7 @@ import { promisify } from 'node:util'
 import { z } from 'zod'
 import { changedApps } from '@aspiralabs/ai/common/lib/changed-apps'
 import type { SessionModel } from '@aspiralabs/ai/common/lib/session-model'
+import { taskModel, type Effort } from '@aspiralabs/ai/common/lib/model-config'
 import { readRunStatus, type ReasonCode } from '@aspiralabs/ai/common/lib/run-status'
 import { parseTicketMd, TICKET_FILE } from '@aspiralabs/ai/common/lib/ticket'
 import { dependenciesAdded, renderDependencies, type DependencyReport } from './dependencies.ts'
@@ -90,7 +91,7 @@ export type Stage = 'plan' | 'parallelize' | 'wave' | 'wave-commit' | 'verificat
 
 /** A task as printed for the session. Orchestrator tasks run in the session; worker tasks run as subagents. */
 /** `model` (KIT-48): the session model the task runs on; lane workers on Sonnet, the orchestrator's own turns on Opus. */
-export type LocalTask = { id: string; agent: 'orchestrator' | 'worker'; prompt: string; output: string; schema: SchemaName; model: SessionModel; error?: string; retry?: boolean }
+export type LocalTask = { id: string; agent: 'orchestrator' | 'worker'; prompt: string; output: string; schema: SchemaName; effort?: Effort; model: SessionModel; error?: string; retry?: boolean }
 
 /** A model stage for the session to run. */
 export type LocalPending = { pending: true; status: 'pending'; stage: Stage; wave?: number; workDir: string; runDir: string; parallel: boolean; tasks: LocalTask[] }
@@ -619,7 +620,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     const prompt = promptFile(task.id)
     await writeFile(prompt, orchestratorPrompt({ task, output, schema, files, facts: facts(extraFacts), knowledge: knowledgeText, repo: source.repo, knowledgeDir }))
     await save()
-    return { pending: true, status: 'pending', stage: task.stage, ...(task.wave === undefined ? {} : { wave: task.wave }), workDir: source.workDir, runDir, parallel: false, tasks: [{ id: task.id, agent: 'orchestrator', prompt, output, schema, model: 'opus', ...outcome }] }
+    return { pending: true, status: 'pending', stage: task.stage, ...(task.wave === undefined ? {} : { wave: task.wave }), workDir: source.workDir, runDir, parallel: false, tasks: [{ id: task.id, agent: 'orchestrator', prompt, output, schema, ...taskModel('implementor.orchestrator', 'opus' as SessionModel, source.repo), ...outcome }] }
   }
 
   // The plan: the reviewed one, or the one the session drafts from the spec.
@@ -705,7 +706,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       ].join('\n')
       const prompt = promptFile(id)
       await writeFile(prompt, workerPrompt({ id, output, files, values }))
-      pendingTasks.push({ id, agent: 'worker', prompt, output, schema: 'WORKER_REPORT', model: 'sonnet', ...('error' in result && result.error !== undefined ? { error: result.error, retry: result.retry } : {}) })
+      pendingTasks.push({ id, agent: 'worker', prompt, output, schema: 'WORKER_REPORT', ...taskModel('implementor.worker', 'sonnet' as SessionModel, source.repo), ...('error' in result && result.error !== undefined ? { error: result.error, retry: result.retry } : {}) })
     }
     if (missing.length > 0) return exportRun('incomplete')
     if (pendingTasks.length > 0) {
