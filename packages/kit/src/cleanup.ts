@@ -26,7 +26,7 @@ export type CleanupOptions = {
   yes: boolean
   /** --only (with --yes): delete only these paths, if they are still marked delete. */
   only?: string[] | undefined
-  /** The board seam; the live lookup through agent-common by default. */
+  /** The board seam; the live lookup through the common folder by default. */
   lookup?: TicketLookup | undefined
   /** The terminal reader; absent when there is no terminal. */
   ask?: Ask | undefined
@@ -35,7 +35,7 @@ export type CleanupOptions = {
   warn?: Log | undefined
 }
 
-const VERSION_SKEW = "the installed @aspiralabs/agent-common does not report the card's Type; install @aspiralabs/agents at the kit's version and run kit init"
+const VERSION_SKEW = "the installed @aspiralabs/ai does not report the card's Type; install @aspiralabs/ai at the kit's version and run kit init"
 
 type Verdict = { kind: 'delete' } | { kind: 'keep' } | { kind: 'skip'; reason: string }
 

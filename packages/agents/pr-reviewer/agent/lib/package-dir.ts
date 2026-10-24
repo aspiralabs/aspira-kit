@@ -6,19 +6,22 @@
 // exactly that. Every host-side read of a package file resolves through here instead.
 
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Reviewer } from './review.ts'
 
-export const PACKAGE_NAME = '@aspiralabs/pr-reviewer'
+export const PACKAGE_NAME = 'pr-reviewer'
+const AI_PACKAGE = '@aspiralabs/ai'
 
 /** The eve directories a running module may sit under; the real package root is what precedes them. */
 const EVE_RUNTIME_SEGMENTS = ['/.eve/dev-runtime/snapshots/', '/.eve/compile/', '/.eve/builds/']
 
 const isThisPackage = (dir: string): boolean => {
   try {
-    const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: unknown }
-    return manifest.name === PACKAGE_NAME
+    const name = (file: string): unknown => (JSON.parse(readFileSync(file, 'utf8')) as { name?: unknown }).name
+    // The cloud copy's root names itself pr-reviewer; the source and installed folder sits in @aspiralabs/ai.
+    if (name(join(dir, 'package.json')) === PACKAGE_NAME) return true
+    return basename(dir) === PACKAGE_NAME && name(join(dir, '..', 'package.json')) === AI_PACKAGE
   } catch {
     return false
   }
@@ -43,7 +46,7 @@ export function packageDirFrom(moduleUrl: string): string {
   for (;;) {
     if (isThisPackage(dir)) return dir
     const parent = resolve(dir, '..')
-    if (parent === dir) throw new Error(`Cannot find the ${PACKAGE_NAME} package directory from ${path}: no eve runtime segment and no ancestor package.json names it.`)
+    if (parent === dir) throw new Error(`Cannot find the ${PACKAGE_NAME} folder of ${AI_PACKAGE} from ${path}: no eve runtime segment and no ancestor is the ${PACKAGE_NAME} folder of ${AI_PACKAGE}.`)
     dir = parent
   }
 }

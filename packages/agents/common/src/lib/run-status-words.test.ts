@@ -19,7 +19,7 @@ const OLD_WORDS = ['complete', 'clean', 'confirmed', 'stopped', 'partial', 'noth
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..', '..')
 /** The packages the spec's F11 and Blast radius name: agent-common, every agent package, build-feature. */
-const SEARCH_DIRS = ['packages/agents/common/src', 'packages/agents/groomer', 'packages/agents/spec-writer', 'packages/agents/spec-reviewer', 'packages/agents/planner', 'packages/agents/implementor', 'packages/agents/code-analyzer', 'packages/agents/pr-reviewer', 'packages/agents/agents', 'packages/agents/build-feature/src'].map((dir) => join(ROOT, dir))
+const SEARCH_DIRS = ['packages/ai/common/src', 'packages/ai/groomer', 'packages/ai/spec-writer', 'packages/ai/spec-reviewer', 'packages/ai/planner', 'packages/ai/implementor', 'packages/ai/code-analyzer', 'packages/ai/pr-reviewer', 'packages/ai/agents', 'packages/ai/build-feature/src'].map((dir) => join(ROOT, dir))
 const SOURCE_EXTENSIONS = ['.ts', '.sh']
 const SKIPPED_DIR_NAMES = new Set(['node_modules', 'dist', '.git', 'coverage'])
 

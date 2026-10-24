@@ -23,7 +23,7 @@ describe('knowledgeConfig', () => {
     const agentDir = join(await tempDir('spec-writer-agent-'), 'spec-writer')
     await mkdir(agentDir)
     expect(await knowledgeConfig(agentDir, {})).toEqual({ root: null, required: ['Agent Instructions', 'Review Verification'], maxDepth: 3, maxPages: 80 })
-    // The shared packages/agents/.env.local, as `pnpm review` loads it.
+    // The shared packages/ai/.env.local, as `pnpm review` loads it.
     await writeFile(join(agentDir, '..', '.env.local'), `AI_GATEWAY_API_KEY=x\nKNOWLEDGE_PAGE=${ROOT}\nNOTION_TOKEN=secret\n`)
     expect(await knowledgeConfig(agentDir, {})).toMatchObject({ root: ROOT, required: ['Agent Instructions', 'Review Verification'] })
     await writeFile(join(agentDir, '.env.development.local'), 'KNOWLEDGE_REQUIRED="Agent Instructions, Security Rules"\n')

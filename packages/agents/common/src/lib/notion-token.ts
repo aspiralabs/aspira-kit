@@ -3,7 +3,7 @@
 // the same root-then-app precedence kit next resolves other project env files in
 // (packages/kit/src/next.ts), with the app's value winning over the root's. It never reads an
 // agent package's own .env.local: that file is for the agent's own runtime config
-// (packages/agents/code-analyzer/agent/lib/knowledge.ts's agentEnv reads it for that), not a place
+// (packages/ai/code-analyzer/agent/lib/knowledge.ts's agentEnv reads it for that), not a place
 // a project is expected to put its Notion token.
 
 import { readFile } from 'node:fs/promises'

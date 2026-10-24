@@ -4,7 +4,7 @@
 // agent version produced it.
 
 import { readFile, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** The agent package that is running. */
@@ -13,11 +13,22 @@ export type AgentVersion = { name: string; version: string; path: string; instal
 /** The file name the version is recorded under, in an export's trace/ (or its root when there is no trace/). */
 export const AGENT_VERSION_FILE = 'agent-version.json'
 
-/** Read the package at `packageDir` (a path or a file URL, as `new URL('..', import.meta.url)`). */
+async function readManifest(file: string): Promise<{ name?: unknown; version?: unknown } | null> {
+  try {
+    return JSON.parse(await readFile(file, 'utf8')) as { name?: unknown; version?: unknown }
+  } catch {
+    return null
+  }
+}
+
+/** Read the agent folder at `packageDir` (a path or a file URL, as `new URL('..', import.meta.url)`). */
 export async function agentVersion(packageDir: string | URL): Promise<AgentVersion> {
   const dir = (typeof packageDir === 'string' ? packageDir : fileURLToPath(packageDir)).replace(/(.)\/+$/, '$1')
-  const manifest = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')) as { name?: unknown; version?: unknown }
-  const name = typeof manifest.name === 'string' ? manifest.name : '(unnamed)'
+  // A cloud copy (.work/.agents/<name>@<version>) carries its own package.json; otherwise the agent is a
+  // folder of @aspiralabs/ai: its name is the folder name and its version is the package's, one level up.
+  const own = await readManifest(join(dir, 'package.json'))
+  const manifest = own ?? (await readManifest(join(dir, '..', 'package.json'))) ?? {}
+  const name = own && typeof own.name === 'string' ? own.name : basename(dir)
   const version = typeof manifest.version === 'string' ? manifest.version : '0.0.0'
   return { name, version, path: dir, installed: /(^|\/)node_modules\//.test(`${dir}/`) }
 }

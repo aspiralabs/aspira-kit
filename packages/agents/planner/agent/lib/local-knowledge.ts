@@ -127,7 +127,7 @@ export async function inspectKnowledge(dir: string, config: KnowledgeConfig): Pr
   return { ready: problems.length === 0 && pages.every((page) => page.present), pages, problems }
 }
 
-const LOAD_KNOWLEDGE = 'load-knowledge --out <dir> (packages/agents/common/scripts/load-knowledge.ts)'
+const LOAD_KNOWLEDGE = 'load-knowledge --out <dir> (packages/ai/common/scripts/load-knowledge.ts)'
 
 /** No folder yet and nothing to fetch it with (no NOTION_TOKEN, or no KNOWLEDGE_PAGE): the run ends blocked (F52), never a session stage. */
 export class KnowledgeBlocked extends KnowledgePrerequisiteError {

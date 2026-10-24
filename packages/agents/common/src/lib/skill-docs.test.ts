@@ -21,18 +21,18 @@ const ROOT = join(import.meta.dirname, '..', '..', '..', '..', '..')
 
 // The eight launcher skills (six agents, build-feature and visual-verify; spec-reviewer is a library since KIT-48), each `skill/aspira-<name>/SKILL.md`.
 const LAUNCHER_SKILLS: { name: string; path: string }[] = [
-  { name: 'groomer', path: 'packages/agents/groomer/skill/aspira-groomer/SKILL.md' },
-  { name: 'spec-writer', path: 'packages/agents/spec-writer/skill/aspira-spec-writer/SKILL.md' },
-  { name: 'planner', path: 'packages/agents/planner/skill/aspira-planner/SKILL.md' },
-  { name: 'implementor', path: 'packages/agents/implementor/skill/aspira-implementor/SKILL.md' },
-  { name: 'code-analyzer', path: 'packages/agents/code-analyzer/skill/aspira-code-analyzer/SKILL.md' },
-  { name: 'pr-reviewer', path: 'packages/agents/pr-reviewer/skill/aspira-pr-reviewer/SKILL.md' },
-  { name: 'build-feature', path: 'packages/agents/build-feature/skill/aspira-build-feature/SKILL.md' },
-  { name: 'visual-verify', path: 'packages/agents/visual-verify/skill/aspira-visual-verify/SKILL.md' },
+  { name: 'groomer', path: 'packages/ai/groomer/skill/aspira-groomer/SKILL.md' },
+  { name: 'spec-writer', path: 'packages/ai/spec-writer/skill/aspira-spec-writer/SKILL.md' },
+  { name: 'planner', path: 'packages/ai/planner/skill/aspira-planner/SKILL.md' },
+  { name: 'implementor', path: 'packages/ai/implementor/skill/aspira-implementor/SKILL.md' },
+  { name: 'code-analyzer', path: 'packages/ai/code-analyzer/skill/aspira-code-analyzer/SKILL.md' },
+  { name: 'pr-reviewer', path: 'packages/ai/pr-reviewer/skill/aspira-pr-reviewer/SKILL.md' },
+  { name: 'build-feature', path: 'packages/ai/build-feature/skill/aspira-build-feature/SKILL.md' },
+  { name: 'visual-verify', path: 'packages/ai/visual-verify/skill/aspira-visual-verify/SKILL.md' },
 ]
 // The implementor cloud agent's own skill file, embedded by --local and load_skill'd in the cloud:
 // not a launcher (no start/status/wait of its own), and never user-invoked directly.
-const IMPLEMENTOR_CLOUD_SKILL = 'packages/agents/implementor/agent/skills/aspira-implementor/SKILL.md'
+const IMPLEMENTOR_CLOUD_SKILL = 'packages/ai/implementor/agent/skills/aspira-implementor/SKILL.md'
 const ALL_SKILL_FILES = [...LAUNCHER_SKILLS.map((s) => s.path), IMPLEMENTOR_CLOUD_SKILL]
 
 function readSkill(path: string): string {
@@ -94,7 +94,7 @@ describe('Launcher SKILL.md says a non-zero exit is a run status to relay, never
 // incomplete, blocked) and a refusal (3). Every launcher SKILL.md and every agent README that names
 // the exit codes names them this way, never needs-author as exit 1 (copied from Q4, TEST-006).
 const EXIT_CODE_LINE = /exit 0 is ready, 1 incomplete or blocked, 3 refused, 5 needs-author/
-const AGENT_READMES = ['planner', 'spec-reviewer', 'spec-writer', 'code-analyzer'].map((name) => `packages/agents/${name}/README.md`)
+const AGENT_READMES = ['planner', 'spec-reviewer', 'spec-writer', 'code-analyzer'].map((name) => `packages/ai/${name}/README.md`)
 
 describe('Launcher SKILL.md and agent READMEs name needs-author\'s own exit code, 5 (REBA2.1, Decision Q4)', () => {
   it.each(LAUNCHER_SKILLS)('$name SKILL.md lists the run-status exit codes', ({ path }) => {
@@ -113,12 +113,12 @@ type KnowledgeStep = { name: string; path: string; anchor: RegExp }
 // Each launcher's knowledge-fetching step starts with its own distinct heading line (column 0, a
 // top-level numbered step); build-feature has none of its own (it steps each stage's own skill).
 const KNOWLEDGE_STEPS: KnowledgeStep[] = [
-  { name: 'groomer', path: 'packages/agents/groomer/skill/aspira-groomer/SKILL.md', anchor: /^\d+\.\s\*\*Knowledge\.\*\*/ },
-  { name: 'spec-writer', path: 'packages/agents/spec-writer/skill/aspira-spec-writer/SKILL.md', anchor: /^\d+\.\s\*\*Knowledge\.\*\*/ },
-  { name: 'planner', path: 'packages/agents/planner/skill/aspira-planner/SKILL.md', anchor: /^\d+\.\sStage `knowledge`:/ },
-  { name: 'implementor', path: 'packages/agents/implementor/skill/aspira-implementor/SKILL.md', anchor: /^\d+\.\s\*\*`knowledge`\*\*/ },
-  { name: 'code-analyzer', path: 'packages/agents/code-analyzer/skill/aspira-code-analyzer/SKILL.md', anchor: /^\d+\.\s\*\*Knowledge\.\*\*/ },
-  { name: 'pr-reviewer', path: 'packages/agents/pr-reviewer/skill/aspira-pr-reviewer/SKILL.md', anchor: /^\d+\.\s\*\*Guidelines\.\*\*/ },
+  { name: 'groomer', path: 'packages/ai/groomer/skill/aspira-groomer/SKILL.md', anchor: /^\d+\.\s\*\*Knowledge\.\*\*/ },
+  { name: 'spec-writer', path: 'packages/ai/spec-writer/skill/aspira-spec-writer/SKILL.md', anchor: /^\d+\.\s\*\*Knowledge\.\*\*/ },
+  { name: 'planner', path: 'packages/ai/planner/skill/aspira-planner/SKILL.md', anchor: /^\d+\.\sStage `knowledge`:/ },
+  { name: 'implementor', path: 'packages/ai/implementor/skill/aspira-implementor/SKILL.md', anchor: /^\d+\.\s\*\*`knowledge`\*\*/ },
+  { name: 'code-analyzer', path: 'packages/ai/code-analyzer/skill/aspira-code-analyzer/SKILL.md', anchor: /^\d+\.\s\*\*Knowledge\.\*\*/ },
+  { name: 'pr-reviewer', path: 'packages/ai/pr-reviewer/skill/aspira-pr-reviewer/SKILL.md', anchor: /^\d+\.\s\*\*Guidelines\.\*\*/ },
 ]
 
 /** The knowledge step's own text: from its heading line up to (not including) the next top-level

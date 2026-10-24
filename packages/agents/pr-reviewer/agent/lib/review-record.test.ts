@@ -1,7 +1,7 @@
 // T27: the run record a --local review exports. Today exportReview (agent/lib/local.ts) writes
 // trace/calls.json and the review's own documents, but no trace/review.json, and LocalDone.status
 // is 'complete' | 'incomplete' rather than the shared five-status vocabulary ('ready' instead of
-// 'complete'; see packages/agents/pr-reviewer/agent/lib/local.ts:123, 678-684). These tests fail
+// 'complete'; see packages/ai/pr-reviewer/agent/lib/local.ts:123, 678-684). These tests fail
 // until that lands: no trace/review.json exists yet, so every assertion on it fails closed.
 //
 // End to end over real git and a stand-in GitHub, the same seam the package's own local.test.ts

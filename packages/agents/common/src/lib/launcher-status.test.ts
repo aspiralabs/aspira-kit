@@ -5,8 +5,8 @@
 // T4) before anything else, and the reason on anything but ready. Today none of the seven launchers'
 // `cmd_status`/`cmd_wait` read the record or derive an exit code at all: a still-running call and a
 // finished call both fall through to the script's last command and exit 0, whatever the trace says
-// (packages/agents/spec-writer/skill/aspira-spec-writer/scripts/spec-writer.sh:256-271 cmd_status
-// returns 0 while running and prints eve's exit; packages/agents/planner/skill/aspira-planner/scripts/planner.sh:254-276
+// (packages/ai/spec-writer/skill/aspira-spec-writer/scripts/spec-writer.sh:256-271 cmd_status
+// returns 0 while running and prints eve's exit; packages/ai/planner/skill/aspira-planner/scripts/planner.sh:254-276
 // the same in the planner launcher). This file fails until P20 lands.
 //
 // Every status word, exit code and record path is copied from the spec's "Run record per skill"
@@ -35,12 +35,12 @@ type Launcher = {
 
 // The seven agent launchers T66 covers (build-feature is not one of them: it has no start/status/wait).
 const LAUNCHERS: Launcher[] = [
-  { name: 'groomer', envVar: 'GROOMER_AGENT_DIR', skillDir: 'packages/agents/groomer/skill/aspira-groomer', agentDir: 'packages/agents/groomer', recordPath: 'trace/groom.json' },
-  { name: 'spec-writer', envVar: 'SPEC_WRITER_AGENT_DIR', skillDir: 'packages/agents/spec-writer/skill/aspira-spec-writer', agentDir: 'packages/agents/spec-writer', recordPath: 'trace/review.json' },
-  { name: 'planner', envVar: 'PLANNER_AGENT_DIR', skillDir: 'packages/agents/planner/skill/aspira-planner', agentDir: 'packages/agents/planner', recordPath: 'trace/review.json' },
-  { name: 'implementor', envVar: 'IMPLEMENTOR_AGENT_DIR', skillDir: 'packages/agents/implementor/skill/aspira-implementor', agentDir: 'packages/agents/implementor', recordPath: 'trace/implementation-local.json' },
-  { name: 'code-analyzer', envVar: 'CODE_ANALYZER_AGENT_DIR', skillDir: 'packages/agents/code-analyzer/skill/aspira-code-analyzer', agentDir: 'packages/agents/code-analyzer', recordPath: 'rounds.json' },
-  { name: 'pr-reviewer', envVar: 'PR_REVIEWER_AGENT_DIR', skillDir: 'packages/agents/pr-reviewer/skill/aspira-pr-reviewer', agentDir: 'packages/agents/pr-reviewer', recordPath: 'trace/review.json' },
+  { name: 'groomer', envVar: 'GROOMER_AGENT_DIR', skillDir: 'packages/ai/groomer/skill/aspira-groomer', agentDir: 'packages/ai/groomer', recordPath: 'trace/groom.json' },
+  { name: 'spec-writer', envVar: 'SPEC_WRITER_AGENT_DIR', skillDir: 'packages/ai/spec-writer/skill/aspira-spec-writer', agentDir: 'packages/ai/spec-writer', recordPath: 'trace/review.json' },
+  { name: 'planner', envVar: 'PLANNER_AGENT_DIR', skillDir: 'packages/ai/planner/skill/aspira-planner', agentDir: 'packages/ai/planner', recordPath: 'trace/review.json' },
+  { name: 'implementor', envVar: 'IMPLEMENTOR_AGENT_DIR', skillDir: 'packages/ai/implementor/skill/aspira-implementor', agentDir: 'packages/ai/implementor', recordPath: 'trace/implementation-local.json' },
+  { name: 'code-analyzer', envVar: 'CODE_ANALYZER_AGENT_DIR', skillDir: 'packages/ai/code-analyzer/skill/aspira-code-analyzer', agentDir: 'packages/ai/code-analyzer', recordPath: 'rounds.json' },
+  { name: 'pr-reviewer', envVar: 'PR_REVIEWER_AGENT_DIR', skillDir: 'packages/ai/pr-reviewer/skill/aspira-pr-reviewer', agentDir: 'packages/ai/pr-reviewer', recordPath: 'trace/review.json' },
 ]
 
 /** A run directory with `started` (five seconds ago) and an `output` file naming a folder this test

@@ -15,7 +15,7 @@ import { spawnSync } from 'node:child_process'
 import { deepMerge, hasJsonComments, readJson, writeIfAbsent, writeJson, type Log } from '../fs.js'
 import { appRoot, isWorkspaceRoot, normalizeApp, writeAspira } from '../aspira.js'
 import { ENV_LOCAL_ENTRY, envLocalIgnored, gitRootOf, hasLine, mcpServer, WORKTREES_ENTRY } from '../doctor.js'
-import { AGENTS_PACKAGE, installSkills } from '../skills.js'
+import { AI_PACKAGE, installSkills } from '../skills.js'
 
 export type InitOptions = { projectRoot: string; app?: string; dryRun: boolean; log: Log; board?: string; releases?: string }
 
@@ -24,7 +24,7 @@ export type InitOptions = { projectRoot: string; app?: string; dryRun: boolean; 
 type Resolved = InitOptions & { app: string | undefined; appDir: string; workspace: boolean; workspaceDir: string }
 
 const DEPS = ['@aspiralabs/ui']
-const DEV_DEPS = ['@aspiralabs/config', '@aspiralabs/kit', AGENTS_PACKAGE, 'eslint', 'prettier', 'typescript']
+const DEV_DEPS = ['@aspiralabs/config', AI_PACKAGE, 'eslint', 'prettier', 'typescript']
 
 // The kit's own version: every @aspiralabs package is installed at exactly this version, because the
 // packages release in lockstep and because pnpm 12's supply-chain policy (minimum release age) would
@@ -255,7 +255,7 @@ function dropKitHooks(settings: Record<string, unknown>): Record<string, unknown
   if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
     return settings
   }
-  const kit = (entry: unknown): boolean => /@aspiralabs\/(config\/agent|kit)\/hooks\//.test(JSON.stringify(entry))
+  const kit = (entry: unknown): boolean => /@aspiralabs\/(config\/agent|kit|ai)\/hooks\//.test(JSON.stringify(entry))
   const next: Record<string, unknown> = {}
   for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
     next[event] = Array.isArray(groups) ? groups.filter((g) => !kit(g)) : groups

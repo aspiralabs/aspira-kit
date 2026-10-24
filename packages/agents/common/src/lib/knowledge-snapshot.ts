@@ -66,7 +66,7 @@ export type VerifyOk = { ok: true; message: string }
 export type VerifyFail = { ok: false; reason: string; hint: string }
 export type VerifyResult = VerifyOk | VerifyFail
 
-const HINT = 'Run the load-knowledge command (packages/agents/common/scripts/load-knowledge.ts) to refresh the guidelines snapshot instead of trusting this copy.'
+const HINT = 'Run the load-knowledge command (packages/ai/common/scripts/load-knowledge.ts) to refresh the guidelines snapshot instead of trusting this copy.'
 
 /**
  * Trusts a snapshot only when it sits exactly where it was written, carries an intact header whose

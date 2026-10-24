@@ -9,7 +9,7 @@ import { INDEX_FILE, KNOWLEDGE_ENV, KNOWLEDGE_PATH, REQUIRED_ENV, REQUIRED_FILE,
 // Puts the org's engineering guidelines in the sandbox as markdown so an agent
 // reads them like any other file: INDEX.md is the Notion page named in
 // KNOWLEDGE_PAGE, one file per page below it. Runs in the app runtime (network
-// and env), writes into the shared sandbox. The walk itself (packages/agents/common/src/lib/
+// and env), writes into the shared sandbox. The walk itself (packages/ai/common/src/lib/
 // knowledge-walk.ts) is shared with the load-knowledge command, probe-knowledge and
 // code-analyzer's host copy, so the three can never again write different file names for the
 // same tree. A page that fails to load, or is truncated, now fails the whole call.

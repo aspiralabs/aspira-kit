@@ -1,7 +1,7 @@
 // The one breadth-first walk of the engineering guidelines tree in Notion, shared by the
 // load-knowledge command (scripts/load-knowledge.ts), the eve load-knowledge tool
 // (tools/load-knowledge.ts), probe-knowledge.ts's preview and code-analyzer's host copy
-// (packages/agents/code-analyzer/agent/lib/knowledge.ts). Depth and page caps, link rewriting and
+// (packages/ai/code-analyzer/agent/lib/knowledge.ts). Depth and page caps, link rewriting and
 // required-page resolution come from ./knowledge; this module adds the walk's error semantics
 // (a failed or truncated page fails the whole walk, naming it), the provenance-carrying write to a
 // destination folder, and the safety checks that write goes through before it ever deletes

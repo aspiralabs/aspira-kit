@@ -1,4 +1,4 @@
-// The planner's implementation-plan shape, moved here from packages/agents/planner/agent/lib/plan.ts
+// The planner's implementation-plan shape, moved here from packages/ai/planner/agent/lib/plan.ts
 // (unchanged) so the implementor's plan-block recovery (plan-block.ts, F36/F37) can read and render
 // a plan without depending on the planner package. The planner re-exports these from here; its own
 // research schema, path-safety checks and validatePlan stay in its own plan.ts.

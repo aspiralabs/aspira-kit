@@ -211,7 +211,7 @@ export class KnowledgeBlocked extends KnowledgePrerequisiteError {
 }
 
 /** The load-knowledge command a refusal names instead of a session fetch. */
-export const LOAD_KNOWLEDGE = 'load-knowledge --out <dir> (packages/agents/common/scripts/load-knowledge.ts)'
+export const LOAD_KNOWLEDGE = 'load-knowledge --out <dir> (packages/ai/common/scripts/load-knowledge.ts)'
 
 /**
  * The NOTION_TOKEN a run fetches with (F52): the process environment, the app's .env.local

@@ -6,7 +6,7 @@
 // migration, else two-way), then the decisions taken for the human, the run's notice and a link to
 // the ticket. implementation.md's own shape (the `## Tasks` pipe table and its
 // `### <id> — red → green evidence` subsections) is the implementor's SKILL.md template
-// (packages/agents/implementor/agent/skills/aspira-implementor/SKILL.md, section 7); this module
+// (packages/ai/implementor/agent/skills/aspira-implementor/SKILL.md, section 7); this module
 // parses exactly that, nothing more general. Every untrusted fragment (a task's red or green
 // output) is redacted on its own, scoped to `app`, before it is woven into the body: redacting the
 // whole rendered document would also mangle this module's own headings and code fences (SEC-010).

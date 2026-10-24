@@ -31,7 +31,7 @@ export function insideRoot(root: string, path: string): string | null {
   return rel
 }
 
-/** Credentials an analyzer command never gets, whether or not they are set: the same list build-feature's gate unsets (packages/agents/build-feature/src/gate.ts). The Notion token is for the knowledge walk only (F52). */
+/** Credentials an analyzer command never gets, whether or not they are set: the same list build-feature's gate unsets (packages/ai/build-feature/src/gate.ts). The Notion token is for the knowledge walk only (F52). */
 export const CREDENTIALS = ['NOTION_TOKEN', 'NOTION_API_KEY', 'GITHUB_TOKEN', 'GH_TOKEN', 'AI_GATEWAY_API_KEY', 'NPM_TOKEN', 'NODE_AUTH_TOKEN'] as const
 /** A variable named like a credential. */
 const CREDENTIAL_NAME = /_(TOKEN|SECRET|KEY|PASSWORD)$/i

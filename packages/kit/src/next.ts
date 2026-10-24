@@ -6,7 +6,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { appRoot, isNotionUrl, readAspira, readApp } from './aspira.js'
 import { readJson, type Log } from './fs.js'
-import { agentPackageDir } from './skills.js'
+import { aiPackageDir } from './skills.js'
 import { commandFor, nextStep, PLAYBOOK, type PlaybookRow } from './playbook.js'
 import { isTicketRef } from './ticket-handle.js'
 import { lookupTicket } from './ticket-lookup.js'
@@ -57,7 +57,7 @@ export function liveResolver(board: string, ref: string, projectRoot: string, ap
 
 /**
  * A progress note's `## Ticket` fields and `## Next action` block, read with kit's own light
- * parser (kit never imports `@aspiralabs/agent-common`'s TypeScript source at runtime, PATTERN-012:
+ * parser (kit never imports the TypeScript of the common folder of @aspiralabs/ai source at runtime, NOVA1.1:
  * the note is plain markdown on disk, the same contract `progress-note.ts` there renders). Null
  * when the text has no `Status:`/`Written:` line, or no `Step:` and no `Run:` line (F29: nothing to
  * resume from, so the caller falls back as if there were no note at all).
@@ -127,16 +127,16 @@ const LAUNCHER_SHAPE = /^\.claude\/skills\/aspira-[a-z][a-z-]*\/scripts\/[a-z][a
 /**
  * The Run-line shapes a progress note's Next action may use (F28): every Playbook slash command
  * (`<ID>` and `<app-dir>` wildcarded), kit's own launcher form, and whatever extra shell-command
- * shapes (`git push`, `gh pr create`, ...) `progress-note-shapes.json` names in the installed
- * `@aspiralabs/agent-common` — read as plain JSON (PATTERN-012), never agent-common's TypeScript.
+ * shapes (`git push`, `gh pr create`, ...) `progress-note-shapes.json` names in the common folder of the installed
+ * `@aspiralabs/ai` — read as plain JSON (NOVA1.1), never its TypeScript.
  */
 export function loadNoteShapes(appDir: string): RegExp[] {
   const builtin: RegExp[] = [
     ...PLAYBOOK.filter(hasCommand).map((row) => new RegExp(`^${row.command.replaceAll('<ID>', '[A-Za-z0-9-]+').replaceAll('<app-dir>', '[\\w./-]+')}$`)),
     LAUNCHER_SHAPE,
   ]
-  const dir = agentPackageDir(appDir, 'agent-common')
-  const file = dir === undefined ? undefined : join(dir, 'src', 'lib', 'progress-note-shapes.json')
+  const ai = aiPackageDir(appDir)
+  const file = ai === undefined ? undefined : join(ai, 'common', 'src', 'lib', 'progress-note-shapes.json')
   const shapes = file === undefined ? undefined : readJson<{ commands?: unknown }>(file)
   const commands = Array.isArray(shapes?.commands) ? shapes.commands.filter((pattern): pattern is string => typeof pattern === 'string') : []
   return [...builtin, ...commands.map((pattern) => new RegExp(pattern))]

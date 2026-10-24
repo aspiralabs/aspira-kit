@@ -4,7 +4,7 @@
 // tooling loaded), then `<appDir>/.env.local`, then `<projectRoot>/.env.local` — the same
 // root-then-app order `kit next` resolves other project env files in (packages/kit/src/next.ts),
 // with the app's value winning over the root's. It never reads an agent package's own .env.local
-// (packages/agents/code-analyzer/agent/lib/knowledge.ts's agentEnv does that for other purposes;
+// (packages/ai/code-analyzer/agent/lib/knowledge.ts's agentEnv does that for other purposes;
 // a token placed only there must not be found here). Returns null when none of the three carries
 // one. On a hit, `source` names where it came from: 'env', 'app' or 'root'.
 

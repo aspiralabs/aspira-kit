@@ -62,7 +62,7 @@ const canonical = (path: string): string => (existsSync(path) ? realpathSync(pat
 function placeTicket(ticket: ResolvedTicket, ref: string): { refusal: string } | Placed {
   const { id, type, folder, status } = ticket
   if (type === undefined || folder === undefined) {
-    return { refusal: `the installed @aspiralabs/agent-common does not report the card's Type; install @aspiralabs/agents at the kit's version${KIT_VERSION === undefined ? '' : ` (${KIT_VERSION})`} and run kit init` }
+    return { refusal: `the installed @aspiralabs/ai does not report the card's Type; install @aspiralabs/ai at the kit's version${KIT_VERSION === undefined ? '' : ` (${KIT_VERSION})`} and run kit init` }
   }
   const row = ticketTypeOf(type)
   if (row === undefined) {
@@ -70,7 +70,7 @@ function placeTicket(ticket: ResolvedTicket, ref: string): { refusal: string } |
     return { refusal: `Type ${type.trim()} has no handle or branch prefix (BOARD-011)` }
   }
   if (!isTicketRef(id)) return { refusal: `the board resolved ${ref} to "${id}", which is not a ticket ID` }
-  if (folder.trim() === '') return { refusal: `the board resolver printed an empty working-folder name for ${id}; update @aspiralabs/agents` }
+  if (folder.trim() === '') return { refusal: `the board resolver printed an empty working-folder name for ${id}; update @aspiralabs/ai` }
   const isFinished = nextStep(status)?.statuses.some((candidate) => FINISHED.includes(candidate)) ?? false
   if (isFinished) return { refusal: `${id}'s Status is ${status.trim()}: a Released or Dropped card gets no worktree (kit cleanup would remove it)` }
   return { id, row, folder: folder.trim() }

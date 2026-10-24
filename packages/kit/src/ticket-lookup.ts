@@ -1,5 +1,5 @@
 // Looks a ticket up on the board through the installed agents' board module: the resolve script that
-// @aspiralabs/agent-common ships, run with node and amaro like the skill launchers do, with the
+// the common folder of @aspiralabs/ai ships, run with node and amaro like the skill launchers do, with the
 // project's .env.local. `kit next`, `kit cleanup` and `kit worktree` share it. Every way of not getting
 // a ticket comes back as a reason with a one-line detail; this module writes nothing itself, so each
 // caller prints the detail under its own command name.
@@ -8,7 +8,7 @@ import { existsSync, realpathSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { z } from 'zod'
 import type { ResolvedTicket } from './next.js'
-import { AGENTS, agentPackageDir } from './skills.js'
+import { aiPackageDir } from './skills.js'
 
 /** Why there is no ticket. `cause` says whose side failed: the kit's install ('kit') or the board and its resolver ('board'). */
 export type TicketLookupFailure = { reason: 'unknown ID' | 'board unreachable' | 'no Status on the card'; detail: string; cause: 'kit' | 'board' }
@@ -69,19 +69,18 @@ function toTicket(output: ResolvedOutput): ResolvedTicket {
 
 const kitFailure = (detail: string): TicketLookupFailure => ({ reason: 'board unreachable', detail, cause: 'kit' })
 
-/** The default lookup: the @aspiralabs/agent-common installed under the app's node_modules, run with its resolve script and the project's .env.local (the root's, then the app's, which wins). */
+/** The default lookup: the common folder of the @aspiralabs/ai installed under the app's node_modules, run with its resolve script and the project's .env.local (the root's, then the app's, which wins). */
 export const lookupTicket: TicketLookup = (board, ref, projectRoot, appDir) => {
-  const common = agentPackageDir(appDir, 'agent-common')
-  if (common === undefined) {
-    return kitFailure(`@aspiralabs/agent-common is not installed: looked in ${join(appDir, 'node_modules', '@aspiralabs')} and beside @aspiralabs/agents there (install @aspiralabs/agents in ${appDir})`)
+  const ai = aiPackageDir(appDir)
+  if (ai === undefined) {
+    return kitFailure(`@aspiralabs/ai is not installed in ${appDir} (install @aspiralabs/ai and run kit init)`)
   }
+  const common = join(ai, 'common')
   const script = join(common, 'scripts', 'resolve-ticket.ts')
-  if (!existsSync(script)) return kitFailure(`${script} is missing (the installed @aspiralabs/agent-common has no resolve script; update @aspiralabs/agents)`)
-  // amaro is a dependency of the agents, not of agent-common. Resolve it the way Node would from an
-  // agent's real location: the first ancestor with node_modules/amaro (pnpm keeps a package's
+  if (!existsSync(script)) return kitFailure(`${script} is missing (the installed @aspiralabs/ai has no resolve script; update @aspiralabs/ai)`)
+  // amaro is a dependency of @aspiralabs/ai. Resolve it the way Node would from its real location: the first ancestor with node_modules/amaro (pnpm keeps a package's
   // dependencies two levels up from a scoped package; npm and yarn hoist them to the app's root).
-  const amaro = [common, ...AGENTS.map((agent) => agentPackageDir(appDir, agent)), appDir]
-    .filter((dir): dir is string => dir !== undefined)
+  const amaro = [common, ai, appDir]
     .map((dir) => findUpModule(realpathSync(dir), join('amaro', 'dist', 'register-strip.mjs')))
     .find((candidate) => candidate !== undefined)
   if (amaro === undefined) return kitFailure('amaro (the TypeScript loader the agents ship with) is not installed')

@@ -1,5 +1,5 @@
 // T5 (plan.json P1, F6): readRunRecord, part of the run-status module added by P14
-// (packages/agents/common/src/lib/run-status.ts). F6: "A run refused at a board gate reports
+// (packages/ai/common/src/lib/run-status.ts). F6: "A run refused at a board gate reports
 // refused, and a run stopped at the knowledge stage for a missing prerequisite reports blocked,
 // from the driver's own outcome, whether or not an agent trace exists. Any other run whose trace
 // file is missing or unreadable, or whose trace records a word outside both the new statuses and

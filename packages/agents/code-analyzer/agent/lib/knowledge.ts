@@ -1,7 +1,7 @@
 // The engineering guidelines for every code-analyzer path. The other agents load them with the
 // shared load-knowledge tool, which writes into the eve sandbox; code-analyzer's fixer runs on the
 // host for local and remote repositories alike, so this walks the same Notion tree through the
-// one shared walk (packages/agents/common/src/lib/knowledge-walk.ts) into a host folder instead of
+// one shared walk (packages/ai/common/src/lib/knowledge-walk.ts) into a host folder instead of
 // the sandbox. A run gets them one of three ways: from Notion (NOTION_TOKEN + KNOWLEDGE_PAGE),
 // from a --knowledge folder in load-knowledge's layout, or from a --guidelines REQUIRED.md
 // snapshot. Without any of them it does not run.
@@ -150,7 +150,7 @@ export async function resolveKnowledge(input: { knowledge?: string; guidelines?:
   if (input.knowledge !== undefined) return checkKnowledgeDir(resolve(input.knowledge), config, hint)
   if (input.guidelines !== undefined) return checkGuidelinesFile(resolve(input.guidelines), config)
 
-  // notionToken never reads an agent package's own .env.local (packages/agents/common/src/lib/
+  // notionToken never reads an agent package's own .env.local (packages/ai/common/src/lib/
   // notion-token.ts); the agent's shared ../.env.local plays the "project root" role here, and the
   // agent's own .env.local (if the deployment carries one) plays "app", so the agent's own value
   // still wins over the shared one, exactly as agentEnv's own precedence did.

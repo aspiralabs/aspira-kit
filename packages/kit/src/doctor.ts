@@ -8,12 +8,12 @@ import { dirname, join } from 'node:path'
 import { appRoot, checkAspira, isWorkspaceRoot, notionTargets, notionTokenCandidates, notionTokenSource, readAspira, readApp, type NotionTarget } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 import { isGitIgnored, repositoryRoot } from './git.js'
-import { AGENTS_PACKAGE, agentPackageDir, checkSkills } from './skills.js'
+import { AI_PACKAGE, aiPackageDir, checkSkills } from './skills.js'
 
 type Pkg = { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
 
-/** The hook command `kit init` writes: `sh <app>/node_modules/@aspiralabs/kit/hooks/<name>` from the project root. */
-export const hookCommand = (app: string | undefined, name: string): string => `sh ${app ? `${app}/` : ''}node_modules/@aspiralabs/kit/hooks/${name}`
+/** The hook command `kit init` writes: `sh <app>/node_modules/@aspiralabs/ai/hooks/<name>` from the project root. */
+export const hookCommand = (app: string | undefined, name: string): string => `sh ${app ? `${app}/` : ''}node_modules/@aspiralabs/ai/hooks/${name}`
 
 /** The MCP server entry `kit init` writes: the installed @aspiralabs/ui's server, run by node from the project root. */
 export const mcpServer = (app: string): { command: string; args: string[] } => ({ command: 'node', args: [`${app}/node_modules/@aspiralabs/ui/bin/mcp.js`] })
@@ -39,15 +39,16 @@ function findUpModule(dir: string, relative: string): string | undefined {
   }
 }
 
-/** The default UrlChecker: spawns agent-common's check-notion-urls.ts with the project's env
+/** The default UrlChecker: spawns the common folder's check-notion-urls.ts with the project's env
  * files, the app's winning, the same way `kit next`'s liveResolver spawns resolve-ticket.ts.
- * Reports every key "unreachable" when agent-common (or amaro) is not installed, rather than
+ * Reports every key "unreachable" when @aspiralabs/ai (or amaro) is not installed, rather than
  * throwing, so a project that has not installed the agents yet still gets a healthy doctor run. */
 export function liveUrlChecker(projectRoot: string, appDir: string): UrlChecker {
   return (checks) => {
     const unreachable = (reason: string): Record<string, UrlCheckResult> => Object.fromEntries(checks.map((check) => [check.key, { ok: false, unreachable: true, reason }]))
-    const common = agentPackageDir(appDir, 'agent-common')
-    if (common === undefined) return unreachable('@aspiralabs/agent-common is not installed; cannot check Notion')
+    const ai = aiPackageDir(appDir)
+    if (ai === undefined) return unreachable('@aspiralabs/ai is not installed; cannot check Notion')
+    const common = join(ai, 'common')
     const script = join(common, 'scripts', 'check-notion-urls.ts')
     const amaro = findUpModule(realpathSync(common), join('amaro', 'dist', 'register-strip.mjs')) ?? findUpModule(realpathSync(appDir), join('amaro', 'dist', 'register-strip.mjs'))
     if (!existsSync(script) || amaro === undefined) return unreachable(existsSync(script) ? 'amaro (the TypeScript loader the agents ship with) is not installed' : `${script} is missing`)
@@ -104,7 +105,7 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
   if (app) log(`app    ${app} (package.json and node_modules); Claude-facing files at ${projectRoot}`)
   let problems = 0
   const all = { ...pkg.dependencies, ...pkg.devDependencies }
-  for (const name of ['@aspiralabs/ui', '@aspiralabs/config', '@aspiralabs/kit', AGENTS_PACKAGE]) {
+  for (const name of ['@aspiralabs/ui', '@aspiralabs/config', AI_PACKAGE]) {
     const declared = all[name]
     const installed = readJson<{ version: string }>(join(appDir, 'node_modules', name, 'package.json'))?.version
     if (!declared) {
@@ -152,7 +153,7 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
   const aspira = checkAspira(projectRoot)
   checks.push([aspira.ok ? `aspira.json names the Feature Board${app ? ` and the app (${app})` : ''}` : aspira.reason ?? 'aspira.json', () => aspira.ok])
   // The /aspira-* skills: present, complete, and from the installed version of the package that ships
-  // them (@aspiralabs/agents for the agent skills, @aspiralabs/kit for the kit's own).
+  // them (all eleven against @aspiralabs/ai).
   for (const skill of checkSkills(projectRoot, app)) {
     checks.push([skill.ok ? `.claude/skills/aspira-${skill.name} matches ${skill.package}` : skill.reason ?? `.claude/skills/aspira-${skill.name}`, () => skill.ok])
   }

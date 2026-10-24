@@ -773,7 +773,7 @@ describe('finishFlow for the groomer, a tick made on Notion', () => {
           decidedBy: 'open',
           answer: null,
           branch: 'who',
-          facts: [{ path: 'packages/agents/common/src/lib/board.ts', line: 87 }],
+          facts: [{ path: 'packages/ai/common/src/lib/board.ts', line: 87 }],
         },
       ],
       branches: [{ id: 'who', state: 'visited' }],

@@ -1,5 +1,5 @@
 // T1-T4 (plan.json P1): the new agent-common run-status module, which does not exist yet
-// (packages/agents/common/src/lib/run-status.ts, added by the implementation wave P14). These
+// (packages/ai/common/src/lib/run-status.ts, added by the implementation wave P14). These
 // tests pin down its contract from the spec (spec.reviewed/spec.reviewed.md Decisions Q3/Q3.1,
 // Assumptions A1/A2, Acceptance Criteria F1-F7, F12, F53) before any of it exists, so they fail
 // for that reason until P14 lands.

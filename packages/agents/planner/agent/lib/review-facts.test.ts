@@ -1,5 +1,5 @@
 // T46 (F33), T47 (F34) and T48 (F35): the planner's review-facts module (plan P8; P28 creates
-// packages/agents/planner/agent/lib/review-facts.ts and wires runner.ts's researchPrompt to it).
+// packages/ai/planner/agent/lib/review-facts.ts and wires runner.ts's researchPrompt to it).
 // This file imports that module, so it fails to collect until P28 lands (the task's planned reason).
 //
 // The contract these tests pin, since nothing exists yet to read it from:

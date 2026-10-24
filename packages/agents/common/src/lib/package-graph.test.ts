@@ -12,7 +12,7 @@ const COMMON = join(ROOT, 'packages', 'agents', 'common')
 
 type Manifest = { name: string; files?: string[]; exports?: Record<string, string>; dependencies?: Record<string, string>; devDependencies?: Record<string, string>; peerDependencies?: Record<string, string>; optionalDependencies?: Record<string, string> }
 
-/** Every package.json directly under packages/ and packages/agents/. */
+/** Every package.json directly under packages/ and packages/ai/. */
 function manifests(): Manifest[] {
   const dirs = [join(ROOT, 'packages'), join(ROOT, 'packages', 'agents')]
   return dirs

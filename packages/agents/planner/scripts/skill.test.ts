@@ -174,7 +174,7 @@ it('resolves the agent in order: PLANNER_AGENT_DIR, the package installed under 
   // The skill as kit init installs it: a copy under the project's .claude/skills/.
   const copy = join(app, '.claude/skills/aspira-planner/scripts/planner.sh')
   await cp(launcher, copy)
-  const stale = join(dir, 'stale-kit/packages/agents/planner')
+  const stale = join(dir, 'stale-kit/packages/ai/planner')
 
   // Installed: found walking up from the working directory, even a subdirectory; the project's env file goes with it.
   const fromApp = await exec('bash', [copy, 'local', spec, '--no-ticket'], { cwd: join(app, 'docs'), env: { ...env, ASPIRA_KIT: stale } })

@@ -1,4 +1,4 @@
-// Same module as spec-reviewer/agent/lib/local-knowledge.ts; a candidate for packages/agents/common.
+// Same module as spec-reviewer/agent/lib/local-knowledge.ts; a candidate for packages/ai/common.
 // The engineering guidelines for --local, decided by the agent's own knowledge configuration.
 // load-knowledge walks Notion from KNOWLEDGE_PAGE and writes REQUIRED.md (the KNOWLEDGE_REQUIRED
 // pages, under its provenance header) beside INDEX.md and one file per page. The first call of a
@@ -58,7 +58,7 @@ const REQUIRED_NAME = basename(REQUIRED_FILE)
 const INDEX_NAME = basename(INDEX_FILE)
 const TRUNCATED = /TRUNCATED by the Notion API/i
 
-const LOAD_KNOWLEDGE = 'load-knowledge --out <dir> (packages/agents/common/scripts/load-knowledge.ts)'
+const LOAD_KNOWLEDGE = 'load-knowledge --out <dir> (packages/ai/common/scripts/load-knowledge.ts)'
 
 /** The folder this run loaded is incomplete (a required page missing, a page truncated): blocked, exit 1, through handleRunError. */
 export class KnowledgeRequired extends KnowledgePrerequisiteError {

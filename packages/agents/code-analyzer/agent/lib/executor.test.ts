@@ -1,6 +1,6 @@
 // Pins F52: the Notion token is for the knowledge walk only. Analyzer commands are project code
 // (eslint configs, tsc plugins, test scripts), so the host executor runs them without the
-// credentials build-feature's gate unsets (packages/agents/build-feature/src/gate.ts CREDENTIALS
+// credentials build-feature's gate unsets (packages/ai/build-feature/src/gate.ts CREDENTIALS
 // plus every *_TOKEN/_SECRET/_KEY/_PASSWORD variable).
 
 import { mkdtemp, rm } from 'node:fs/promises'

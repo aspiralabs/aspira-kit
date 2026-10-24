@@ -7,7 +7,7 @@ import { KIT_VERSION, approveIgnoredBuilds, pinned, withAllowBuilds } from './st
 describe('pinned', () => {
   it('pins every @aspiralabs package to the kit version and leaves others alone', () => {
     expect(pinned('@aspiralabs/ui', '0.5.0')).toBe('@aspiralabs/ui@0.5.0')
-    expect(pinned('@aspiralabs/agents', '0.5.0')).toBe('@aspiralabs/agents@0.5.0')
+    expect(pinned('@aspiralabs/ai', '0.5.0')).toBe('@aspiralabs/ai@0.5.0')
     expect(pinned('eslint', '0.5.0')).toBe('eslint')
     expect(pinned('@aspiralabs/ui', undefined)).toBe('@aspiralabs/ui')
   })
@@ -44,7 +44,7 @@ describe('approveIgnoredBuilds', () => {
   })
 
   it('puts the block first in a file that has other settings but no block', () => {
-    expect(withAllowBuilds("minimumReleaseAgeExclude:\n  - '@aspiralabs/kit@0.5.2'\n", ['core-js-pure'])).toBe("allowBuilds:\n  core-js-pure: true\n\nminimumReleaseAgeExclude:\n  - '@aspiralabs/kit@0.5.2'\n")
+    expect(withAllowBuilds("minimumReleaseAgeExclude:\n  - '@aspiralabs/ai@0.5.2'\n", ['core-js-pure'])).toBe("allowBuilds:\n  core-js-pure: true\n\nminimumReleaseAgeExclude:\n  - '@aspiralabs/ai@0.5.2'\n")
   })
 
   it('does nothing when the output names no ignored builds', () => {

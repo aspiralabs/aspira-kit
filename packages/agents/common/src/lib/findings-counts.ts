@@ -1,6 +1,6 @@
 // The counts behind a PR review verdict, shared so every reader of a findings.md agrees on them
 // (specs/agents-human-lists.md F27). Moved from pr-reviewer's agent/lib/findings.ts unchanged, so
-// both pr-reviewer and build-feature read the same counts (packages/agents/README.md: shared logic
+// both pr-reviewer and build-feature read the same counts (packages/ai/README.md: shared logic
 // lives in a shared package, helpers in common/src/lib). Pure: text in, counts out.
 
 import { SEVERITIES, type Counts, type Severity } from './severity.ts'
