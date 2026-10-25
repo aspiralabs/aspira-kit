@@ -3,7 +3,7 @@
 // shaped { checkedAt: <ms>, latest: '<x.y.z>', notified: {} }. No network is needed: the cached answer
 // is fresh, and the no-cache homes have no token, so no request is made.
 import { spawnSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -92,38 +92,29 @@ describe('kit stderr notice', () => {
   })
 })
 
-describe('re-exec', () => {
-  it("T27: inside a project the project's copy runs once with the same arguments and its exit code wins", () => {
+describe('global kit', () => {
+  it("inside a project that still has its own kit from before global installs, the running kit answers, not the project's copy", () => {
     const project = fixtureProject()
     stubKit(project)
     const result = kit(['doctor'], { home: homeWithCache(null), cwd: project })
-    expect(result.code).toBe(7)
-    expect(result.stdout.match(/project-kit doctor/g)).toHaveLength(1)
+    expect(result.stdout).not.toContain('project-kit')
+    expect(result.stdout).toContain('@aspiralabs/ai')
+
+    const app = temp('app-project')
+    writeFileSync(join(app, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/web' }))
+    mkdirSync(join(app, 'apps', 'web'), { recursive: true })
+    writeFileSync(join(app, 'apps', 'web', 'package.json'), JSON.stringify({ name: 'web', private: true }))
+    stubKit(join(app, 'apps', 'web'))
+    expect(kit(['doctor'], { home: homeWithCache(null), cwd: app }).stdout).not.toContain('project-kit')
   })
 
-  it("T27: in an --app project the app's copy runs", () => {
-    const project = temp('app-project')
+  it('init with no --app works on the app aspira.json records', () => {
+    const project = temp('app-init')
     writeFileSync(join(project, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/web' }))
     mkdirSync(join(project, 'apps', 'web'), { recursive: true })
     writeFileSync(join(project, 'apps', 'web', 'package.json'), JSON.stringify({ name: 'web', private: true }))
-    stubKit(join(project, 'apps', 'web'))
-    const result = kit(['doctor'], { home: homeWithCache(null), cwd: project })
-    expect(result.code).toBe(7)
-    expect(result.stdout).toContain('project-kit doctor')
-  })
-
-  it('T27: outside a project the running copy answers, and a project copy that is the running file is not re-executed', () => {
-    const empty = temp('empty')
-    const outside = kit(['playbook'], { home: homeWithCache(null), cwd: empty })
-    expect(outside.code).toBe(0)
-    expect(outside.stdout.length).toBeGreaterThan(0)
-    expect(outside.stdout).not.toContain('project-kit')
-
-    const project = fixtureProject()
-    mkdirSync(join(project, 'node_modules', '.bin'), { recursive: true })
-    symlinkSync(CLI, join(project, 'node_modules', '.bin', 'kit'))
-    const self = kit(['playbook'], { home: homeWithCache(null), cwd: project })
-    expect(self.code).toBe(0)
-    expect(self.stdout).toBe(outside.stdout)
+    const result = kit(['init', '--stack', 'next', '--dry-run', '--cwd', project], { home: homeWithCache(null) })
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain('app apps/web')
   })
 })

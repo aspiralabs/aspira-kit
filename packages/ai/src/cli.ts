@@ -7,11 +7,9 @@
 // kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
 // kit playbook
 // kit package-dir (prints this @aspiralabs/ai's directory; the /aspira-* launchers find the global install with it)
-import { spawnSync } from 'node:child_process'
-import { existsSync, realpathSync } from 'node:fs'
-import { join, resolve, sep } from 'node:path'
+import { resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
-import { appRoot, readApp, resolveProjectRoot, writeAspira } from './aspira.js'
+import { readApp, resolveProjectRoot, writeAspira } from './aspira.js'
 import { cleanup, type Ask } from './cleanup.js'
 import { parseCleanupArgs, parseWorktreeArgs } from './command-args.js'
 import { doctor } from './doctor.js'
@@ -79,7 +77,9 @@ async function main(): Promise<number> {
       console.error(`unknown or missing --stack (have: next)\n${usage}`)
       return 2
     }
-    await initNext({ projectRoot: cwd, dryRun: flag('dry-run') === true, log, ...(app !== undefined ? { app } : {}), ...(typeof board === 'string' ? { board } : {}), ...(typeof releases === 'string' ? { releases } : {}) })
+    // A project wired with --app before keeps its app: aspira.json records it.
+    const initApp = app ?? readApp(cwd)
+    await initNext({ projectRoot: cwd, dryRun: flag('dry-run') === true, log, ...(initApp !== undefined ? { app: initApp } : {}), ...(typeof board === 'string' ? { board } : {}), ...(typeof releases === 'string' ? { releases } : {}) })
     return 0
   }
   if (command === 'next') {
@@ -141,32 +141,6 @@ function terminalAsk(): Ask | undefined {
   }
 }
 
-/**
- * Inside a project whose app still has its own kit (node_modules/.bin/kit, from a kit before global installs), a global
- * kit hands over to that copy, as the launchers do. Returns the copy's exit code, or undefined to carry on with this copy.
- */
-function projectCopyExit(): number | undefined {
-  if (process.env.ASPIRA_KIT_REEXEC !== undefined || command === 'version-check' || command === 'package-dir') return undefined
-  try {
-    const root = explicitCwd ?? resolveProjectRoot(process.cwd())
-    if (!existsSync(join(root, 'aspira.json'))) return undefined
-    const appDir = appRoot(root, typeof appFlag === 'string' ? appFlag : readApp(root))
-    const bin = join(appDir, 'node_modules', '.bin', 'kit')
-    if (!existsSync(bin) || process.argv[1] === undefined) return undefined
-    const running = realpathSync(process.argv[1])
-    if (running === realpathSync(bin)) return undefined
-    for (const dir of [appDir, root]) {
-      const modules = join(dir, 'node_modules')
-      if (existsSync(modules) && running.startsWith(realpathSync(modules) + sep)) return undefined
-    }
-    const result = spawnSync(bin, argv, { stdio: 'inherit', env: { ...process.env, ASPIRA_KIT_REEXEC: '1' } })
-    if (result.error) return undefined
-    return result.status ?? 1
-  } catch {
-    return undefined
-  }
-}
-
 /** The daily upgrade notice, on stderr after the command's own output. Never changes anything else. */
 async function printNotice(): Promise<void> {
   try {
@@ -179,8 +153,6 @@ async function printNotice(): Promise<void> {
 }
 
 try {
-  const handedOver = projectCopyExit()
-  if (handedOver !== undefined) process.exit(handedOver)
   if (command === 'package-dir') {
     process.stdout.write(`${kitPackageDir()}\n`)
     process.exit(0)
