@@ -152,3 +152,58 @@ describe.each(LAUNCHERS)('$name .kit-version vs. installed @aspiralabs/ai (T67, 
     expect(await ran(made.stubDir)).toBe(false)
   })
 })
+
+/** A project with no @aspiralabs/ai under it and a global one: a `kit` on PATH whose `kit package-dir` prints a package
+ * at AI_VERSION holding a stub <agent> folder. The package sits outside any node_modules so Node strips the stub's types. */
+async function makeGlobalProject(launcher: Launcher): Promise<{ project: string; scriptPath: string; stubDir: string; path: string }> {
+  const project = await mkdtemp(join(tmpdir(), 'launcher-global-'))
+  execFileSync('git', ['init', '-q'], { cwd: project })
+  const pkg = join(project, 'global', 'aspira-ai')
+  const stubDir = join(pkg, launcher.name)
+  await mkdir(join(stubDir, 'scripts'), { recursive: true })
+  await mkdir(join(stubDir, 'skill'), { recursive: true })
+  await writeFile(join(pkg, 'package.json'), JSON.stringify({ name: '@aspiralabs/ai', version: AI_VERSION }, null, 2))
+  await writeFile(join(stubDir, 'scripts', 'local.ts'), STUB_LOCAL_TS)
+  const bin = join(project, 'global', 'bin')
+  await mkdir(bin, { recursive: true })
+  await writeFile(join(bin, 'kit'), `#!/bin/sh\n[ "$1" = package-dir ] && echo '${pkg}'\n`)
+  await chmod(join(bin, 'kit'), 0o755)
+  const skillTarget = join(project, '.claude', 'skills', `aspira-${launcher.name}`)
+  await cp(join(ROOT, launcher.skillDir), skillTarget, { recursive: true })
+  await writeFile(join(skillTarget, '.kit-version'), `${SKILL_KIT_VERSION}\n`)
+  const scriptPath = join(skillTarget, 'scripts', `${launcher.name}.sh`)
+  await chmod(scriptPath, 0o755)
+  return { project, scriptPath, stubDir, path: `${bin}:${process.env.PATH ?? ''}` }
+}
+
+describe.each(LAUNCHERS)('$name runs the global @aspiralabs/ai when the project has none', (launcher) => {
+  let project: string
+
+  afterEach(async () => {
+    await rm(project, { recursive: true, force: true })
+  })
+
+  const run = (made: Awaited<ReturnType<typeof makeGlobalProject>>) => {
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: made.path }
+    for (const key of ['NOTION_TOKEN', 'NOTION_API_KEY', 'AI_GATEWAY_API_KEY', launcher.envVar]) delete env[key]
+    const result = spawnSync('bash', [made.scriptPath, ...launcher.args], { cwd: made.project, env, encoding: 'utf8', timeout: 15_000 })
+    return { stdout: `${result.stdout ?? ''}${result.stderr ?? ''}`, status: result.status }
+  }
+
+  it('a skill pinned to another version than the global install is blocked and says kit init', async () => {
+    const made = await makeGlobalProject(launcher)
+    project = made.project
+    const result = run(made)
+    expect(result.status).not.toBe(0)
+    expect(result.stdout).toContain(`pinned to @aspiralabs/ai ${SKILL_KIT_VERSION} but the global @aspiralabs/ai is ${AI_VERSION}; run kit init`)
+    expect(await ran(made.stubDir)).toBe(false)
+  })
+
+  it('a skill pinned to the global version runs the global agent', async () => {
+    const made = await makeGlobalProject(launcher)
+    project = made.project
+    await writeFile(join(project, '.claude', 'skills', `aspira-${launcher.name}`, '.kit-version'), `${AI_VERSION}\n`)
+    run(made)
+    expect(await ran(made.stubDir)).toBe(true)
+  })
+})

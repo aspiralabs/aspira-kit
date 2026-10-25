@@ -31,11 +31,11 @@ Then in the project, committed:
 ```
 
 ```bash
-pnpm add -D @aspiralabs/ai
-pnpm kit init --stack next        # installs ui + config + ai, writes eslint/prettier/tsconfig wiring,
-                                  # globals.css imports, AGENTS.md, CLAUDE.md, .mcp.json, hooks, .claude/skills/aspira-*
-pnpm kit add auth                 # optional: base Better Auth setup the project then owns
-pnpm kit doctor                   # what version you are on, what is wired
+pnpm add -g @aspiralabs/ai        # once per engineer: kit, the agents and the skills, never a project dependency
+kit init --stack next             # installs ui + config, writes eslint/prettier/tsconfig wiring, globals.css imports,
+                                  # AGENTS.md, CLAUDE.md, .mcp.json, .claude/hooks/aspira/*, .claude/skills/aspira-*
+kit add auth                      # optional: base Better Auth setup the project then owns
+kit doctor                        # what version you are on, what is wired
 ```
 
 Every command, flag and file the CLI writes is in the [ai README](packages/ai/README.md).

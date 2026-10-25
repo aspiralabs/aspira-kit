@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { liveResolver, next } from './next.js'
 import { lookupTicket } from './ticket-lookup.js'
+import { aiPackageDir, kitPackageDir } from './skills.js'
 
 const kit = dirname(dirname(fileURLToPath(import.meta.url)))
 const amaro = join(dirname(dirname(kit)), 'packages', 'ai', 'node_modules', 'amaro')
@@ -108,11 +109,9 @@ describe('lookupTicket: why there is no ticket', () => {
     expect(result).toMatchObject({ reason: 'board unreachable', detail: expect.stringContaining('hello=world') })
   })
 
-  it('no @aspiralabs/ai installed is an unreachable board caused by the kit, naming the package and where it looked', () => {
+  it('with no @aspiralabs/ai in the project, the lookup uses the global one: the running package', () => {
     const project = layout('absent')
-    const result = lookup(project)
-    expect(result).toMatchObject({ reason: 'board unreachable', cause: 'kit', detail: expect.stringContaining('@aspiralabs/ai') })
-    expect(result).toMatchObject({ detail: expect.stringContaining(project.app) })
+    expect(aiPackageDir(project.app)).toBe(kitPackageDir())
   })
 
   it('@aspiralabs/ai without its resolve script names the script path', () => {
@@ -147,10 +146,6 @@ describe('kit next names the cause before "see the error above"', () => {
     expect(cannot).toBeGreaterThan(events.findIndex((e) => e.kind === 'warn'))
     expect(code).toBe(1)
   }
-
-  it('when @aspiralabs/ai is not installed', () => {
-    check(layout('absent'), '@aspiralabs/ai')
-  })
 
   it.skipIf(!hasAmaro)('when the resolver answers without an id', () => {
     check(layout({ stdout: ['hello=world'] }), 'hello=world')

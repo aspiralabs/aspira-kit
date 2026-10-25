@@ -166,7 +166,7 @@ describe('an installed project', () => {
     expect(step.stdout).toBe('/aspira-spec-writer DEMO-1')
   })
 
-  it('kit-skill launchers run the project kit, and without an install each says to install @aspiralabs/ai and run kit init', () => {
+  it('kit-skill launchers run the project kit, and without a project or global install each says to install @aspiralabs/ai and run kit init', () => {
     const env: NodeJS.ProcessEnv = { ...process.env }
     for (const name of ['ASPIRA_KIT', 'NOTION_TOKEN', 'NOTION_API_KEY']) delete env[name]
     const next = spawnSync('bash', [join(app, '.claude', 'skills', 'aspira-next', 'scripts', 'next.sh')], { cwd: app, env, encoding: 'utf8' })
@@ -176,15 +176,17 @@ describe('an installed project', () => {
     run('git', ['init', '-q', bare], scratch)
     writeAspira({ projectRoot: bare, board: BOARD, dryRun: false, log: () => {} })
     cpSync(join(app, '.claude'), join(bare, '.claude'), { recursive: true })
+    // No global kit either: a machine with one installed would otherwise find it.
+    const noKit = { ...env, PATH: (process.env.PATH ?? '').split(':').filter((dir) => !existsSync(join(dir, 'kit'))).join(':') }
     for (const name of ['next', 'cleanup', 'worktree']) {
-      const out = spawnSync('bash', [join(bare, '.claude', 'skills', `aspira-${name}`, 'scripts', `${name}.sh`)], { cwd: bare, env, encoding: 'utf8' })
+      const out = spawnSync('bash', [join(bare, '.claude', 'skills', `aspira-${name}`, 'scripts', `${name}.sh`)], { cwd: bare, env: noKit, encoding: 'utf8' })
       const text = `${out.stdout}${out.stderr}`
       expect(out.status, text).toBe(1)
       expect(text).toContain('install @aspiralabs/ai')
       expect(text).toContain('kit init')
       expect(text).not.toMatch(/@aspiralabs\/(agents|kit)/)
     }
-    const planner = spawnSync('bash', [join(bare, '.claude', 'skills', 'aspira-planner', 'scripts', 'planner.sh'), 'local'], { cwd: bare, env, encoding: 'utf8' })
+    const planner = spawnSync('bash', [join(bare, '.claude', 'skills', 'aspira-planner', 'scripts', 'planner.sh'), 'local'], { cwd: bare, env: noKit, encoding: 'utf8' })
     const text = `${planner.stdout}${planner.stderr}`
     expect(planner.status).not.toBe(0)
     expect(text).toContain('@aspiralabs/ai')

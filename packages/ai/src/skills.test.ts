@@ -4,11 +4,11 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { doctor } from './doctor.js'
-import { AGENTS, AI_PACKAGE, aiPackageDir, checkSkills, installSkills, skillDir, VERSION_FILE } from './skills.js'
+import { AGENTS, AI_PACKAGE, aiPackageDir, checkSkills, HOOKS, HOOKS_DIR, installHooks, installSkills, kitPackageDir, skillDir, VERSION_FILE } from './skills.js'
 
 /** The kit-owned skills, beside the eight agent skills; all eleven ship in @aspiralabs/ai. */
 const KIT_OWNED = ['cleanup', 'next', 'worktree'] as const
-/** The running package's own version: the kit-owned skills are stamped with it when the app has no @aspiralabs/ai. */
+/** The running package's own version (the global install's, in a project): every skill is stamped with it when the app has no @aspiralabs/ai of its own. */
 const KIT_VERSION = (JSON.parse(readFileSync(join(dirname(dirname(fileURLToPath(import.meta.url))), 'package.json'), 'utf8')) as { version: string }).version
 
 const kitSkill = (root: string, name: string): string => join(root, '.claude', 'skills', `aspira-${name}`)
@@ -77,12 +77,12 @@ const logs = () => {
 }
 
 describe('aiPackageDir', () => {
-  it('finds the package installed in the app, by its package.json name, and nothing else', () => {
+  it('finds a copy an earlier kit installed in the app, else the running package: the global install', () => {
     const root = project()
     expect(aiPackageDir(root)).toBe(join(root, 'node_modules', '@aspiralabs', 'ai'))
-    expect(aiPackageDir(realpathSync(mkdtempSync(join(tmpdir(), 'kit-empty-'))))).toBeUndefined()
-    // The 0.15 packages are never looked up as a fallback.
-    expect(aiPackageDir(legacyProject())).toBeUndefined()
+    expect(aiPackageDir(realpathSync(mkdtempSync(join(tmpdir(), 'kit-empty-'))))).toBe(kitPackageDir())
+    // The 0.15 packages are never looked up.
+    expect(aiPackageDir(legacyProject())).toBe(kitPackageDir())
   })
 
   it('finds the workspace link in the self-hosting layout', () => {
@@ -94,7 +94,7 @@ describe('aiPackageDir', () => {
   it('ignores a folder at the right path whose package.json names another package', () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kit-wrong-')))
     manifest(join(root, 'node_modules', '@aspiralabs', 'ai'), '@aspiralabs/other')
-    expect(aiPackageDir(root)).toBeUndefined()
+    expect(aiPackageDir(root)).toBe(kitPackageDir())
   })
 })
 
@@ -155,28 +155,38 @@ describe('installSkills', () => {
     expect(existsSync(join(skillDir(root, 'planner'), 'stale.md'))).toBe(false)
   })
 
-  it('skips the agent skills with a note naming @aspiralabs/ai when it is not installed, and still writes the kit-owned skills from the running package at its own version', () => {
+  it('with no @aspiralabs/ai in the project, writes all eleven skills from the running package (the global install) at its version', () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kit-noai-')))
     const { lines, log } = logs()
-    expect(installSkills({ projectRoot: root, dryRun: false, log })).toEqual([...AGENTS])
-    expect(lines.some((l) => l.startsWith('skip ') && l.includes('@aspiralabs/ai is not installed'))).toBe(true)
+    expect(installSkills({ projectRoot: root, dryRun: false, log })).toEqual([])
     expect(lines.some((l) => l.includes('@aspiralabs/agents') || l.includes('@aspiralabs/kit'))).toBe(false)
-    for (const agent of AGENTS) expect(existsSync(skillDir(root, agent)), agent).toBe(false)
-    for (const name of KIT_OWNED) {
+    for (const name of [...AGENTS, ...KIT_OWNED]) {
       expect(readFileSync(join(kitSkill(root, name), VERSION_FILE), 'utf8'), name).toBe(`${KIT_VERSION}\n`)
       expect(readFileSync(join(kitSkill(root, name), 'SKILL.md'), 'utf8'), name).not.toContain(MARKER)
     }
+    expect(checkSkills(root).every((c) => c.ok)).toBe(true)
   })
 
-  it('treats the 0.15 layout (kit and agents installed, no ai) as not installed: no agent skill, the log names @aspiralabs/ai, never @aspiralabs/agents', () => {
+  it('treats the 0.15 layout (kit and agents installed, no ai) like no install: every skill from the running package, nothing names @aspiralabs/agents', () => {
     const root = legacyProject()
     const { lines, log } = logs()
-    expect(installSkills({ projectRoot: root, dryRun: false, log })).toEqual([...AGENTS])
-    expect(lines.some((l) => l.includes('@aspiralabs/ai is not installed'))).toBe(true)
+    expect(installSkills({ projectRoot: root, dryRun: false, log })).toEqual([])
     expect(lines.some((l) => l.includes('@aspiralabs/agents'))).toBe(false)
-    for (const agent of AGENTS) expect(existsSync(skillDir(root, agent)), agent).toBe(false)
     for (const check of checkSkills(root)) expect(check.package).toBe('@aspiralabs/ai')
-    expect(checkSkills(root).some((c) => (c.reason ?? '').includes('@aspiralabs/kit') || (c.reason ?? '').includes('@aspiralabs/agents'))).toBe(false)
+    expect(checkSkills(root).every((c) => c.ok)).toBe(true)
+  })
+
+  it('installHooks copies the three hooks into .claude/hooks/aspira/, executable, and keeps them on a re-run', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kit-hooks-')))
+    installHooks({ projectRoot: root, dryRun: false, log: () => {} })
+    for (const name of HOOKS) {
+      const target = join(root, HOOKS_DIR, name)
+      expect(readFileSync(target, 'utf8'), name).toBe(readFileSync(join(kitPackageDir(), 'hooks', name), 'utf8'))
+      expect(statSync(target).mode & 0o111, name).not.toBe(0)
+    }
+    const again = logs()
+    installHooks({ projectRoot: root, dryRun: false, log: again.log })
+    expect(again.lines).toEqual(HOOKS.map((name) => `keep   ${HOOKS_DIR}/${name}`))
   })
 
   it('writes all eleven skills from a plain install and from this repository\'s workspace link', () => {
@@ -200,9 +210,15 @@ describe('installSkills', () => {
 })
 
 describe('checkSkills and kit doctor', () => {
+  /** A project on the global install: no @aspiralabs/ai of its own, so the running package is the one checked against. */
+  function project(): string {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kit-global-')))
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'app' }))
+    return root
+  }
   /** Everything else doctor checks, so only the skills decide the verdict. */
   function wire(root: string) {
-    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { devDependencies: Record<string, string> }
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { devDependencies?: Record<string, string> }
     pkg.devDependencies = { ...pkg.devDependencies, '@aspiralabs/config': AI_VERSION, '@aspiralabs/ui': AI_VERSION }
     writeFileSync(join(root, 'package.json'), JSON.stringify(pkg))
     for (const name of ['ui', 'config']) {
@@ -216,7 +232,8 @@ describe('checkSkills and kit doctor', () => {
     writeFileSync(join(root, 'AGENTS.md'), '<!-- aspiralabs:begin -->\n<!-- aspiralabs:end -->\n')
     writeFileSync(join(root, '.mcp.json'), JSON.stringify({ mcpServers: { 'aspiralabs-ui': {} } }))
     mkdirSync(join(root, '.claude'), { recursive: true })
-    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ command: 'sh node_modules/@aspiralabs/ai/hooks/session-start.sh' }] }] } }))
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: HOOKS.map((name) => ({ command: `sh .claude/hooks/aspira/${name}` })) }] } }))
+    installHooks({ projectRoot: root, dryRun: false, log: () => {} })
     // The ignore lines doctor checks; the temp dir is not a git repository, so the git-based checks report skipped.
     writeFileSync(join(root, '.gitignore'), '.work/\n.aspira/\n.worktrees/\n.env.local\n')
     writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6' }))
@@ -228,7 +245,7 @@ describe('checkSkills and kit doctor', () => {
     const before = logs()
     expect(doctor(root, before.log)).toBe(1)
     expect(before.lines).toContain('FAIL .claude/skills/aspira-planner is missing')
-    expect(before.lines.some((l) => l.startsWith('@aspiralabs/ai') && l.includes(`installed ${AI_VERSION}`))).toBe(true)
+    expect(before.lines.some((l) => l.startsWith('@aspiralabs/ai') && l.includes(`global ${KIT_VERSION}`))).toBe(true)
 
     installSkills({ projectRoot: root, dryRun: false, log: () => {} })
     const healthy = logs()
@@ -241,10 +258,10 @@ describe('checkSkills and kit doctor', () => {
     // A skill from 0.15.0: the reason names the pinned version, the package and the installed version.
     writeFileSync(join(skillDir(root, 'pr-reviewer'), VERSION_FILE), '0.15.0\n')
     const stale = checkSkills(root)
-    expect(stale.find((c) => c.reason?.includes('aspira-pr-reviewer'))?.reason).toBe(`.claude/skills/aspira-pr-reviewer is from 0.15.0, @aspiralabs/ai is ${AI_VERSION}`)
+    expect(stale.find((c) => c.reason?.includes('aspira-pr-reviewer'))?.reason).toBe(`.claude/skills/aspira-pr-reviewer is from 0.15.0, @aspiralabs/ai is ${KIT_VERSION}`)
     const mismatch = logs()
     expect(doctor(root, mismatch.log)).toBe(1)
-    expect(mismatch.lines).toContain(`FAIL .claude/skills/aspira-pr-reviewer is from 0.15.0, @aspiralabs/ai is ${AI_VERSION}`)
+    expect(mismatch.lines).toContain(`FAIL .claude/skills/aspira-pr-reviewer is from 0.15.0, @aspiralabs/ai is ${KIT_VERSION}`)
 
     rmSync(skillDir(root, 'implementor'), { recursive: true })
     expect(checkSkills(root).find((c) => c.reason?.includes('aspira-implementor'))?.reason).toBe('.claude/skills/aspira-implementor is missing')
@@ -257,23 +274,35 @@ describe('checkSkills and kit doctor', () => {
     const root = project()
     installSkills({ projectRoot: root, dryRun: false, log: () => {} })
     const groomer = join(root, '.claude', 'skills', 'aspira-groomer')
-    expect(readFileSync(join(groomer, VERSION_FILE), 'utf8')).toBe(`${AI_VERSION}\n`)
+    expect(readFileSync(join(groomer, VERSION_FILE), 'utf8')).toBe(`${KIT_VERSION}\n`)
     rmSync(groomer, { recursive: true })
     const missing = checkSkills(root).find((c) => c.reason?.includes('aspira-groomer'))
     expect(missing?.reason).toBe('.claude/skills/aspira-groomer is missing')
     installSkills({ projectRoot: root, dryRun: false, log: () => {} })
     writeFileSync(join(groomer, VERSION_FILE), '0.15.0\n')
     const stale = checkSkills(root).find((c) => c.reason?.includes('aspira-groomer'))
-    expect(stale?.reason).toBe(`.claude/skills/aspira-groomer is from 0.15.0, @aspiralabs/ai is ${AI_VERSION}`)
+    expect(stale?.reason).toBe(`.claude/skills/aspira-groomer is from 0.15.0, @aspiralabs/ai is ${KIT_VERSION}`)
   })
 
-  it('reports a skill it cannot check when @aspiralabs/ai is missing', () => {
+  it('fails while the project still declares @aspiralabs/ai, naming the remove command', () => {
     const root = project()
+    wire(root)
     installSkills({ projectRoot: root, dryRun: false, log: () => {} })
-    rmSync(join(root, 'node_modules'), { recursive: true })
-    const reasons = checkSkills(root).map((c) => c.reason ?? '')
-    expect(reasons.filter((r) => r.includes('@aspiralabs/ai is not installed')).length).toBe(11)
-    expect(reasons.some((r) => r.includes('@aspiralabs/kit') || r.includes('@aspiralabs/agents'))).toBe(false)
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { devDependencies: Record<string, string> }
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ ...pkg, devDependencies: { ...pkg.devDependencies, [AI_PACKAGE]: KIT_VERSION } }))
+    const { lines, log } = logs()
+    expect(doctor(root, log)).toBe(1)
+    expect(lines).toContain(`FAIL ${AI_PACKAGE} is in package.json; it is installed globally now: pnpm remove ${AI_PACKAGE}, then kit init`)
+  })
+
+  it('fails when a hook copy is missing from .claude/hooks/aspira/', () => {
+    const root = project()
+    wire(root)
+    installSkills({ projectRoot: root, dryRun: false, log: () => {} })
+    rmSync(join(root, HOOKS_DIR, 'deny-tier3.sh'))
+    const { lines, log } = logs()
+    expect(doctor(root, log)).toBe(1)
+    expect(lines).toContain(`FAIL .claude/settings.json runs the hooks from ${HOOKS_DIR}`)
   })
 
   describe('the kit-owned skills', () => {
