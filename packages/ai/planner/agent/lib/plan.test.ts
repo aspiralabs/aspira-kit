@@ -26,7 +26,7 @@ it('rejects broken coverage, IDs, cycles and non-test-first implementation', () 
     const plan = validPlan(); mutate(plan)
     expect(validatePlan(plan, spec, files).length).toBeGreaterThan(0)
   }
-  expect(validatePlan(validPlan(), spec + '- [ ] F2: Items can be removed.\n', files)).toContain('No implementation maps to F2')
+  expect(validatePlan(validPlan(), spec + '- [ ] F2: Items can be removed.\n', files).some((error) => error.startsWith('No implementation maps to F2'))).toBe(true)
 })
 
 it('rejects unsafe paths, nonexistent targets, create collisions and fabricated evidence', () => {
@@ -82,6 +82,16 @@ it('treats a plan as UI work only when it writes UI files', () => {
   expect(touchesUi(validPlan())).toBe(false)
   const ui = validPlan(); ui.tasks[1]!.changes[0]!.path = 'app/items/page.tsx'
   expect(touchesUi(ui)).toBe(true)
+})
+
+it('accepts a criterion that keeps behaviour unchanged when a tests task writes a test pinning it, with no implementation (NOM-43)', () => {
+  const specUnchanged = spec + '- [ ] F2: Export is unchanged; non-admins still get 403.\n'
+  const plan = validPlan()
+  expect(validatePlan(plan, specUnchanged, files)).toContain('No implementation maps to F2; a criterion that keeps behaviour unchanged needs a tests task naming F2 that writes a test pinning it')
+  plan.tests.push({ ...plan.tests[0]!, id: 'T3', featureIds: ['F2'], title: 'export still refuses non-admins' })
+  plan.tasks[0]!.featureIds.push('F2')
+  plan.tasks[0]!.testIds.push('T3')
+  expect(validatePlan(plan, specUnchanged, files).filter((error) => /F2|T3/.test(error))).toEqual([])
 })
 
 it('accepts a handoff for work a named person does: no file changes, and its criterion needs no code or test', () => {

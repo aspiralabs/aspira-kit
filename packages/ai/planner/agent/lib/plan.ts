@@ -147,7 +147,9 @@ export function validatePlan(plan: Plan, spec: string, files: Map<string, string
   for (const id of features) {
     // A criterion met only by a person's handoff (a Notion page, say) has no code to test.
     const handedOff = plan.tasks.some((task) => task.kind === 'handoff' && task.featureIds.includes(id))
-    if (!handedOff && !plan.tasks.some((task) => task.kind === 'implementation' && task.featureIds.includes(id))) errors.push(`No implementation maps to ${id}`)
+    // A criterion that keeps existing behaviour unchanged needs no code, only a test that pins it (NOM-43: "export is unchanged").
+    const guarded = plan.tests.some((test) => test.featureIds.includes(id) && plan.tasks.some((task) => task.kind === 'tests' && task.featureIds.includes(id) && task.testIds.includes(test.id)))
+    if (!handedOff && !guarded && !plan.tasks.some((task) => task.kind === 'implementation' && task.featureIds.includes(id))) errors.push(`No implementation maps to ${id}; a criterion that keeps behaviour unchanged needs a tests task naming ${id} that writes a test pinning it`)
     if (!handedOff && !plan.tests.some((test) => test.featureIds.includes(id))) errors.push(`No test maps to ${id}`)
   }
   if (!plan.tasks.some((task) => task.kind === 'verification')) errors.push('Missing final verification task')

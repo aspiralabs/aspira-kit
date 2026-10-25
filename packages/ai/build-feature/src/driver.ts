@@ -873,6 +873,9 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
   const effort = effortFor(STEP_ROLE[step], ctx.aspira)
   const promptDir = join(ctx.dir, 'prompts')
   await mkdir(promptDir, { recursive: true })
+  // The groomer asks the human its exit-criterion questions and Confirm in chat, which a subagent cannot do (NOM-43):
+  // outside --autonomous and --cloud the build-feature session runs it itself.
+  const inSession = ctx.mode === 'local' && step === 'groomer' && !ctx.autonomous
   const launcher = launcherFor(command, ctx.mode)
   const skillMd = `.claude/skills/aspira-${step}/SKILL.md`
   // The nonce is minted first so the printed command and launcher can carry it; what is stored keeps both without it.
@@ -891,6 +894,7 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
       runFlags,
       mode: ctx.mode,
       cwd: ctx.input.repo,
+      ...(inSession ? { inSession: true } : {}),
       model,
       // aspira.json `models` may set the step subagent's reasoning effort; absent, the Agent tool's default.
       ...(effort === undefined ? {} : { effort }),
@@ -917,6 +921,9 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
           "This run is in cloud mode: the first line above starts the step's cloud agent (`start`). Let it start, then run the second line (`wait`) again and again until it ends; waiting does not stop the agent. Do not stop after `start`, do not run the step yourself, and never retry a failed run. When it has ended, read its result exactly as for a step run in this session.",
           '',
         ]
+      : []),
+    ...(inSession
+      ? ["This step asks the human: the build-feature session runs it itself, not in a subagent. Ask the skill's `answers` questions and its Confirm in this chat and wait for the human's answers; never answer them yourself.", '']
       : []),
     `You run on ${model}${effort === undefined ? '' : ` at ${effort} effort`}. ${subagentModels(step, ctx.aspira)}`,
     '',
