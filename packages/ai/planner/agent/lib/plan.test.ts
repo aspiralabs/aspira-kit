@@ -183,3 +183,21 @@ describe('symbol citations (path#symbol)', () => {
     }
   })
 })
+
+describe('the final verification rule names what to change (SCOOP-7, SCOOP-8)', () => {
+  it('names the handoff that comes after the verification and how to fix it', () => {
+    const plan = validPlan()
+    plan.tasks.push({ id: 'P4', title: 'Owner adds the env var', kind: 'handoff', featureIds: ['F1'], dependsOn: ['P3'], testIds: [], changes: [], commands: [], outcome: 'The owner confirms the variable is set.' })
+    expect(validatePlan(plan, spec, files)).toContain('The last task must be the verification task: P4 (handoff) comes after P3. Move it before P3 (taskOrder) and drop any dependency on P3')
+  })
+  it('accepts the same plan with the handoff moved before the verification', () => {
+    const plan = validPlan()
+    plan.tasks.splice(2, 0, { id: 'P4', title: 'Owner adds the env var', kind: 'handoff', featureIds: ['F1'], dependsOn: ['P2'], testIds: [], changes: [], commands: [], outcome: 'The owner confirms the variable is set.' })
+    expect(validatePlan(plan, spec, files)).toEqual([])
+  })
+  it('names the implementation tasks the verification does not depend on', () => {
+    const plan = validPlan()
+    plan.tasks[2]!.dependsOn = ['P1']
+    expect(validatePlan(plan, spec, files)).toContain('Final verification P3 must depend on every implementation task; add P2 to its dependsOn')
+  })
+})

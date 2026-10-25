@@ -151,8 +151,17 @@ export function validatePlan(plan: Plan, spec: string, files: Map<string, string
     if (!handedOff && !plan.tests.some((test) => test.featureIds.includes(id))) errors.push(`No test maps to ${id}`)
   }
   if (!plan.tasks.some((task) => task.kind === 'verification')) errors.push('Missing final verification task')
+  // Named in full, so a correction pass knows what to move or wire (SCOOP-7, SCOOP-8: a handoff after the verification survived two repairs).
   const final = plan.tasks.at(-1)
-  if (final?.kind !== 'verification' || plan.tasks.some((task) => task.kind === 'implementation' && !ancestors.get(final.id)?.has(task.id))) errors.push('Final verification must depend on every implementation task')
+  const verification = plan.tasks.findLast((task) => task.kind === 'verification')
+  if (final && verification && final.kind !== 'verification') {
+    const after = plan.tasks.slice(plan.tasks.indexOf(verification) + 1).map((task) => `${task.id} (${task.kind})`)
+    errors.push(`The last task must be the verification task: ${after.join(', ')} come${after.length === 1 ? 's' : ''} after ${verification.id}. Move ${after.length === 1 ? 'it' : 'them'} before ${verification.id} (taskOrder) and drop any dependency on ${verification.id}`)
+  }
+  if (final?.kind === 'verification') {
+    const missing = plan.tasks.filter((task) => task.kind === 'implementation' && !ancestors.get(final.id)?.has(task.id)).map((task) => task.id)
+    if (missing.length) errors.push(`Final verification ${final.id} must depend on every implementation task; add ${missing.join(', ')} to its dependsOn`)
+  }
   return errors
 }
 
