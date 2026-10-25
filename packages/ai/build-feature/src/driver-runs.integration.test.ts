@@ -158,3 +158,14 @@ describe('T44 F46: the run touches only the ticket, its pages, the board rules (
     }).toEqual({ end: 'end', writes: true, outside: [] })
   }, SLOW)
 })
+
+describe('a step report without usage numbers moves the run on (SCOOP-5, SCOOP-7)', () => {
+  it('goes to the next stage when the session reports usage as null, and records the step as not measured', async () => {
+    const h = await project({ status: 'Ready: Plan', files: { 'AGENTS.md': '# Project\n\nRun `pnpm check`.\n' } })
+    const implementor = await h.advance({}, await h.start())
+    await h.report(implementor.stage!, 'complete', { usage: null })
+    const next = await h.advance()
+    const step = (await h.state()).steps?.find((s) => s.step === 'implementor')
+    expect({ next: next.stage?.stage, usage: step?.usage ?? null }).toEqual({ next: 'gate', usage: null })
+  }, SLOW)
+})

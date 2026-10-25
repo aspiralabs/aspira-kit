@@ -69,14 +69,32 @@ function store(parent: string, blocks: Json[], after?: string): Json[] {
   let at = after === undefined ? list.length : list.findIndex((block) => block.id === after) + 1
   return blocks.map((block) => {
     const id = `blk-${nextId++}`
-    const { children, ...rest } = block
+    const { children: _ignored, ...rest } = block
+    const type = String(rest.type)
+    const typed = isRecord(rest[type]) ? rest[type] : {}
+    const { children, ...content } = typed
     const nested = records(children)
-    const saved = { object: 'block', id, has_children: nested.length > 0, ...rest }
+    const saved = { object: 'block', id, has_children: nested.length > 0, ...rest, ...(isRecord(rest[type]) ? { [type]: content } : {}) }
     list.splice(at, 0, saved)
     at += 1
     if (nested.length > 0) store(id, nested)
     return saved
   })
+}
+
+/** Notion's refusals for block children (the append and create schemas): children inside the type object, one level under the request's blocks, a table with its rows. */
+function shapeError(blocks: Json[], path = 'body.children', level = 1): string | undefined {
+  for (const [i, block] of blocks.entries()) {
+    const at = `${path}[${i}]`
+    if ('children' in block) return `${at}.children should be not present`
+    const type = String(block.type)
+    const kids = records(isRecord(block[type]) ? block[type].children : undefined)
+    if (type === 'table' && kids.length === 0) return `${at}.table.children should be defined`
+    if (kids.length > 0 && level >= 2) return `${at}.${type}.children should be not present`
+    const nested = shapeError(kids, `${at}.${type}.children`, level + 1)
+    if (nested !== undefined) return nested
+  }
+  return undefined
 }
 
 /** A page's last edit moves forward on every write under it, as Notion's does. */
@@ -157,6 +175,8 @@ function route(call: Call): { status: number; body: Json } {
     if (position !== undefined && refusePosition) return json({ object: 'error', status: 400, code: 'validation_error', message: 'body.position should be not present' }, 400)
     const after = isRecord(position) && isRecord(position.after_block) && typeof position.after_block.id === 'string' ? position.after_block.id : undefined
     if (after !== undefined && !(stored.get(parent) ?? []).some((block) => block.id === after)) return json({ object: 'error', status: 400, code: 'validation_error', message: `no block ${after} under ${parent}` }, 400)
+    const refused = shapeError(records(body?.children))
+    if (refused !== undefined) return json({ object: 'error', status: 400, code: 'validation_error', message: refused }, 400)
     if (parent === SPEC_REVIEWED && !stored.has(SPEC_REVIEWED)) stored.set(SPEC_REVIEWED, [])
     const results = store(parent, records(body?.children), after)
     touch(parent)
@@ -177,6 +197,8 @@ function route(call: Call): { status: number; body: Json } {
     return json({ object: 'block', id: single[1], in_trash: true })
   }
   if (method === 'POST' && path === '/v1/pages') {
+    const refused = shapeError(records(body?.children))
+    if (refused !== undefined) return json({ object: 'error', status: 400, code: 'validation_error', message: refused }, 400)
     const id = `page-${nextId++}`
     store(id, records(body?.children))
     const created = { object: 'page', id, url: `https://www.notion.so/${id}`, last_edited_time: '2026-10-06T00:00:00.000Z', parent: body?.parent }
@@ -404,8 +426,8 @@ describe('pushPage', () => {
 
   it('attaches list levels deeper than Notion takes in one request by appending to the created blocks', async () => {
     await client.pushPage(PAGE, 'Deep', '- a\n  - b\n    - c\n      - d\n        - e\n')
-    const first = calls.find((call) => call.method === 'POST')?.body?.children as { children?: { children?: { children?: unknown }[] }[] }[]
-    expect(first[0]?.children?.[0]?.children?.[0]?.children).toBeUndefined()
+    const first = calls.find((call) => call.method === 'POST')?.body?.children as Json[]
+    expect(shapeError(first)).toBeUndefined()
     const text = (block: Json) => ((block.bulleted_list_item as { rich_text: { text: { content: string } }[] }).rich_text[0]!.text.content)
     const a = stored.get('page-1')![0]!
     const b = stored.get(a.id as string)![0]!
@@ -413,6 +435,29 @@ describe('pushPage', () => {
     const d = stored.get(c.id as string)![0]!
     const e = stored.get(d.id as string)![0]!
     expect([a, b, c, d, e].map(text)).toEqual(['a', 'b', 'c', 'd', 'e'])
+  })
+})
+
+describe('pushPage with the shapes Notion refused (KIT-13, SCOOP-7)', () => {
+  it('pushes a to-do whose bullets have their own bullets, every level in order', async () => {
+    await client.pushPage(PAGE, 'Nested Plan', '- [ ] P1: Write the tests\n  - Files\n    - src/a.test.ts\n    - src/b.test.ts\n  - Outcome: red\n- [ ] P2: Implement\n')
+    const text = (block: Json) => ((block[String(block.type)] as { rich_text: { text: { content: string } }[] }).rich_text[0]!.text.content)
+    const [p1, p2] = stored.get('page-1')!
+    const [files, outcome] = stored.get(p1!.id as string)!
+    expect([p1, p2, files, outcome].map((b) => text(b!))).toEqual(['P1: Write the tests', 'P2: Implement', 'Files', 'Outcome: red'])
+    expect(stored.get(files!.id as string)!.map(text)).toEqual(['src/a.test.ts', 'src/b.test.ts'])
+  })
+
+  it('pushes a pipe table with its rows, at the top level and inside a list item', async () => {
+    const table = '| Task | Status |\n| --- | --- |\n| P1 | done |\n| P2 | open |'
+    await client.pushPage(PAGE, 'Tables', `## Results\n\n${table}\n\n- Lane A\n\n  ${table.replaceAll('\n', '\n  ')}\n`)
+    const top = stored.get('page-1')!
+    const rows = (id: string) => stored.get(id)!.map((row) => (row.table_row as { cells: { text: { content: string } }[][] }).cells.map((cell) => cell[0]?.text.content ?? ''))
+    const topTable = top.find((block) => block.type === 'table')!
+    expect(rows(topTable.id as string)).toEqual([['Task', 'Status'], ['P1', 'done'], ['P2', 'open']])
+    const lane = top.find((block) => block.type === 'bulleted_list_item')!
+    const nestedTable = stored.get(lane.id as string)!.find((block) => block.type === 'table')
+    expect(nestedTable === undefined ? null : rows(nestedTable.id as string)).toEqual([['Task', 'Status'], ['P1', 'done'], ['P2', 'open']])
   })
 })
 
