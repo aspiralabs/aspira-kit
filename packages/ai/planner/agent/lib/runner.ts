@@ -300,7 +300,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   const mcp = await connectReadTools(process.env.MCP_READ_CONNECTIONS, preparation)
   const prepareMs = Date.now() - started
   const trace = modelTrace(started, options.signal)
-  const models = { explore: process.env.SPEC_PLAN_EXPLORE_MODEL || 'anthropic/claude-sonnet-5', research: process.env.SPEC_PLAN_RESEARCH_MODEL || 'anthropic/claude-opus-5.5', planning: process.env.SPEC_PLAN_MODEL || 'openai/gpt-6.1-sol' }
+  const models = { explore: process.env.SPEC_PLAN_EXPLORE_MODEL || 'anthropic/claude-haiku-4.5', research: process.env.SPEC_PLAN_RESEARCH_MODEL || 'anthropic/claude-opus-5.5', planning: process.env.SPEC_PLAN_MODEL || 'openai/gpt-6.1-sol' }
   const context = planContext(prepared)
   // Planning and repair get the packet's index, not the packet: research's facts and touches carry it.
   const planningContext = planContext(prepared, 'index')

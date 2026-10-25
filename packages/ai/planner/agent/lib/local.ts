@@ -52,8 +52,8 @@ export type PhaseId = `explore-${number}` | 'research' | 'planning' | `repair-${
 /** A task as printed for the session: the prompt and output are file paths; `model` the session model it runs on (KIT-48). */
 export type LocalTask = { id: PhaseId; prompt: string; output: string; schema: string; model: SessionModel; effort?: Effort; reads?: string; error?: string; retry?: boolean }
 
-/** Research and planning on Opus, the correction passes on Sonnet (KIT-48). */
-export const modelForPhase = (id: PhaseId): SessionModel => (id.startsWith('repair-') || id.startsWith('explore-') ? 'sonnet' : 'opus')
+/** Explorers on Haiku, research and planning on Opus, the correction passes on Sonnet (KIT-48). */
+export const modelForPhase = (id: PhaseId): SessionModel => (id.startsWith('explore-') ? 'haiku' : id.startsWith('repair-') ? 'sonnet' : 'opus')
 
 /** The phase's model and effort: aspira.json `models` planner.research, planner.planning or planner.repair, else modelForPhase. */
 export const taskModelForPhase = (id: PhaseId, repo: string): { model: SessionModel; effort?: Effort } => taskModel(`planner.${id.startsWith('repair-') ? 'repair' : id.startsWith('explore-') ? 'explore' : id}`, modelForPhase(id), repo)

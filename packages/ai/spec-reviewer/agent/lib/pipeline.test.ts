@@ -142,3 +142,56 @@ it('lets every phase finish beyond the former time limits and records elapsed ti
     expect(result.reviewMs).toBe(1_800_000)
   } finally { vi.useRealTimers() }
 })
+
+describe('one send-back before a phase\'s output counts against the run (SCOOP-7)', () => {
+  const spec = '# Feature\n## Intent\nSave items.\n## Acceptance criteria\n### Features\n- [ ] F1: Save an item.\n'
+  const guidelines = 'REV-001 Check facts\nREV-007 Data\nREV-008 Data more'
+  const covered = (rules: string[]): Review => ({ ...review, findings: [], checks: rules.map((rule) => ({ rule, evidence: 'checked' })) })
+
+  it('sends a lens that skipped an assigned rule back once, naming the rule, and the run ends ready', async () => {
+    const requests: { phase: string; attempt?: number; prompt: string }[] = []
+    const call: Call = async ({ phase, attempt, prompt }) => {
+      requests.push({ phase, prompt, ...(attempt === undefined ? {} : { attempt }) })
+      if (phase === 'synthesis') return { edits: [], dispositions: [] }
+      if (phase === 'research') return covered(['REV-001'])
+      if (phase === 'data') return covered(attempt === 2 ? ['REV-007', 'REV-008'] : ['REV-007', 'REV-024'])
+      return covered([])
+    }
+    const result = await runPipeline({ ...input, spec, guidelines }, call)
+    expect({ status: result.status, problems: result.problems }).toEqual({ status: 'ready', problems: [] })
+    const again = requests.filter((r) => r.attempt === 2)
+    expect(again.map((r) => r.phase)).toEqual(['data'])
+    expect(again[0]!.prompt).toContain('No checks row for assigned rule REV-008')
+    expect(again[0]!.prompt).toContain('YOUR PREVIOUS OUTPUT WAS SENT BACK')
+  })
+
+  it('sends a phase back only once: a second miss is the run problem it was before', async () => {
+    let attempts = 0
+    const call: Call = async ({ phase }) => {
+      if (phase === 'synthesis') return { edits: [], dispositions: [] }
+      if (phase === 'data') { attempts += 1; return covered(['REV-007']) }
+      return covered(phase === 'research' ? ['REV-001'] : [])
+    }
+    const result = await runPipeline({ ...input, spec, guidelines }, call)
+    expect(attempts).toBe(2)
+    expect(result.problems).toEqual(['Uncovered guideline: REV-008'])
+  })
+
+  it('sends a synthesis with a duplicate carrying edits and an orphan edit back once, and takes the corrected one', async () => {
+    const finding = { title: 'Issue', severity: 'medium' as const, whatThisMeans: 'x', evidence: ['spec: q'], fix: 'f' }
+    const sent: string[] = []
+    const call: Call = async ({ phase, attempt, prompt }) => {
+      if (phase === 'research') return { ...covered(['REV-001']), findings: [finding, finding] }
+      if (phase !== 'synthesis') return covered([])
+      if (attempt !== 2) return { edits: [{ id: 'E1', before: 'Save items.', after: 'Save items once.' }, { id: 'E2', before: 'F1: Save an item.', after: 'F1: Save an item idempotently.' }], dispositions: [{ findingId: 'R1', status: 'applied', reason: 'r', evidence: ['e'], editIds: ['E1'], duplicateOf: null }, { findingId: 'R2', status: 'duplicate', reason: 'r', evidence: [], editIds: ['E1'], duplicateOf: 'R1' }] }
+      sent.push(prompt)
+      return { edits: [{ id: 'E1', before: 'Save items.', after: 'Save items once.' }, { id: 'E2', before: 'F1: Save an item.', after: 'F1: Save an item idempotently.' }], dispositions: [{ findingId: 'R1', status: 'applied', reason: 'r', evidence: ['e'], editIds: ['E1', 'E2'], duplicateOf: null }, { findingId: 'R2', status: 'duplicate', reason: 'r', evidence: [], editIds: [], duplicateOf: 'R1' }] }
+    }
+    const result = await runPipeline({ ...input, spec }, call)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('Non-applied finding has edits: R2')
+    expect(sent[0]).toContain('Unjustified edit: E2')
+    expect({ status: result.status, problems: result.problems }).toEqual({ status: 'ready', problems: [] })
+    expect(result.candidate).toContain('F1: Save an item idempotently.')
+  })
+})

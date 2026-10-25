@@ -44,7 +44,7 @@ describe('the pipeline with areas', () => {
 })
 
 describe('--local with areas', () => {
-  it('prints one explore task per area, each on sonnet, in one stage, and holds the draft to the packet', async () => {
+  it('prints one explore task per area, each on haiku, in one stage, and holds the draft to the packet', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'spec-writer-areas-'))
     const ideaPath = join(dir, 'idea.md')
     const guidelinesPath = join(dir, 'rules.md')
@@ -54,7 +54,7 @@ describe('--local with areas', () => {
     const explore = await runLocal(input)
     if (!explore.pending) throw new Error('expected pending')
     expect(explore.stage).toBe('explore')
-    expect(explore.tasks.map((task) => [task.phase, task.model])).toEqual([['explore:instances/core', 'sonnet'], ['explore:tools/aspira', 'sonnet']])
+    expect(explore.tasks.map((task) => [task.phase, task.model])).toEqual([['explore:instances/core', 'haiku'], ['explore:tools/aspira', 'haiku']])
     expect(await readFile(explore.tasks[0]!.prompt, 'utf8')).toContain('YOUR AREA: instances/core')
     for (const task of explore.tasks) await writeFile(task.output, JSON.stringify({ facts: [`${task.phase}: fact`], constraints: [], questions: [], uiEvidence: [], gaps: [] }))
     const draft = await runLocal(input)

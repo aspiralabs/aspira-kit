@@ -84,5 +84,5 @@ export function subagentModels(step: string, aspira: { models?: unknown } | null
   const fetches = `knowledge fetches ${modelFor('knowledge', aspira)}, Notion page pushes ${modelFor('notion-push', aspira)}`
   if (step === 'implementor') return `Its lane workers run on ${modelFor('implementor', aspira)}; ${fetches}.`
   if (step === 'pr-reviewer') return `Its review seats run on ${modelFor('pr-reviewer', aspira)} and its verifier on ${modelFor('pr-reviewer-verifier', aspira)}; ${fetches}.`
-  return `Its own tasks name their model and, when aspira.json sets one, their effort (by default research and reconciliation on opus, explorers and specialists on sonnet); ${fetches}.`
+  return `Its own tasks name their model and, when aspira.json sets one, their effort (by default research and reconciliation on opus, specialists on sonnet, explorers on haiku); ${fetches}.`
 }

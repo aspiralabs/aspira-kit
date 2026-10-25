@@ -254,7 +254,7 @@ it('runs one explorer per area in parallel before research, folds their touches 
   await writeSnapshot(snapshot)
   const args = { specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir, guidelinesPath: snapshot }
   const explore = pending(await runLocal(args, { env: {} }))
-  expect(explore).toMatchObject({ stage: 'explore', tasks: [{ id: 'explore-1', model: 'sonnet', schema: 'exploreSchema' }, { id: 'explore-2', model: 'sonnet', schema: 'exploreSchema' }] })
+  expect(explore).toMatchObject({ stage: 'explore', tasks: [{ id: 'explore-1', model: 'haiku', schema: 'exploreSchema' }, { id: 'explore-2', model: 'haiku', schema: 'exploreSchema' }] })
   const touch = { path: 'src/items.ts', operation: 'modify', symbols: ['save'], lines: '1-1', why: 'persist the item' }
   await writeFile(explore.tasks[0]!.output, JSON.stringify({ facts: ['save is the only export (src/items.ts:1)'], touches: [touch], gaps: [] }))
   await writeFile(explore.tasks[1]!.output, JSON.stringify({ facts: ['tests use vitest (tests/example.test.ts:1)'], touches: [], gaps: [] }))

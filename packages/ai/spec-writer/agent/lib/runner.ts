@@ -122,7 +122,7 @@ export function writeFiles(result: WriteResult, { idea, spec, guidelines, mode }
 
 export function writerModels(env: NodeJS.ProcessEnv = process.env) {
   return {
-    explore: env.SPEC_WRITER_EXPLORE_MODEL || 'anthropic/claude-opus-5.5',
+    explore: env.SPEC_WRITER_EXPLORE_MODEL || 'anthropic/claude-haiku-4.5',
     draft: env.SPEC_WRITER_DRAFT_MODEL || 'anthropic/claude-opus-5.5',
     review: reviewModels(env),
   }
