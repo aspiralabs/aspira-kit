@@ -88,7 +88,7 @@ it('accepts a criterion that keeps behaviour unchanged when a tests task writes 
   const specUnchanged = spec + '- [ ] F2: Export is unchanged; non-admins still get 403.\n'
   const plan = validPlan()
   expect(validatePlan(plan, specUnchanged, files)).toContain('No implementation maps to F2; a criterion that keeps behaviour unchanged needs a tests task naming F2 that writes a test pinning it')
-  plan.tests.push({ ...plan.tests[0]!, id: 'T3', featureIds: ['F2'], title: 'export still refuses non-admins' })
+  plan.tests.push({ ...plan.tests[0]!, id: 'T3', featureIds: ['F2'], action: 'a non-admin requests the export' })
   plan.tasks[0]!.featureIds.push('F2')
   plan.tasks[0]!.testIds.push('T3')
   expect(validatePlan(plan, specUnchanged, files).filter((error) => /F2|T3/.test(error))).toEqual([])
