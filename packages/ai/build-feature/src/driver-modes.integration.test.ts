@@ -28,6 +28,16 @@ describe('KIT-24: --autonomous skips the human gates', () => {
     expect({ code: result.code, named: /--autonomous does not apply with --cloud/.test(result.text) && result.text.includes('/aspira-build-feature KIT-11 --autonomous') }).toEqual({ code: 1, named: true })
   }, SLOW)
 
+  it('runs the groomer step in this session outside --autonomous, so its questions reach the human (NOM-43); --autonomous keeps the subagent', async () => {
+    const asks = await project({ status: 'Idea' })
+    const groomer = await asks.advance({}, await asks.start())
+    const prompt = await readFile(String(groomer.stage!.prompt), 'utf8')
+    expect({ inSession: groomer.stage!.inSession, told: prompt.includes('the build-feature session runs it itself, not in a subagent') }).toEqual({ inSession: true, told: true })
+    const auto = await project({ status: 'Idea' })
+    const autonomous = await auto.advance({}, await auto.start(['--autonomous']))
+    expect(autonomous.stage!.inSession).toBeUndefined()
+  }, SLOW)
+
   it('passes --autonomous to the groomer step only, records it on the run, and carries it in the resume command', async () => {
     const h = await project({ status: 'Idea' })
     const groomer = await h.advance({}, await h.start(['--autonomous']))
