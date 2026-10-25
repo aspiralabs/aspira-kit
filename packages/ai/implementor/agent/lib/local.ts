@@ -432,6 +432,17 @@ function readInFull(repo: string, scope: string[], knowledge: { path: string }[]
   return [...project, ...(existsSync(constraints) ? [constraints] : []), ...knowledge.map((file) => file.path).filter((file) => basename(file) !== 'INDEX.md')]
 }
 
+/** The ready export of a previous run of this same source, when trace/implementation-local.json holds one. */
+async function readFinishedTrace(source: Source): Promise<{ path: string; head: string; branch?: string; apps?: string[]; reason: string | null } | null> {
+  const path = join(source.workDir, 'trace', 'implementation-local.json')
+  const trace = await readFile(path, 'utf8').then(
+    (text) => z.looseObject({ status: z.string(), source: z.looseObject({ path: z.string() }), head: z.string().optional(), branch: z.string().optional(), apps: z.array(z.string()).optional(), reason: z.string().nullable().default(null) }).parse(JSON.parse(text)),
+    () => null,
+  )
+  if (trace === null || trace.status !== 'ready' || trace.source.path !== source.path || trace.head === undefined) return null
+  return { path, head: trace.head, reason: trace.reason, ...(trace.branch === undefined ? {} : { branch: trace.branch }), ...(trace.apps === undefined ? {} : { apps: trace.apps }) }
+}
+
 /** One step of a --local build: the next model stage, or the finished run (blocked when the knowledge cannot be loaded). */
 export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise<LocalResult> {
   if (input.maxParallel !== undefined && (!Number.isInteger(input.maxParallel) || input.maxParallel < 1 || input.maxParallel > 16)) throw new Error('--max-parallel must be a whole number from 1 to 16.')
@@ -450,6 +461,12 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     if (saved !== null && given !== undefined && given !== kept) throw new Error(`${flag} differs from the value this run started with. Drop it, or delete ${runDir} to start over.`)
   }
   const head = await git(source.repo, 'rev-parse', 'HEAD')
+  // A call after a ready export, with HEAD still where the build left it, is answered from the export,
+  // not with a new run whose gate would read the build's own commits as plan drift (SCOOP-7, SCOOP-8).
+  if (saved === null) {
+    const exported = await readFinishedTrace(source)
+    if (exported !== null && exported.head === head) return { pending: false, status: 'ready', reason: exported.reason ?? undefined, reasonCode: null, workDir: source.workDir, export: exported.path, missing: [], branch: exported.branch, apps: exported.apps, head }
+  }
   const state: State = saved ?? { source: source.path, sourceFingerprint: fingerprint, maxParallel: input.maxParallel ?? 4, serial: input.serial === true, startedAt: new Date().toISOString(), startCommit: head, knowledge: null, gate: null, planAccepted: null, rejections: {} }
   await mkdir(join(runDir, 'outputs'), { recursive: true })
   const save = () => writeFile(stateFile, JSON.stringify(state, null, 2))
