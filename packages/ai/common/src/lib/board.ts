@@ -13,7 +13,9 @@ export const BOARD_ENV = 'NOTION_TOKEN'
 
 /** Notion appends at most 100 blocks per request, nested at most two levels deep. */
 const APPEND_BATCH = 100
-const APPEND_DEPTH = 2
+// Notion takes the blocks of a request plus one level of children under them, and a nested block's
+// children go inside its type object (bulleted_list_item.children, table.children for the rows).
+const APPEND_DEPTH = 1
 const RETRIES = 5
 
 export type BoardOptions = {
@@ -203,15 +205,24 @@ const pageUrl = (id: string) => `https://www.notion.so/${id.replaceAll('-', '')}
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
-function prune(block: Block, depth: number): Block {
-  const { children, ...rest } = block
-  if (depth === 0 || !children?.length) return rest
-  return { ...rest, children: children.map((child) => prune(child, depth - 1)) }
+/** Whether a block's children wait for a later request: past the depth one request takes, or holding a table, whose rows would be one level too deep. A table always carries its rows. */
+function deferred(block: Block, depth: number): boolean {
+  if (!block.children?.length || block.type === 'table') return false
+  return depth === 0 || block.children.some((child) => child.type === 'table')
 }
 
-function deeperThan(block: Block, depth: number): boolean {
-  if (!block.children?.length) return false
-  return depth === 0 || block.children.some((child) => deeperThan(child, depth - 1))
+/** The block as one request sends it: the children it can take inside its type object, the rest left for reattach (SCOOP-7, KIT-13). */
+function wire(block: Block, depth: number): Block {
+  const { children, ...rest } = block
+  if (!children?.length || deferred(block, depth)) return rest
+  const typed = typeof rest[block.type] === 'object' && rest[block.type] !== null ? (rest[block.type] as Record<string, unknown>) : {}
+  return { ...rest, [block.type]: { ...typed, children: children.map((child) => wire(child, block.type === 'table' ? 0 : depth - 1)) } }
+}
+
+/** Whether a request with this block leaves any of its descendants to attach afterwards. */
+function cut(block: Block, depth: number): boolean {
+  if (!block.children?.length || block.type === 'table') return false
+  return deferred(block, depth) || block.children.some((child) => cut(child, depth - 1))
 }
 
 /**
@@ -400,7 +411,7 @@ export function board(options: BoardOptions): BoardWithPageMarkdown {
   async function append(parentId: string, blocks: Block[]): Promise<void> {
     for (let offset = 0; offset < blocks.length; offset += APPEND_BATCH) {
       const batch = blocks.slice(offset, offset + APPEND_BATCH)
-      const created = await call<ListResponse<Block>>(`/blocks/${parentId}/children`, 'PATCH', { children: batch.map((block) => prune(block, APPEND_DEPTH)) })
+      const created = await call<ListResponse<Block>>(`/blocks/${parentId}/children`, 'PATCH', { children: batch.map((block) => wire(block, APPEND_DEPTH)) })
       await attachDeeper(created.results, batch)
     }
   }
@@ -408,15 +419,15 @@ export function board(options: BoardOptions): BoardWithPageMarkdown {
   async function attachDeeper(created: Block[], originals: Block[]): Promise<void> {
     for (let i = 0; i < originals.length; i += 1) {
       const id = created[i]?.id
-      if (id !== undefined && deeperThan(originals[i]!, APPEND_DEPTH)) await reattach(id, originals[i]!, APPEND_DEPTH)
+      if (id !== undefined && cut(originals[i]!, APPEND_DEPTH)) await reattach(id, originals[i]!, APPEND_DEPTH)
     }
   }
 
   async function reattach(id: string, original: Block, depth: number): Promise<void> {
     const nested = original.children ?? []
     if (nested.length === 0) return
-    if (depth === 0) return append(id, nested)
-    if (!nested.some((child) => deeperThan(child, depth - 1))) return
+    if (deferred(original, depth)) return append(id, nested)
+    if (!nested.some((child) => cut(child, depth - 1))) return
     const kids = await children(id)
     for (let j = 0; j < nested.length; j += 1) {
       const kid = kids[j]?.id
@@ -446,9 +457,9 @@ export function board(options: BoardOptions): BoardWithPageMarkdown {
     const created = await call<{ id: string; url: string }>('/pages', 'POST', {
       parent: { page_id: pageId },
       properties: { title: { title: [{ type: 'text', text: { content: title } }] } },
-      children: head.map((block) => prune(block, APPEND_DEPTH)),
+      children: head.map((block) => wire(block, APPEND_DEPTH)),
     })
-    if (head.some((block) => deeperThan(block, APPEND_DEPTH))) await attachDeeper(await children(created.id), head)
+    if (head.some((block) => cut(block, APPEND_DEPTH))) await attachDeeper(await children(created.id), head)
     await append(created.id, blocks.slice(APPEND_BATCH))
     return { id: dashed(created.id), url: created.url }
   }
@@ -460,7 +471,7 @@ export function board(options: BoardOptions): BoardWithPageMarkdown {
     for (let offset = 0; offset < blocks.length; offset += APPEND_BATCH) {
       const batch = blocks.slice(offset, offset + APPEND_BATCH)
       const created = await parsed(Created, `/blocks/${parentId}/children`, 'PATCH', {
-        children: batch.map((block) => prune(block, APPEND_DEPTH)),
+        children: batch.map((block) => wire(block, APPEND_DEPTH)),
         position: { type: 'after_block', after_block: { id: after } },
       }).catch((error: unknown) => {
         if (error instanceof BoardError && error.status === 400) throw new BoardError(IDEA_SUMMARY_REFUSED, error.status, error.code)
@@ -478,7 +489,7 @@ export function board(options: BoardOptions): BoardWithPageMarkdown {
     const ids: string[] = []
     for (let offset = 0; offset < blocks.length; offset += APPEND_BATCH) {
       const batch = blocks.slice(offset, offset + APPEND_BATCH)
-      const created = await parsed(Created, `/blocks/${parentId}/children`, 'PATCH', { children: batch.map((block) => prune(block, APPEND_DEPTH)) })
+      const created = await parsed(Created, `/blocks/${parentId}/children`, 'PATCH', { children: batch.map((block) => wire(block, APPEND_DEPTH)) })
       await attachDeeper(created.results, batch)
       ids.push(...created.results.map((block) => block.id))
     }
