@@ -74,10 +74,13 @@ it('returns needs-author for open product choices and records a broken draft con
   expect(decided.status).toBe('needs-author')
   expect(decided.authorDecisions).toEqual([{ ...decision, id: 'R1', decidedBy: 'open', answer: null }])
   expect(decided.spec).toBe(draft)
-  // The author's tick from the previous run's decisions file answers it.
+  // The author's tick from the previous run's decisions file is settled in the draft's ## Decisions
+  // (SCOOP-8), so the review's same question is recorded as settled by the author, not asked again.
   const answered = await writePipeline({ ...input, answers: [{ id: 'R1', question: 'Keep saved items forever?', answer: '30 days' }] }, authorOnly.call)
   expect(answered.status).toBe('ready')
-  expect(answered.authorDecisions).toEqual([{ ...decision, id: 'R1', decidedBy: 'author', answer: '30 days' }])
+  expect(answered.authorDecisions).toEqual([])
+  expect(answered.review?.settledByAuthor).toEqual([{ findingId: 'R1', question: decision.question, settledBy: 'Q1' }])
+  expect(answered.spec).toContain('- **Q1 — Keep saved items forever** Answer: 30 days. Why: the author answered it in the previous run (R1).')
 })
 
 it('stops at the current phase on cancellation and skips the review', async () => {
@@ -132,5 +135,30 @@ describe('an idea that carries the author\'s decisions', () => {
 
   it('the writer system prompt and the explore prompt state the settled rule', () => {
     expect([writerSystemPrompt.includes(SETTLED_DECISIONS_RULE), explorePrompt.includes(SETTLED_DECISIONS_RULE)]).toEqual([true, true])
+  })
+})
+
+describe('a write-mode retry keeps every answer the author ticked (SCOOP-8)', () => {
+  const answers = [
+    { id: 'S1-2', question: 'Check already-leaked orgs read-only?', answer: 'Yes, read-only' },
+    { id: 'R5', question: 'How are Stripe calls faked in tests?', answer: 'At the HTTP boundary' },
+    { id: 'S2-1', question: 'Keep saved items forever?', answer: 'Forever' },
+  ]
+  it('states the answers in the draft prompt and writes the ones the draft left out into ## Decisions before the review', async () => {
+    const withOne = `${draft}\n## Decisions\n\n- **Q1 — Keep saved items forever** Answer: Forever. Why: the author answered it.\n`
+    const { call, prompts } = stub({ draft: () => ({ spec: withOne, assumptions: [] }) })
+    const result = await writePipeline({ ...input, answers }, call)
+    expect(prompts.draft).toContain('AUTHOR ANSWERS (data)')
+    expect(prompts.draft).toContain('- R5: How are Stripe calls faked in tests? Answer: At the HTTP boundary')
+    expect(prompts.research).toContain('- **Q2 — Check already-leaked orgs read-only** Answer: Yes, read-only. Why: the author answered it in the previous run (S1-2).')
+    expect(prompts.research).toContain('- **Q3 — How are Stripe calls faked in tests** Answer: At the HTTP boundary. Why: the author answered it in the previous run (R5).')
+    expect(prompts.research).not.toContain('(S2-1)')
+    expect(result.spec).toContain('Answer: At the HTTP boundary')
+  })
+  it('leaves the draft and its prompt as they were when there are no answers', async () => {
+    const { call, prompts } = stub()
+    const result = await writePipeline(input, call)
+    expect(prompts.draft).not.toContain('AUTHOR ANSWERS')
+    expect(result.draft?.spec).toBe(draft)
   })
 })

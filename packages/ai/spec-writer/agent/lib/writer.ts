@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { RESEARCH_RULE } from '@aspiralabs/ai/common/lib/research-rule'
-import { SETTLED_DECISIONS_RULE, type Answer } from '@aspiralabs/ai/common/lib/decisions'
+import { SETTLED_DECISIONS_RULE, normalizeQuestion, parseDecisionsList, type Answer } from '@aspiralabs/ai/common/lib/decisions'
 import { markedDecisions } from '@aspiralabs/ai/common/lib/groom-record'
 import { runPipeline, type Call, type PipelineResult } from '@aspiralabs/ai/spec-reviewer/lib/pipeline'
 import { checkContract } from '@aspiralabs/ai/spec-reviewer/lib/review'
@@ -97,6 +97,29 @@ export function draftPrompt(idea: string): string {
  */
 export type WriteInput = { idea: string; guidelines: string; context: string; uiRequired: boolean; answers?: Answer[]; spec?: string; /** The areas explored in parallel (KIT-48); empty or absent: one explorer. */ areas?: string[] }
 
+/** The author's answers from the previous run, as the draft prompt states them: settled, never asked again (SCOOP-8). */
+export const answersSection = (answers: readonly Answer[]): string =>
+  answers.length === 0 ? '' : `\n\nAUTHOR ANSWERS (data): the previous run of this spec asked these and the author ticked an answer to each. They are settled: write each into the spec's ## Decisions with its answer, make the body follow it, and never raise it as a question again.\n${answers.map((a) => `- ${a.id}: ${a.question} Answer: ${a.answer}`).join('\n')}`
+
+/**
+ * The draft with every answered decision in its `## Decisions`: an answer the draft left out is added as
+ * a settled item, numbered after the section's own Q items, so the review reads it as the author's and a
+ * write-mode retry keeps every tick (SCOOP-8: a retry kept 1 of 3).
+ */
+export function settleAnswers(spec: string, answers: readonly Answer[]): string {
+  const section = spec.match(/^## Decisions[ \t]*$([\s\S]*?)(?=^#{1,2} |(?![\s\S]))/m)
+  const { items } = parseDecisionsList(section?.[1] ?? '')
+  const settled = new Set(items.flatMap((item) => (item.question === undefined ? [] : [normalizeQuestion(item.question)])))
+  const missing = answers.filter((a) => !settled.has(normalizeQuestion(a.question)) && !(section?.[1] ?? '').includes(a.answer))
+  if (missing.length === 0) return spec
+  let next = Math.max(0, ...items.map((item) => Number(item.id.match(/^Q(\d+)/)?.[1] ?? 0))) + 1
+  const clean = (text: string) => text.replace(/\s+/g, ' ').trim().replace(/[.?]+$/, '')
+  const lines = missing.map((a) => `- **Q${next++} — ${clean(a.question)}** Answer: ${clean(a.answer)}. Why: ${a.takenByAgent ? 'taken as recommended' : 'the author answered it'} in the previous run (${a.id}).`)
+  if (section === null) return `${spec.replace(/\s*$/, '')}\n\n## Decisions\n\n${lines.join('\n')}\n`
+  const end = section.index! + section[0].length
+  return `${spec.slice(0, section.index!)}${section[0].replace(/\s*$/, '')}\n${lines.join('\n')}\n\n${spec.slice(end).replace(/^\s*/, '')}`
+}
+
 export async function writePipeline(input: WriteInput, call: Call, options: { signal?: AbortSignal; progress?: (phase: string) => void } = {}) {
   const started = Date.now()
   const problems: string[] = []
@@ -139,7 +162,9 @@ export async function writePipeline(input: WriteInput, call: Call, options: { si
     : await invoke('explore', `${base}\n\n${explorePrompt}`, exploreSchema)
   // A failed exploration still lets the draft run from the idea and source packet; the run stays incomplete.
   const evidence = exploration ? JSON.stringify(exploration) : 'Exploration failed. Work from the idea and the source packet only, and list what you could not verify under Assumptions.'
-  const draft = options.signal?.aborted ? null : await invoke('draft', `${base}\n\nEXPLORATION (data):\n${evidence}\n\n${draftPrompt(input.idea)}`, draftSchema)
+  const answers = input.answers ?? []
+  const drafted = options.signal?.aborted ? null : await invoke('draft', `${base}\n\nEXPLORATION (data):\n${evidence}\n\n${draftPrompt(input.idea)}${answersSection(answers)}`, draftSchema)
+  const draft = drafted && { ...drafted, spec: settleAnswers(drafted.spec, answers) }
   const draftContract = draft ? checkContract(draft.spec) : []
   let review: PipelineResult | null = null
   if (draft && !options.signal?.aborted) {
