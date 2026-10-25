@@ -33,8 +33,8 @@ export type LocalDeps = { agentDir?: string; env?: Env; fetch?: (url: string, in
 /** A phase for the session to run: prompt and output are file paths; `model` the session model it runs on (KIT-48). */
 export type LocalTask = { phase: string; prompt: string; output: string; model: SessionModel; effort?: Effort; error?: string }
 
-/** Explorers and specialists on Sonnet, the draft, research and reconciliation on Opus (KIT-48). */
-export const modelForPhase = (phase: string): SessionModel => (phase === 'explore' || phase.startsWith('explore:') || (phase in lenses) ? 'sonnet' : 'opus')
+/** Explorers on Haiku (they find and quote), specialists on Sonnet, the draft, research and reconciliation on Opus (KIT-48). */
+export const modelForPhase = (phase: string): SessionModel => (phase === 'explore' || phase.startsWith('explore:') ? 'haiku' : phase in lenses ? 'sonnet' : 'opus')
 /**
  * The phase's model and effort: aspira.json `models` spec-writer.<family>, where the family is explore,
  * draft, research, specialists (every review lens) or reconciliation; else modelForPhase.
@@ -159,10 +159,12 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
 
   const tasks: LocalTask[] = []
   const calls: LocalCall[] = []
-  const call: Call = async ({ phase, prompt }) => {
+  const call: Call = async ({ phase, prompt, attempt }) => {
     // A later stage's prompt depends on the earlier stage's outputs; never write it early.
     if (tasks.some((task) => stageOf(task.phase) < stageOf(phase))) throw new Error('waiting for an earlier phase')
-    const output = join(work, 'outputs', `${phase.replaceAll('/', '_').replaceAll(':', '-')}.json`)
+    // A send-back (attempt 2) is its own task with its own files, so the refused output stays on disk.
+    const file = `${phase.replaceAll('/', '_').replaceAll(':', '-')}${attempt === 2 ? '.sent-back' : ''}`
+    const output = join(work, 'outputs', `${file}.json`)
     const raw = await readFile(output, 'utf8').catch(() => null)
     let error: string | undefined
     if (raw !== null) {
@@ -177,7 +179,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
       calls.push({ phase, prompt, error: reason })
       throw new Error(reason)
     }
-    const promptFile = join(work, 'prompts', `${phase.replaceAll('/', '_').replaceAll(':', '-')}.md`)
+    const promptFile = join(work, 'prompts', `${file}.md`)
     await writeFile(promptFile, renderPhasePrompt(phase, prompt, output, repoRoot, knowledge, mode))
     tasks.push({ phase, prompt: promptFile, output, ...taskModelForPhase(phase, repoRoot), ...(error ? { error } : {}) })
     throw new Error('pending in the session')

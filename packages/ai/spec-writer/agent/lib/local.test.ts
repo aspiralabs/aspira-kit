@@ -30,7 +30,7 @@ it('runs explore, draft and the review one stage at a time in the session, then 
   const { dir, ideaPath, input } = await setup()
   const explore = await pending(input)
   expect(explore).toMatchObject({ stage: 'explore', workDir: join(dir, 'spec.reviewed.local') })
-  expect(explore.tasks.map((t) => t.phase)).toEqual(['explore'])
+  expect(explore.tasks.map((t) => [t.phase, t.model])).toEqual([['explore', 'haiku']])
   const explorePrompt = await readFile(explore.tasks[0]!.prompt, 'utf8')
   expect(explorePrompt).toContain('Explore the repository for this idea')
   expect(explorePrompt).toContain('Let people save items.')
@@ -63,7 +63,14 @@ it('runs explore, draft and the review one stage at a time in the session, then 
 
   const synthesis = await pending(input)
   expect(synthesis.stage).toBe('reconciliation')
-  await writeFile(synthesis.tasks[0]!.output, JSON.stringify({ edits: [{ id: 'E1', before: 'appears in the list.', after: 'appears in the list until removed.' }], dispositions: [{ findingId: 'R1', status: 'applied', reason: 'Retention stated', evidence: ['spec: list'], editIds: ['E1'], duplicateOf: null }] }))
+  const edits = [{ id: 'E1', before: 'appears in the list.', after: 'appears in the list until removed.' }, { id: 'E2', before: 'Let people save items.', after: 'Let signed-in people save items.' }]
+  // An orphan edit is sent back once as its own task, beside the refused output (SCOOP-7).
+  await writeFile(synthesis.tasks[0]!.output, JSON.stringify({ edits, dispositions: [{ findingId: 'R1', status: 'applied', reason: 'Retention stated', evidence: ['spec: list'], editIds: ['E1'], duplicateOf: null }] }))
+  const sentBack = await pending(input)
+  expect(sentBack.tasks).toMatchObject([{ phase: 'synthesis', model: 'opus' }])
+  expect(sentBack.tasks[0]!.output).toBe(join(dir, 'spec.reviewed.local/outputs/synthesis.sent-back.json'))
+  expect(await readFile(sentBack.tasks[0]!.prompt, 'utf8')).toContain('- Unjustified edit: E2')
+  await writeFile(sentBack.tasks[0]!.output, JSON.stringify({ edits: edits.slice(0, 1), dispositions: [{ findingId: 'R1', status: 'applied', reason: 'Retention stated', evidence: ['spec: list'], editIds: ['E1'], duplicateOf: null }] }))
 
   const done = await runLocal(input)
   expect(done).toMatchObject({ pending: false, status: 'ready', dir: join(dir, 'spec.reviewed'), findings: 1 })
@@ -72,7 +79,7 @@ it('runs explore, draft and the review one stage at a time in the session, then 
   expect(await readFile(join(dir, 'spec.reviewed/spec.reviewed.md'), 'utf8')).toContain('until removed')
   expect(await readFile(join(dir, 'spec.reviewed/run-analysis.md'), 'utf8')).toContain('--local')
   const trace = JSON.parse(await readFile(join(dir, 'spec.reviewed/trace/calls.json'), 'utf8'))
-  expect(trace.calls).toHaveLength(10)
+  expect(trace.calls).toHaveLength(11)
   expect(JSON.parse(await readFile(join(dir, 'spec.reviewed/trace/review.json'), 'utf8'))).toMatchObject({ mode: 'local', status: 'ready' })
   await expect(stat(join(dir, 'spec.reviewed.local'))).rejects.toThrow()
 })

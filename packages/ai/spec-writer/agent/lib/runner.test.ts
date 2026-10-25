@@ -58,7 +58,7 @@ it('writes the draft and the reviewed spec beside the idea without altering it, 
   expect(trace.calls).toHaveLength(10)
   const usage = JSON.parse(await readFile(join(result.dir, 'trace/usage.json'), 'utf8'))
   expect(usage.turns).toHaveLength(10)
-  expect(new Set(fixture.models)).toEqual(new Set(['anthropic/claude-opus-5.5', 'openai/gpt-6.1-sol']))
+  expect(new Set(fixture.models)).toEqual(new Set(['anthropic/claude-haiku-4.5', 'anthropic/claude-opus-5.5', 'openai/gpt-6.1-sol']))
   const rerun = await runWrite({ ideaPath, guidelinesPath, repoPath: dir, uiRequired: false })
   expect(await readdir(join(rerun.dir, 'trace/history'))).toHaveLength(1)
   await expect(runWrite({ ideaPath, guidelinesPath, repoPath: dir, outputDir: dir })).rejects.toThrow('must not contain')
