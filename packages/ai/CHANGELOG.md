@@ -1,5 +1,25 @@
 # @aspiralabs/kit
 
+## 0.17.0
+
+### Minor Changes
+
+- f5d87a3: `@aspiralabs/ai` is installed globally only (`pnpm add -g @aspiralabs/ai`), never as a project dependency. `kit init` no longer adds it, and removes one an earlier kit added; `kit doctor` fails while a project declares it. The `/aspira-*` launchers run the agents from the global install (found with the new `kit package-dir`), blocked with "run kit init" when a skill's `.kit-version` differs from it. The hooks are copied into `.claude/hooks/aspira/` and `.claude/settings.json` runs them from there, so nothing points into `node_modules/@aspiralabs/ai`. To move a project: `pnpm add -g @aspiralabs/ai@latest`, then `kit init` in the project, and commit `package.json`, the lockfile and `.claude/`.
+- 61a8aa3: Explorers run on Haiku, and a spec review phase that breaks a checked rule gets one send-back instead of ending the run.
+
+  - The spec writer's and the planner's explore phases default to `haiku` in session runs (`spec-writer.explore`, `planner.explore`; aspira.json `models` still overrides them) and to `anthropic/claude-haiku-4.5` in the cloud (`SPEC_WRITER_EXPLORE_MODEL`, `SPEC_PLAN_EXPLORE_MODEL`). Review specialists stay on Sonnet; draft, research, planning and reconciliation on Opus.
+  - A review lens whose checks rows leave out one of its assigned rules, or research leaving out a rule no lens owns, is sent back once with the missing rules named, before the coverage check counts "Uncovered guideline". A reconciliation whose bookkeeping fails (a duplicate or rejected finding carrying edits, an edit no finding cites, unknown or duplicate gap resolutions, a candidate that breaks the spec contract) is sent back once with those problems. A second miss is the run problem it was before. In a session run the send-back is its own task (`outputs/<phase>.sent-back.json`), so the refused output stays on disk. On SCOOP-7 each of these ended a finished review incomplete and cost a full rerun (about 1.3M tokens).
+
+### Patch Changes
+
+- 96eabdb: Five fixes from the ScoopLine SCOOP-7 and SCOOP-8 runs.
+
+  - Planner: the final-verification rule names what to change. A task after the verification gets "The last task must be the verification task: P19 (handoff) comes after P18. Move it before P18 (taskOrder) and drop any dependency on P18"; a missing dependency names the implementation tasks to add. The planning prompt says handoffs come before the verification. Both repair passes had kept a trailing handoff, since the old message gave them nothing to change.
+  - Implementor: a `local` call after a ready export, with HEAD where the build left it, answers from that export. It used to start a new run whose gate read the build's own commits as plan drift and rewrote the trace as refused.
+  - build-feature: the skill launches each step subagent with a background wait on its report file and steps the driver as soon as the report exists, never holding the run for the Agent tool's usage numbers (the driver already takes a report without them). Runs sat idle for hours waiting on a hand-back or on telemetry.
+  - Page pushes through the Notion API put nested children inside the block's type object (`bulleted_list_item.children`, `table.children`), send one level of children per request, and always send a table with its rows; a block holding a table sends its children in a later request. Nested lists three deep and tables, at the top or inside a list, no longer fail with Notion's 400.
+  - Spec writer: a write-mode retry (from In Progress: Spec) keeps every answer the author ticked in the previous run's decisions file. The draft prompt states them as settled, and any the draft leaves out is written into its `## Decisions` before the review, which then treats it as settled. A retry had kept 1 of 3.
+
 ## 0.16.0
 
 ### Minor Changes
