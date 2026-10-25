@@ -1,19 +1,20 @@
 # @aspiralabs/ai
 
-The `kit` CLI and the Aspira agents, in one package. `kit` puts a project on the kit: it installs `@aspiralabs/ui`, `@aspiralabs/config` and `@aspiralabs/ai`, wires them in, installs the `/aspira-*` agent skills, scaffolds shared features like auth, and reports drift.
+The `kit` CLI and the Aspira agents, in one package, installed globally once per engineer. `kit` puts a project on the kit: it installs `@aspiralabs/ui` and `@aspiralabs/config`, wires them in, copies the `/aspira-*` skills and the hooks into `.claude/`, scaffolds shared features like auth, and reports drift. `@aspiralabs/ai` itself is never a project dependency.
 
 ```bash
-pnpm dlx @aspiralabs/ai init --stack next --board <Feature Board URL>   # first run, before the kit is installed
-pnpm kit add auth                            # base Better Auth setup
-pnpm kit doctor                              # what version you're on, what's wired
-pnpm kit next NOM-4                          # what to run next for a ticket
+pnpm add -g @aspiralabs/ai                   # once per engineer
+kit init --stack next --board <Feature Board URL>
+kit add auth                                 # base Better Auth setup
+kit doctor                                   # what version you're on, what's wired
+kit next NOM-4                               # what to run next for a ticket
 ```
 
 In a repository where the app is not the root (no root `package.json`; the Next app, its `package.json` and `node_modules` are in `apps/web`; Claude Code runs at the root), run `init` at the root with `--app`:
 
 ```bash
-pnpm dlx @aspiralabs/ai init --stack next --app apps/web --board <Feature Board URL>   # at the repository root
-pnpm -C apps/web kit doctor                  # the app is read from aspira.json; the root is found from inside the app
+kit init --stack next --app apps/web --board <Feature Board URL>   # at the repository root
+kit doctor                                   # the app is read from aspira.json, from the root or inside the app
 ```
 
 Installing needs a GitHub Packages token in `~/.npmrc`; see the [repo README](../../README.md#use-the-kit-in-an-app).
@@ -26,11 +27,12 @@ Setting up a new project end to end (the Notion teamspace, Feature Board and Rel
 pnpm add -g @aspiralabs/ai
 ```
 
-puts `kit` on your PATH, so `kit` runs in any directory.
+puts `kit` on your PATH. That one install is what every project uses: the `/aspira-*` skills `kit init` copies into `.claude/skills/` run the agents from it, and the hooks it copies into `.claude/hooks/aspira/` need nothing from `node_modules`.
 
-- **Inside a project, the project's copy wins.** `kit` re-executes the `@aspiralabs/ai` the project has in its `devDependencies`, so the commands, the skills, the hooks, the launchers and the cloud runs all use the project's version, whatever the global one is.
-- **With only the global copy** (no `@aspiralabs/ai` in the project yet), `kit init`, `kit doctor` and `kit playbook` run from it. `/aspira-next`, `/aspira-cleanup` and `/aspira-worktree` stop asking you to install `@aspiralabs/ai` in the project: they tell you to run `kit init`, which installs it.
-- **Version notice.** At most once every 24 hours `kit` (and, separately, the session-start hook) checks the registry for a newer `@aspiralabs/ai` and prints one line when there is one. It never blocks a command. It names both upgrade commands: `pnpm add -g @aspiralabs/ai@latest` for the global copy, and `pnpm add -D @aspiralabs/ai@latest` followed by `kit init` for the project, which refreshes the copied skills.
+- **Not a project dependency.** `kit init` installs only `@aspiralabs/ui` and `@aspiralabs/config` in the project, and removes an `@aspiralabs/ai` an earlier kit added to `package.json` (it would win over the global install). `kit doctor` fails while one is declared.
+- **The skills are pinned.** Each copied skill records the version it came from in `.kit-version`. When the global install is a different version, a skill stops before it starts and says to run `kit init`, which recopies them. So after upgrading the global install, run `kit init` in each project and commit the refreshed `.claude/` files.
+- **Version notice.** At most once every 24 hours `kit` (and, separately, the session-start hook) checks the registry for a newer `@aspiralabs/ai` and prints one line when there is one. It never blocks a command. It names the upgrade: `pnpm add -g @aspiralabs/ai@latest`, then `kit init` in each project.
+- **Moving a project off a project install.** `pnpm remove @aspiralabs/ai` in the app (or just `kit init`, which does it), then `kit init` from the global install; commit `package.json`, the lockfile and `.claude/`.
 
 ## Commands
 
@@ -64,7 +66,7 @@ Exit codes: `0` success, `1` a failed step or `doctor` found problems, `2` bad a
 ## `kit init --stack next`
 
 ```bash
-pnpm kit init --stack next [--app <dir>] [--board <Feature Board URL>] [--releases <Releases page URL>] [--dry-run] [--cwd <path>]
+kit init --stack next [--app <dir>] [--board <Feature Board URL>] [--releases <Releases page URL>] [--dry-run] [--cwd <path>]
 ```
 
 Puts a Next.js project on the kit. `next` is the only stack so far. Without `--app`, every step below runs in the project root. With `--app <dir>`, the package steps (`.npmrc`, the install, `eslint.config.mjs`, `prettier.config.mjs`, `tsconfig.json`, `globals.css`) run in `<dir>` and the rest at the root.
@@ -72,7 +74,7 @@ Puts a Next.js project on the kit. `next` is the only stack so far. Without `--a
 | Step | Result |
 |---|---|
 | `.npmrc` | Maps `@aspiralabs` to GitHub Packages. Warns if `~/.npmrc` has no token |
-| Install | `@aspiralabs/ui`; dev: `@aspiralabs/config`, `@aspiralabs/ai`, `@aspiralabs/ai`, `eslint`, `prettier`, `typescript`. Uses the project's package manager (pnpm, npm or yarn, from the lockfile) |
+| Install | `@aspiralabs/ui`; dev: `@aspiralabs/config`, `eslint`, `prettier`, `typescript`. Removes `@aspiralabs/ai` first when an earlier kit declared it (it is installed globally). Uses the project's package manager (pnpm, npm or yarn, from the lockfile) |
 | `eslint.config.mjs` | `@aspiralabs/config/eslint/next`, if the file doesn't exist |
 | `prettier.config.mjs` | `@aspiralabs/config/prettier`, if the file doesn't exist |
 | `tsconfig.json` | `extends` the kit's `next.json`; adds `paths: { "@/*": ["./*"] }` if there are none |
@@ -80,26 +82,27 @@ Puts a Next.js project on the kit. `next` is the only stack so far. Without `--a
 | `AGENTS.md` | Writes or replaces the block between `<!-- aspiralabs:begin -->` and `<!-- aspiralabs:end -->`. Everything outside it is yours and is kept |
 | `CLAUDE.md` | `@AGENTS.md`, if the file doesn't exist |
 | `.mcp.json` | Registers the `aspiralabs-ui` docs server (`npx --no aspiralabs-ui-mcp`; with `--app`, `node <app>/node_modules/@aspiralabs/ui/bin/mcp.js`), merged into your servers. The kit's entry is replaced on a re-run, yours are kept |
-| `.claude/settings.json` | Adds the session-start, deny-tier3 and audit-log hooks (`sh node_modules/@aspiralabs/ai/hooks/<name>.sh`; with `--app`, `sh <app>/node_modules/...`), merged into your settings. The kit's hook groups are replaced on a re-run, including entries pointing at the retired `@aspiralabs/config/agent/hooks/` path or at a previous app directory; yours are kept |
-| `.claude/skills/aspira-<agent>/` | One folder per agent (groomer, spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer): a copy of the installed package's `skill/aspira-<agent>/` (`SKILL.md` and `scripts/`) plus `.kit-version`, the installed `@aspiralabs/ai` version. Commit them. A re-run after a bump rewrites them |
-| `.claude/skills/aspira-{cleanup,next,worktree}/` | The three kit-owned skills, copied from this package's `skills/` with `.kit-version` set to the installed `@aspiralabs/ai` version, written even when `@aspiralabs/ai` is not installed. Each is a launcher that runs the matching `kit` command and relays it: `/aspira-cleanup` lists, confirms in chat and reruns with `--yes --only`; `/aspira-next` offers to run the next command on a yes; `/aspira-worktree` moves the session into the new worktree |
+| `.claude/hooks/aspira/` | `session-start.sh`, `deny-tier3.sh` and `audit-log.sh`, copied from the global `@aspiralabs/ai`. Commit them |
+| `.claude/settings.json` | Adds those hooks (`sh .claude/hooks/aspira/<name>.sh`), merged into your settings. The kit's hook groups are replaced on a re-run, including entries pointing into `node_modules/@aspiralabs/ai/hooks/` (earlier kits) or the retired `@aspiralabs/config/agent/hooks/`; yours are kept |
+| `.claude/skills/aspira-<agent>/` | One folder per agent (groomer, spec-writer, spec-reviewer, planner, implementor, code-analyzer, pr-reviewer): a copy of the global `@aspiralabs/ai`'s `skill/aspira-<agent>/` (`SKILL.md` and `scripts/`) plus `.kit-version`, its version. Commit them. A re-run after a bump rewrites them |
+| `.claude/skills/aspira-{cleanup,next,worktree}/` | The three kit-owned skills, copied from this package's `skills/` with `.kit-version` set to its version. Each is a launcher that runs the matching `kit` command and relays it: `/aspira-cleanup` lists, confirms in chat and reruns with `--yes --only`; `/aspira-next` offers to run the next command on a yes; `/aspira-worktree` moves the session into the new worktree |
 | `.gitignore` | Adds `.work/` (the per-ticket working folder) and `.aspira/` (the audit log the hooks write, `.aspira/audit.jsonl`), whichever is missing; `.worktrees/` (ticket worktrees) to the git repository root's `.gitignore`; and `.env.local` unless `git check-ignore` already reports it ignored (a `.env*.local` glob counts) |
-| `aspira.json` | With `--board`: the project's Feature Board URL and, with `--releases`, its Releases page. The `/aspira-*` skills and `kit next` read it. With `--app`: `"app": "<dir>"`, which `kit doctor`, `kit next` and the skill launchers read to find the installed packages. Without `--board` the board is left as it is, and a project without one has no board: every skill then needs `--no-ticket`. Add `"knowledge": "<Agent Instructions URL>"` by hand so a build-feature run builds the guidelines without `KNOWLEDGE_PAGE` in its environment. Add `"models"` by hand to try other models or reasoning effort (see [Models](#models-per-stage-and-phase)) |
+| `aspira.json` | With `--board`: the project's Feature Board URL and, with `--releases`, its Releases page. The `/aspira-*` skills and `kit next` read it. With `--app`: `"app": "<dir>"`, which `kit doctor`, `kit next` and the skill launchers read to find the app's packages. Without `--board` the board is left as it is, and a project without one has no board: every skill then needs `--no-ticket`. Add `"knowledge": "<Agent Instructions URL>"` by hand so a build-feature run builds the guidelines without `KNOWLEDGE_PAGE` in its environment. Add `"models"` by hand to try other models or reasoning effort (see [Models](#models-per-stage-and-phase)) |
 
 ### `--app`: a repository whose app is not the root
 
 nomnomzz is the case: the Next app with its `package.json` and `node_modules` is `apps/web`, there is no root `package.json`, and Claude Code runs at the repository root, where it reads `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and `.claude/`. Run `init` at the root with `--app <dir>`, where `<dir>` is the app, relative to the root:
 
 ```bash
-pnpm dlx @aspiralabs/ai init --stack next --app apps/web --board <Feature Board URL>
+kit init --stack next --app apps/web --board <Feature Board URL>
 ```
 
 | Where | What |
 |---|---|
 | `apps/web/` | `.npmrc`, the install (`pnpm add` runs there, with its lockfile), `eslint.config.mjs`, `prettier.config.mjs`, `tsconfig.json`, `app/globals.css` |
-| the root | `AGENTS.md` (managed block, plus one line naming the app), `CLAUDE.md`, `.mcp.json`, `.claude/settings.json`, `.claude/skills/aspira-*/`, `.gitignore` (`.work/`, `.aspira/`), `aspira.json` with `"app": "apps/web"` |
+| the root | `AGENTS.md` (managed block, plus one line naming the app), `CLAUDE.md`, `.mcp.json`, `.claude/settings.json`, `.claude/hooks/aspira/`, `.claude/skills/aspira-*/`, `.gitignore` (`.work/`, `.aspira/`), `aspira.json` with `"app": "apps/web"` |
 
-Every path inside the root files points into the app, relative to the root where Claude Code runs them: the hooks are `sh apps/web/node_modules/@aspiralabs/ai/hooks/<name>.sh`, the MCP server is `node apps/web/node_modules/@aspiralabs/ui/bin/mcp.js`, and the skills are copied from the agent packages under `apps/web/node_modules`. The launchers in `.claude/skills/` read `app` from the root's `aspira.json` and resolve the installed agents under `apps/web/node_modules` whatever the working directory is; the app's `.env.local` is the one they load. `kit doctor` and `kit next` read `app` from `aspira.json` too, so they need no flag after `init`, and run from inside the app (`pnpm -C apps/web kit doctor`, where the kit's bin is) they find the root that wired it. One app per repository: `--app` names the app the kit packages are installed in; other apps keep their own tooling.
+The MCP server points into the app, relative to the root where Claude Code runs it: `node apps/web/node_modules/@aspiralabs/ui/bin/mcp.js`. The hooks and skills are copies under `.claude/` and the agents run from the global `@aspiralabs/ai`; the launchers in `.claude/skills/` read `app` from the root's `aspira.json`, and the app's `.env.local` is the one they load. `kit doctor` and `kit next` read `app` from `aspira.json` too, so they need no flag after `init`, and run from inside the app they find the root that wired it. One app per repository: `--app` names the app the kit packages are installed in; other apps keep their own tooling.
 
 The `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and settings templates ship in this package (`templates/agent/`), and the hooks in `hooks/`, so re-running `init` after an upgrade brings them up to that version. The managed `AGENTS.md` block and the session-start hook only point at the rules in Notion; they restate none.
 
@@ -126,7 +129,7 @@ A value is a model (`fable`, `opus`, `sonnet`, `haiku`) or `{ "model": …, "eff
 }
 ```
 
-`@aspiralabs/ai` is one dependency that brings every agent (the folders `groomer`, `spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer`, `build-feature`, `visual-verify` and `common`) into the project at the kit's version. Each agent's skill is copied into `.claude/skills/aspira-<agent>/`, so `/aspira-planner` and friends run the agent installed in `node_modules`, never a source checkout. The launcher resolves its agent as `<AGENT>_AGENT_DIR` (kit development only; the run says so), then the installed package under the app named in the root's `aspira.json` (`--app`), then walking up from the working directory, then from its own location; `$ASPIRA_KIT` is not consulted. Agent environment comes from the project's `.env.local` (`AI_GATEWAY_API_KEY`, `NOTION_TOKEN`, `KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`), then the agent's own folder.
+`@aspiralabs/ai`, installed globally, brings every agent (the folders `groomer`, `spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer`, `build-feature`, `visual-verify` and `common`) at the kit's version. Each agent's skill is copied into `.claude/skills/aspira-<agent>/`, so `/aspira-planner` and friends run the agent from the global install, never a source checkout. The launcher resolves its agent as `<AGENT>_AGENT_DIR` (kit development only; the run says so), then a copy an earlier kit installed under the project (the app named in the root's `aspira.json`, then walking up from the working directory, then from its own location), then its own package, then the global install (`kit package-dir`, from the `kit` on PATH); `$ASPIRA_KIT` is not consulted. Agent environment comes from the project's `.env.local` (`AI_GATEWAY_API_KEY`, `NOTION_TOKEN`, `KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`), then the agent's own folder.
 
 Updating an agent is a kit release, a bump of `@aspiralabs/ai` in the project, and `kit init` again; `kit doctor` fails until the skills match the installed version. Each run reports the agent package and version it ran, and writes `trace/agent-version.json` into its export.
 
@@ -142,7 +145,7 @@ done
 ## `kit add auth`
 
 ```bash
-pnpm kit add auth [--no-passkey] [--expo <scheme>] [--dry-run] [--cwd <path>]
+kit add auth [--no-passkey] [--expo <scheme>] [--dry-run] [--cwd <path>]
 ```
 
 Writes the Better Auth setup that every product had converged on. The files are a starting point the product owns, not a package: edit them freely. The kit never overwrites them, so re-running only adds what's missing.
@@ -203,7 +206,7 @@ If you already have `lib/prisma.ts` or `lib/redis.ts`, they're kept. The command
 ## `kit doctor`
 
 ```bash
-pnpm kit doctor [--app <dir>] [--cwd <path>]
+kit doctor [--app <dir>] [--cwd <path>]
 ```
 
 Prints the version of each kit package the project declares and has installed (`@aspiralabs/ui`, `config`, `kit` and `agents`), then checks each part of the `init` wiring: ESLint, `tsconfig.json`, the tokens import, the `AGENTS.md` block, the MCP server, the hooks, `.gitignore` (`.work/` and `.aspira/`; `.worktrees/` at the git repository root; `.env.local` as `git check-ignore` sees it, both reported skipped outside a git repository), `aspira.json` (present, with a Notion URL as `board`, and an `app` directory that has a `package.json` when set), and each `.claude/skills/aspira-<agent>/` folder (present, complete, and its `.kit-version` equal to the installed `@aspiralabs/ai` version) and each kit-owned skill (`aspira-cleanup`, `aspira-next`, `aspira-worktree`, checked against the installed `@aspiralabs/ai` version). It exits `1` if anything is missing and tells you to re-run `init`.
@@ -213,8 +216,8 @@ With an app (`--app <dir>`, or `app` in `aspira.json`), one run checks both plac
 ## `kit next` and `kit playbook`
 
 ```bash
-pnpm kit next [<ticket>] [--app <dir>] [--cwd <path>]
-pnpm kit playbook
+kit next [<ticket>] [--app <dir>] [--cwd <path>]
+kit playbook
 ```
 
 `kit next` answers "what is the next step" for a ticket. It reads the board (and the app) from `aspira.json`, resolves the ticket (an ID such as `NOM-4`, a Notion page URL, or, with no argument, the one folder under `.work/` that holds a `ticket.md`; two is an error naming them) through the agents installed under the app's `node_modules` with `NOTION_TOKEN` from `.env.local` (the root's, then the app's, which wins), and prints its Status, the Playbook step for that Status, the exact command to run with the ID filled in, and who acts. When the board does not answer, the Status as pulled into the working folder stands in and the output says so.
@@ -224,8 +227,8 @@ The mapping is `src/playbook.ts`, the one source of the Status table. `kit playb
 ## `kit cleanup` and `kit worktree`
 
 ```bash
-pnpm kit cleanup [--yes] [--only <path>...] [--app <dir>] [--cwd <path>]
-pnpm kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
+kit cleanup [--yes] [--only <path>...] [--app <dir>] [--cwd <path>]
+kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
 ```
 
 `kit cleanup` lists every working folder under `.work/` (in the main checkout and in each ticket worktree) and every ticket worktree at `.worktrees/<TYPE>-<ID>` (TYPE `FEATURE`, `BUG` or `CHORE`) with the card's **live** Status, and marks for deletion only those whose card is Released or Dropped. On a terminal it asks `Delete N folders and remove M worktrees? [y/N]`; `--yes` skips the question, `--only <path>...` (with `--yes`) deletes only the listed paths that are still marked, and without a terminal and `--yes` it lists and deletes nothing. A worktree with uncommitted or unpushed work (commits not on any remote-tracking branch after `git fetch --prune`) is kept, even with `--yes`; worktrees are removed without `--force` and their local branch with `git branch -d`, never a remote branch. The main checkout, worktrees outside `.worktrees/` and folders it cannot match to a card are never touched, and every skip says why. It exits `0` when every marked item was deleted, `1` when there is no board or a deletion failed, `2` for a bad argument.
@@ -250,7 +253,7 @@ All agents run without application wall-clock cutoffs, including preparation, mo
 
 The tracked `@modelcontextprotocol/sdk` patch in `patches/` adds `timeout: false` for agent MCP requests; omitted timeouts keep the SDK default for other consumers. Keep its regression tests passing when upgrading the SDK.
 
-Aspira Labs agents, built on [eve](https://vercel.com/eve). One folder per agent in this one package, published to GitHub Packages at the kit's version and installed into a project by `kit init` as part of `@aspiralabs/ai`. A project runs the installed package from `node_modules`; this checkout is for developing the kit.
+Aspira Labs agents, built on [eve](https://vercel.com/eve). One folder per agent in this one package, published to GitHub Packages at the kit's version as part of `@aspiralabs/ai`, which each engineer installs globally. A project runs that global install; this checkout is for developing the kit.
 
 | Package | Agent | Spec | State |
 | --- | --- | --- | --- |
@@ -276,7 +279,7 @@ Architecture Decision Record (Proposed): https://app.notion.com/p/3f83e59b225881
 - **`SKILL.md` is mechanics only.** It says which command to run, how to launch the tasks, and what to report, and it names `agent/instructions.md` (or the agent's procedure file) as the authority. Each skill has a test that the agent's key rule sentences are absent from `SKILL.md`.
 - **The ticket is the argument.** Every skill takes the Feature Board ticket first: an ID such as `NOM-4`, a Notion page URL, or nothing when `.work/` holds one ticket (a file path needs `--no-ticket`). The board comes from the project's `aspira.json`. Before any model call the skill checks the Status against its row of the gate table in `common/src/lib/ticket.ts` and refuses otherwise, naming the Status it needs and who makes that move; it pulls the ticket's pages into `.work/<id>-<slug>/` (unchanged files are left alone; a local file newer than its page needs `--force-pull`), makes its own two moves and never a third, and pushes its output back under a fixed title. In the session the driver prints a `board` stage before `knowledge` with the actions as data for the session to perform with the Notion MCP, verifies `ticket.md` between steps, and ends with `--verify`; the launcher's separate-process path performs the same actions itself through `scripts/ticket.ts` and the shared board module with `NOTION_TOKEN`. Every action is recorded in the run's `trace/board.json` with the Status before and after.
 
-A project gets the skills from `kit init`, which copies each installed package's `skill/aspira-<agent>/` into the project's `.claude/skills/aspira-<agent>/` with a `.kit-version`; they are committed, and `kit doctor` fails when one is missing or from another version. The launcher resolves its agent as `<AGENT>_AGENT_DIR` (kit development only; the run says so), then the agent folder in the `@aspiralabs/ai` installed under the project (the app named by `app` in the nearest `aspira.json` above the launcher, which `kit init --app apps/web` writes for a repository whose app is not the root; then walking up from the working directory, then from the launcher's own location), then its own package. `$ASPIRA_KIT` is not consulted. A launcher that lands on a checkout prints one line saying it is running kit source, and every run reports the package version it ran and records it in `trace/agent-version.json`.
+A project gets the skills from `kit init`, which copies the global `@aspiralabs/ai`'s `skill/aspira-<agent>/` into the project's `.claude/skills/aspira-<agent>/` with a `.kit-version`; they are committed, and `kit doctor` fails when one is missing or from another version. The launcher resolves its agent as `<AGENT>_AGENT_DIR` (kit development only; the run says so), then the agent folder in the `@aspiralabs/ai` installed under the project (the app named by `app` in the nearest `aspira.json` above the launcher, which `kit init --app apps/web` writes for a repository whose app is not the root; then walking up from the working directory, then from the launcher's own location), then its own package, then the global install (`kit package-dir` names it). `$ASPIRA_KIT` is not consulted. A launcher that lands on a checkout prints one line saying it is running kit source, and every run reports the package version it ran and records it in `trace/agent-version.json`.
 
 The agents are TypeScript run straight from source. Node refuses to strip types under `node_modules`, so each launcher loads `amaro` (Node's own type stripper, a dependency of every agent) as a module hook. The agent's environment is the project's `.env.local`, then the agent's own `.env.local` and `.env.development.local` (kit development); a variable already in the shell wins.
 

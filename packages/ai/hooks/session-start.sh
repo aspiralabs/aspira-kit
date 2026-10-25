@@ -16,7 +16,14 @@ Aspira Labs: the engineering rules and the process live in Notion. Look them up;
 TXT
 }
 escaped=$(rules | sed 's/\\/\\\\/g; s/"/\\"/g' | awk 'BEGIN { ORS = "\\n" } { print }')
-notice=$(node "$(dirname "$0")/../dist/cli.js" version-check 2>/dev/null || true)
+# kit init copies this hook into .claude/hooks/aspira/; the version check is the global kit's. In the
+# package itself (kit development) the package's own cli runs it.
+cli="$(dirname "$0")/../dist/cli.js"
+if [ -f "$cli" ]; then
+  notice=$(node "$cli" version-check 2>/dev/null || true)
+else
+  notice=$(kit version-check 2>/dev/null || true)
+fi
 message=""
 if [ -n "$notice" ]; then
   message=",\"systemMessage\":\"$notice\""

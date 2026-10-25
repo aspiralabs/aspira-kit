@@ -2,9 +2,9 @@
 // The version-check cache is <HOME>/.cache/aspiralabs/version-check.json shaped
 // { checkedAt: <ms>, latest: '<x.y.z>', notified: {} }; no network is needed (fresh cache, or no token).
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -32,8 +32,11 @@ function homeWithCache(latest: string | null): string {
 
 type Output = { hookSpecificOutput?: { hookEventName?: string; additionalContext?: string }; systemMessage?: string }
 
-function runHook(script: string, home: string) {
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home }
+/** PATH with node and the system tools but no global kit, unless `bin` (a folder holding a fake kit) comes first. */
+const pathWithout = (bin?: string): string => [...(bin ? [bin] : []), dirname(process.execPath), '/usr/bin', '/bin'].join(':')
+
+function runHook(script: string, home: string, path = process.env.PATH) {
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home, PATH: path }
   for (const key of ['NOTION_TOKEN', 'NOTION_API_KEY']) delete env[key]
   const result = spawnSync('sh', [script], { env, encoding: 'utf8', timeout: 30_000 })
   return { code: result.status, stdout: result.stdout, stderr: result.stderr }
@@ -59,7 +62,7 @@ describe('SessionStart JSON', () => {
     expect(output.systemMessage).toContain('99.0.0')
     expect(output.systemMessage).toContain(version)
     expect(output.systemMessage).toContain('pnpm add -g @aspiralabs/ai@latest')
-    expect(output.systemMessage).toContain('pnpm add -D @aspiralabs/ai@latest')
+    expect(output.systemMessage).not.toContain('pnpm add -D')
     expect(output.systemMessage).toContain('kit init')
 
     const plain = runHook(HOOK, homeWithCache(null))
@@ -70,15 +73,29 @@ describe('SessionStart JSON', () => {
     expect(plainOutput.hookSpecificOutput?.additionalContext).toBe(output.hookSpecificOutput?.additionalContext)
   })
 
-  it('T28: with no dist/ beside it the hook still prints the one JSON object and nothing on stderr', () => {
+  it('T28: copied into .claude/hooks/aspira/ with no kit on PATH, the hook still prints the one JSON object and nothing on stderr', () => {
     const dir = temp('copy')
-    mkdirSync(join(dir, 'hooks'))
-    copyFileSync(HOOK, join(dir, 'hooks', 'session-start.sh'))
-    const result = runHook(join(dir, 'hooks', 'session-start.sh'), homeWithCache('99.0.0'))
+    mkdirSync(join(dir, '.claude', 'hooks', 'aspira'), { recursive: true })
+    copyFileSync(HOOK, join(dir, '.claude', 'hooks', 'aspira', 'session-start.sh'))
+    const result = runHook(join(dir, '.claude', 'hooks', 'aspira', 'session-start.sh'), homeWithCache('99.0.0'), pathWithout())
     expect(result.code).toBe(0)
     expect(result.stderr).toBe('')
     const output = JSON.parse(result.stdout) as Output
     expectRulesPointer(output)
     expect(output.systemMessage).toBeUndefined()
+  })
+
+  it('copied into .claude/hooks/aspira/, the notice comes from the global kit on PATH', () => {
+    const dir = temp('global')
+    mkdirSync(join(dir, '.claude', 'hooks', 'aspira'), { recursive: true })
+    copyFileSync(HOOK, join(dir, '.claude', 'hooks', 'aspira', 'session-start.sh'))
+    mkdirSync(join(dir, 'bin'))
+    writeFileSync(join(dir, 'bin', 'kit'), '#!/bin/sh\n[ "$1" = version-check ] && echo "@aspiralabs/ai 99.0.0 is available"\n')
+    chmodSync(join(dir, 'bin', 'kit'), 0o755)
+    const result = runHook(join(dir, '.claude', 'hooks', 'aspira', 'session-start.sh'), homeWithCache(null), pathWithout(join(dir, 'bin')))
+    expect(result.code).toBe(0)
+    const output = JSON.parse(result.stdout) as Output
+    expectRulesPointer(output)
+    expect(output.systemMessage).toBe('@aspiralabs/ai 99.0.0 is available')
   })
 })

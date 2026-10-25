@@ -46,7 +46,7 @@ export function readUserToken(home: string): string | undefined {
 
 /** The one line shown to the user. Built from fixed text and two validated versions. */
 export function versionNotice(latest: string, running: string): string {
-  return `@aspiralabs/ai ${latest} is available (you have ${running}). Upgrade: pnpm add -g @aspiralabs/ai@latest; in a project: pnpm add -D @aspiralabs/ai@latest, then kit init`
+  return `@aspiralabs/ai ${latest} is available (you have ${running}). Upgrade: pnpm add -g @aspiralabs/ai@latest, then kit init in each project`
 }
 
 function newer(latest: string, running: string): boolean {

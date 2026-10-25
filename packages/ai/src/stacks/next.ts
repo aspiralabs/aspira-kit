@@ -15,7 +15,7 @@ import { spawnSync } from 'node:child_process'
 import { deepMerge, hasJsonComments, readJson, writeIfAbsent, writeJson, type Log } from '../fs.js'
 import { appRoot, isWorkspaceRoot, normalizeApp, writeAspira } from '../aspira.js'
 import { ENV_LOCAL_ENTRY, envLocalIgnored, gitRootOf, hasLine, mcpServer, WORKTREES_ENTRY } from '../doctor.js'
-import { AI_PACKAGE, installSkills } from '../skills.js'
+import { AI_PACKAGE, HOOKS_DIR, installHooks, installSkills } from '../skills.js'
 
 export type InitOptions = { projectRoot: string; app?: string; dryRun: boolean; log: Log; board?: string; releases?: string }
 
@@ -24,7 +24,8 @@ export type InitOptions = { projectRoot: string; app?: string; dryRun: boolean; 
 type Resolved = InitOptions & { app: string | undefined; appDir: string; workspace: boolean; workspaceDir: string }
 
 const DEPS = ['@aspiralabs/ui']
-const DEV_DEPS = ['@aspiralabs/config', AI_PACKAGE, 'eslint', 'prettier', 'typescript']
+// @aspiralabs/ai is not among them: it is installed globally, once per engineer (pnpm add -g @aspiralabs/ai).
+const DEV_DEPS = ['@aspiralabs/config', 'eslint', 'prettier', 'typescript']
 
 // The kit's own version: every @aspiralabs package is installed at exactly this version, because the
 // packages release in lockstep and because pnpm 12's supply-chain policy (minimum release age) would
@@ -152,19 +153,27 @@ function install(opts: Resolved): void {
   }
 }
 
-/** The install commands for the app, then, in a workspace, for the @aspiralabs packages the root already declares (kept on the app's version). */
+type Pkg = { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
+const declares = (pkg: Pkg | undefined, name: string): boolean => pkg?.dependencies?.[name] !== undefined || pkg?.devDependencies?.[name] !== undefined
+
+/**
+ * The install commands for the app, then, in a workspace, for the @aspiralabs packages the root already declares (kept on the
+ * app's version). A project copy of @aspiralabs/ai an earlier kit added is removed first, from the app and the workspace root:
+ * it would win over the global install.
+ */
 function installCommands(opts: Resolved, pm: 'pnpm' | 'npm' | 'yarn'): Array<[cmd: string[], cwd: string]> {
   const add = pm === 'npm' ? 'install' : 'add'
+  const remove = pm === 'npm' ? 'uninstall' : 'remove'
   const devFlag = pm === 'npm' ? '--save-dev' : '-D'
-  const cmds: Array<[string[], string]> = [
-    [[pm, add, ...DEPS.map((name) => pinned(name, KIT_VERSION))], opts.appDir],
-    [[pm, add, devFlag, ...DEV_DEPS.map((name) => pinned(name, KIT_VERSION))], opts.appDir],
-  ]
-  if (!opts.workspace) return cmds
-  const root = readJson<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(join(opts.projectRoot, 'package.json')) ?? {}
   // pnpm and yarn refuse an add at a workspace root without saying it is meant (-w, -W).
   const rootFlag = pm === 'pnpm' ? ['-w'] : pm === 'yarn' ? ['-W'] : []
-  const kitNames = (deps: Record<string, string> | undefined) => Object.keys(deps ?? {}).filter((name) => name.startsWith('@aspiralabs/'))
+  const root = opts.workspace ? (readJson<Pkg>(join(opts.projectRoot, 'package.json')) ?? {}) : undefined
+  const cmds: Array<[string[], string]> = []
+  if (declares(readJson<Pkg>(join(opts.appDir, 'package.json')), AI_PACKAGE)) cmds.push([[pm, remove, AI_PACKAGE], opts.appDir])
+  if (declares(root, AI_PACKAGE)) cmds.push([[pm, remove, ...rootFlag, AI_PACKAGE], opts.projectRoot])
+  cmds.push([[pm, add, ...DEPS.map((name) => pinned(name, KIT_VERSION))], opts.appDir], [[pm, add, devFlag, ...DEV_DEPS.map((name) => pinned(name, KIT_VERSION))], opts.appDir])
+  if (root === undefined) return cmds
+  const kitNames = (deps: Record<string, string> | undefined) => Object.keys(deps ?? {}).filter((name) => name.startsWith('@aspiralabs/') && name !== AI_PACKAGE)
   const deps = kitNames(root.dependencies)
   const devDeps = kitNames(root.devDependencies)
   if (deps.length > 0) cmds.push([[pm, add, ...rootFlag, ...deps.map((name) => pinned(name, KIT_VERSION))], opts.projectRoot])
@@ -248,14 +257,14 @@ function css(opts: Resolved): void {
 }
 
 // The kit's own hook groups are replaced, not merged: a group from an earlier kit (the retired
-// @aspiralabs/config path, or the hooks under another app directory) would otherwise stay beside
+// @aspiralabs/config path, or the hooks under node_modules before they were copied) would otherwise stay beside
 // the current one, since the merge keeps arrays. Everything else in the settings is the project's.
 function dropKitHooks(settings: Record<string, unknown>): Record<string, unknown> {
   const hooks = settings.hooks
   if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
     return settings
   }
-  const kit = (entry: unknown): boolean => /@aspiralabs\/(config\/agent|kit|ai)\/hooks\//.test(JSON.stringify(entry))
+  const kit = (entry: unknown): boolean => /@aspiralabs\/(config\/agent|kit|ai)\/hooks\/|\.claude\/hooks\/aspira\//.test(JSON.stringify(entry))
   const next: Record<string, unknown> = {}
   for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
     next[event] = Array.isArray(groups) ? groups.filter((g) => !kit(g)) : groups
@@ -314,7 +323,7 @@ function agentFiles(opts: Resolved): void {
   const settingsPath = join(opts.projectRoot, '.claude', 'settings.json')
   const settingsTemplate = JSON.parse(tpl('claude-settings.json', '{}')) as Record<string, unknown>
   const settingsNext = deepMerge(dropKitHooks(readJson<Record<string, unknown>>(settingsPath) ?? {}), settingsTemplate)
-  opts.log(`${existsSync(settingsPath) ? 'update' : 'write '} ${settingsPath} (session-start, deny-tier3, audit-log hooks${opts.app ? ` from ${opts.app}/node_modules` : ''})`)
+  opts.log(`${existsSync(settingsPath) ? 'update' : 'write '} ${settingsPath} (session-start, deny-tier3, audit-log hooks from ${HOOKS_DIR})`)
   if (!opts.dryRun) {
     writeJson(settingsPath, settingsNext)
   }
@@ -387,8 +396,9 @@ export async function initNext(options: InitOptions): Promise<void> {
   tsconfig(opts)
   css(opts)
   agentFiles(opts)
-  // The /aspira-* skills, copied from the installed agent packages (under the app) into the root and pinned to their version.
+  // The /aspira-* skills and the hooks, copied from the global @aspiralabs/ai into the root; the skills pinned to its version.
   installSkills({ projectRoot: opts.projectRoot, app: opts.app, dryRun: opts.dryRun, log: opts.log })
+  installHooks({ projectRoot: opts.projectRoot, app: opts.app, dryRun: opts.dryRun, log: opts.log })
   gitignore(opts)
   // The Feature Board the skills and kit next read, when the project has one, and the app the launchers and kit next resolve the packages under.
   writeAspira({ projectRoot: opts.projectRoot, board: opts.board, releases: opts.releases, app: opts.app, dryRun: opts.dryRun, log: opts.log })

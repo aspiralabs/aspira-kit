@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, realpath, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -195,13 +196,13 @@ it('resolves the agent in order: PLANNER_AGENT_DIR, the package installed under 
   expect(command(await captured())[3]).toBe(join(root, 'scripts/local.ts'))
   expect(override.stderr).toContain(`planner: PLANNER_AGENT_DIR is set: running kit source at ${root}, not the installed @aspiralabs/ai`)
   await expect(exec('bash', [copy, 'local', spec, '--no-ticket'], { cwd: app, env: { ...env, PLANNER_AGENT_DIR: dir } })).rejects.toThrow('PLANNER_AGENT_DIR is not the planner folder of @aspiralabs/ai')
-  // Nothing installed, and the copied launcher is not inside a package: a clear error, with no $ASPIRA_KIT fallback.
+  // Nothing installed (no global kit on PATH either), and the copied launcher is not inside a package: a clear error, with no $ASPIRA_KIT fallback.
   const bare = join(dir, 'bare')
   await mkdir(join(bare, '.claude/skills/aspira-planner/scripts'), { recursive: true })
   await cp(launcher, join(bare, '.claude/skills/aspira-planner/scripts/planner.sh'))
   await exec('git', ['init', bare])
   await writeFile(join(bare, 'spec.md'), '# Spec')
-  await expect(exec('bash', [join(bare, '.claude/skills/aspira-planner/scripts/planner.sh'), 'local', 'spec.md', '--no-ticket'], { cwd: bare, env: { ...env, ASPIRA_KIT: dirname(dirname(dirname(root))) } })).rejects.toThrow('cannot find planner: install @aspiralabs/ai')
+  await expect(exec('bash', [join(bare, '.claude/skills/aspira-planner/scripts/planner.sh'), 'local', 'spec.md', '--no-ticket'], { cwd: bare, env: { ...env, ASPIRA_KIT: dirname(dirname(dirname(root))), PATH: (process.env.PATH ?? '').split(':').filter((dir) => !existsSync(join(dir, 'kit'))).join(':') } })).rejects.toThrow('cannot find planner: install @aspiralabs/ai')
 })
 
 it('keeps SKILL.md to mechanics: it names agent/instructions.md and copies none of its rules', async () => {

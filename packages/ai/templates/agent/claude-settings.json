@@ -3,15 +3,15 @@
     "SessionStart": [
       {
         "matcher": "startup|resume|clear|compact",
-        "hooks": [{ "type": "command", "command": "sh {{app}}node_modules/@aspiralabs/ai/hooks/session-start.sh" }]
+        "hooks": [{ "type": "command", "command": "sh .claude/hooks/aspira/session-start.sh" }]
       }
     ],
     "PreToolUse": [
       {
         "matcher": "Bash|Edit|Write",
         "hooks": [
-          { "type": "command", "command": "sh {{app}}node_modules/@aspiralabs/ai/hooks/deny-tier3.sh" },
-          { "type": "command", "command": "sh {{app}}node_modules/@aspiralabs/ai/hooks/audit-log.sh" }
+          { "type": "command", "command": "sh .claude/hooks/aspira/deny-tier3.sh" },
+          { "type": "command", "command": "sh .claude/hooks/aspira/audit-log.sh" }
         ]
       }
     ]

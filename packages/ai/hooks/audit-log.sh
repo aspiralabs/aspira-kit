@@ -2,8 +2,7 @@
 # PreToolUse hook. One JSON line per tool call. The log answers: which agent,
 # which tool, what input, when, on which branch. The log lives at the project
 # root (the directory Claude Code runs in, which it names CLAUDE_PROJECT_DIR),
-# never beside this script: in a multi-app repository the script sits under
-# <app>/node_modules while the session runs at the root.
+# never beside this script, which kit init copies into .claude/hooks/aspira/.
 input=$(cat)
 log="${ASPIRA_AUDIT_LOG:-${CLAUDE_PROJECT_DIR:-.}/.aspira/audit.jsonl}"
 mkdir -p "$(dirname "$log")"

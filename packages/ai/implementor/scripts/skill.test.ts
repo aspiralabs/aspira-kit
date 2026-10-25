@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -280,9 +281,9 @@ it('resolves the agent under the app named in the root aspira.json: a multi-app 
   expect((await captured())[3]).toBe(join(root, 'scripts/local.ts'))
   expect(override.stderr).toContain('IMPLEMENTOR_AGENT_DIR is set')
   // An aspira.json without app (a single-app project) changes nothing: the walk-up from the working directory decides,
-  // so from inside the app the package is found, and from the root (no node_modules there) it is reported missing.
+  // so from inside the app the package is found, and from the root (no node_modules there, no global kit on PATH) it is reported missing.
   await writeFile(join(repo, 'aspira.json'), JSON.stringify({ board: 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6' }))
   await exec('bash', [copy, 'local', '../../specs/x.md', '--no-ticket'], { cwd: web, env: local })
   expect((await captured())[3]).toBe(join(installed, 'scripts/local.ts'))
-  await expect(exec('bash', [copy, 'local', 'specs/x.md', '--no-ticket'], { cwd: repo, env: local })).rejects.toThrow('cannot find implementor: install @aspiralabs/ai in the project and run kit init')
+  await expect(exec('bash', [copy, 'local', 'specs/x.md', '--no-ticket'], { cwd: repo, env: { ...local, PATH: (process.env.PATH ?? '').split(':').filter((dir) => !existsSync(join(dir, 'kit'))).join(':') } })).rejects.toThrow('cannot find implementor: install @aspiralabs/ai globally (pnpm add -g @aspiralabs/ai) and run kit init')
 })

@@ -96,13 +96,14 @@ function run(home: string, registry: string, opts: { surface?: 'kit' | 'hook'; r
 }
 
 describe('version check', () => {
-  it('T19: returns one notice with both upgrade commands, sends the bearer token and writes a 0600 cache', async () => {
+  it('T19: returns one notice with the global upgrade command, sends the bearer token and writes a 0600 cache', async () => {
     const server = await stub(latest('0.17.0'))
     const home = tempHome()
     const notice = await run(home, server.base)
     expect(notice).toMatch(NOTICE_RE)
     expect(notice).toContain('pnpm add -g @aspiralabs/ai@latest')
-    expect(notice).toMatch(/pnpm add -D @aspiralabs\/ai@latest.*kit init/)
+    expect(notice).toMatch(/pnpm add -g @aspiralabs\/ai@latest, then kit init in each project/)
+    expect(notice).not.toContain('pnpm add -D')
     expect(server.seen).toHaveLength(1)
     expect(server.seen[0]!.url).toBe('/@aspiralabs%2fai')
     expect(server.seen[0]!.headers.authorization).toBe(`Bearer ${TOKEN}`)

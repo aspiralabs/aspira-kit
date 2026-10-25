@@ -8,12 +8,12 @@ import { dirname, join } from 'node:path'
 import { appRoot, checkAspira, isWorkspaceRoot, notionTargets, notionTokenCandidates, notionTokenSource, readAspira, readApp, type NotionTarget } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 import { isGitIgnored, repositoryRoot } from './git.js'
-import { AI_PACKAGE, aiPackageDir, checkSkills } from './skills.js'
+import { AI_PACKAGE, aiPackageDir, aiVersion, checkSkills, HOOKS, HOOKS_DIR } from './skills.js'
 
 type Pkg = { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
 
-/** The hook command `kit init` writes: `sh <app>/node_modules/@aspiralabs/ai/hooks/<name>` from the project root. */
-export const hookCommand = (app: string | undefined, name: string): string => `sh ${app ? `${app}/` : ''}node_modules/@aspiralabs/ai/hooks/${name}`
+/** The hook command `kit init` writes: `sh .claude/hooks/aspira/<name>`, the copy it makes, from the project root. */
+export const hookCommand = (name: string): string => `sh ${HOOKS_DIR}/${name}`
 
 /** The MCP server entry `kit init` writes: the installed @aspiralabs/ui's server, run by node from the project root. */
 export const mcpServer = (app: string): { command: string; args: string[] } => ({ command: 'node', args: [`${app}/node_modules/@aspiralabs/ui/bin/mcp.js`] })
@@ -41,8 +41,7 @@ function findUpModule(dir: string, relative: string): string | undefined {
 
 /** The default UrlChecker: spawns the common folder's check-notion-urls.ts with the project's env
  * files, the app's winning, the same way `kit next`'s liveResolver spawns resolve-ticket.ts.
- * Reports every key "unreachable" when @aspiralabs/ai (or amaro) is not installed, rather than
- * throwing, so a project that has not installed the agents yet still gets a healthy doctor run. */
+ * Reports every key "unreachable" when amaro is not found, rather than throwing, so the doctor run still finishes. */
 export function liveUrlChecker(projectRoot: string, appDir: string): UrlChecker {
   return (checks) => {
     const unreachable = (reason: string): Record<string, UrlCheckResult> => Object.fromEntries(checks.map((check) => [check.key, { ok: false, unreachable: true, reason }]))
@@ -106,7 +105,7 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
   if (app) log(`app    ${app} (package.json and node_modules); Claude-facing files at ${projectRoot}`)
   let problems = 0
   const all = { ...pkg.dependencies, ...pkg.devDependencies }
-  for (const name of ['@aspiralabs/ui', '@aspiralabs/config', AI_PACKAGE]) {
+  for (const name of ['@aspiralabs/ui', '@aspiralabs/config']) {
     const declared = all[name]
     const installed = readJson<{ version: string }>(join(appDir, 'node_modules', name, 'package.json'))?.version
     if (!declared) {
@@ -115,6 +114,13 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
       continue
     }
     log(`${name.padEnd(20)} declared ${declared.padEnd(14)} installed ${installed ?? '(not installed)'}`)
+  }
+  // @aspiralabs/ai is installed globally, once per engineer; a project copy (an earlier kit's devDependency) would win over it.
+  if (all[AI_PACKAGE] !== undefined) {
+    log(`FAIL ${AI_PACKAGE} is in ${app ? `${app}/` : ''}package.json; it is installed globally now: pnpm remove ${AI_PACKAGE}${app ? ` (in ${app})` : ''}, then kit init`)
+    problems += 1
+  } else {
+    log(`${AI_PACKAGE.padEnd(20)} global ${aiVersion(appDir) ?? '(not found)'}`)
   }
   // A workspace root that declares @aspiralabs packages itself (shared eslint or prettier config) keeps them on the app's version.
   if (isWorkspaceRoot(projectRoot, app)) {
@@ -137,7 +143,7 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
     [`${inApp('globals.css')} imports tokens`, () => ['app/globals.css', 'src/app/globals.css'].some((p) => existsSync(join(appDir, p)) && readFileSync(join(appDir, p), 'utf8').includes('@aspiralabs/ui/tokens.css'))],
     ['AGENTS.md has the managed block', () => existsSync(join(projectRoot, 'AGENTS.md')) && readFileSync(join(projectRoot, 'AGENTS.md'), 'utf8').includes('aspiralabs:begin')],
     [app ? `.mcp.json registers aspiralabs-ui from ${app}/node_modules` : '.mcp.json registers aspiralabs-ui', () => mcp().includes('aspiralabs-ui') && (!app || mcp().includes(mcpServer(app).args[0]!))],
-    [app ? `.claude/settings.json has the hooks from ${app}/node_modules` : '.claude/settings.json has the hooks', () => settings().includes(hookCommand(app, 'session-start.sh'))],
+    [`.claude/settings.json runs the hooks from ${HOOKS_DIR}`, () => HOOKS.every((name) => settings().includes(hookCommand(name)) && existsSync(join(projectRoot, HOOKS_DIR, name)))],
     ['.gitignore ignores .work/ (per-ticket working folders)', () => ignores('.work')],
     ['.gitignore ignores .aspira/ (the audit log the hooks write)', () => ignores('.aspira')],
     // Ticket worktrees live at the git repository root, and the .env.local symlinks kit worktree makes

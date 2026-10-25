@@ -6,6 +6,7 @@
 // kit cleanup [--yes] [--only <path>...] [--app <dir>] [--cwd <path>]
 // kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
 // kit playbook
+// kit package-dir (prints this @aspiralabs/ai's directory; the /aspira-* launchers find the global install with it)
 import { spawnSync } from 'node:child_process'
 import { existsSync, realpathSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
@@ -18,6 +19,7 @@ import { next } from './next.js'
 import { renderPlaybook } from './playbook.js'
 import { initNext, KIT_VERSION } from './stacks/next.js'
 import { addAuthNext } from './stacks/next-auth.js'
+import { kitPackageDir } from './skills.js'
 import { checkVersion } from './version-check.js'
 import { worktree } from './worktree.js'
 
@@ -140,11 +142,11 @@ function terminalAsk(): Ask | undefined {
 }
 
 /**
- * Inside a project whose app has its own kit (node_modules/.bin/kit), a global kit hands over to that copy, so
- * the project's pinned version runs. Returns the copy's exit code, or undefined to carry on with this copy.
+ * Inside a project whose app still has its own kit (node_modules/.bin/kit, from a kit before global installs), a global
+ * kit hands over to that copy, as the launchers do. Returns the copy's exit code, or undefined to carry on with this copy.
  */
 function projectCopyExit(): number | undefined {
-  if (process.env.ASPIRA_KIT_REEXEC !== undefined || command === 'version-check') return undefined
+  if (process.env.ASPIRA_KIT_REEXEC !== undefined || command === 'version-check' || command === 'package-dir') return undefined
   try {
     const root = explicitCwd ?? resolveProjectRoot(process.cwd())
     if (!existsSync(join(root, 'aspira.json'))) return undefined
@@ -179,6 +181,10 @@ async function printNotice(): Promise<void> {
 try {
   const handedOver = projectCopyExit()
   if (handedOver !== undefined) process.exit(handedOver)
+  if (command === 'package-dir') {
+    process.stdout.write(`${kitPackageDir()}\n`)
+    process.exit(0)
+  }
   if (command === 'version-check') {
     // The SessionStart hook's entry point: the notice on stdout, nothing else, always exit 0.
     const notice = KIT_VERSION === undefined ? undefined : await checkVersion({ surface: 'hook', running: KIT_VERSION })

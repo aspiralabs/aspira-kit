@@ -1,10 +1,10 @@
-// The kit as a project gets it: packages/ai is packed with `pnpm pack` into one tarball, installed
-// into a scratch project as its only @aspiralabs devDependency, `kit init` writes the skills, and
-// the launchers run from node_modules with no ASPIRA_KIT set. Needs pnpm and git; the package's own
-// dependencies are resolved online and their tarballs come from the pnpm store.
+// The kit as an engineer gets it: packages/ai is packed with `pnpm pack` into one tarball and installed
+// globally (`pnpm add -g`, under a scratch PNPM_HOME), the global `kit init` wires a scratch project that
+// has no @aspiralabs/ai of its own, and the launchers run the global install with no ASPIRA_KIT set.
+// Needs pnpm and git; the package's own dependencies are resolved online and their tarballs come from the pnpm store.
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,7 +12,6 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { writeAspira } from './aspira.js'
 import { doctor } from './doctor.js'
 import { AGENTS, skillDir, VERSION_FILE } from './skills.js'
-import { initNext } from './stacks/next.js'
 
 const kit = dirname(dirname(fileURLToPath(import.meta.url)))
 const repo = dirname(dirname(kit))
@@ -24,10 +23,12 @@ const aiVersion = () => (JSON.parse(readFileSync(join(AI, 'package.json'), 'utf8
 let scratch: string
 let app: string
 let tarball: string
+/** The global install's package directory, as `kit package-dir` prints it. */
+let globalDir: string
 /** What the one kit init in beforeAll logged. */
 const initLines: string[] = []
 
-beforeAll(async () => {
+beforeAll(() => {
   scratch = realpathSync(mkdtempSync(join(tmpdir(), 'kit-install-')))
   const tarballs = join(scratch, 'tarballs')
   mkdirSync(tarballs)
@@ -36,32 +37,29 @@ beforeAll(async () => {
   app = join(scratch, 'app')
   mkdirSync(join(app, 'app'), { recursive: true })
   writeFileSync(join(app, 'app', 'globals.css'), '@import "tailwindcss";\n')
-  writeFileSync(join(app, 'package.json'), `${JSON.stringify({ name: 'scratch-app', private: true, type: 'module', devDependencies: { '@aspiralabs/ai': `file:${tarball}` } }, null, 2)}\n`)
-  // pnpm 12 wants every dependency with a build script approved; none is needed to run the agents.
-  const builds = readFileSync(join(repo, 'pnpm-workspace.yaml'), 'utf8').replace(/^packages:[\s\S]*?\n\n/, '').replace(/patchedDependencies:[\s\S]*$/, '')
-  writeFileSync(join(app, 'pnpm-workspace.yaml'), builds)
-  run('pnpm', ['install', '--ignore-scripts', '--config.confirmModulesPurge=false'], app)
+  writeFileSync(join(app, 'package.json'), `${JSON.stringify({ name: 'scratch-app', private: true, type: 'module' }, null, 2)}\n`)
   run('git', ['init', '-q', app], scratch)
   writeAspira({ projectRoot: app, board: BOARD, dryRun: false, log: () => {} })
-  // kit init's install step adds the registry package; here it is a no-op, the tarball is already installed.
+  // The global install, in a PNPM_HOME of its own; every later spawn in this file finds its kit on PATH.
+  const home = join(scratch, 'global')
+  Object.assign(process.env, { PNPM_HOME: join(home, 'pnpm'), XDG_DATA_HOME: join(home, 'data'), XDG_CONFIG_HOME: join(home, 'config'), XDG_CACHE_HOME: join(home, 'cache'), XDG_STATE_HOME: join(home, 'state') })
+  mkdirSync(join(process.env.PNPM_HOME!, 'bin'), { recursive: true })
+  process.env.PATH = `${join(process.env.PNPM_HOME!, 'bin')}:${process.env.PNPM_HOME}:${process.env.PATH}`
+  run('pnpm', ['add', '-g', `file:${tarball}`], scratch)
+  globalDir = run('kit', ['package-dir'], scratch).trim()
+  // kit init's install step adds ui and config from the registry; here it is a no-op.
   const bin = join(scratch, 'bin')
   mkdirSync(bin)
   writeFileSync(join(bin, 'pnpm'), '#!/bin/bash\n[ "$1" = add ] && exit 0\nexec /usr/bin/env pnpm "$@"\n', { mode: 0o755 })
-  const path = process.env.PATH
-  process.env.PATH = `${bin}:${path}`
-  try {
-    await initNext({ projectRoot: app, dryRun: false, log: (line) => initLines.push(line) })
-  } finally {
-    process.env.PATH = path
-  }
-})
+  initLines.push(...run('kit', ['init', '--stack', 'next'], app, { ...process.env, PATH: `${bin}:${process.env.PATH}` }).split('\n'))
+}, 300_000)
 
-const kitBin = () => join(app, 'node_modules', '.bin', 'kit')
-
-describe('an installed project', () => {
-  it('installs one package, and kit init writes the eleven skills from it; doctor, kit playbook and the hooks use it', () => {
-    expect(JSON.parse(readFileSync(join(app, 'node_modules', '@aspiralabs', 'ai', 'package.json'), 'utf8'))).toMatchObject({ name: '@aspiralabs/ai' })
-    expect(readdirSync(join(app, 'node_modules', '@aspiralabs'))).toEqual(['ai'])
+describe('a project on the global install', () => {
+  it('kit init writes the eleven skills and the hooks from the global install and installs no @aspiralabs/ai; doctor and kit playbook use it', () => {
+    expect(JSON.parse(readFileSync(join(globalDir, 'package.json'), 'utf8'))).toMatchObject({ name: '@aspiralabs/ai' })
+    expect(globalDir).toContain(`${scratch}/global/`)
+    expect(existsSync(join(app, 'node_modules', '@aspiralabs', 'ai'))).toBe(false)
+    expect(JSON.parse(readFileSync(join(app, 'package.json'), 'utf8'))).not.toHaveProperty('devDependencies.@aspiralabs/ai')
     const written = initLines.filter((l) => l.startsWith('write  .claude/skills/aspira-'))
     expect(written.filter((l) => AGENTS.some((agent) => l.startsWith(`write  .claude/skills/aspira-${agent} `))).length).toBe(8)
     expect(written.filter((l) => /^write {2}\.claude\/skills\/aspira-(cleanup|next|worktree) /.test(l)).length).toBe(3)
@@ -76,15 +74,15 @@ describe('an installed project', () => {
     const skillLines = report.filter((l) => l.startsWith('ok   .claude/skills/aspira-'))
     expect(skillLines.length).toBe(11)
     expect(skillLines.every((l) => l.includes('matches @aspiralabs/ai'))).toBe(true)
-    expect(report.some((l) => l.startsWith('@aspiralabs/ai') && l.includes(`installed ${version}`))).toBe(true)
+    expect(report.some((l) => l.startsWith('@aspiralabs/ai') && l.includes(`global ${version}`))).toBe(true)
     expect(report.some((l) => l.includes('@aspiralabs/kit') || l.includes('@aspiralabs/agents'))).toBe(false)
-    const playbook = spawnSync(kitBin(), ['playbook'], { cwd: app, encoding: 'utf8' })
+    const playbook = spawnSync('kit', ['playbook'], { cwd: app, encoding: 'utf8' })
     expect(playbook.status, playbook.stderr).toBe(0)
     expect(playbook.stdout.length).toBeGreaterThan(0)
-    const usage = spawnSync(kitBin(), [], { cwd: app, encoding: 'utf8' })
+    const usage = spawnSync('kit', [], { cwd: app, encoding: 'utf8' })
     const text = `${usage.stdout}${usage.stderr}`
     for (const word of ['init', 'add auth', 'doctor', 'next', 'cleanup', 'worktree', 'playbook']) expect(text).toContain(word)
-    for (const hook of ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh']) expect(existsSync(join(app, 'node_modules', '@aspiralabs', 'ai', 'hooks', hook))).toBe(true)
+    for (const hook of ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh']) expect(readFileSync(join(app, '.claude', 'hooks', 'aspira', hook), 'utf8')).toBe(readFileSync(join(globalDir, 'hooks', hook), 'utf8'))
   })
 
   it('kit init --board writes aspira.json, and kit doctor fails without it', () => {
@@ -103,7 +101,7 @@ describe('an installed project', () => {
     expect(after).toContain('ok   aspira.json names the Feature Board')
   })
 
-  it('runs planner.sh local from node_modules through its knowledge stage with no ASPIRA_KIT set', () => {
+  it('runs planner.sh local from the global install through its knowledge stage with no ASPIRA_KIT set', () => {
     const launcher = join(skillDir(app, 'planner'), 'scripts', 'planner.sh')
     expect(existsSync(launcher)).toBe(true)
     mkdirSync(join(app, 'docs', 'feature'), { recursive: true })
@@ -125,9 +123,9 @@ describe('an installed project', () => {
     expect(blocked).toMatchObject({ pending: false, status: 'blocked' })
     expect(blocked.reason).toContain('NOTION_TOKEN')
     expect(blocked.agent).toMatchObject({ name: 'planner', installed: true })
-    expect(blocked.agent.path).toContain(`${app}/node_modules/`)
+    expect(blocked.agent.path).toBe(realpathSync(join(globalDir, 'planner')))
     expect(blocked.agent.path.endsWith('/@aspiralabs/ai/planner')).toBe(true)
-    // With a load-knowledge snapshot (F50) the knowledge is satisfied and the next stage is research: the whole runtime loaded from node_modules.
+    // With a load-knowledge snapshot (F50) the knowledge is satisfied and the next stage is research: the whole runtime loaded from the global install.
     const guidelines = join(scratch, 'REQUIRED.md')
     const sha = (text: string) => createHash('sha256').update(text).digest('hex')
     const ID = '11111111-1111-1111-1111-111111111111'
@@ -140,17 +138,17 @@ describe('an installed project', () => {
     expect(research.stage).toBe('research')
     expect(research.instructions).toContain('/node_modules/')
     expect(readFileSync(research.tasks[0]!.prompt, 'utf8')).toContain('REV-001')
-    // The launcher runs from the installed package, not a checkout, even with a stale ASPIRA_KIT exported.
+    // The launcher runs from the global install, not a checkout, even with a stale ASPIRA_KIT exported.
     const stale = spawnSync('bash', [launcher, 'local', spec, '--no-ticket', '--output', out, '--guidelines', guidelines], { cwd: app, env: { ...env, ASPIRA_KIT: join(scratch, 'nowhere') }, encoding: 'utf8' })
     expect(stale.status, stale.stderr).toBe(0)
   })
 
-  it('the build-feature launcher runs the installed driver, and the Playbook resolves through @aspiralabs/ai/playbook', async () => {
+  it('the build-feature launcher runs the global driver, and the Playbook resolves through @aspiralabs/ai/playbook', async () => {
     const skill = join(app, '.claude', 'skills', 'aspira-build-feature')
     const launcher = join(skill, 'scripts', 'build-feature.sh')
     expect(existsSync(launcher)).toBe(true)
     expect(readFileSync(join(skill, VERSION_FILE), 'utf8').trim()).toBe(aiVersion())
-    const packageDir = join(app, 'node_modules', '@aspiralabs', 'ai', 'build-feature')
+    const packageDir = join(globalDir, 'build-feature')
     expect(existsSync(join(packageDir))).toBe(true)
 
     const env: NodeJS.ProcessEnv = { ...process.env }
@@ -166,7 +164,7 @@ describe('an installed project', () => {
     expect(step.stdout).toBe('/aspira-spec-writer DEMO-1')
   })
 
-  it('kit-skill launchers run the project kit, and without an install each says to install @aspiralabs/ai and run kit init', () => {
+  it('kit-skill launchers run the global kit, and without a project or global install each says to install @aspiralabs/ai and run kit init', () => {
     const env: NodeJS.ProcessEnv = { ...process.env }
     for (const name of ['ASPIRA_KIT', 'NOTION_TOKEN', 'NOTION_API_KEY']) delete env[name]
     const next = spawnSync('bash', [join(app, '.claude', 'skills', 'aspira-next', 'scripts', 'next.sh')], { cwd: app, env, encoding: 'utf8' })
@@ -176,15 +174,17 @@ describe('an installed project', () => {
     run('git', ['init', '-q', bare], scratch)
     writeAspira({ projectRoot: bare, board: BOARD, dryRun: false, log: () => {} })
     cpSync(join(app, '.claude'), join(bare, '.claude'), { recursive: true })
+    // No global kit either: a machine with one installed would otherwise find it.
+    const noKit = { ...env, PATH: (process.env.PATH ?? '').split(':').filter((dir) => !existsSync(join(dir, 'kit'))).join(':') }
     for (const name of ['next', 'cleanup', 'worktree']) {
-      const out = spawnSync('bash', [join(bare, '.claude', 'skills', `aspira-${name}`, 'scripts', `${name}.sh`)], { cwd: bare, env, encoding: 'utf8' })
+      const out = spawnSync('bash', [join(bare, '.claude', 'skills', `aspira-${name}`, 'scripts', `${name}.sh`)], { cwd: bare, env: noKit, encoding: 'utf8' })
       const text = `${out.stdout}${out.stderr}`
       expect(out.status, text).toBe(1)
       expect(text).toContain('install @aspiralabs/ai')
       expect(text).toContain('kit init')
       expect(text).not.toMatch(/@aspiralabs\/(agents|kit)/)
     }
-    const planner = spawnSync('bash', [join(bare, '.claude', 'skills', 'aspira-planner', 'scripts', 'planner.sh'), 'local'], { cwd: bare, env, encoding: 'utf8' })
+    const planner = spawnSync('bash', [join(bare, '.claude', 'skills', 'aspira-planner', 'scripts', 'planner.sh'), 'local'], { cwd: bare, env: noKit, encoding: 'utf8' })
     const text = `${planner.stdout}${planner.stderr}`
     expect(planner.status).not.toBe(0)
     expect(text).toContain('@aspiralabs/ai')
@@ -192,7 +192,7 @@ describe('an installed project', () => {
     expect(text).not.toMatch(/@aspiralabs\/(agents|kit)/)
   })
 
-  it('pr-reviewer.sh start builds a copy of the agent under .work/.agents that resolves @aspiralabs/ai', () => {
+  it('pr-reviewer.sh start builds a copy of the global agent under .work/.agents that resolves @aspiralabs/ai', () => {
     const bin = join(scratch, 'screen-bin')
     mkdirSync(bin, { recursive: true })
     writeFileSync(join(bin, 'screen'), '#!/bin/bash\nexit 0\n', { mode: 0o755 })
@@ -213,22 +213,15 @@ describe('an installed project', () => {
 })
 
 describe('a global install and the bootstrap', () => {
-  it('a global kit runs anywhere, and in a project prints what the project copy prints', () => {
-    const home = join(scratch, 'global')
-    const env: NodeJS.ProcessEnv = { ...process.env, PNPM_HOME: join(home, 'pnpm'), XDG_DATA_HOME: join(home, 'data'), XDG_CONFIG_HOME: join(home, 'config'), XDG_CACHE_HOME: join(home, 'cache'), XDG_STATE_HOME: join(home, 'state') }
-    mkdirSync(env.PNPM_HOME!, { recursive: true })
-    mkdirSync(join(env.PNPM_HOME!, 'bin'), { recursive: true })
-    env.PATH = `${join(env.PNPM_HOME!, 'bin')}:${env.PNPM_HOME}:${process.env.PATH}`
-    run('pnpm', ['add', '-g', `file:${tarball}`], scratch, env)
+  it('the global kit runs anywhere, and its doctor names the global version and the copied hooks', () => {
     const empty = mkdtempSync(join(scratch, 'empty-'))
-    const playbook = spawnSync('kit', ['playbook'], { cwd: empty, env, encoding: 'utf8' })
+    const playbook = spawnSync('kit', ['playbook'], { cwd: empty, encoding: 'utf8' })
     expect(playbook.status, playbook.stderr).toBe(0)
     expect(playbook.stdout.length).toBeGreaterThan(0)
-    const global = spawnSync('kit', ['doctor'], { cwd: app, env, encoding: 'utf8' })
-    const local = spawnSync(kitBin(), ['doctor'], { cwd: app, encoding: 'utf8' })
-    expect(global.stdout).toBe(local.stdout)
-    expect(global.status).toBe(local.status)
-  }, 300_000)
+    const report = spawnSync('kit', ['doctor'], { cwd: app, encoding: 'utf8' }).stdout
+    expect(report).toContain(`@aspiralabs/ai       global ${aiVersion()}`)
+    expect(report).toContain('ok   .claude/settings.json runs the hooks from .claude/hooks/aspira')
+  })
 
   it('pnpm dlx kit resolves the kit bin from @aspiralabs/ai and prints the usage', () => {
     const empty = mkdtempSync(join(scratch, 'dlx-'))

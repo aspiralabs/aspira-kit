@@ -1,5 +1,5 @@
 #!/bin/bash
-# The /aspira-worktree launcher: runs `kit worktree` from the project's installed @aspiralabs/ai with
+# The /aspira-worktree launcher: runs `kit worktree` from the global @aspiralabs/ai with
 # the arguments it was given, relays its output and exits with its code. It has no rules of its own.
 set -euo pipefail
 
@@ -24,6 +24,7 @@ APP=""
 [ ! -f "$ROOT/aspira.json" ] || APP=$(sed -nE 's/.*"app"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$ROOT/aspira.json" | head -n 1)
 OWNER=$ROOT
 if [ -n "$APP" ] && [ "$APP" != . ]; then OWNER="$ROOT/$APP"; fi
+# A project copy from an earlier kit wins; otherwise the global install (pnpm add -g @aspiralabs/ai) on PATH.
 KIT="$OWNER/node_modules/.bin/kit"
-[ -x "$KIT" ] || die "cannot find $KIT: install @aspiralabs/ai in ${APP:-the project} and run kit init"
+[ -x "$KIT" ] || KIT=$(command -v kit) || die "cannot find kit: install @aspiralabs/ai globally (pnpm add -g @aspiralabs/ai) and run kit init"
 exec "$KIT" "$NAME" "$@"

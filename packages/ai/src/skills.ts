@@ -1,11 +1,11 @@
 // The installed /aspira-* skills: eight agent skills and three kit launchers, all from one package,
 // @aspiralabs/ai. Each agent ships its skill under <agent>/skill/aspira-<agent>/ and the kit skills
 // sit under skills/aspira-<name>/ (SKILL.md and scripts/<name>.sh); `kit init` copies them into the
-// project's .claude/skills/ and pins each to the installed @aspiralabs/ai version in .kit-version.
-// Without @aspiralabs/ai the kit skills still install from the running package.
+// project's .claude/skills/ and pins each to the @aspiralabs/ai version in .kit-version.
+// @aspiralabs/ai is installed globally (pnpm add -g), so the source is the running kit's own package;
+// a project that still has it under its app's node_modules (an earlier kit) uses that copy instead.
 // The copies are committed, so every clone has the same skills; `kit doctor` reports drift.
-// The skills live at the project root (where Claude Code looks); the packages are installed under
-// the app that owns package.json (`app` in aspira.json, the root itself for a single-app project).
+// The hooks are copied the same way, into .claude/hooks/aspira/, so nothing points into node_modules.
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -41,15 +41,23 @@ export const kitSkillDir = (name: KitSkill): string => join(KIT_DIR, 'skills', `
 
 const isPackage = (dir: string, name: string): boolean => readJson<{ name?: string }>(join(dir, 'package.json'))?.name === name
 
-/** The installed @aspiralabs/ai under `appDir` (the directory that owns node_modules), or undefined. Nothing else is looked up. */
+/** This kit package's directory: the global @aspiralabs/ai `kit` runs from (or the source checkout). `kit package-dir` prints it for the launchers. */
+export const kitPackageDir = (): string => KIT_DIR
+
+/**
+ * The @aspiralabs/ai a project uses: one still installed under `appDir` (the directory that owns node_modules,
+ * from a kit before global installs), else the running kit's own package, the global install.
+ */
 export function aiPackageDir(appDir: string): string | undefined {
   const dir = join(appDir, 'node_modules', '@aspiralabs', 'ai')
-  return isPackage(dir, AI_PACKAGE) ? dir : undefined
+  if (isPackage(dir, AI_PACKAGE)) return dir
+  return isPackage(KIT_DIR, AI_PACKAGE) ? KIT_DIR : undefined
 }
 
-/** The installed version of @aspiralabs/ai under `appDir`, or undefined. */
+/** The version of the @aspiralabs/ai the project uses (see aiPackageDir), or undefined. */
 export function aiVersion(appDir: string): string | undefined {
-  return readJson<{ version?: string }>(join(aiPackageDir(appDir) ?? join(appDir, 'node_modules', '@aspiralabs', 'ai'), 'package.json'))?.version
+  const dir = aiPackageDir(appDir)
+  return dir === undefined ? undefined : readJson<{ version?: string }>(join(dir, 'package.json'))?.version
 }
 
 /** The version of this kit package, the one its own skills are stamped with. */
@@ -106,12 +114,10 @@ function copySkill(source: string, target: string, version: string, opts: Instal
 }
 
 /**
- * Write <projectRoot>/.claude/skills/aspira-<name>/ for all eleven skills. With @aspiralabs/ai installed
- * under the app, every skill is a copy of that install's folder (kit skills from skills/aspira-<name>,
- * agent skills from <agent>/skill/aspira-<agent>) stamped with its version, so a kit run from elsewhere
- * writes the project's files. Without it the kit skills come from the running package with its own
- * version and the agent skills are skipped. A re-run after a bump rewrites them; an up-to-date copy is kept.
- * Returns the agents whose skill could not be found.
+ * Write <projectRoot>/.claude/skills/aspira-<name>/ for all eleven skills, each a copy of the @aspiralabs/ai
+ * folder (aiPackageDir: the global install, or a copy still under the app) stamped with its version: kit
+ * skills from skills/aspira-<name>, agent skills from <agent>/skill/aspira-<agent>. A re-run after a bump
+ * rewrites them; an up-to-date copy is kept. Returns the agents whose skill could not be found.
  */
 export function installSkills(opts: InstallSkillsOptions): Agent[] {
   const app = appRoot(opts.projectRoot, opts.app)
@@ -149,6 +155,35 @@ export function installSkills(opts: InstallSkillsOptions): Agent[] {
     copySkill(source, target, version, opts)
   }
   return missing
+}
+
+/** The hooks `kit init` copies from @aspiralabs/ai's hooks/ into the project; .claude/settings.json runs them from there. */
+export const HOOKS = ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh'] as const
+/** Where the copied hooks live, relative to the project root. */
+export const HOOKS_DIR = '.claude/hooks/aspira'
+
+/** Copy each hook into <projectRoot>/.claude/hooks/aspira/, executable. An up-to-date copy is kept; a dry run only logs. */
+export function installHooks(opts: InstallSkillsOptions): void {
+  const ai = aiPackageDir(appRoot(opts.projectRoot, opts.app))
+  for (const name of HOOKS) {
+    const target = join(opts.projectRoot, HOOKS_DIR, name)
+    const shown = relative(opts.projectRoot, target)
+    const source = ai === undefined ? undefined : join(ai, 'hooks', name)
+    if (source === undefined || !existsSync(source)) {
+      opts.log(`skip   ${shown} (${AI_PACKAGE} ships no hooks/${name})`)
+      continue
+    }
+    const wanted = readFileSync(source)
+    if (existsSync(target) && readFileSync(target).equals(wanted)) {
+      opts.log(`keep   ${shown}`)
+      continue
+    }
+    opts.log(`${existsSync(target) ? 'update' : 'write '} ${shown}`)
+    if (opts.dryRun) continue
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, wanted)
+    chmodSync(target, 0o755)
+  }
 }
 
 export type SkillCheck = { name: SkillName; package: typeof AI_PACKAGE; ok: boolean; reason?: string }
