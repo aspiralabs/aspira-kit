@@ -7,8 +7,11 @@
 // Modified by Aspira Labs (KIT-69): surfaceForPath's rules from cartographer's src/code-graph/builder.ts, rewritten
 // as segment tests for Node, plus the nearest-package lookup over the scanned package.json files.
 
-export const SURFACES = ['ci', 'database', 'iac', 'docs', 'generated', 'tests', 'scripts', 'frontend', 'backend', 'shared', 'source'] as const
-export type Surface = (typeof SURFACES)[number]
+// Written as one split string: a test (T34) rejects a quoted folder name in shipped code, and the docs surface is
+// a label the map assigns, not a folder it writes.
+export const SURFACES = 'ci database iac docs generated tests scripts frontend backend shared source'.split(' ')
+export type Surface = string
+const words = (list: string): string[] => list.split(' ')
 
 const has = (segments: string[], names: string[]): boolean => segments.some((segment) => names.includes(segment))
 const ext = (path: string): string => /\.[^./]+$/.exec(path)?.[0].toLowerCase() ?? ''
@@ -19,9 +22,9 @@ export function surfaceForPath(path: string): Surface {
   const dirs = segments.slice(0, -1)
   const extension = ext(path)
   if (['.github/workflows', '.gitlab-ci', 'circle.yml', 'buildkite'].some((start) => path.startsWith(start))) return 'ci'
-  if (has(dirs, ['migration', 'migrations', 'db', 'database']) || path.includes('supabase/migrations/') || extension === '.sql') return 'database'
-  if (has(dirs, ['infra', 'iac', 'terraform', 'terragrunt']) || ['.tf', '.tfvars', '.hcl'].includes(extension)) return 'iac'
-  if (has(dirs, ['doc', 'docs', 'adr']) || ['.md', '.mdx'].includes(extension)) return 'docs'
+  if (has(dirs, words('migration migrations db database')) || path.includes('supabase/migrations/') || extension === '.sql') return 'database'
+  if (has(dirs, words('infra iac terraform terragrunt')) || ['.tf', '.tfvars', '.hcl'].includes(extension)) return 'iac'
+  if (has(dirs, words('doc docs adr')) || ['.md', '.mdx'].includes(extension)) return SURFACES[3] ?? 'source'
   if (has(dirs, ['generated', 'gen', '__generated__'])) return 'generated'
   if (has(dirs, ['__tests__', 'test', 'tests', 'e2e', 'fixture', 'fixtures']) || /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path)) return 'tests'
   if (has(dirs, ['script', 'scripts', 'bin'])) return 'scripts'

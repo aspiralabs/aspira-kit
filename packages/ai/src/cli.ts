@@ -9,6 +9,7 @@
 // kit dev [--app <dir>] [--cwd <path>]
 // kit update (pnpm add -g @aspiralabs/ai@latest, then the new kit writes the global harness)
 // kit upgrade [--dry-run] [--app <dir>] [--cwd <path>] (moves a repository an earlier kit set up to the global harness)
+// kit map-codebase [--check] [brief <target>... | notes ...] (builds the codebase map of the git repo around the working directory)
 // kit playbook
 // kit package-dir (prints this @aspiralabs/ai's directory; the /aspira-* launchers find the global install with it)
 import { spawnSync } from 'node:child_process'
@@ -20,6 +21,7 @@ import { parseCleanupArgs, parseDbMigrateArgs, parseWorktreeArgs } from './comma
 import { dbMigrate } from './db-migrate.js'
 import { dev } from './dev.js'
 import { doctor } from './doctor.js'
+import { mapCodebase } from './map-codebase.js'
 import { next } from './next.js'
 import { renderPlaybook } from './playbook.js'
 import { initNext, KIT_VERSION } from './stacks/next.js'
@@ -60,6 +62,7 @@ const usage = `usage:
   kit dev [--app <dir>] [--cwd <path>]
   kit update
   kit upgrade [--dry-run] [--app <dir>] [--cwd <path>]
+  kit map-codebase [--check] [brief <target>... | notes ...]
   kit playbook
 
   --app <dir>: in a repository whose app (package.json, node_modules) is not the root, that directory,
@@ -139,6 +142,9 @@ async function main(): Promise<number> {
   if (command === 'upgrade') {
     // Only the harness migration; --app is accepted like every project command, and the harness lives at the root.
     return upgrade({ projectRoot: cwd, dryRun: flag('dry-run') === true, log })
+  }
+  if (command === 'map-codebase') {
+    return mapCodebase(process.cwd(), argv.slice(1), log)
   }
   if (command === 'playbook') {
     process.stdout.write(renderPlaybook())
