@@ -416,7 +416,7 @@ describe('self-healing', () => {
     const noAspira = harnessHome()
     writeFileSync(defaultIgnore(noAspira), '.work/\n.aspira/\n.worktrees/\n')
     kit(['package-dir'], { home: noAspira })
-    expect(readFileSync(defaultIgnore(noAspira), 'utf8').split('\n').map((line) => line.trim())).toEqual(['.work/', '.aspira/', '.worktrees/', 'aspira.json', '.codebase-map/map/', ''])
+    expect(readFileSync(defaultIgnore(noAspira), 'utf8').split('\n').map((line) => line.trim())).toEqual(['.work/', '.aspira/', '.worktrees/', 'aspira.json', '.codebase-map/map/', '.codebase-map/notes-step/', ''])
 
     const retired = harnessHome()
     mkdirSync(join(skillsDir(retired), 'aspira-spec-reviewer'))

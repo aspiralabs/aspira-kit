@@ -94,8 +94,8 @@ function sameTree(a: Map<string, Buffer>, b: Map<string, Buffer>): boolean {
 export const HOOKS = ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh'] as const
 /** Where the hooks live, relative to the home folder. */
 export const HOOKS_DIR = '.claude/hooks/aspira'
-/** The lines the global git ignore needs, so a project's working folders never show up in git status, and aspira.json is never committed. */
-export const IGNORE_ENTRIES = ['.work/', '.aspira/', '.worktrees/', 'aspira.json', '.codebase-map/map/'] as const
+/** The lines the global git ignore needs, so a project's working folders never show up in git status, and aspira.json is never committed. `.codebase-map/notes-step/` holds a notes step's proposals before they are redacted. */
+export const IGNORE_ENTRIES = ['.work/', '.aspira/', '.worktrees/', 'aspira.json', '.codebase-map/map/', '.codebase-map/notes-step/'] as const
 
 export type HarnessOptions = {
   /** The home folder to write under; defaults to the user's. */

@@ -71,7 +71,8 @@ async function main(): Promise<number> {
     console.log('run kit map-codebase to refresh it')
     return 1
   }
-  const summary = await buildMap(repo, root, dirs.notesDir)
+  // a linked worktree's build never stales the main checkout's shared notes over its own unmerged edits
+  const summary = await buildMap(repo, root, dirs.sharedNotes ? null : dirs.notesDir)
   console.log(`map root: ${summary.mapRoot}`)
   console.log(`commit: ${summary.commit.slice(0, 7)}`)
   console.log(`${summary.files} files`)

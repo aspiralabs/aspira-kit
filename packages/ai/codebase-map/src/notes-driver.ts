@@ -9,7 +9,7 @@ import { z } from 'zod'
 import { GRAPH_FILE, readGraph } from './sqlite-store.ts'
 import { mapDirs } from './map-root.ts'
 import { hashFile } from './scan.ts'
-import { insideRepo, newNoteId, writeNote, type Note } from './notes.ts'
+import { insideRepo, newNoteId, readNotes, writeNote, type Note } from './notes.ts'
 
 const Proposals = z.object({ notes: z.array(z.object({ title: z.string().min(1), text: z.string().min(1), paths: z.array(z.string()).min(1) })) })
 
@@ -70,6 +70,10 @@ export async function notesStep(repo: string, mapRoot: string): Promise<number> 
   await rm(dirname(output), { recursive: true, force: true })
   await mkdir(notesDir, { recursive: true })
   console.log(`stored ${stored.length} candidate note${stored.length === 1 ? '' : 's'}${stored.length === 0 ? '' : `: ${stored.join(', ')}`}`)
+  // each note as it was written (redacted), so the person reads what they would accept
+  const written = (await readNotes(notesDir)).notes.filter((note) => stored.includes(note.id))
+  for (const note of written) console.log(`\n[${note.id}] ${note.title ?? ''}\n${note.text}`)
+  if (written.length > 0) console.log('')
   console.log('a person accepts one with: kit map-codebase notes accept <note-id>')
   return 0
 }

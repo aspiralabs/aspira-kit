@@ -28,7 +28,7 @@ Notes are authored statements about the code that a later brief can show. Drive 
 
 1. Run `<skill-dir>/scripts/map-codebase.sh notes`. With nothing pending it prints one JSON object `{ "stage": "step", "task": ..., "output": ... }`.
 2. Launch one subagent with the `task` text, plus these two sentences: it may read the repository (Read, Grep, Glob) and nothing else, and it must not run `notes accept` or `notes retire`. It writes its JSON to `output`.
-3. Run the same `notes` command again. It stores each proposal as a candidate note and prints the new note ids and their text.
-4. Print those ids and the note text to the human.
+3. Run the same `notes` command again. It stores each proposal as a candidate note and prints each new note's id, title and text as stored (redacted).
+4. Print those ids, titles and texts to the human.
 
 A candidate note is shown in no brief. Accepting one is the human's command, `kit map-codebase notes accept <note-id>`: this session and its subagents never run `accept`, and never `retire` either unless the human asks for that note by id.

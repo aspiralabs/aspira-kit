@@ -4,7 +4,7 @@
 // like ingested ones; a rebuild downgrades accepted notes whose evidence moved; every ingested note is
 // redacted. Fixture repos hold fake credential values in .env files (never real ones).
 
-import { readFile, readdir, unlink, writeFile } from 'node:fs/promises'
+import { readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { CHAIN, SLOW, build, briefCli, cleanup, fileHash, git, handNote, inRepo, makeRepo, noteIds, notesCli, notesDir, packetOf, proposeNotes, readNotes, snapshot } from './fixture.test-helper.ts'
@@ -32,10 +32,12 @@ describe('F22: the notes step driver proposes candidates', () => {
       first: { code: run.first.code, stage: run.stage.stage, task: run.stage.task.length > 0, accept: /accept/i.test(run.stage.task), output: run.stage.output.length > 0, network: /openrouter|api[ _-]?key/i.test(run.first.out) },
       second: { code: run.second.code, count: Object.keys(notes).length, id: id.startsWith('auth-flow') && /^[a-z0-9][a-z0-9-]{0,80}$/.test(id), status: note?.status, text: note?.text, cited: note?.evidence.map((entry) => [entry.path, entry.hash]) },
       hidden: [json.stdout, text.stdout].map((out) => out.includes('Sessions are checked')),
+      printed: [id, 'Auth flow', 'Sessions are checked in src/a.ts only'].map((part) => part !== '' && run.second.stdout.includes(part)),
     }).toEqual({
       first: { code: 0, stage: 'step', task: true, accept: true, output: true, network: false },
       second: { code: 0, count: 1, id: true, status: 'candidate', text: 'Sessions are checked in src/a.ts only', cited: [['src/a.ts', await fileHash(repo, 'src/a.ts')]] },
       hidden: [false, false],
+      printed: [true, true, true],
     })
   }, SLOW)
 })
@@ -82,11 +84,15 @@ describe('F23: accept and retire', () => {
 })
 
 describe('F24: hand-written notes', () => {
-  it('T20: a hand-written accepted note briefs like an ingested one; one citing a path outside the repo is ignored with a warning', async () => {
+  it('T20: a hand-written accepted note briefs like an ingested one; one citing a path outside the repo, one whose id is not its file name and one with an invalid status are ignored', async () => {
     const repo = await makeRepo(CHAIN)
     const root = inRepo(repo)
     await handNote(repo, root, { id: 'hand-1', text: 'Written by a person about a.ts', paths: ['src/a.ts'] })
     await handNote(repo, root, { id: 'bad-1', text: 'Cites a file outside the repo', paths: ['../outside.ts'] })
+    // each of these cites src/a.ts too, so only the shared note reader keeps them out of the brief
+    await handNote(repo, root, { id: 'bad-2', text: 'Cites a.ts and a file outside the repo', paths: ['src/a.ts', '../outside.ts'] })
+    await rename(await handNote(repo, root, { id: 'y-1', text: 'Stored under another name', paths: ['src/a.ts'] }), join(notesDir(root), 'x-1.json'))
+    await handNote(repo, root, { id: 'bad-3', status: 'Accepted', text: 'Status not in the lifecycle', paths: ['src/a.ts'] })
     const built = await build(repo)
     const proposed = await proposeNotes(repo, root, [{ title: 'Ingested', text: 'Written by a subagent about a.ts', paths: ['src/a.ts'] }])
     const ingested = (await noteIds(root)).find((id) => id.startsWith('ingested'))!
@@ -163,8 +169,9 @@ describe('F26: notes are redacted', () => {
       ran: run.second.code,
       leaked: [rootValue, appValue, pkgValue, token].filter((value) => written.includes(value)),
       marked: written.includes('[redacted]'),
+      printed: { leaked: [rootValue, appValue, pkgValue, token].filter((value) => run.second.out.includes(value)), marked: run.second.stdout.includes('[redacted]') },
       brief: { code: brief.code, leaked: brief.stdout.includes(rootValue), inBlock: /unverified[\s\S]*\[redacted\]/i.test(brief.stdout) },
-    }).toEqual({ ran: 0, leaked: [], marked: true, brief: { code: 0, leaked: false, inBlock: true } })
+    }).toEqual({ ran: 0, leaked: [], marked: true, printed: { leaked: [], marked: true }, brief: { code: 0, leaked: false, inBlock: true } })
   }, SLOW)
 })
 

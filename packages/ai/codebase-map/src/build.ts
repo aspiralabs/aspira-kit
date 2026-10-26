@@ -138,8 +138,8 @@ async function swapIn(mapRoot: string, tmp: string): Promise<void> {
   await rm(old, { recursive: true, force: true })
 }
 
-/** `notesDir` is the shared notes folder; accepted notes whose cited file changed become stale on every build. */
-export async function buildMap(repo: string, mapRoot: string, notesDir: string = join(mapRoot, 'notes')): Promise<BuildSummary> {
+/** `notesDir` is the notes folder; accepted notes whose cited file changed become stale on every build. `null` when the notes belong to another checkout (a linked worktree's build of the harness layout): they are neither read nor marked. */
+export async function buildMap(repo: string, mapRoot: string, notesDir: string | null = join(mapRoot, 'notes')): Promise<BuildSummary> {
   await assertSameRepo(repo, mapRoot)
   await mkdir(mapRoot, { recursive: true })
   const release = await takeLock(mapRoot)
@@ -151,8 +151,10 @@ export async function buildMap(repo: string, mapRoot: string, notesDir: string =
     await mkdir(tmp)
 
     const { scanned, now } = await current(repo, mapRoot)
-    for (const warning of (await readNotes(notesDir)).warnings) console.error(`map-codebase: ${warning}`)
-    await markStale(notesDir, repo, now.files)
+    if (notesDir !== null) {
+      for (const warning of (await readNotes(notesDir)).warnings) console.error(`map-codebase: ${warning}`)
+      await markStale(notesDir, repo, now.files)
+    }
     const previous = readCache(join(mapDirOf(mapRoot), GRAPH_FILE))
     const facts = new Map<string, SyntaxFacts>()
     const cache = new Map<string, CacheEntry>()

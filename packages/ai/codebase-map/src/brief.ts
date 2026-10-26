@@ -9,12 +9,13 @@
 // refusals for a missing or stale map. The `@aspiralabs/ai/codebase-map` package export.
 
 import { execFile } from 'node:child_process'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { redactSecrets } from '@aspiralabs/ai/common/lib/redact'
 import { checkMap } from './build.ts'
 import { mapDirs } from './map-root.ts'
+import { readNotes, type Note } from './notes.ts'
 import { GRAPH_FILE, readGraph, type Graph } from './sqlite-store.ts'
 
 const exec = promisify(execFile)
@@ -32,7 +33,7 @@ export type BriefOptions = {
   /** One target; several go in `targets`. */
   target?: string
   targets?: string[]
-  /** Brief the files changed since the merge base with main, with any targets. */
+  /** Brief the files changed since the merge base with the default branch, with any targets. */
   changed?: boolean
   /** Force the target kind instead of path, package, env, symbol in that order. */
   kind?: TargetKind
@@ -60,25 +61,6 @@ export const ORIENTATION = 'Orientation only: this brief is a map, not the code.
 const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
 const sorted = (values: Iterable<string>): string[] => [...new Set(values)].sort(compare)
 
-type Note = { id: string; status: string; text: string; evidence: { path: string; hash: string }[] }
-
-/** The note files of the notes folder that read as notes; anything else is skipped. */
-async function readNotes(notesDir: string): Promise<Note[]> {
-  const names = (await readdir(notesDir).catch(() => [])).filter((name) => name.endsWith('.json')).sort(compare)
-  const notes: Note[] = []
-  for (const name of names) {
-    try {
-      const raw = JSON.parse(await readFile(join(notesDir, name), 'utf8')) as Partial<Note>
-      if (typeof raw.id !== 'string' || typeof raw.status !== 'string' || typeof raw.text !== 'string' || !Array.isArray(raw.evidence)) continue
-      const evidence = raw.evidence.filter((entry): entry is { path: string; hash: string } => typeof entry?.path === 'string')
-      notes.push({ id: raw.id, status: raw.status, text: raw.text, evidence })
-    } catch {
-      // an unreadable note file is not a note
-    }
-  }
-  return notes
-}
-
 type Matcher = (graph: Graph, target: string) => string[]
 const matchers: Record<TargetKind, Matcher> = {
   path: (graph, target) => {
@@ -93,9 +75,21 @@ const matchers: Record<TargetKind, Matcher> = {
   symbol: (graph, target) => graph.symbols.filter((symbol) => symbol.name === target).map((symbol) => symbol.path),
 }
 
+/** The default branch: origin/HEAD, else init.defaultBranch when that branch exists, else main or master, whichever exists (main when neither). */
+async function defaultBranch(git: (...args: string[]) => Promise<string>): Promise<string> {
+  const remote = (await git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD').catch(() => '')).trim()
+  if (remote !== '') return remote
+  const exists = (branch: string): Promise<boolean> => git('rev-parse', '--verify', '--quiet', `refs/heads/${branch}`).then(() => true, () => false)
+  const configured = (await git('config', 'init.defaultBranch').catch(() => '')).trim()
+  for (const branch of [configured, 'main', 'master']) if (branch !== '' && (await exists(branch))) return branch
+  return 'main'
+}
+
 async function changedFiles(repo: string): Promise<string[]> {
   const git = async (...args: string[]): Promise<string> => (await exec('git', ['-C', repo, ...args], { maxBuffer: 64 * 1024 * 1024 })).stdout
-  const base = (await git('merge-base', 'main', 'HEAD').catch(() => '')).trim() || 'HEAD'
+  const branch = await defaultBranch(git)
+  const base = (await git('merge-base', branch, 'HEAD').catch(() => '')).trim()
+  if (base === '') throw new BriefError(`cannot find the merge base with ${branch}; --changed needs it`)
   const [diff, untracked] = await Promise.all([git('diff', '--name-only', '-z', base).catch(() => ''), git('ls-files', '-z', '-o', '--exclude-standard').catch(() => '')])
   return sorted([...diff.split('\0'), ...untracked.split('\0')].filter(Boolean))
 }
@@ -177,7 +171,7 @@ export async function brief(options: BriefOptions): Promise<BriefPacket> {
   const validationAll: string[] = []
   for (const pkg of touched) for (const script of await scriptsOf(repo, pkg.dir)) validationAll.push(pkg.dir === '.' ? `pnpm run ${script}` : `pnpm --dir ${pkg.dir} run ${script}`)
 
-  const notes = await readNotes(notesDir)
+  const notes = (await readNotes(notesDir)).notes
   const cites = (note: Note): string[] => note.evidence.map((entry) => entry.path).filter((path) => files.has(path))
   const acceptedAll = notes.filter((note) => note.status === 'accepted' && cites(note).length > 0)
   const staleAll = notes.filter((note) => note.status === 'stale').flatMap((note) => cites(note).slice(0, 1).map((path) => ({ id: note.id, path })))

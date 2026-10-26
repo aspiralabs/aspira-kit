@@ -4,10 +4,10 @@
 // into the repo, gives a linked worktree its own map under worktrees/<name>/map while it reads the
 // main checkout's notes, and refuses a second repo of the same name under one key folder.
 
-import { writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { CHAIN, SLOW, build, cleanup, git, handNote, inRepo, makeRepo, mapDir, noteIds, packetOf, proposeNotes, snapshot, tempDir } from './fixture.test-helper.ts'
+import { CHAIN, SLOW, build, cleanup, git, handNote, inRepo, makeRepo, mapDir, noteIds, notesCli, packetOf, proposeNotes, readNotes, snapshot, tempDir } from './fixture.test-helper.ts'
 
 afterAll(cleanup)
 
@@ -49,6 +49,20 @@ describe('F3: the in-repo notes folder is committed and the map is not', () => {
       notes: [a.id, b.id].sort(),
     })
   }, SLOW)
+
+  it('T10b: a pending proposals file of the notes step, not yet redacted, is covered by the global ignore entries', async () => {
+    const repo = await makeRepo(CHAIN)
+    // the two .codebase-map lines of the global ignore kit update writes (IGNORE_ENTRIES, pinned in src/cli.test.ts T9),
+    // standing in as the repo's own exclude; codebase-map/ never imports the kit's src
+    await writeFile(join(repo, '.git', 'info', 'exclude'), '.codebase-map/map/\n.codebase-map/notes-step/\n')
+    const root = inRepo(repo)
+    expect((await build(repo)).code).toBe(0)
+    const step = JSON.parse((await notesCli(repo, root)).stdout.trim()) as { output: string }
+    await mkdir(dirname(step.output), { recursive: true })
+    await writeFile(step.output, '{ "notes": [ unfinished')
+    const failed = await notesCli(repo, root)
+    expect({ failed: failed.code, status: await git(repo, 'status', '--porcelain', '-uall') }).toEqual({ failed: 1, status: '' })
+  }, SLOW)
 })
 
 describe('F4: the harness layout keeps the repo untouched', () => {
@@ -85,5 +99,20 @@ describe('F4: the harness layout keeps the repo untouched', () => {
       second: { code: 0, map: true, mainSame: true, notes: ['main-note-1'], worktreeStatus: '' },
       third: { refused: true, names: true, same: true, noFolder: [] },
     })
+  }, SLOW)
+
+  it('T11b: a build of a linked worktree that edited a cited file leaves the main checkout’s shared notes accepted', async () => {
+    const key = await tempDir('cmap-key-')
+    const main = await makeRepo({ ...CHAIN, '.gitignore': '.worktrees/\n' }, { name: 'loantrack-web' })
+    const harness = join(key, 'loantrack-web')
+    const worktree = join(main, '.worktrees', 'FEATURE-X-2')
+    await git(main, 'worktree', 'add', '-q', '-b', 'feat/x2', worktree)
+    expect((await build(main, harness)).code).toBe(0)
+    await handNote(main, harness, { id: 'main-note-1', text: 'the main checkout’s note', paths: ['src/a.ts'] })
+    await writeFile(join(worktree, 'src/a.ts'), 'export const changedInTheWorktree = 1\n')
+    const built = await build(worktree, harness)
+    const notes = await readNotes(harness)
+    const inMain = await packetOf(main, harness, ['src/a.ts'])
+    expect({ built: built.code, status: notes['main-note-1']?.status, mainNotes: inMain.notes.map((note) => note.id) }).toEqual({ built: 0, status: 'accepted', mainNotes: ['main-note-1'] })
   }, SLOW)
 })

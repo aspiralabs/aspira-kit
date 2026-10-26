@@ -77,6 +77,20 @@ describe('F16: a brief for a path, a package, an env var, a symbol or a set of c
   }, SLOW)
 })
 
+describe('F16: --changed finds the default branch', () => {
+  it('T12: on a repo whose default branch is master, --changed lists the files the branch committed', async () => {
+    const { repo, root } = await mono()
+    await writeFile(join(repo, '.git', 'info', 'exclude'), '.codebase-map/\n')
+    await git(repo, 'branch', '-m', 'main', 'master')
+    await git(repo, 'checkout', '-q', '-b', 'feat')
+    await writeFile(join(repo, A), 'export const shared = 3\n')
+    await git(repo, 'commit', '-q', '-am', 'change a')
+    expect((await build(repo)).code).toBe(0)
+    const changed = await packetOf(repo, root, [], ['--changed'])
+    expect(changed.readFirst).toContain(A)
+  }, SLOW)
+})
+
 describe('F17: impact is transitive', () => {
   it('T13: direct importers come first, then those reached through a re-export, each once', async () => {
     const repo = await makeRepo({

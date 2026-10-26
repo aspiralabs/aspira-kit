@@ -10,7 +10,8 @@ import { promisify } from 'node:util'
 
 const exec = promisify(execFile)
 
-export type MapDirs = { mapDir: string; notesDir: string }
+/** `sharedNotes`: the notes belong to the main checkout (a linked worktree mapped outside itself), so its builds never mark them stale. */
+export type MapDirs = { mapDir: string; notesDir: string; sharedNotes: boolean }
 
 async function gitPath(repo: string, flag: string): Promise<string | undefined> {
   const out = await exec('git', ['-C', repo, 'rev-parse', '--path-format=absolute', flag]).then((run) => run.stdout.trim(), () => '')
@@ -28,6 +29,6 @@ export async function mapDirs(repo: string, mapRoot: string): Promise<MapDirs> {
   const [gitDir, commonDir, top] = await Promise.all([gitPath(repo, '--git-dir'), gitPath(repo, '--git-common-dir'), gitPath(repo, '--show-toplevel')])
   const linked = gitDir !== undefined && commonDir !== undefined && gitDir !== commonDir
   const outside = top !== undefined && !inside(top, await realpath(resolve(mapRoot)).catch(() => resolve(mapRoot)))
-  if (linked && outside) return { mapDir: join(mapRoot, 'worktrees', basename(top), 'map'), notesDir }
-  return { mapDir: join(mapRoot, 'map'), notesDir }
+  if (linked && outside) return { mapDir: join(mapRoot, 'worktrees', basename(top), 'map'), notesDir, sharedNotes: true }
+  return { mapDir: join(mapRoot, 'map'), notesDir, sharedNotes: false }
 }
