@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, utimes, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -241,8 +241,6 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.useRealTimers()
   vi.unstubAllEnvs()
-  const telemetry = join(folderOf(), 'telemetry')
-  if (existsSync(telemetry)) await chmod(telemetry, 0o700)
   await rm(repo, { recursive: true, force: true })
 })
 
@@ -738,8 +736,9 @@ describe('hand-run telemetry', () => {
     it('the exit code and printed run status are those of a run whose write succeeds', async () => {
       const run = await handStart('spec-writer', T0)
       const exportDir = await seedSpecWriterExport('2026-10-15T09:02:00.000Z')
-      await mkdir(join(folderOf(), 'telemetry'), { recursive: true })
-      await chmod(join(folderOf(), 'telemetry'), 0o500)
+      // A file where the telemetry folder goes: the write fails for any user, root included (CI runners run as root, which a read-only folder would not stop).
+      await mkdir(folderOf(), { recursive: true })
+      await writeFile(join(folderOf(), 'telemetry'), '')
       const finished = await handFinish('spec-writer', run, AT_5M, { runStatus: 'ready', exportDir })
       expect({ code: finished.code, status: finished.out.find((line) => line.startsWith('Status: ')) }).toEqual({ code: 0, status: 'Status: In Progress: Spec -> In Review: Spec' })
     })
@@ -747,10 +746,11 @@ describe('hand-run telemetry', () => {
     it('a "Telemetry not" line gives the reason', async () => {
       const run = await handStart('spec-writer', T0)
       const exportDir = await seedSpecWriterExport('2026-10-15T09:02:00.000Z')
-      await mkdir(join(folderOf(), 'telemetry'), { recursive: true })
-      await chmod(join(folderOf(), 'telemetry'), 0o500)
+      // A file where the telemetry folder goes: the write fails for any user, root included (CI runners run as root, which a read-only folder would not stop).
+      await mkdir(folderOf(), { recursive: true })
+      await writeFile(join(folderOf(), 'telemetry'), '')
       const finished = await handFinish('spec-writer', run, AT_5M, { runStatus: 'ready', exportDir })
-      expect(noticeOf(finished.out)).toMatch(/^Telemetry not \w+: .*(EACCES|permission denied)/i)
+      expect(noticeOf(finished.out)).toMatch(/^Telemetry not \w+: .*(ENOTDIR|EEXIST|not a directory|file already exists)/i)
     })
   })
 })

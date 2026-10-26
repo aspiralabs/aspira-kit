@@ -6,8 +6,8 @@
 // always has a Next action to read (F14-F21).
 
 import { execFile } from 'node:child_process'
-import { constants, existsSync } from 'node:fs'
-import { access, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { promisify } from 'node:util'
 import { z } from 'zod'
@@ -19,7 +19,7 @@ import { appendRefusal, nextAction, PROGRESS_NOTE_FILE, writeProgressNote, write
 import { redact } from './redact.ts'
 import { REFUSED_EXIT, USAGE_EXIT, exitCodeFor, readRunStatus, type ReasonCode, type RunStatus } from './run-status.ts'
 import { isCommittable, isSecretsFile } from './step-commands.ts'
-import { checkParentRun, encodeTrace, parentRunSchema, releaseRunId, reserveRunId, telemetryDir, telemetryFile, writeTelemetry, type Gap, type SpanInput, type SpanUsage } from './telemetry.ts'
+import { checkParentRun, encodeTrace, parentRunSchema, releaseRunId, reserveRunId, telemetryFile, writeTelemetry, type Gap, type SpanInput, type SpanUsage } from './telemetry.ts'
 import { HAND_USAGE_SOURCE, readSessionUsage, readUsageSource, subagentSpans, type Interval } from './telemetry-sources.ts'
 import { TICKET_FILE, TicketArgumentError, WORK_DIR, ticketArgument, type BoardTrace, type Skill, type TicketArgument, type TicketRecord } from './ticket.ts'
 import {
@@ -239,16 +239,6 @@ async function localHandRunSpans(sessionUsage: string | undefined, runId: string
   return { children: subagentSpans(report.usage, interval) }
 }
 
-/** Why the telemetry folder cannot be written, for the notice; empty when it can. */
-async function writeCause(folder: string): Promise<string> {
-  try {
-    await access(telemetryDir(folder), constants.W_OK)
-    return ''
-  } catch (error) {
-    return ` (${error instanceof Error ? error.message : String(error)})`
-  }
-}
-
 /** The notice for a hand run that has no run id: its launcher predates run telemetry. */
 export const NO_RUN_ID_NOTICE = 'Telemetry not written: no run id; run kit update'
 /** The notice for a --local run whose driver passed no session usage report: the driver predates run telemetry. */
@@ -278,7 +268,7 @@ export async function writeHandRunTelemetry(run: { skill: Skill; folder: string;
   const result = await writeTelemetry(run.folder, run.runId, document)
   const file = telemetryFile(run.folder, run.runId)
   if (result.ok || existsSync(file)) return { file, notice: null }
-  return { file: null, notice: `Telemetry not written: ${result.reason}${await writeCause(run.folder)}` }
+  return { file: null, notice: `Telemetry not written: ${result.reason}` }
 }
 
 /**
