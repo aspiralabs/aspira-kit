@@ -19,6 +19,8 @@ export type DbMigrateOptions = {
   warn: (line: string) => void
   env?: Readonly<Record<string, string | undefined>>
   neon?: NeonSeam
+  /** The hosts of a branch's endpoints; defaults to the Neon API's GET /projects/{id}/branches/{id}/endpoints. */
+  endpointHosts?: (projectId: string, branchId: string) => Promise<string[]>
 }
 
 const ENV_FILE = '.env.development.local'
@@ -47,6 +49,25 @@ function datasourceVariables(appDir: string): string[] {
     for (const match of readFileSync(config, 'utf8').matchAll(/\benv\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\)/g)) if (match[1] !== undefined) names.add(match[1])
   }
   return [...names]
+}
+
+async function neonEndpointHosts(env: Readonly<Record<string, string | undefined>>, projectId: string, branchId: string): Promise<string[]> {
+  const base = (env['NEON_API_BASE_URL'] ?? 'https://console.neon.tech/api/v2').replace(/\/+$/, '')
+  const response = await fetch(`${base}/projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/endpoints`, {
+    headers: { Authorization: `Bearer ${env['NEON_API_KEY'] ?? ''}`, Accept: 'application/json' },
+  })
+  if (!response.ok) throw new Error(`Neon GET endpoints answered ${String(response.status)}`)
+  const body = (await response.json()) as { endpoints?: Array<{ host?: unknown }> }
+  return (body.endpoints ?? []).flatMap((endpoint) => (typeof endpoint.host === 'string' ? [endpoint.host] : []))
+}
+
+/** The host of a connection string, or undefined when it does not parse. */
+function urlHost(value: string): string | undefined {
+  try {
+    return new URL(value).hostname
+  } catch {
+    return undefined
+  }
 }
 
 export async function dbMigrate(options: DbMigrateOptions): Promise<number> {
@@ -79,8 +100,23 @@ export async function dbMigrate(options: DbMigrateOptions): Promise<number> {
     options.warn(`could not list the Neon branches: ${error instanceof Error ? error.message : String(error)}`)
     return 1
   }
-  if (!branches.some((branch) => branch.name === `wt/${name}`)) {
+  const branch = branches.find((candidate) => candidate.name === `wt/${name}`)
+  if (branch === undefined) {
     options.warn(`the Neon branch wt/${name} expired or was deleted; rerun kit worktree to recreate it, then kit db migrate`)
+    return 1
+  }
+  let hosts: string[]
+  try {
+    hosts = await (options.endpointHosts ?? ((projectId, branchId) => neonEndpointHosts(env, projectId, branchId)))(database.projectId, branch.id)
+  } catch (error) {
+    options.warn(`could not list the endpoints of the Neon branch wt/${name}: ${error instanceof Error ? error.message : String(error)}`)
+    return 1
+  }
+  // A pooled host is the endpoint host with -pooler after the endpoint id (ep-x-123-pooler.region.aws.neon.tech).
+  const allowed = new Set(hosts.flatMap((host) => [host, host.replace(/^([^.]+)/, '$1-pooler')]))
+  const foreign = names.filter((variable) => !allowed.has(urlHost(values[variable] as string) ?? ''))
+  if (foreign.length > 0) {
+    options.warn(`${foreign.join(', ')} in ${join(appDir, ENV_FILE)} does not point at an endpoint of the Neon branch wt/${name}; it could reach the shared database. Rerun kit worktree to rewrite it`)
     return 1
   }
   const unlisted = datasourceVariables(appDir).filter((variable) => !names.includes(variable))

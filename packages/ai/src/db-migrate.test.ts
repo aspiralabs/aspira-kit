@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import { dbMigrate } from './db-migrate.js'
 
 const CLI = fileURLToPath(new URL('../dist/cli.js', import.meta.url))
 const PROJECT_ID = 'proj-1'
@@ -36,6 +37,13 @@ async function neonMock(branches: string[]): Promise<string> {
       const list = branches.map((name, i) => ({ id: `br-${i}`, name, default: name === 'main', project_id: PROJECT_ID }))
       response.writeHead(200, { 'Content-Type': 'application/json' })
       response.end(JSON.stringify({ branches: list }))
+      return
+    }
+    const endpoints = /\/projects\/proj-1\/branches\/br-(\d+)\/endpoints$/.exec(path)
+    if (request.method === 'GET' && endpoints !== null) {
+      const name = branches[Number(endpoints[1])]
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ endpoints: name === BRANCH ? [{ id: 'ep-branch', host: 'ep-branch.neon.test' }] : [{ id: 'ep-other', host: 'ep-other.neon.test' }] }))
       return
     }
     response.writeHead(404, { 'Content-Type': 'application/json' })
@@ -218,5 +226,43 @@ process.exit(1)
     expect(calls).toHaveLength(1)
     expect(calls[0]!.argv).toContain('--name')
     expect(calls[0]!.argv).toContain('add_x')
+  })
+
+  it('AVA1.2: exits 1 naming the variable and the branch when a URL host is not an endpoint of wt/<name> (the shared URL pasted in), via the Neon endpoints API', async () => {
+    const f = fixture({ envFile: `DATABASE_URL=${SHARED}\nDIRECT_URL=${DIRECT}\nPORT=3001\nASPIRA_WORKTREE=scoop-7\n` })
+    const result = await kit(f, await neonMock(['main', 'dev', BRANCH]), MIGRATE)
+    expect(result.code).toBe(1)
+    expect(result.out).toContain('DATABASE_URL')
+    expect(result.out).toContain(BRANCH)
+    expect(prismaCalls(f)).toEqual([])
+  })
+
+  it('AVA1.2: the injected endpoint hosts decide: a pooled and a direct host of the branch pass, any other host refuses before prisma', async () => {
+    const run = async (envFile: string, hosts: string[]): Promise<{ code: number; warnings: string[]; calls: Call[] }> => {
+      const f = fixture({ envFile })
+      const warnings: string[] = []
+      const code = await dbMigrate({
+        projectRoot: f.worktree,
+        name: 'add_x',
+        passthrough: [],
+        log: () => {},
+        warn: (line) => warnings.push(line),
+        env: { PATH: [f.bin, process.env.PATH].join(':'), REC_DIR: f.record },
+        neon: { listBranches: async () => [{ id: 'br-1', name: BRANCH, default: false }], createBranch: async () => Promise.reject(new Error('unused')), deleteBranch: async () => {} },
+        endpointHosts: async (projectId, branchId) => (projectId === PROJECT_ID && branchId === 'br-1' ? hosts : []),
+      })
+      return { code, warnings, calls: prismaCalls(f) }
+    }
+    const good = await run(`DATABASE_URL=${POOLED}\nDIRECT_URL=${DIRECT}\nASPIRA_WORKTREE=scoop-7\n`, ['ep-branch.neon.test'])
+    expect(good.code).toBe(0)
+    expect(good.calls).toHaveLength(1)
+    const bad = await run(`DATABASE_URL=${POOLED}\nDIRECT_URL=${SHARED}\nASPIRA_WORKTREE=scoop-7\n`, ['ep-branch.neon.test'])
+    expect(bad.code).toBe(1)
+    expect(bad.warnings.join('\n')).toContain('DIRECT_URL')
+    expect(bad.warnings.join('\n')).toContain(BRANCH)
+    expect(bad.calls).toEqual([])
+    const none = await run(`DATABASE_URL=${POOLED}\nDIRECT_URL=${DIRECT}\nASPIRA_WORKTREE=scoop-7\n`, [])
+    expect(none.code).toBe(1)
+    expect(none.calls).toEqual([])
   })
 })
