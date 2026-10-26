@@ -713,6 +713,90 @@ describe('kit init removes the committed harness (KIT-71)', () => {
   })
 })
 
+// ---- aspira.json is git-ignored, never committed (KIT-71) ----
+
+const ASPIRA = { board: BOARD, app: 'apps/web' }
+const ASPIRA_TEXT = `${JSON.stringify(ASPIRA, null, 2)}\n`
+
+/** A wired project whose aspira.json is committed, as every project was before KIT-71. */
+function committedAspira(): { root: string } {
+  const { root } = repository()
+  writeFileSync(join(root, 'aspira.json'), ASPIRA_TEXT)
+  expect(git(root, 'init', '-q').status).toBe(0)
+  expect(runGit(root, 'add', '-A').status).toBe(0)
+  expect(runGit(root, 'commit', '-q', '-m', 'first').status).toBe(0)
+  return { root }
+}
+
+const tracked = (root: string): boolean => runGit(root, 'ls-files', '--', 'aspira.json').stdout.trim() !== ''
+
+describe('aspira.json is git-ignored (KIT-71)', () => {
+  it('init stops tracking a committed aspira.json, keeps the file, and the printed commands record the untracking', async () => {
+    const { root } = committedAspira()
+    const lines = await init(root, { app: 'apps/web', board: BOARD })
+    expect(tracked(root)).toBe(false)
+    expect(readFileSync(join(root, 'aspira.json'), 'utf8')).toBe(ASPIRA_TEXT)
+    expect(lines.some((l) => l.startsWith('untrack') && l.includes('aspira.json'))).toBe(true)
+    expect(commitCount(root)).toBe('1')
+    const commands = lines.filter((l) => /^\s+git (add|commit) /.test(l)).map((l) => l.trim())
+    expect(commands.some((c) => c.startsWith('git commit -m'))).toBe(true)
+    for (const command of commands) {
+      const run = spawnSync('sh', ['-c', command], { cwd: root, env: GIT_ENV, encoding: 'utf8' })
+      expect(run.status, `${command}\n${run.stderr}`).toBe(0)
+    }
+    expect(commitCount(root)).toBe('2')
+    expect(runGit(root, 'ls-tree', '--name-only', 'HEAD', '--', 'aspira.json').stdout.trim()).toBe('')
+    expect(readFileSync(join(root, 'aspira.json'), 'utf8')).toBe(ASPIRA_TEXT)
+  })
+
+  it('a dry run lists the untracking and leaves aspira.json tracked', async () => {
+    const { root } = committedAspira()
+    const lines = await init(root, { app: 'apps/web', board: BOARD, dryRun: true })
+    expect(lines.some((l) => l.startsWith('untrack') && l.includes('aspira.json'))).toBe(true)
+    expect(tracked(root)).toBe(true)
+  })
+
+  it('init restores the aspira.json a pull of the untracking commit deleted, from the commit before it, and keeps the app it names', async () => {
+    const { root } = committedAspira()
+    expect(runGit(root, 'rm', '-q', 'aspira.json').status).toBe(0)
+    expect(runGit(root, 'commit', '-q', '-m', 'untrack aspira.json').status).toBe(0)
+    expect(existsSync(join(root, 'aspira.json'))).toBe(false)
+    const lines = await init(root)
+    expect(readFileSync(join(root, 'aspira.json'), 'utf8')).toBe(ASPIRA_TEXT)
+    expect(lines.some((l) => l.startsWith('restore') && l.includes('aspira.json'))).toBe(true)
+    expect(lines).toContain(`stack  next (${root}; app apps/web)`)
+    expect(tracked(root)).toBe(false)
+  })
+
+  it('init restores a deleted aspira.json from the last commit that still has it, and never overwrites one that is there', async () => {
+    const { root } = committedAspira()
+    rmSync(join(root, 'aspira.json'))
+    const restored = await init(root, { app: 'apps/web' })
+    expect(restored.some((l) => l.startsWith('restore') && l.includes('aspira.json'))).toBe(true)
+    expect(JSON.parse(readFileSync(join(root, 'aspira.json'), 'utf8'))).toEqual(ASPIRA)
+    const mine = `${JSON.stringify({ ...ASPIRA, releases: BOARD }, null, 2)}\n`
+    writeFileSync(join(root, 'aspira.json'), mine)
+    const kept = await init(root, { app: 'apps/web' })
+    expect(kept.some((l) => l.startsWith('restore'))).toBe(false)
+    expect(readFileSync(join(root, 'aspira.json'), 'utf8')).toBe(mine)
+  })
+
+  it('doctor fails while git tracks aspira.json, naming kit upgrade, and passes that check once it is untracked', () => {
+    const { root } = committedAspira()
+    const home = harnessHome()
+    const notion = { home, env: { NOTION_TOKEN: 'ntn_test' }, check: (checks: { key: string }[]) => Object.fromEntries(checks.map(({ key }) => [key, { ok: true as const }])) }
+    const first = logs()
+    expect(doctor(root, first.log, undefined, notion)).toBe(1)
+    const fail = first.lines.find((l) => l.startsWith('FAIL') && l.includes('aspira.json') && l.includes('tracked'))
+    expect(fail).toBeDefined()
+    expect(fail).toContain('kit upgrade')
+    expect(runGit(root, 'rm', '-q', '--cached', 'aspira.json').status).toBe(0)
+    const second = logs()
+    doctor(root, second.log, undefined, notion)
+    expect(second.lines.some((l) => l.startsWith('FAIL') && l.includes('aspira.json'))).toBe(false)
+  })
+})
+
 describe('readJson', () => {
   it('reads JSON with comments and trailing commas, and leaves comment markers inside strings alone', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kit-jsonc-'))

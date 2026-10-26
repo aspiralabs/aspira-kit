@@ -2,8 +2,8 @@
 // repository's root (GIT-002, BOARD-011), on `<prefix>/<id>-<slug>` with the prefix from the card's
 // Type (GIT-001). This module names both, finds where the driver is running (the main checkout or
 // one of its worktrees), and prepares a new worktree: `git fetch origin main`, the GIT-002
-// `git worktree add`, `.worktrees/` in .git/info/exclude when .gitignore does not list it, then the
-// project's install and build. It carries the ticket's `.work/` folder over without overwriting
+// `git worktree add`, `.worktrees/` in .git/info/exclude when .gitignore does not list it, the main
+// checkout's .env.local files and git-ignored aspira.json linked in, then the project's install and build. It carries the ticket's `.work/` folder over without overwriting
 // anything there. It never removes a worktree (that is `kit cleanup`, KIT-13).
 //
 // Every git and project command goes through the system wrappers (system.ts).
@@ -115,6 +115,15 @@ export function linkEnvLocal(from: string, to: string, dirs: readonly string[]):
   return made
 }
 
+/** Link the main checkout's aspira.json into the worktree when it has none: the file is git-ignored (KIT-71), so a new worktree lacks it. Returns the link line, or none. */
+export function linkAspira(from: string, to: string): string[] {
+  const source = join(from, 'aspira.json')
+  const target = join(to, 'aspira.json')
+  if (!existsSync(source)) return []
+  try { lstatSync(target); return [] } catch { /* nothing at the target: link it */ }
+  try { symlinkSync(source, target); return [`ln -s ${source} ${target}`] } catch { return [] }
+}
+
 const errorOf = (result: CommandResult): string => tail((result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`).trim(), 20)
 
 const resourceKeys = z.looseObject({
@@ -171,6 +180,8 @@ export async function prepareWorktree(input: { place: Place; id: string; title: 
     return { ok: false, message: `${why}: \`${command}\` exited ${result.code}: ${output}`, command, exitCode: result.code, output }
   }
   if (existsSync(worktree)) {
+    // A worktree made before aspira.json was git-ignored, or by hand, gets the main checkout's (KIT-71).
+    linkAspira(place.main, worktree)
     // A rerun completes missing isolation instead of returning (KIT-67 F1); a merged ticket's is never rebuilt.
     if (input.skipIsolation !== true) {
       const isolated = await isolateIn({ place, id, worktree, env, onlyIfPending: true }, sys)
@@ -189,7 +200,7 @@ export async function prepareWorktree(input: { place: Place; id: string; title: 
   await excludeWorktrees(place)
   // The main checkout's .env.local files, linked in (the root's, then the app's), as kit worktree does (KIT-49):
   // the install and the first step need the project's keys, and a worktree has none of its own.
-  const linked = linkEnvLocal(place.main, worktree, ['', ...(input.app === undefined || input.app === '.' ? [] : [input.app])])
+  const linked = [...linkEnvLocal(place.main, worktree, ['', ...(input.app === undefined || input.app === '.' ? [] : [input.app])]), ...linkAspira(place.main, worktree)]
   const ran: string[] = [...linked]
   // Isolation after the worktree exists and before the install, so the install and build see the branch's own environment (KIT-67).
   const isolated = await isolateIn({ place, id, worktree, env }, sys)

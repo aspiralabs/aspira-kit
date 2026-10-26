@@ -2,7 +2,7 @@
 // from one package, @aspiralabs/ai. Each agent ships its skill under <agent>/skill/aspira-<agent>/ and the
 // kit skills sit under skills/aspira-<name>/ (SKILL.md and scripts/<name>.sh). They are a global harness,
 // written once per engineer into ~/.claude (skills/aspira-<name>/, hooks/aspira/, and the kit's hook groups
-// in settings.json) plus three lines in the global git ignore, never into a project. Each skill is stamped
+// in settings.json) plus four lines in the global git ignore, never into a project. Each skill is stamped
 // with the running kit's version in .kit-version; `kit` rewrites the harness before any command when
 // harnessCurrent finds it stale, and `kit doctor` reports the same items.
 // @aspiralabs/ai is installed globally (pnpm add -g), so the source is always the running kit's own package;
@@ -94,8 +94,8 @@ function sameTree(a: Map<string, Buffer>, b: Map<string, Buffer>): boolean {
 export const HOOKS = ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh'] as const
 /** Where the hooks live, relative to the home folder. */
 export const HOOKS_DIR = '.claude/hooks/aspira'
-/** The lines the global git ignore needs, so a project's working folders never show up in git status. */
-export const IGNORE_ENTRIES = ['.work/', '.aspira/', '.worktrees/'] as const
+/** The lines the global git ignore needs, so a project's working folders never show up in git status, and aspira.json is never committed. */
+export const IGNORE_ENTRIES = ['.work/', '.aspira/', '.worktrees/', 'aspira.json'] as const
 
 export type HarnessOptions = {
   /** The home folder to write under; defaults to the user's. */
@@ -357,7 +357,7 @@ function writeIgnore(home: string, env: NodeJS.ProcessEnv | undefined, log: Log)
  * Write the global harness under <home>/.claude: the eleven skills (each a regular folder copied from this kit
  * and stamped with its version, swapped in whole so no reader sees a partial one; a symlinked aspira-<name>
  * is replaced, the engineer's other skills are untouched), the three hooks at 0755, the kit's hook groups
- * in settings.json (left alone with a warning when it is not strict JSON) and the three lines of the global
+ * in settings.json (left alone with a warning when it is not strict JSON) and the four lines of the global
  * git ignore. Retired skill folders are removed. Every step runs; the failures are thrown together at the end.
  * Never reads or writes ~/.claude/CLAUDE.md.
  */

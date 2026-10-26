@@ -1,6 +1,6 @@
 // The Next.js profile. Each step is idempotent: run init twice, get the same project.
 // Two directories: `projectRoot`, where Claude Code runs and the Claude-facing files go (AGENTS.md,
-// CLAUDE.md, .mcp.json, .claude/, aspira.json, .gitignore), and the app that owns package.json and
+// CLAUDE.md, .mcp.json, .claude/, aspira.json (git-ignored, never committed), .gitignore), and the app that owns package.json and
 // node_modules, where the package steps go (.npmrc, the install, eslint, prettier, tsconfig, css).
 // They are the same directory unless `--app <dir>` says otherwise (apps/web in a multi-app repository).
 // With `--app` there are two layouts. In a repository with no root package.json, the app is on its own
@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 import { join, basename, relative } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { deepMerge, hasJsonComments, readJson, writeIfAbsent, writeJson, type Log } from '../fs.js'
-import { appRoot, isWorkspaceRoot, normalizeApp, readAspira, writeAspira } from '../aspira.js'
+import { appRoot, isWorkspaceRoot, normalizeApp, readApp, readAspira, restoreAspira, untrackAspira, writeAspira } from '../aspira.js'
 import { ENV_DEVELOPMENT_ENTRY, ENV_LOCAL_ENTRY, envDevelopmentIgnored, envLocalIgnored, gitRootOf, hasLine, isolates, mcpServer, WORKTREES_ENTRY } from '../doctor.js'
 import { AGENTS, AI_PACKAGE, HOOKS_DIR, KIT_SKILLS, RETIRED_SKILLS, VERSION_FILE } from '../skills.js'
 
@@ -460,33 +460,56 @@ const gitPath = (projectRoot: string, path: string): string => {
   return /\s/.test(shown) ? `'${shown}'` : shown
 }
 
+/** Removes the harness an earlier kit committed into the project (harnessLeftovers) and returns what it removed; a dry run only lists. */
+export function removeLeftovers(projectRoot: string, dryRun: boolean, log: Log): Leftover[] {
+  const leftovers = harnessLeftovers(projectRoot)
+  for (const item of leftovers) {
+    log(`remove ${item.label}`)
+    if (!dryRun) item.remove()
+  }
+  if (dryRun) return leftovers
+  for (const dir of [join(projectRoot, '.claude', 'skills'), join(projectRoot, '.claude', 'hooks')]) {
+    if (isFolder(dir) && readdirSync(dir).length === 0) rmdirSync(dir)
+  }
+  return leftovers
+}
+
+/** The message of the commit that records a project's move to the global harness. */
+export const MIGRATION_COMMIT = 'chore: move to the global Aspira harness'
+
 /**
- * Removes the harness an earlier kit committed into the project (harnessLeftovers); the global harness replaces it. A dry run only
- * lists. After a removal it prints the `git add` and `git commit` that record it, limited to the removed and edited paths, and
- * commits nothing; with nothing to remove it prints no commit command.
+ * The `git add` and `git commit` that record the removed leftovers and an untracked aspira.json. The commit is limited to the removed
+ * paths, unless aspira.json was untracked: a path-limited commit takes each path from the working tree and would keep it tracked, so
+ * then the commit takes the index, where `git rm --cached` staged its removal.
+ */
+export function recordCommands(projectRoot: string, removed: readonly Leftover[], untracked: boolean): string[] {
+  const paths = removed.map((item) => gitPath(projectRoot, item.path)).join(' ')
+  const add = paths === '' ? [] : [`git add -A -- ${paths}`]
+  return [...add, untracked || paths === '' ? `git commit -m "${MIGRATION_COMMIT}"` : `git commit -m "${MIGRATION_COMMIT}" -- ${paths}`]
+}
+
+/**
+ * Removes the harness an earlier kit committed into the project (removeLeftovers); the global harness replaces it. Stops tracking a
+ * committed aspira.json, which is git-ignored now (the file stays). A dry run only lists. After a change it prints the `git add` and
+ * `git commit` that record it (recordCommands) and commits nothing; with nothing to change it prints no commit command.
  */
 function removeHarness(opts: Resolved): void {
-  const leftovers = harnessLeftovers(opts.projectRoot)
-  if (leftovers.length === 0) {
+  const removed = removeLeftovers(opts.projectRoot, opts.dryRun, opts.log)
+  const untracked = untrackAspira(opts.projectRoot, opts.dryRun, opts.log)
+  if (removed.length === 0 && !untracked) {
     opts.log('keep   nothing to remove (no committed Aspira harness in the project)')
     return
   }
-  for (const item of leftovers) {
-    opts.log(`remove ${item.label}`)
-    if (!opts.dryRun) item.remove()
-  }
   if (opts.dryRun) return
-  for (const dir of [join(opts.projectRoot, '.claude', 'skills'), join(opts.projectRoot, '.claude', 'hooks')]) {
-    if (isFolder(dir) && readdirSync(dir).length === 0) rmdirSync(dir)
-  }
-  const paths = leftovers.map((item) => gitPath(opts.projectRoot, item.path)).join(' ')
-  opts.log('note   the global harness replaces these files; record the removal (init commits nothing):')
-  opts.log(`       git add -A -- ${paths}`)
-  opts.log(`       git commit -m "chore: remove the committed Aspira harness" -- ${paths}`)
+  opts.log(`note   ${removed.length === 0 ? 'aspira.json is git-ignored now' : 'the global harness replaces these files'}; record the change (init commits nothing${untracked ? '; the commit takes everything staged, so check git status first' : ''}):`)
+  for (const command of recordCommands(opts.projectRoot, removed, untracked)) opts.log(`       ${command}`)
 }
 
 export async function initNext(options: InitOptions): Promise<void> {
-  const app = options.app === undefined ? undefined : normalizeApp(options.app)
+  // An aspira.json a pull deleted (the commit that stopped tracking it) comes back first, with the app it names.
+  const restored = restoreAspira(options.projectRoot, options.dryRun, options.log)
+  const appOption = options.app ?? (restored ? readApp(options.projectRoot) : undefined)
+  const app = appOption === undefined ? undefined : normalizeApp(appOption)
   const appDir = appRoot(options.projectRoot, app)
   const workspace = isWorkspaceRoot(options.projectRoot, app)
   const opts: Resolved = { ...options, app: app === '.' ? undefined : app, appDir, workspace, workspaceDir: workspaceDirOf(options.projectRoot, app) }

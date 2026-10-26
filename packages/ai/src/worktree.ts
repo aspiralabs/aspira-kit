@@ -2,14 +2,15 @@
 // live (TicketLookup, injected in tests), refuses a card it cannot place (no answer, version skew,
 // no or unknown Type, Released or Dropped), fetches origin, then creates or reuses the worktree at
 // `<main checkout root>/.worktrees/<HANDLE>-<ID>` on the ticket's GIT-001 branch, links the main
-// checkout's .env.local files into it, and runs install and build where `kit init` would. Every git
-// command runs as `git -C <main checkout root>`, so it behaves the same from inside another worktree.
+// checkout's .env.local files (and its git-ignored aspira.json, when the branch has none) into it, and
+// runs install and build where `kit init` would. Every git command runs as `git -C <main checkout root>`,
+// so it behaves the same from inside another worktree.
 import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, realpathSync, symlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
 import { z } from 'zod'
-import { appRoot, isNotionUrl, readApp, readAspira } from './aspira.js'
+import { appRoot, ASPIRA_FILE, isNotionUrl, readApp, readAspira } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 import { defaultSeams, isolate, seamsFromCommand, type CommandSeams } from './isolation.js'
 import { git, listWorktrees, mainCheckoutRoot, repositoryRoot, type Worktree } from './git.js'
@@ -121,10 +122,10 @@ function runStep(log: Log, step: 'install' | 'build', dir: string, pm: string, a
   return false
 }
 
-/** Link `<from>/<dir>/.env.local` to the same place under `to`; a missing source or an occupied target is skipped and said. */
-function linkEnvLocal(log: Log, from: string, to: string, dir: string): void {
-  const source = join(from, dir, '.env.local')
-  const target = join(to, dir, '.env.local')
+/** Link `<from>/<dir>/<file>` (.env.local, or the git-ignored aspira.json) to the same place under `to`; a missing source or an occupied target is skipped and said. */
+function linkLocal(log: Log, from: string, to: string, dir: string, file: string): void {
+  const source = join(from, dir, file)
+  const target = join(to, dir, file)
   if (!existsSync(source)) {
     log(`skip     ${source} (the main checkout has none)`)
     return
@@ -146,6 +147,12 @@ function linkEnvLocal(log: Log, from: string, to: string, dir: string): void {
   } catch (error) {
     say(log, `could not link ${target} -> ${source}: ${error instanceof Error ? error.message : String(error)}`)
   }
+}
+
+/** Link the main checkout's aspira.json into the worktree's project root when it has none: the file is git-ignored (KIT-71), so a new worktree lacks it. */
+function linkAspira(log: Log, from: string, to: string): void {
+  if (existsSync(join(to, ASPIRA_FILE)) || !existsSync(join(from, ASPIRA_FILE))) return
+  linkLocal(log, from, to, '', ASPIRA_FILE)
 }
 
 /** Runs the isolation in the worktree's project root; false (after saying why) when a step fails. */
@@ -232,6 +239,7 @@ export async function worktree(options: WorktreeOptions): Promise<number> {
       return 1
     }
     log(`exists   ${target} (already a worktree${registered.branch === undefined ? '' : ` on ${registered.branch}`})`)
+    linkAspira(log, mainProject, join(target, projectPath))
     if (isolates && !(await isolateWorktree(options, id, main, join(target, projectPath)))) return 1
     log(target)
     log(registered.branch ?? '(detached HEAD)')
@@ -275,10 +283,11 @@ export async function worktree(options: WorktreeOptions): Promise<number> {
   }
   log(`created  ${target} on ${branch}`)
 
-  // 5. The main checkout's .env.local files, linked (the root's, then the app's).
+  // 5. The main checkout's .env.local files, linked (the root's, then the app's), and its aspira.json when the branch does not commit one.
   const worktreeProject = join(target, projectPath)
   const envDirs = app === undefined ? [''] : ['', app]
-  for (const dir of envDirs) linkEnvLocal(log, mainProject, worktreeProject, dir)
+  for (const dir of envDirs) linkLocal(log, mainProject, worktreeProject, dir, '.env.local')
+  linkAspira(log, mainProject, worktreeProject)
 
   if (isolates && !(await isolateWorktree(options, id, main, worktreeProject))) return 1
 

@@ -307,7 +307,7 @@ describe('the global harness writer', () => {
   })
 
   it('T8: the global ignore is core.excludesFile, else $XDG_CONFIG_HOME/git/ignore, else ~/.config/git/ignore, and the kit never sets core.excludesFile', () => {
-    const wanted = ['.work/', '.aspira/', '.worktrees/']
+    const wanted = ['.work/', '.aspira/', '.worktrees/', 'aspira.json']
     const lines = (file: string): string[] => readFileSync(file, 'utf8').split('\n').map((line) => line.trim())
 
     const a = homeWithCache(null)
@@ -330,7 +330,7 @@ describe('the global harness writer', () => {
     const mine = lines(join(c, 'my-ignore'))
     expect(mine).toContain('*.log')
     expect(mine.filter((line) => line === '.work/').length).toBe(1)
-    expect(mine).toEqual(expect.arrayContaining(['.aspira/', '.worktrees/']))
+    expect(mine).toEqual(expect.arrayContaining(['.aspira/', '.worktrees/', 'aspira.json']))
     expect(readFileSync(join(c, '.gitconfig'), 'utf8')).toBe(config)
   })
 })
@@ -355,6 +355,12 @@ describe('self-healing', () => {
     writeFileSync(defaultIgnore(ignore), readFileSync(defaultIgnore(ignore), 'utf8').split('\n').filter((line) => line.trim() !== '.aspira/').join('\n'))
     kit(['package-dir'], { home: ignore })
     expect(readFileSync(defaultIgnore(ignore), 'utf8').split('\n').map((line) => line.trim())).toContain('.aspira/')
+
+    // A global ignore an earlier kit wrote, before aspira.json was git-ignored (KIT-71), is stale too.
+    const noAspira = harnessHome()
+    writeFileSync(defaultIgnore(noAspira), '.work/\n.aspira/\n.worktrees/\n')
+    kit(['package-dir'], { home: noAspira })
+    expect(readFileSync(defaultIgnore(noAspira), 'utf8').split('\n').map((line) => line.trim())).toEqual(['.work/', '.aspira/', '.worktrees/', 'aspira.json', ''])
 
     const retired = harnessHome()
     mkdirSync(join(skillsDir(retired), 'aspira-spec-reviewer'))

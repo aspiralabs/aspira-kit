@@ -61,6 +61,8 @@ type Variant = {
   config?: Record<string, unknown>
   /** Extra .gitignore lines beside the defaults. */
   ignore?: string[]
+  /** aspira.json only in the main checkout, git-ignored and never committed (KIT-71), instead of committed on main. */
+  untrackedAspira?: boolean
 }
 
 type Fixture = { tmp: string; origin: string; main: string }
@@ -88,8 +90,9 @@ function fixture(variant: Variant = {}): Fixture {
   git(seed, 'init', '-q', '-b', 'main')
   const app = variant.app ?? 'root'
   const build = variant.build ?? 'ok'
-  writeFileSync(join(seed, '.gitignore'), ['.worktrees/', '.env.local', 'node_modules/', MARKER, ...(variant.ignore ?? []), ''].join('\n'))
-  writeFileSync(join(seed, 'aspira.json'), json(app === 'root' ? { board: BOARD, ...variant.config } : { board: BOARD, app: 'apps/web', ...variant.config }))
+  writeFileSync(join(seed, '.gitignore'), ['.worktrees/', '.env.local', 'node_modules/', MARKER, ...(variant.untrackedAspira === true ? ['aspira.json'] : []), ...(variant.ignore ?? []), ''].join('\n'))
+  const aspira = json(app === 'root' ? { board: BOARD, ...variant.config } : { board: BOARD, app: 'apps/web', ...variant.config })
+  if (variant.untrackedAspira !== true) writeFileSync(join(seed, 'aspira.json'), aspira)
   if (app === 'root') {
     const dependencies = variant.brokenInstall === true ? { missing: 'file:./missing.tgz' } : {}
     writePackage(seed, { name: 'fixture', version: '1.0.0', private: true, dependencies }, build)
@@ -114,6 +117,7 @@ function fixture(variant: Variant = {}): Fixture {
   git(tmp, 'clone', '-q', '--bare', seed, origin)
   git(tmp, 'clone', '-q', origin, main)
   git(main, 'checkout', '-q', '-b', 'chore/other')
+  if (variant.untrackedAspira === true) writeFileSync(join(main, 'aspira.json'), aspira)
   writeFileSync(join(main, '.env.local'), variant.config === undefined ? 'NOTION_TOKEN=secret\n' : 'NOTION_TOKEN=secret\nSTRIPE_SECRET_KEY=sk_test_x\n')
   return { tmp, origin, main }
 }
@@ -440,6 +444,29 @@ describe('kit worktree: .env.local', () => {
     expect(existsSync(join(wt, 'apps', 'web', '.env.local'))).toBe(false)
     expect(result.lines.some((line) => line.includes(join('apps', 'web', '.env.local')) && /skip/i.test(line))).toBe(true)
     expect(git(wt, 'status', '--porcelain')).toBe('')
+  })
+})
+
+describe('kit worktree: aspira.json (KIT-71)', () => {
+  it('links the main checkout\'s git-ignored aspira.json into the new worktree, and leaves git status clean', async () => {
+    const { main } = fixture({ app: 'workspace', untrackedAspira: true })
+    const result = await run(main, 'KIT-13', feature())
+    const wt = handlePath(main, 'FEATURE-KIT-13')
+    expect(result.code).toBe(0)
+    const link = join(wt, 'aspira.json')
+    expect(lstatSync(link).isSymbolicLink()).toBe(true)
+    expect(realpathSync(link)).toBe(realpathSync(join(main, 'aspira.json')))
+    expect(lineWith(result.lines, 'link', link)).toBeDefined()
+    expect(git(wt, 'status', '--porcelain')).toBe('')
+  })
+
+  it('keeps the aspira.json a branch still commits, linking nothing over it', async () => {
+    const { main } = fixture()
+    const result = await run(main, 'KIT-13', feature())
+    const link = join(handlePath(main, 'FEATURE-KIT-13'), 'aspira.json')
+    expect(result.code).toBe(0)
+    expect(lstatSync(link).isSymbolicLink()).toBe(false)
+    expect(lineWith(result.lines, 'link', link)).toBeUndefined()
   })
 })
 

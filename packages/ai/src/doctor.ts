@@ -5,7 +5,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { delimiter, dirname, join } from 'node:path'
-import { appRoot, checkAspira, type AspiraConfig, isWorkspaceRoot, notionTargets, notionTokenCandidates, notionTokenSource, readAspira, readApp, type NotionTarget } from './aspira.js'
+import { appRoot, aspiraTracked, checkAspira, type AspiraConfig, isWorkspaceRoot, notionTargets, notionTokenCandidates, notionTokenSource, readAspira, readApp, type NotionTarget } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 import { isGitIgnored, repositoryRoot } from './git.js'
 import type { CommandSeams } from './isolation.js'
@@ -193,6 +193,8 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
   // The Feature Board: aspira.json with a Notion URL, which the skills and kit next read.
   const aspira = checkAspira(projectRoot)
   checks.push([aspira.ok ? `aspira.json names the Feature Board${app ? ` and the app (${app})` : ''}` : aspira.reason ?? 'aspira.json', () => aspira.ok])
+  // aspira.json is git-ignored and never committed (KIT-71); one an earlier kit committed is still tracked until kit upgrade.
+  if (aspiraTracked(projectRoot)) checks.push(['aspira.json is tracked by git; run kit upgrade (it stops tracking the file and keeps it)', () => false])
   // The global harness (~/.claude skills and hooks, settings.json, the global git ignore): one line per item, from the same
   // predicate the kit self-heals with. Then whatever an earlier kit committed into the project, one failing line each.
   const harness = harnessItems({ home: options?.home })

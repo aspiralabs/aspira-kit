@@ -71,7 +71,7 @@ import { step8Phase } from '#build-feature/step8.ts'
 import { renderBuildSummary } from '#build-feature/summary.ts'
 import { shown, system } from '#build-feature/system.ts'
 import { runSpans } from '#build-feature/telemetry.ts'
-import { carryTicketFolder, existingWorktree, insideWorktree, isolateIn, locate, prepareWorktree, ticketTypeOf, worktreePath, type Place } from '#build-feature/worktree.ts'
+import { carryTicketFolder, existingWorktree, insideWorktree, isolateIn, linkAspira, locate, prepareWorktree, ticketTypeOf, worktreePath, type Place } from '#build-feature/worktree.ts'
 
 export const STAGE_KINDS = ['resolve', 'approval', 'overrides', 'worktree', 'step', 'ask', 'move', 'set-pr', 'visual-verify', 'gate', 'step10', 'fix', 'release-row', 'merge', 'summary', 'telemetry', 'end'] as const
 export type StageKind = (typeof STAGE_KINDS)[number]
@@ -677,6 +677,8 @@ async function moveIntoWorktree(ctx: Ctx, state: RunState, place: Place, type: N
 /** A new invocation, or a call, outside the ticket's existing worktree: continue there (nothing is recorded here). */
 async function redirectStage(input: DriverInput, place: Place, worktree: string, folder: string): Promise<Stage> {
   await carryTicketFolder(folder, worktree)
+  // aspira.json is git-ignored (KIT-71): a worktree that lacks it gets the main checkout's before the run continues there.
+  linkAspira(place.main, worktree)
   // A rerun from the main checkout completes missing isolation before it sends the session on (KIT-67 F1); a merged ticket's is never rebuilt.
   const carried = await readRunState(await workFolder(worktree, input.id)).catch(() => null)
   if (carried === null || mergeRecordOf(carried) === null) {

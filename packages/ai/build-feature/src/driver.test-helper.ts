@@ -52,7 +52,7 @@
 
 import { execFile } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -149,6 +149,8 @@ export function findingsMarkdown(entries: { id: string; severity: 'critical' | '
 type ProjectOptions = {
   /** aspira.json contents; null leaves the file out. Default: board and repository. */
   aspira?: Record<string, unknown> | null
+  /** aspira.json only in the main checkout, excluded and never committed (KIT-71). Default false: committed on main. */
+  aspiraUntracked?: boolean
   /** The card's Status at the start. */
   status: string
   pr?: string | null
@@ -212,7 +214,7 @@ export async function project(options: ProjectOptions) {
   await git(main, 'config', `url.${origin}.insteadOf`, GITHUB)
   await git(main, 'config', `url.${origin}.pushInsteadOf`, GITHUB)
   const aspira = options.aspira === undefined ? { board: BOARD, repository: REPOSITORY } : options.aspira
-  if (aspira !== null) await writeFile(join(main, 'aspira.json'), `${JSON.stringify(aspira, null, 2)}\n`)
+  if (aspira !== null && options.aspiraUntracked !== true) await writeFile(join(main, 'aspira.json'), `${JSON.stringify(aspira, null, 2)}\n`)
   await mkdir(join(main, 'src'))
   await writeFile(join(main, 'README.md'), '# Fixture\n')
   await writeFile(join(main, 'src/app.ts'), 'export const app = 1\n')
@@ -231,13 +233,17 @@ export async function project(options: ProjectOptions) {
   await git(main, 'add', '.')
   await git(main, 'commit', '-qm', 'init')
   await git(main, 'push', '-q', 'origin', 'main')
+  if (aspira !== null && options.aspiraUntracked === true) {
+    await writeFile(join(main, 'aspira.json'), `${JSON.stringify(aspira, null, 2)}\n`)
+    await appendFile(join(main, '.git/info/exclude'), 'aspira.json\n')
+  }
   const type = options.type === undefined ? 'Feature' : options.type
   const branch = options.branch ?? BRANCH
   let repo = main
   if (options.layout !== 'checkout') {
     // GIT-002: the ticket's worktree under .worktrees/, excluded locally.
     repo = worktreeFor(main, type ?? 'Feature')
-    await writeFile(join(main, '.git/info/exclude'), '.worktrees/\n')
+    await appendFile(join(main, '.git/info/exclude'), '.worktrees/\n')
     if (branch === 'main') {
       await git(main, 'switch', '-q', '--detach')
       await git(main, 'worktree', 'add', '-q', repo, 'main')
