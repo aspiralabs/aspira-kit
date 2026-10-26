@@ -43,11 +43,13 @@ puts `kit` on your PATH. That one install is what every project uses: the `/aspi
 | `kit add auth` | Writes a base Better Auth setup the project then owns |
 | `kit doctor` | Prints the kit versions in use and checks the wiring, including `aspira.json` and the agent skills; `--app <dir>` (or `app` in `aspira.json`) names the app |
 | `kit next [<ticket>]` | Prints the ticket's Status and the Playbook step, command and owner that come next |
-| `kit cleanup [--yes] [--only <path>...]` | Lists every `.work/` folder and `.worktrees/<TYPE>-<ID>` ticket worktree with its card's live Status, and on confirmation deletes those whose card is Released or Dropped |
-| `kit worktree <ticket>` | Creates (or reuses) the ticket's worktree at `.worktrees/<TYPE>-<ID>` on its GIT-001 branch from `origin/main`, links `.env.local`, then installs and builds |
+| `kit cleanup [--yes] [--only <path>...]` | Lists every `.work/` folder and `.worktrees/<TYPE>-<ID>` ticket worktree with its card's live Status, and on confirmation deletes those whose card is Released or Dropped, first tearing down each worktree's isolation |
+| `kit worktree <ticket>` | Creates (or reuses) the ticket's worktree at `.worktrees/<TYPE>-<ID>` on its GIT-001 branch from `origin/main`, links `.env.local`, isolates it when `aspira.json` asks (see [Worktree isolation](#worktree-isolation)), then installs and builds |
+| `kit db migrate --name <n> [prisma args]` | Runs `prisma migrate dev` against the worktree's own Neon branch |
+| `kit dev` | Runs `dev.command` on the worktree's own `PORT`, with its Cloudflare tunnel beside it |
 | `kit playbook` | Prints the Playbook section of From Idea to Release as markdown, from the same table `kit next` reads (`common/lib/playbook.json` in this package) |
 
-Every command takes `--cwd <path>` to run against another directory. `init` and `add` take `--dry-run`, which prints the plan and changes nothing. `init`, `doctor`, `next`, `cleanup` and `worktree` take `--app <dir>`, the app that owns `package.json` and `node_modules` when it is not the root (see [`--app`](#--app-a-repository-whose-app-is-not-the-root)); `doctor` and `next` read it from `aspira.json` once `init` has recorded it.
+Every command takes `--cwd <path>` to run against another directory. `init` and `add` take `--dry-run`, which prints the plan and changes nothing. `init`, `doctor`, `next`, `cleanup`, `worktree`, `db migrate` and `dev` take `--app <dir>`, the app that owns `package.json` and `node_modules` when it is not the root (see [`--app`](#--app-a-repository-whose-app-is-not-the-root)); `doctor` and `next` read it from `aspira.json` once `init` has recorded it.
 
 Every command is safe to re-run. Each line of output starts with what happened to one thing:
 
@@ -209,7 +211,7 @@ If you already have `lib/prisma.ts` or `lib/redis.ts`, they're kept. The command
 kit doctor [--app <dir>] [--cwd <path>]
 ```
 
-Prints the version of each kit package the project declares and has installed (`@aspiralabs/ui`, `config`, `kit` and `agents`), then checks each part of the `init` wiring: ESLint, `tsconfig.json`, the tokens import, the `AGENTS.md` block, the MCP server, the hooks, `.gitignore` (`.work/` and `.aspira/`; `.worktrees/` at the git repository root; `.env.local` as `git check-ignore` sees it, both reported skipped outside a git repository), `aspira.json` (present, with a Notion URL as `board`, and an `app` directory that has a `package.json` when set), and each `.claude/skills/aspira-<agent>/` folder (present, complete, and its `.kit-version` equal to the installed `@aspiralabs/ai` version) and each kit-owned skill (`aspira-cleanup`, `aspira-next`, `aspira-worktree`, checked against the installed `@aspiralabs/ai` version). It exits `1` if anything is missing and tells you to re-run `init`.
+Prints the version of each kit package the project declares and has installed (`@aspiralabs/ui`, `config`, `kit` and `agents`), then checks each part of the `init` wiring: ESLint, `tsconfig.json`, the tokens import, the `AGENTS.md` block, the MCP server, the hooks, `.gitignore` (`.work/` and `.aspira/`; `.worktrees/` at the git repository root; `.env.local` as `git check-ignore` sees it, both reported skipped outside a git repository), `aspira.json` (present, with a Notion URL as `board`, and an `app` directory that has a `package.json` when set), and each `.claude/skills/aspira-<agent>/` folder (present, complete, and its `.kit-version` equal to the installed `@aspiralabs/ai` version) and each kit-owned skill (`aspira-cleanup`, `aspira-next`, `aspira-worktree`, checked against the installed `@aspiralabs/ai` version). When `aspira.json` isolates worktrees it also checks that `.env.development.local` is git-ignored, and warns (without failing) when `NEON_API_KEY`, `CLOUDFLARE_API_TOKEN`, `cloudflared`, `~/.cloudflared/cert.pem` or the Stripe CLI is missing, and for each Stripe endpoint tagged `aspira_worktree` whose worktree folder is gone. It exits `1` if anything is missing and tells you to re-run `init`.
 
 With an app (`--app <dir>`, or `app` in `aspira.json`), one run checks both places: the package-level items (`package.json`, `node_modules`, ESLint, `tsconfig.json`, `globals.css`) in the app, and the Claude-facing items at the root, where the hooks and the MCP server must point into `<app>/node_modules`. Run from inside the app with no `--cwd`, it works on the root whose `aspira.json` names that app.
 
@@ -224,16 +226,35 @@ kit playbook
 
 The mapping is `src/playbook.ts`, the one source of the Status table. `kit playbook` renders it as the markdown of the "Playbook: what to run next" section of From Idea to Release in Notion; paste its output there when the table changes, so the page and the command stay in step.
 
-## `kit cleanup` and `kit worktree`
+## `kit cleanup`, `kit worktree`, `kit db migrate` and `kit dev`
 
 ```bash
 kit cleanup [--yes] [--only <path>...] [--app <dir>] [--cwd <path>]
 kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
+kit db migrate --name <n> [prisma args] [--app <dir>] [--cwd <path>]
+kit dev [--app <dir>] [--cwd <path>]
 ```
 
-`kit cleanup` lists every working folder under `.work/` (in the main checkout and in each ticket worktree) and every ticket worktree at `.worktrees/<TYPE>-<ID>` (TYPE `FEATURE`, `BUG` or `CHORE`) with the card's **live** Status, and marks for deletion only those whose card is Released or Dropped. On a terminal it asks `Delete N folders and remove M worktrees? [y/N]`; `--yes` skips the question, `--only <path>...` (with `--yes`) deletes only the listed paths that are still marked, and without a terminal and `--yes` it lists and deletes nothing. A worktree with uncommitted or unpushed work (commits not on any remote-tracking branch after `git fetch --prune`) is kept, even with `--yes`; worktrees are removed without `--force` and their local branch with `git branch -d`, never a remote branch. The main checkout, worktrees outside `.worktrees/` and folders it cannot match to a card are never touched, and every skip says why. It exits `0` when every marked item was deleted, `1` when there is no board or a deletion failed, `2` for a bad argument.
+`kit cleanup` lists every working folder under `.work/` (in the main checkout and in each ticket worktree) and every ticket worktree at `.worktrees/<TYPE>-<ID>` (TYPE `FEATURE`, `BUG` or `CHORE`) with the card's **live** Status, and marks for deletion only those whose card is Released or Dropped. On a terminal it asks `Delete N folders and remove M worktrees? [y/N]`; `--yes` skips the question, `--only <path>...` (with `--yes`) deletes only the listed paths that are still marked, and without a terminal and `--yes` it lists and deletes nothing. A worktree with uncommitted or unpushed work (commits not on any remote-tracking branch after `git fetch --prune`) is kept, even with `--yes`; before a worktree is removed its isolation is torn down (only what the kit marked: the `wt/<ticket>` Neon branch, the `wt-<name>` tunnel and its DNS record, the Stripe endpoints tagged with the worktree), and a failed teardown keeps the folder; worktrees are removed without `--force` and their local branch with `git branch -d`, never a remote branch. The main checkout, worktrees outside `.worktrees/` and folders it cannot match to a card are never touched, and every skip says why. It exits `0` when every marked item was deleted, `1` when there is no board or a deletion failed, `2` for a bad argument.
 
 `kit worktree <ticket>` resolves the card, refuses a Released or Dropped card or one without a Feature, Bug or Chore Type, and creates `.worktrees/<TYPE>-<ID>` at the repository root on `<feat|fix|chore>/<id>-<slug>` from `origin/main` (after a fetch), reusing the ticket's branch or worktree when one exists. It links the main checkout's `.env.local` files into the worktree, then runs the project's install and build there, naming each command. When it reuses a branch that exists only on `origin`, or one under a name other than the card's today, it prints the branch's last commit and skips install and build, because that branch's scripts have not been read on this machine: read it, then install yourself or rerun with `--install`. `/aspira-worktree` runs it and continues the Claude Code session in the new worktree.
+
+`kit db migrate --name <n>` runs `prisma migrate dev --name <n>` (plus any prisma arguments) with every `database.envVars` name set from the worktree's `.env.development.local`. It refuses before prisma runs when the branch URL is missing, the branch no longer exists in Neon, or the Prisma datasource reads a variable `database.envVars` does not list; it never passes `--force` and never resets.
+
+`kit dev` runs `dev.command` on the worktree's `PORT` and, when the kit wrote a tunnel config, `cloudflared tunnel run` beside it; either one exiting, or Ctrl-C, stops both. Outside an isolated worktree it runs `dev.command` unchanged.
+
+### Worktree isolation
+
+Optional `aspira.json` keys give every ticket worktree its own state, so two tickets never share a database, port or webhook:
+
+| Key | What `kit worktree` (and build-feature's worktree stage) does |
+|---|---|
+| `database` (`provider: "neon"`, `projectId`, `parentBranch`, `envVars`) | Creates the Neon branch `wt/<ticket>` from `parentBranch`, expiring in 14 days, through the Neon API with `NEON_API_KEY`, and writes its URLs to each `envVars` name |
+| `dev` (`command`, `cwd`, `url`, `urlEnvVars`) | Picks a free `PORT` no sibling worktree claims; a `url` with `{name}` or `{port}` (`http://{name}.localhost:{port}`) is written to each `urlEnvVars` name |
+| `tunnel` (`zone`) | Creates the named Cloudflare tunnel `wt-<name>` at `<name>-branch.<zone>` (ingress for `/api/webhooks/*` only), with `~/.cloudflared/cert.pem` and `CLOUDFLARE_API_TOKEN` (DNS Edit, Zone Read) |
+| `webhooks` (`provider: "stripe"`, `path`, `events`, `connect`, `secretEnvVar`, `connectSecretEnvVar`) | Creates a Stripe endpoint at the tunnel host with the Stripe CLI and the app's own `STRIPE_SECRET_KEY` (an `sk_live_` key is refused; `stripe switch` is never used), tagged `aspira_worktree=<name>`, and writes its signing secret. A Stripe account holds 16 endpoints, so they are deleted at merge |
+
+The results go to the app's `.env.development.local` (git-ignored; `kit init` adds the line). Setup and teardown run one at a time under a lock in the main checkout's `.work/`, create only what is missing, and stop at the first failed step, naming it; a rerun resumes. build-feature tears the isolation down once after the merge, and a failed teardown adds a line to the run's end message that names `kit cleanup`.
 
 ## Working on the CLI
 
