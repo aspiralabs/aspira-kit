@@ -40,6 +40,16 @@ export function resolveDevUrl(url: string, worktree: { name: string; port: numbe
   return url.replaceAll('{name}', worktree.name).replaceAll('{port}', String(worktree.port))
 }
 
+/** Whether dev.url carries a {name} or {port} placeholder, which only a kit worktree can fill. */
+export function hasDevPlaceholder(url: string): boolean {
+  return url.includes('{name}') || url.includes('{port}')
+}
+
+/** Whether the dev server is started with `kit dev` (the project has a placeholder url or any isolation key) rather than dev.command as written (A6). */
+export function startsWithKitDev(url: string, config: Readonly<Record<string, unknown>>): boolean {
+  return hasDevPlaceholder(url) || ['database', 'webhooks', 'tunnel'].some((key) => config[key] !== undefined)
+}
+
 /** How bad a visual finding is, its own scale; never counted by severity.ts. */
 export const GRADES = ['blocker', 'major', 'minor'] as const
 export type Grade = (typeof GRADES)[number]
