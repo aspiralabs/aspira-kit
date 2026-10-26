@@ -13,6 +13,7 @@ Files in this package adapted from cartographer. Each carries the Apache-2.0 hea
 line stating what changed:
 
   codebase-map/src/manifest.ts
+  codebase-map/src/membership.ts
   codebase-map/src/brief.ts
   codebase-map/src/notes.ts
 
