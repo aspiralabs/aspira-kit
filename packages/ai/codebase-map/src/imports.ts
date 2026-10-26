@@ -3,7 +3,7 @@
 
 import { builtinModules } from 'node:module'
 import { realpathSync } from 'node:fs'
-import { join, relative, sep } from 'node:path'
+import { dirname, join, relative, sep } from 'node:path'
 import ts from 'typescript'
 import { envNamesIn } from './env.ts'
 
@@ -56,32 +56,68 @@ export function packageName(specifier: string): string {
   return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : (parts[0] ?? specifier)
 }
 
-export type ResolveContext = { repo: string; files: ReadonlySet<string> }
+export type WorkspacePackage = { dir: string; name: string }
+export type ResolveContext = { repo: string; files: ReadonlySet<string>; packages?: WorkspacePackage[] }
 
-const OPTIONS: ts.CompilerOptions = { moduleResolution: ts.ModuleResolutionKind.Bundler, module: ts.ModuleKind.ESNext, allowJs: true, resolveJsonModule: true, allowImportingTsExtensions: true }
+const DEFAULTS: ts.CompilerOptions = { moduleResolution: ts.ModuleResolutionKind.Bundler, module: ts.ModuleKind.ESNext, allowJs: true, resolveJsonModule: true, allowImportingTsExtensions: true }
+const ENTRY_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']
+const noop = (): void => undefined
+
+type Resolver = { options: ts.CompilerOptions; cache: ts.ModuleResolutionCache }
+
+/** The package a bare specifier points into when it names a workspace package of this repo. */
+function workspaceTarget(context: ResolveContext, specifier: string): string | undefined {
+  const name = packageName(specifier)
+  const pkg = context.packages?.find((entry) => entry.name === name)
+  if (pkg === undefined) return undefined
+  const sub = specifier.slice(name.length).replace(/^\//, '')
+  const at = (path: string): string => (pkg.dir === '.' ? path : `${pkg.dir}/${path}`)
+  const stems = sub === '' ? ['src/index', 'index'] : [`src/${sub}`, sub, `src/${sub}/index`, `${sub}/index`]
+  for (const stem of stems) for (const extension of ENTRY_EXTENSIONS) if (context.files.has(at(`${stem}${extension}`))) return at(`${stem}${extension}`)
+  return context.files.has(at('package.json')) ? at('package.json') : undefined
+}
 
 export function resolveEdges(context: ResolveContext, facts: ReadonlyMap<string, SyntaxFacts>): Edge[] {
   const host: ts.ModuleResolutionHost = { ...ts.sys, realpath: (path) => { try { return realpathSync(path) } catch { return path } } }
-  const cache = ts.createModuleResolutionCache(context.repo, (name) => name, OPTIONS)
+  const configHost: ts.ParseConfigFileHost = { ...ts.sys, onUnRecoverableConfigFileDiagnostic: noop }
+  const resolvers = new Map<string, Resolver>()
+  // The nearest tsconfig at or above the importing file, inside the repo; the compiler defaults when there is none.
+  const resolverFor = (source: string): Resolver => {
+    const found = ts.findConfigFile(dirname(join(context.repo, source)), ts.sys.fileExists)
+    const inside = found !== undefined && !relative(context.repo, found).startsWith('..')
+    const key = inside ? found : ''
+    const known = resolvers.get(key)
+    if (known !== undefined) return known
+    const parsed = inside ? ts.getParsedCommandLineOfConfigFile(found, {}, configHost) : undefined
+    const options: ts.CompilerOptions = { ...DEFAULTS, ...parsed?.options, allowJs: true, noEmit: true }
+    const resolver = { options, cache: ts.createModuleResolutionCache(context.repo, (name) => name, options) }
+    resolvers.set(key, resolver)
+    return resolver
+  }
   const edges: Edge[] = []
   for (const [source, fact] of facts) {
+    const resolver = resolverFor(source)
     for (const entry of fact.imports) {
       const edge = (kind: Edge['kind'], target: string): Edge => ({ source, specifier: entry.specifier, kind, target, typeOnly: entry.typeOnly })
       if (isBuiltin(entry.specifier)) {
         edges.push(edge('external', entry.specifier))
         continue
       }
-      const resolved = ts.resolveModuleName(entry.specifier, join(context.repo, source), OPTIONS, host, cache).resolvedModule
-      if (resolved === undefined) {
-        edges.push(edge('unresolved', ''))
-        continue
+      const resolved = ts.resolveModuleName(entry.specifier, join(context.repo, source), resolver.options, host, resolver.cache).resolvedModule
+      if (resolved !== undefined) {
+        const real = host.realpath?.(resolved.resolvedFileName) ?? resolved.resolvedFileName
+        const rel = relative(context.repo, real).split(sep).join('/')
+        const inside = !rel.startsWith('..') && !rel.split('/').includes('node_modules')
+        if (inside && context.files.has(rel)) {
+          edges.push(edge('internal', rel))
+          continue
+        }
       }
-      const real = host.realpath?.(resolved.resolvedFileName) ?? resolved.resolvedFileName
-      const rel = relative(context.repo, real).split(sep).join('/')
-      const inside = !rel.startsWith('..') && !rel.split('/').includes('node_modules')
-      if (inside && context.files.has(rel)) edges.push(edge('internal', rel))
-      else if (resolved.isExternalLibraryImport === true || !inside) edges.push(edge('external', resolved.packageId?.name ?? packageName(entry.specifier)))
-      else edges.push(edge('unresolved', ''))
+      // A workspace package resolved to built output (dist/) that is not a map node, or not linked at all.
+      const workspace = entry.specifier.startsWith('.') ? undefined : workspaceTarget(context, entry.specifier)
+      if (workspace !== undefined) edges.push(edge('internal', workspace))
+      else if (resolved === undefined) edges.push(edge('unresolved', ''))
+      else edges.push(edge('external', resolved.packageId?.name ?? packageName(entry.specifier)))
     }
   }
   return edges

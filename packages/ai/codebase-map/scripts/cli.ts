@@ -2,7 +2,9 @@
 // them as --repo and --map-root. No command builds the map; --check reports freshness (exit 0 fresh, 1 missing or stale).
 
 import { parseArgs } from 'node:util'
+import { dirname } from 'node:path'
 import { buildMap, checkMap } from '../src/build.ts'
+import { mapDirs } from '../src/map-root.ts'
 
 const USAGE = 'usage: map-codebase --repo <dir> --map-root <dir> [--check] [brief <target>... [--json] [--kind k] [--changed] | notes [accept|retire <id>]]'
 
@@ -15,8 +17,10 @@ async function main(): Promise<number> {
     console.error(USAGE)
     return 2
   }
+  // the build functions keep their map in <root>/map: hand them the folder that holds this repo's map/
+  const root = dirname((await mapDirs(repo, mapRoot)).mapDir)
   if (values.check === true) {
-    const freshness = await checkMap(repo, mapRoot)
+    const freshness = await checkMap(repo, root)
     if (freshness.state === 'fresh') {
       console.log(`fresh: the map in ${mapRoot} matches the repo`)
       return 0
@@ -30,7 +34,7 @@ async function main(): Promise<number> {
     console.log('run kit map-codebase to refresh it')
     return 1
   }
-  const summary = await buildMap(repo, mapRoot)
+  const summary = await buildMap(repo, root)
   console.log(`map root: ${summary.mapRoot}`)
   console.log(`commit: ${summary.commit.slice(0, 7)}`)
   console.log(`${summary.files} files`)

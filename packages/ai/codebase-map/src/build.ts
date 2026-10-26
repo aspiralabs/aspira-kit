@@ -170,7 +170,7 @@ export async function buildMap(repo: string, mapRoot: string): Promise<BuildSumm
     const removed = [...previous.keys()].filter((path) => !cache.has(path)).length
 
     const packages = await readPackages(repo, scanned)
-    const edges = resolveEdges({ repo, files: new Set(scanned.map((file) => file.path)) }, facts)
+    const edges = resolveEdges({ repo, files: new Set(scanned.map((file) => file.path)), packages }, facts)
     const graph: Graph = {
       nodes: scanned.map((file) => {
         const pkg = packageForPath(file.path, packages)
