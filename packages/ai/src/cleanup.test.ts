@@ -14,6 +14,13 @@ import { cleanup } from './cleanup.js'
 import { forbiddenSeams, ISOLATION_CONFIG, setServiceEnv, startMocks, type MockSeams, type Mocks } from './isolation-mocks.test.js'
 import { lookupTicket, type TicketLookup, type TicketLookupResult } from './ticket-lookup.js'
 
+// The kit runs only as the global @aspiralabs/ai: T39 points aiPackageDir() at a fake package holding the resolve script.
+const fakeAi = vi.hoisted(() => ({ dir: undefined as string | undefined }))
+vi.mock('./skills.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./skills.js')>()
+  return { ...actual, aiPackageDir: () => fakeAi.dir ?? actual.aiPackageDir() }
+})
+
 const kit = dirname(dirname(fileURLToPath(import.meta.url)))
 
 // The one folder T31 cannot remove: node:fs's rmSync fails on it with a real EACCES error. A read-only
@@ -39,6 +46,7 @@ const temporary: string[] = []
 afterEach(() => {
   process.chdir(startCwd)
   failRemoval.path = ''
+  fakeAi.dir = undefined
   for (const dir of temporary.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
@@ -550,6 +558,7 @@ describe('kit cleanup and the board', () => {
     workFolder(repo.root, 'kit-2-open', { id: 'KIT-2' })
     const modules = join(repo.root, 'node_modules')
     const ai = join(modules, '@aspiralabs', 'ai')
+    fakeAi.dir = ai
     const common = join(ai, 'common')
     mkdirSync(join(common, 'scripts'), { recursive: true })
     symlinkSync(realpathSync(amaro), join(modules, 'amaro'))

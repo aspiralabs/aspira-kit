@@ -12,7 +12,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { parseNextAction, writeProgressNote } from '@aspiralabs/ai/common/lib/progress-note'
-import { APPROVER, cleanup, ID, project, RESUME, TITLE, writeStepExport, type Project, type Result } from '#build-feature/driver.test-helper.ts'
+import { homeProject } from '#build-feature/kit-home.test-helper.ts'
+import { APPROVER, cleanup, ID, RESUME, TITLE, writeStepExport, type Project, type Result } from '#build-feature/driver.test-helper.ts'
 
 afterAll(cleanup)
 
@@ -26,7 +27,7 @@ describe('F20: the end stage carries build-feature\'s own run status, and the ex
   it('a Dropped card ends refused (exit 3), and Ready: Implementation (nothing to do) too', async () => {
     const outcomes = []
     for (const status of ['Dropped', 'Ready: Implementation']) {
-      const h = await project({ status })
+      const h = await homeProject({ status })
       outcomes.push(endOf(await h.advance({}, await h.start())))
     }
     expect(outcomes).toEqual([
@@ -36,19 +37,19 @@ describe('F20: the end stage carries build-feature\'s own run status, and the ex
   }, SLOW)
 
   it('a missing aspira.json ends blocked (exit 1)', async () => {
-    const h = await project({ status: 'Ready: Plan', aspira: null })
+    const h = await homeProject({ status: 'Ready: Plan', aspira: null })
     expect(endOf(await h.advance({}, await h.start()))).toEqual({ stage: 'end', status: 'blocked', code: 1 })
   }, SLOW)
 
   it('a step that stops carries that step\'s own status: a blocked planner ends blocked (exit 1)', async () => {
-    const h = await project({ status: 'Ready: Spec' })
+    const h = await homeProject({ status: 'Ready: Spec' })
     const planner = await h.advance({}, await h.start())
     await h.report(planner.stage!, 'blocked')
     expect(endOf(await h.advance())).toEqual({ stage: 'end', status: 'blocked', code: 1 })
   }, SLOW)
 
   it('gh missing at Step 8 ends blocked (exit 1)', async () => {
-    const h = await project({ status: 'In Progress: Implementation', gh: false })
+    const h = await homeProject({ status: 'In Progress: Implementation', gh: false })
     // The helper's step exports keep the old words, which read as ready (F7).
     await writeStepExport(h.folder, h.repo, 'implementor', 'complete')
     const analyzer = await h.advance({}, await h.start())
@@ -57,7 +58,7 @@ describe('F20: the end stage carries build-feature\'s own run status, and the ex
   }, SLOW)
 
   it('--finish before a merge-ready PR ends incomplete (exit 1), and a later --finish prints the same status', async () => {
-    const h = await project({ status: 'Ready: Plan' })
+    const h = await homeProject({ status: 'Ready: Plan' })
     await h.advance({}, await h.start())
     const end = await h.stop()
     const again = await h.finish()
@@ -70,7 +71,7 @@ describe('F20: the end stage carries build-feature\'s own run status, and the ex
 
 describe('F20: active.json marks a run in progress, and the run\'s end ends it', () => {
   it('is written at run start with no end, and carries the end time once the run stops', async () => {
-    const h = await project({ status: 'Ready: Plan' })
+    const h = await homeProject({ status: 'Ready: Plan' })
     await h.start()
     const running = await active(h)
     const implementor = await h.advance({ approval: async (stage) => h.answer(stage, { ...APPROVER }) })
@@ -88,7 +89,7 @@ describe('F20: active.json marks a run in progress, and the run\'s end ends it',
 
 describe('F20: the progress note while build-feature drives a ticket, and when it stops', () => {
   it('a build interrupted mid-step leaves a note whose Next action resumes build-feature, with the step\'s own command under Open issues', async () => {
-    const h = await project({ status: 'Ready: Plan' })
+    const h = await homeProject({ status: 'Ready: Plan' })
     await h.advance({}, await h.start())
     // The implementor step is running and writes its own note (as every --local driver stage does).
     await writeProgressNote({
@@ -97,15 +98,17 @@ describe('F20: the progress note while build-feature drives a ticket, and when i
       note: {
         id: ID, title: TITLE, skill: 'implementor', runId: 'impl-1', runStatus: 'incomplete', status: 'In Progress: Implementation', expectedStatus: null,
         outputs: [], completed: [], decisions: [], openIssues: [],
-        nextAction: { step: 'implementor is running, or it stopped: rerun it', do: [], run: ['.claude/skills/aspira-implementor/scripts/implementor.sh local KIT-11'], session: '.claude/skills/aspira-implementor/scripts/implementor.sh local KIT-11' },
+        nextAction: { step: 'implementor is running, or it stopped: rerun it', do: [], run: ['~/.claude/skills/aspira-implementor/scripts/implementor.sh local KIT-11'], session: '~/.claude/skills/aspira-implementor/scripts/implementor.sh local KIT-11' },
       },
     })
     const text = await note(h)
-    expect({ run: parseNextAction(text)?.run, demoted: text.slice(text.indexOf('## Open issues'), text.indexOf('## Next action')).includes('implementor.sh local KIT-11') }).toEqual({ run: [RESUME], demoted: true })
+    expect({ run: parseNextAction(text)?.run, demoted: text.slice(text.indexOf('## Open issues'), text.indexOf('## Next action')).includes('~/.claude/skills/aspira-implementor/scripts/implementor.sh local KIT-11') }).toEqual({ run: [RESUME], demoted: true })
+    // T52: no stored line is the project-relative form.
+    expect(text.split('\n').filter((line) => line.replace(/^(?:Run|Session): /, '').startsWith('.claude/skills/'))).toEqual([])
   }, SLOW)
 
   it('a stopped run writes progress.md itself: its run status, the stop reason under Open issues, and Next action the resume command', async () => {
-    const h = await project({ status: 'Ready: Spec' })
+    const h = await homeProject({ status: 'Ready: Spec' })
     const planner = await h.advance({}, await h.start())
     await h.report(planner.stage!, 'blocked')
     await h.advance()

@@ -47,14 +47,14 @@ const NOTHING_TO_DO = 'Nothing to do right now.'
 
 /** The launcher form of a skill's command: the script path, `local <id>`, and the flags the slash command carried. */
 function launcherCommand(skill: string, id: string, extraFlags = ''): string {
-  return `.claude/skills/aspira-${skill}/scripts/${skill}.sh local ${id}${extraFlags}`.trim()
+  return `~/.claude/skills/aspira-${skill}/scripts/${skill}.sh local ${id}${extraFlags}`.trim()
 }
 
 /** A Playbook row's command, translated into the launcher form a session runs directly, with a reminder to read that skill's SKILL.md first (never "the Skill tool"). */
 export function launcherFor(command: string, id: string): string {
   const name = /^\/aspira-([a-z-]+)\s/.exec(command)?.[1]
   if (name === undefined) return ''
-  return `${launcherCommand(name, id)} (read .claude/skills/aspira-${name}/SKILL.md first)`
+  return `${launcherCommand(name, id)} (read ~/.claude/skills/aspira-${name}/SKILL.md first)`
 }
 
 /** The Playbook's row for a live board Status, as a NextAction (F3, F44): the slash command as Run, the launcher form as Session. */

@@ -1,4 +1,4 @@
-// T28 (F6, F8, F10): the real hooks/session-start.sh run with sh, its stdout parsed as one JSON object.
+// T27, T28 (F6, F7, F8, F10): the real hooks/session-start.sh run with sh, its stdout parsed as one JSON object.
 // The version-check cache is <HOME>/.cache/aspiralabs/version-check.json shaped
 // { checkedAt: <ms>, latest: '<x.y.z>', notified: {} }; no network is needed (fresh cache, or no token).
 import { spawnSync } from 'node:child_process'
@@ -30,15 +30,23 @@ function homeWithCache(latest: string | null): string {
   return home
 }
 
+/** A git repository holding aspira.json: an Aspira project, the only place the hook speaks. */
+function aspiraProject(): string {
+  const dir = temp('project')
+  spawnSync('git', ['init', '-q', dir])
+  writeFileSync(join(dir, 'aspira.json'), '{}\n')
+  return dir
+}
+
 type Output = { hookSpecificOutput?: { hookEventName?: string; additionalContext?: string }; systemMessage?: string }
 
 /** PATH with node and the system tools but no global kit, unless `bin` (a folder holding a fake kit) comes first. */
 const pathWithout = (bin?: string): string => [...(bin ? [bin] : []), dirname(process.execPath), '/usr/bin', '/bin'].join(':')
 
-function runHook(script: string, home: string, path = process.env.PATH) {
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home, PATH: path }
+function runHook(script: string, home: string, path = process.env.PATH, project = aspiraProject()) {
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home, PATH: path, CLAUDE_PROJECT_DIR: project }
   for (const key of ['NOTION_TOKEN', 'NOTION_API_KEY']) delete env[key]
-  const result = spawnSync('sh', [script], { env, encoding: 'utf8', timeout: 30_000 })
+  const result = spawnSync('sh', [script], { env, cwd: project, encoding: 'utf8', timeout: 30_000 })
   return { code: result.status, stdout: result.stdout, stderr: result.stderr }
 }
 
@@ -47,9 +55,7 @@ function expectRulesPointer(output: Output): void {
   const context = output.hookSpecificOutput?.additionalContext ?? ''
   expect(context).toContain('https://app.notion.com/p/3e73e59b2258813d9eece6ed89171bd3')
   expect(context).toContain('https://app.notion.com/p/3e83e59b225881f7ac5aeab5d353beea')
-  expect(context).toContain('aspiralabs-ui MCP server')
-  expect(context).toContain("this repository's AGENTS.md")
-  expect(context).toContain('Gotchas')
+  expect(context).toContain('aspiralabs-ui MCP')
 }
 
 describe('SessionStart JSON', () => {
@@ -61,9 +67,8 @@ describe('SessionStart JSON', () => {
     const version = (JSON.parse(readFileSync(PACKAGE_JSON, 'utf8')) as { version: string }).version
     expect(output.systemMessage).toContain('99.0.0')
     expect(output.systemMessage).toContain(version)
-    expect(output.systemMessage).toContain('pnpm add -g @aspiralabs/ai@latest')
+    expect(output.systemMessage).toContain('Upgrade: kit update')
     expect(output.systemMessage).not.toContain('pnpm add -D')
-    expect(output.systemMessage).toContain('kit init')
 
     const plain = runHook(HOOK, homeWithCache(null))
     expect(plain.code).toBe(0)
@@ -74,10 +79,10 @@ describe('SessionStart JSON', () => {
   })
 
   it('T28: copied into .claude/hooks/aspira/ with no kit on PATH, the hook still prints the one JSON object and nothing on stderr', () => {
-    const dir = temp('copy')
-    mkdirSync(join(dir, '.claude', 'hooks', 'aspira'), { recursive: true })
-    copyFileSync(HOOK, join(dir, '.claude', 'hooks', 'aspira', 'session-start.sh'))
-    const result = runHook(join(dir, '.claude', 'hooks', 'aspira', 'session-start.sh'), homeWithCache('99.0.0'), pathWithout())
+    const home = homeWithCache('99.0.0')
+    mkdirSync(join(home, '.claude', 'hooks', 'aspira'), { recursive: true })
+    copyFileSync(HOOK, join(home, '.claude', 'hooks', 'aspira', 'session-start.sh'))
+    const result = runHook(join(home, '.claude', 'hooks', 'aspira', 'session-start.sh'), home, pathWithout())
     expect(result.code).toBe(0)
     expect(result.stderr).toBe('')
     const output = JSON.parse(result.stdout) as Output
@@ -87,15 +92,33 @@ describe('SessionStart JSON', () => {
 
   it('copied into .claude/hooks/aspira/, the notice comes from the global kit on PATH', () => {
     const dir = temp('global')
-    mkdirSync(join(dir, '.claude', 'hooks', 'aspira'), { recursive: true })
-    copyFileSync(HOOK, join(dir, '.claude', 'hooks', 'aspira', 'session-start.sh'))
+    const home = homeWithCache(null)
+    mkdirSync(join(home, '.claude', 'hooks', 'aspira'), { recursive: true })
+    copyFileSync(HOOK, join(home, '.claude', 'hooks', 'aspira', 'session-start.sh'))
     mkdirSync(join(dir, 'bin'))
     writeFileSync(join(dir, 'bin', 'kit'), '#!/bin/sh\n[ "$1" = version-check ] && echo "@aspiralabs/ai 99.0.0 is available"\n')
     chmodSync(join(dir, 'bin', 'kit'), 0o755)
-    const result = runHook(join(dir, '.claude', 'hooks', 'aspira', 'session-start.sh'), homeWithCache(null), pathWithout(join(dir, 'bin')))
+    const result = runHook(join(home, '.claude', 'hooks', 'aspira', 'session-start.sh'), home, pathWithout(join(dir, 'bin')))
     expect(result.code).toBe(0)
     const output = JSON.parse(result.stdout) as Output
     expectRulesPointer(output)
     expect(output.systemMessage).toBe('@aspiralabs/ai 99.0.0 is available')
+  })
+
+  it('T27: in an Aspira project the context has one line per pointer and no pinned, kit init or managed-block wording', () => {
+    const result = runHook(HOOK, homeWithCache(null))
+    expect(result.code).toBe(0)
+    const context = (JSON.parse(result.stdout) as Output).hookSpecificOutput?.additionalContext ?? ''
+    const lines = context.split('\n')
+    const line = (...needles: string[]) => lines.filter((l) => needles.every((n) => l.includes(n)))
+    expect(line('Agent Instructions', 'https://app.notion.com/p/3e73e59b2258813d9eece6ed89171bd3')).toHaveLength(1)
+    expect(line('From Idea to Release', 'https://app.notion.com/p/3e83e59b225881f7ac5aeab5d353beea')).toHaveLength(1)
+    expect(line('https://app.notion.com/p/bc25fc5cf5464f2593c7a0b663d6f859', 'Aspira Kit')).toHaveLength(1)
+    expect(line('aspiralabs-ui', 'get_component')).toHaveLength(1)
+    expect(line('/aspira-')).toHaveLength(1)
+    expect(line('@aspiralabs/config', 'pnpm check')).toHaveLength(1)
+    expect(context).not.toContain('pinned')
+    expect(context).not.toContain('kit init')
+    expect(context).not.toContain('outside the managed block')
   })
 })

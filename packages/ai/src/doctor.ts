@@ -5,16 +5,14 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { delimiter, dirname, join } from 'node:path'
-import { appRoot, checkAspira, type AspiraConfig, isWorkspaceRoot, notionTargets, notionTokenCandidates, notionTokenSource, readAspira, readApp, type NotionTarget } from './aspira.js'
+import { appRoot, aspiraTracked, checkAspira, type AspiraConfig, isWorkspaceRoot, notionTargets, notionTokenCandidates, notionTokenSource, readAspira, readApp, type NotionTarget } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 import { isGitIgnored, repositoryRoot } from './git.js'
 import type { CommandSeams } from './isolation.js'
-import { AI_PACKAGE, aiPackageDir, aiVersion, checkSkills, HOOKS, HOOKS_DIR } from './skills.js'
+import { AI_PACKAGE, aiPackageDir, aiVersion, harnessItems } from './skills.js'
+import { harnessLeftovers } from './stacks/next.js'
 
 type Pkg = { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
-
-/** The hook command `kit init` writes: `sh .claude/hooks/aspira/<name>`, the copy it makes, from the project root. */
-export const hookCommand = (name: string): string => `sh ${HOOKS_DIR}/${name}`
 
 /** The MCP server entry `kit init` writes: the installed @aspiralabs/ui's server, run by node from the project root. */
 export const mcpServer = (app: string): { command: string; args: string[] } => ({ command: 'node', args: [`${app}/node_modules/@aspiralabs/ui/bin/mcp.js`] })
@@ -46,7 +44,7 @@ function findUpModule(dir: string, relative: string): string | undefined {
 export function liveUrlChecker(projectRoot: string, appDir: string): UrlChecker {
   return (checks) => {
     const unreachable = (reason: string): Record<string, UrlCheckResult> => Object.fromEntries(checks.map((check) => [check.key, { ok: false, unreachable: true, reason }]))
-    const ai = aiPackageDir(appDir)
+    const ai = aiPackageDir()
     if (ai === undefined) return unreachable('@aspiralabs/ai is not installed; cannot check Notion')
     const common = join(ai, 'common')
     const script = join(common, 'scripts', 'check-notion-urls.ts')
@@ -105,6 +103,14 @@ export function gitRootOf(projectRoot: string): string | undefined {
   return realpathSync(root) === realpathSync(projectRoot) ? projectRoot : root
 }
 
+/** Whether an aspira.json is in `projectRoot` or a folder above it, up to the git top-level (or `projectRoot` alone outside git). */
+function hasAspiraJson(projectRoot: string, gitRoot: string | undefined): boolean {
+  for (let dir = projectRoot; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, 'aspira.json'))) return true
+    if (dir === (gitRoot ?? projectRoot) || dirname(dir) === dir) return false
+  }
+}
+
 const readText = (path: string): string => (existsSync(path) ? readFileSync(path, 'utf8') : '')
 
 /** Whether an executable `name` is in a directory of env.PATH. */
@@ -134,7 +140,7 @@ function staleEndpoints(projectRoot: string, apiKey: string, env: Record<string,
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-export function doctor(projectRoot: string, log: Log, appFlag?: string, options?: { check?: UrlChecker; env?: Record<string, string | undefined>; seams?: CommandSeams }): number {
+export function doctor(projectRoot: string, log: Log, appFlag?: string, options?: { check?: UrlChecker; env?: Record<string, string | undefined>; seams?: CommandSeams; home?: string }): number {
   const app = appFlag ?? readApp(projectRoot)
   const appDir = appRoot(projectRoot, app)
   const pkg = readJson<Pkg>(join(appDir, 'package.json'))
@@ -160,7 +166,7 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
     log(`FAIL ${AI_PACKAGE} is in ${app ? `${app}/` : ''}package.json; it is installed globally now: pnpm remove ${AI_PACKAGE}${app ? ` (in ${app})` : ''}, then kit init`)
     problems += 1
   } else {
-    log(`${AI_PACKAGE.padEnd(20)} global ${aiVersion(appDir) ?? '(not found)'}`)
+    log(`${AI_PACKAGE.padEnd(20)} global ${aiVersion() ?? '(not found)'}`)
   }
   // A workspace root that declares @aspiralabs packages itself (shared eslint or prettier config) keeps them on the app's version.
   if (isWorkspaceRoot(projectRoot, app)) {
@@ -172,25 +178,13 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
     }
   }
   const inApp = (file: string) => (app ? `${app}/${file}` : file)
-  const settings = () => JSON.stringify(readJson(join(projectRoot, '.claude', 'settings.json')) ?? {})
   const mcp = () => JSON.stringify(readJson(join(projectRoot, '.mcp.json')) ?? {})
-  const ignores = (entry: string) => existsSync(join(projectRoot, '.gitignore')) && new RegExp(`^${entry.replace('.', '\\.')}/?$`, 'm').test(readFileSync(join(projectRoot, '.gitignore'), 'utf8'))
   const gitRoot = gitRootOf(projectRoot)
-  const rootIgnore = join(gitRoot ?? projectRoot, '.gitignore')
   const checks: Array<[string, (() => boolean) | 'skipped']> = [
     [`${inApp('eslint.config.mjs')} extends the kit`, () => existsSync(join(appDir, 'eslint.config.mjs')) && readFileSync(join(appDir, 'eslint.config.mjs'), 'utf8').includes('@aspiralabs/config')],
     [`${inApp('tsconfig.json')} extends the kit`, () => readJson<{ extends?: string }>(join(appDir, 'tsconfig.json'))?.extends?.includes('@aspiralabs/config') ?? false],
     [`${inApp('globals.css')} imports tokens`, () => ['app/globals.css', 'src/app/globals.css'].some((p) => existsSync(join(appDir, p)) && readFileSync(join(appDir, p), 'utf8').includes('@aspiralabs/ui/tokens.css'))],
-    ['AGENTS.md has the managed block', () => existsSync(join(projectRoot, 'AGENTS.md')) && readFileSync(join(projectRoot, 'AGENTS.md'), 'utf8').includes('aspiralabs:begin')],
     [app ? `.mcp.json registers aspiralabs-ui from ${app}/node_modules` : '.mcp.json registers aspiralabs-ui', () => mcp().includes('aspiralabs-ui') && (!app || mcp().includes(mcpServer(app).args[0]!))],
-    [`.claude/settings.json runs the hooks from ${HOOKS_DIR}`, () => HOOKS.every((name) => settings().includes(hookCommand(name)) && existsSync(join(projectRoot, HOOKS_DIR, name)))],
-    ['.gitignore ignores .work/ (per-ticket working folders)', () => ignores('.work')],
-    ['.gitignore ignores .aspira/ (the audit log the hooks write)', () => ignores('.aspira')],
-    // Ticket worktrees live at the git repository root, and the .env.local symlinks kit worktree makes
-    // must stay out of commits; outside a git repository neither applies.
-    gitRoot === undefined
-      ? ['.gitignore ignores .worktrees/ (skipped: not in a git repository)', 'skipped']
-      : [`${gitRoot === projectRoot ? '.gitignore' : rootIgnore} ignores .worktrees/ (per-ticket git worktrees)`, () => existsSync(rootIgnore) && hasLine(readFileSync(rootIgnore, 'utf8'), WORKTREES_ENTRY[0])],
     gitRoot === undefined
       ? ['.env.local is git-ignored (skipped: not in a git repository)', 'skipped']
       : [`${envLocalPaths(app).join(' and ')} git-ignored (local secrets kit worktree links)`, () => envLocalIgnored(projectRoot, app)],
@@ -199,11 +193,19 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
   // The Feature Board: aspira.json with a Notion URL, which the skills and kit next read.
   const aspira = checkAspira(projectRoot)
   checks.push([aspira.ok ? `aspira.json names the Feature Board${app ? ` and the app (${app})` : ''}` : aspira.reason ?? 'aspira.json', () => aspira.ok])
-  // The /aspira-* skills: present, complete, and from the installed version of the package that ships
-  // them (all eleven against @aspiralabs/ai).
-  for (const skill of checkSkills(projectRoot, app)) {
-    checks.push([skill.ok ? `.claude/skills/aspira-${skill.name} matches ${skill.package}` : skill.reason ?? `.claude/skills/aspira-${skill.name}`, () => skill.ok])
+  // aspira.json is git-ignored and never committed (KIT-71); one an earlier kit committed is still tracked until kit upgrade.
+  if (aspiraTracked(projectRoot)) checks.push(['aspira.json is tracked by git; run kit upgrade (it stops tracking the file and keeps it)', () => false])
+  // The global harness (~/.claude skills and hooks, settings.json, the global git ignore): one line per item, from the same
+  // predicate the kit self-heals with. Then whatever an earlier kit committed into the project, one failing line each.
+  const harness = harnessItems({ home: options?.home })
+  for (const item of harness) {
+    checks.push([item.ok ? item.label : item.reason ?? item.label, () => item.ok])
   }
+  for (const leftover of harnessLeftovers(projectRoot)) {
+    checks.push([`${leftover.label} is left from an earlier kit; kit upgrade removes it`, () => false])
+  }
+  // The tier-3 deny hook is global and only guards a repository that has an aspira.json.
+  if (!hasAspiraJson(projectRoot, gitRoot)) log('skip the tier-3 deny hook does not apply in this repository (no aspira.json from here up to the git root)')
   for (const [label, ok] of checks) {
     if (ok === 'skipped') {
       log(`skip ${label}`)
@@ -271,6 +273,12 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
       }
     }
   }
-  log(problems === 0 ? 'healthy' : `${problems} problem(s); run kit init --stack next${app ? ` --app ${app}` : ''} (and --board <Feature Board URL> when aspira.json is the problem)`)
+  const globalFailed = harness.some((item) => !item.ok)
+  const projectFailed = problems > (globalFailed ? harness.filter((item) => !item.ok).length : 0)
+  const hints = [
+    ...(globalFailed ? ['run kit update for the global harness'] : []),
+    ...(projectFailed || !globalFailed ? [`run kit init --stack next${app ? ` --app ${app}` : ''} (and --board <Feature Board URL> when aspira.json is the problem)`] : []),
+  ]
+  log(problems === 0 ? 'healthy' : `${problems} problem(s); ${hints.join('; ')}`)
   return problems === 0 ? 0 : 1
 }

@@ -96,6 +96,17 @@ describe('F50: the run works the ticket in its own worktree', () => {
     expect({ root: link('.env.local'), app: link('tools/app/.env.local') }).toEqual({ root: true, app: true })
   }, SLOW)
 
+  it('links the main checkout\'s git-ignored aspira.json into a new worktree, and into a reused one that lacks it (KIT-71)', async () => {
+    const isLink = (worktree: string) => { try { return lstatSync(join(worktree, 'aspira.json')).isSymbolicLink() } catch { return false } }
+    const { h } = await fromMain({ status: 'Ready: Spec', aspiraUntracked: true })
+    const reuse = await project({ status: 'Ready: Spec', layout: 'checkout', aspiraUntracked: true })
+    await mkdir(reuse.folder, { recursive: true })
+    await writeFile(join(reuse.folder, 'spec.md'), SPEC)
+    await exec('git', ['-C', reuse.main, 'worktree', 'add', '-q', '-b', 'feat/kit-11-x', worktreeFor(reuse.main), 'main'])
+    const redirect = await reuse.start()
+    expect({ created: isLink(worktreeFor(h.main)), reused: isLink(worktreeFor(reuse.main)), stage: redirect.stage?.stage }).toEqual({ created: true, reused: true, stage: 'worktree' })
+  }, SLOW)
+
   it('continues from inside the worktree: the ticket folder is there and the next stage is the step', async () => {
     const { h, result } = await fromMain({ status: 'Ready: Spec' })
     const mainState = JSON.parse(await readFile(join(h.stateDir, 'state.json'), 'utf8')) as { inProgress: unknown; runs: { ended: string | null }[] }

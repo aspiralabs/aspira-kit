@@ -1,10 +1,13 @@
 // aspira.json at the project root: the project's Feature Board (a Notion URL), its Releases page
 // when given, and, in a repository where the app that owns package.json and node_modules is not
 // the root (apps/web), that app's directory. `kit init` writes it, `kit doctor` checks it, the
-// skills, the launchers and `kit next` read it.
-import { existsSync, readFileSync } from 'node:fs'
+// skills, the launchers and `kit next` read it. It is git-ignored (the global ignore lists it) and
+// never committed (KIT-71): `kit init` and `kit upgrade` stop tracking one an earlier kit committed
+// and restore one that a pull of that change deleted.
+import { existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import { readJson, writeJson, type Log } from './fs.js'
+import { git } from './git.js'
 
 export const ASPIRA_FILE = 'aspira.json'
 
@@ -86,6 +89,50 @@ export function resolveProjectRoot(cwd: string): string {
     }
     if (dirname(dir) === dir) return start
   }
+}
+
+/** Whether git tracks the project root's aspira.json; false outside a git repository. */
+export function aspiraTracked(projectRoot: string): boolean {
+  return git(projectRoot, ['ls-files', '--error-unmatch', '--', ASPIRA_FILE]).status === 0
+}
+
+/** Stop tracking aspira.json (`git rm --cached`), keeping the engineer's file; true when it was tracked. A dry run only logs. */
+export function untrackAspira(projectRoot: string, dryRun: boolean, log: Log): boolean {
+  if (!aspiraTracked(projectRoot)) return false
+  const path = join(projectRoot, ASPIRA_FILE)
+  log(`untrack ${path} (git rm --cached: it is git-ignored now; the file stays)`)
+  if (dryRun) return true
+  const run = git(projectRoot, ['rm', '--cached', '-q', '--', ASPIRA_FILE])
+  if (run.status !== 0) throw new Error(`git rm --cached ${ASPIRA_FILE} failed in ${projectRoot}: ${run.stderr.trim()}`)
+  return true
+}
+
+/**
+ * Put back an aspira.json git history has but the working tree lacks: a pull of the commit that stopped tracking it deletes the
+ * local copy. Read from the last commit touching the path, or from its parent when that commit removed it. Never overwrites a file
+ * that is there; true when it restored one. A dry run only logs.
+ */
+export function restoreAspira(projectRoot: string, dryRun: boolean, log: Log): boolean {
+  const path = join(projectRoot, ASPIRA_FILE)
+  try {
+    lstatSync(path)
+    return false
+  } catch {
+    // Nothing there: look in history below.
+  }
+  const last = git(projectRoot, ['log', '-1', '--format=%H', '--', ASPIRA_FILE])
+  const sha = last.stdout.trim()
+  if (last.status !== 0 || sha === '') return false
+  let from = sha
+  let show = git(projectRoot, ['show', `${sha}:./${ASPIRA_FILE}`])
+  if (show.status !== 0) {
+    from = `${sha}^`
+    show = git(projectRoot, ['show', `${from}:./${ASPIRA_FILE}`])
+  }
+  if (show.status !== 0) return false
+  log(`restore ${path} (from commit ${from.slice(0, 7)}${from.endsWith('^') ? '^' : ''}; git no longer tracks it)`)
+  if (!dryRun) writeFileSync(path, show.stdout, { flag: 'wx' })
+  return true
 }
 
 /** Write or update aspira.json. A key that is not given keeps its current value. */

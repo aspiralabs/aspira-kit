@@ -42,7 +42,7 @@ const STEP5: NextAction = {
   step: 'Step 5: plan',
   do: [],
   run: ['/aspira-planner KIT-2'],
-  session: '.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 (read .claude/skills/aspira-planner/SKILL.md first)',
+  session: '~/.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 (read ~/.claude/skills/aspira-planner/SKILL.md first)',
 }
 
 const baseNote = {
@@ -188,8 +188,15 @@ describe('nextAction: the Playbook template (T12)', () => {
     expect(action.run).toEqual(['/aspira-planner KIT-2'])
   })
 
+  it('T32: the planner launcher command starts with the ~/.claude/skills path and the read-first line names the global SKILL.md', () => {
+    expect(action.session.startsWith('~/.claude/skills/aspira-planner/scripts/planner.sh')).toBe(true)
+    expect(action.session).toContain('read ~/.claude/skills/aspira-planner/SKILL.md first')
+    const analyzer = nextAction({ kind: 'run', id: 'KIT-2', skill: 'implementor', runStatus: 'ready', verified: true, liveStatus: 'In Progress: Implementation', apps: ['.'], analyzedApps: [] })
+    expect(analyzer.session.startsWith('~/.claude/skills/aspira-code-analyzer/scripts/code-analyzer.sh')).toBe(true)
+  })
+
   it('the Session line is the launcher form and tells the session to read the skill’s SKILL.md first, never naming the Skill tool', () => {
-    expect(action.session).toContain('.claude/skills/aspira-planner/scripts/planner.sh local KIT-2')
+    expect(action.session).toContain('~/.claude/skills/aspira-planner/scripts/planner.sh local KIT-2')
     expect(action.session).toMatch(/SKILL\.md/)
     expect(action.session.toLowerCase()).not.toContain('skill tool')
   })

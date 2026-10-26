@@ -11,6 +11,7 @@
 // the gate's: one outcome per build, a new implementor run verifies again.
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { touchesUi } from '@aspiralabs/ai/common/lib/plan'
@@ -27,7 +28,7 @@ import { parseStatus, system, type System } from '#build-feature/system.ts'
 /** Verifications per build before the run stops with blockers left. */
 export const MAX_VERIFICATIONS = 3
 
-const SKILL = '.claude/skills/aspira-visual-verify/SKILL.md'
+const skillPath = (): string => join(homedir(), '.claude', 'skills', 'aspira-visual-verify', 'SKILL.md')
 
 /** What the phase records in state.phases['visual-verify']: the result, the build it belongs to, and the tracked paths dirty before the last verification. */
 export const visualVerifyRecordSchema = visualVerifyResultSchema.extend({ key: z.string(), dirtyBefore: z.array(z.string()).default([]) })
@@ -118,7 +119,7 @@ async function verifyStage(context: PhaseContext, state: RunState, key: string, 
       screenshotsDir: folderOf(context),
       spec: join(context.folder, 'spec.reviewed/spec.reviewed.md'),
       plan: join(context.folder, 'plan.review/trace/plan.json'),
-      skill: join(context.repo, SKILL),
+      skill: skillPath(),
       instructions: `Follow the check in "skill" exactly, in this session (it needs this session's Chrome tool), against the dev server in "devServer": start it with "run", never with credentials, or reuse a server already answering at "url". Save screenshots under "screenshotsDir". Write the answer {"nonce", "status", "skipReason", "viewport", "findings", "notExercised", "backendNotDeployed", "noData", "screenshots"} to the output file.`,
     },
     data: { part: 'verify', key, n, dirtyBefore: await dirtyTracked(context, sys) },

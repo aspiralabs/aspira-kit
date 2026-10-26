@@ -5,5 +5,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     sequence: { concurrent: true },
+    // No test reads or writes the machine's global git config or ignore (../git-setup.ts).
+    setupFiles: ['../git-setup.ts'],
   },
 })

@@ -16,7 +16,8 @@ import { renderTicketMd } from '@aspiralabs/ai/common/lib/ticket'
 const exec = promisify(execFile)
 const PACKAGE = join(dirname(fileURLToPath(import.meta.url)), '..')
 const DRIVER = join(PACKAGE, 'scripts', 'local.ts')
-const LOADER = join(PACKAGE, 'node_modules', 'amaro', 'dist', 'register-strip.mjs')
+// amaro is a dependency of @aspiralabs/ai, the groomer folder's parent, since KIT-65 folded the agent packages in.
+const LOADER = join(PACKAGE, '..', 'node_modules', 'amaro', 'dist', 'register-strip.mjs')
 const BOARD = 'https://app.notion.com/p/3e93e59b225881bba552f8e336ad08ad'
 
 const temps: string[] = []

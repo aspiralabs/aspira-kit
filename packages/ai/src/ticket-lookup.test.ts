@@ -5,10 +5,17 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFil
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { liveResolver, next } from './next.js'
 import { lookupTicket } from './ticket-lookup.js'
 import { aiPackageDir, kitPackageDir } from './skills.js'
+
+// The kit runs only as the global @aspiralabs/ai (aiPackageDir() is the running package), so each layout stands in for it.
+const fakeAi = vi.hoisted(() => ({ dir: undefined as string | undefined }))
+vi.mock('./skills.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./skills.js')>()
+  return { ...actual, aiPackageDir: () => fakeAi.dir ?? actual.aiPackageDir() }
+})
 
 const kit = dirname(dirname(fileURLToPath(import.meta.url)))
 const amaro = join(dirname(dirname(kit)), 'packages', 'ai', 'node_modules', 'amaro')
@@ -55,6 +62,7 @@ function layout(common: Fake | 'no script' | 'absent'): Layout {
       writeFileSync(join(commonDir, 'scripts', 'resolve-ticket.ts'), resolveScript(common))
     }
   }
+  fakeAi.dir = common === 'absent' ? undefined : aiDir
   return { root, app, common: join(app, 'node_modules', '@aspiralabs', 'ai', 'common') }
 }
 
@@ -110,14 +118,14 @@ describe('lookupTicket: why there is no ticket', () => {
   })
 
   it('with no @aspiralabs/ai in the project, the lookup uses the global one: the running package', () => {
-    const project = layout('absent')
-    expect(aiPackageDir(project.app)).toBe(kitPackageDir())
+    layout('absent')
+    expect(aiPackageDir()).toBe(kitPackageDir())
   })
 
   it('@aspiralabs/ai without its resolve script names the script path', () => {
     const project = layout('no script')
     const result = lookup(project)
-    expect(result).toMatchObject({ reason: 'board unreachable', cause: 'kit', detail: expect.stringContaining(join(project.common, 'scripts', 'resolve-ticket.ts')) })
+    expect(result).toMatchObject({ reason: 'board unreachable', cause: 'kit', detail: expect.stringContaining(join(realpathSync(project.common), 'scripts', 'resolve-ticket.ts')) })
   })
 })
 

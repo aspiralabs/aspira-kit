@@ -23,7 +23,7 @@ const PLANNER_CONTINUATION: NextAction = {
   step: 'Step 5 is running, or it stopped: rerun it',
   do: [],
   run: ['/aspira-planner KIT-2'],
-  session: '.claude/skills/aspira-planner/scripts/planner.sh local KIT-2',
+  session: '~/.claude/skills/aspira-planner/scripts/planner.sh local KIT-2',
 }
 
 beforeEach(async () => {
@@ -87,5 +87,6 @@ describe('T15: once the marker is gone (the build-feature run ended)', () => {
     await writeProgressNote({ folder, repo, note: baseNote })
     const text = await readFile(join(folder, 'progress.md'), 'utf8')
     expect(parseNextAction(text)).toEqual(PLANNER_CONTINUATION)
+    expect(parseNextAction(text)?.session).toBe('~/.claude/skills/aspira-planner/scripts/planner.sh local KIT-2')
   })
 })

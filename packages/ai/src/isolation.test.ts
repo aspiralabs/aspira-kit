@@ -616,6 +616,17 @@ describe('isolate: the git-ignore refusal (F6)', () => {
     expect(result.reason).toContain('.aspira/')
     expect(existsSync(join(h.wt, '.aspira', 'cloudflared.yml'))).toBe(false)
   })
+
+  it('T38 an unignored .aspira/ tells the engineer to run kit update, never to add .aspira/ to .gitignore', async () => {
+    const h = await harness({ database: DATABASE, webhooks: [STRIPE_HOOK] }, { ignore: ['.env.development.local', '.work/', '.worktrees/'] })
+    const result = await go(h)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.step).toBe('tunnel')
+    expect(result.reason).toContain('kit update')
+    expect(result.reason).not.toContain('kit init')
+    expect(result.reason).not.toMatch(/add the line \.aspira\/ to \.gitignore/)
+  })
 })
 
 describe('isolate: the port (F9)', () => {

@@ -107,7 +107,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
       'git push -u origin feat/<id>-<slug>',
       'gh pr create --base main --title "<ID>: <feature>" --body-file <summary.md>',
       '```',
-      `Needs In Progress: Implementation, after Step 7; ${STEP8_ROW?.manual ?? 'by hand'}: read \`.work/<id>-<slug>/progress.md\`'s Next action for the commit of the analyzer's changes, the push and the \`gh pr create\` command above, word for word. The body links the ticket. Then set the ticket's **PR** property to the PR URL (BOARD-005) and move the card to In Review: Implementation. The implementor does both itself when it opened the PR (\`--pr\`, as a separate process); after a build in this session (the default), which pushes nothing, you do. Verify with \`.claude/skills/aspira-implementor/scripts/implementor.sh local <ID> --verify --pr-url <url>\`. Open the PR before the review; the reviewer comments on it.`,
+      `Needs In Progress: Implementation, after Step 7; ${STEP8_ROW?.manual ?? 'by hand'}: read \`.work/<id>-<slug>/progress.md\`'s Next action for the commit of the analyzer's changes, the push and the \`gh pr create\` command above, word for word. The body links the ticket. Then set the ticket's **PR** property to the PR URL (BOARD-005) and move the card to In Review: Implementation. The implementor does both itself when it opened the PR (\`--pr\`, as a separate process); after a build in this session (the default), which pushes nothing, you do. Verify with \`~/.claude/skills/aspira-implementor/scripts/implementor.sh local <ID> --verify --pr-url <url>\`. Open the PR before the review; the reviewer comments on it.`,
     ].join('\n'),
   },
   {

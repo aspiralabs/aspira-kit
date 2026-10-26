@@ -1,15 +1,10 @@
-// T67 (plan.json P12, F8, A3): every launcher checks the skill's `.kit-version` against the
-// installed `@aspiralabs/agents` before it starts (packages/ai/src/skills.ts checkSkills
-// compares .kit-version with the installed version; packages/ai/planner/skill/aspira-planner/scripts/planner.sh:52-90
-// resolve_agent, which has no such check yet). The implementation wave (plan.json P20) makes
-// resolve_agent, when the agent source is the installed package, compare the skill's own
-// `.kit-version` with `node_modules/@aspiralabs/ai`'s version: a mismatch ends the run blocked,
-// printing `kit init`, before anything is launched (F8). Running from source (the kit-development
-// env override, or the package checkout) only warns and continues (R14). This file fails until
-// that lands: today resolve_agent never reads `.kit-version`, so an installed mismatch still runs.
-//
-// Every expected value here is copied from the spec (spec.reviewed/spec.reviewed.md F8) and the
-// plan's own P20 task description, never recomputed the way resolve_agent would compute it (TEST-006).
+// Every launcher is installed under <HOME>/.claude/skills/aspira-<name>/ and run with a temp HOME and a
+// working directory inside a project (a folder holding aspira.json). It resolves the project from the
+// working directory, runs only the global kit (`kit package-dir`, or the AGENT_DIR kit-development
+// override), and checks its own `.kit-version` against that kit: a pin the kit's self-heal just rewrote
+// stops the run with `skills were updated to <version>; run the command again` (T40), a pin that stays
+// different blocks it and names `kit update`, never `kit init` (T41), and a project's own node_modules
+// copy of @aspiralabs/ai is never run (T44). Expected strings are copied from the spec (F5, F11, F12, F20).
 import { execFileSync, spawnSync } from 'node:child_process'
 import { access, chmod, cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -42,168 +37,181 @@ const LAUNCHERS: Launcher[] = [
 ]
 
 const AI_VERSION = '0.8.0'
-const SKILL_KIT_VERSION = '0.7.0'
+const SKILL_KIT_VERSION = '0.0.1'
 
 // A stub `scripts/local.ts`: every launcher's `local` subcommand ends by `exec`-ing node on this
-// file from inside the agent package directory (agent_node / cmd_local, every <agent>.sh). It
-// never touches Notion or GitHub (TEST-003, TEST-007): it only records that it ran, so the test
-// can tell a blocked run (F8) from one that reached the agent.
+// file from inside the agent package directory. It never touches Notion or GitHub: it only records
+// that it ran, so a test can tell a blocked run from one that reached the agent.
 const STUB_LOCAL_TS = "require('node:fs').writeFileSync('ran.marker', JSON.stringify(process.argv.slice(2)))\n"
 
-/** A fresh git repository (resolve_agent's project_root and every launcher's `parse` need one) with
- * node_modules/@aspiralabs/ai at AI_VERSION, a stub node_modules/@aspiralabs/ai/<agent> folder
- * (whose scripts/local.ts records a run), amaro (so a non-blocked run can reach node) and the
- * launcher's skill folder copied in with .kit-version at SKILL_KIT_VERSION (F8's mismatch). */
-async function makeProject(launcher: Launcher): Promise<{ project: string; scriptPath: string; stubDir: string; sourceDir: string }> {
-  const project = await mkdtemp(join(tmpdir(), 'launcher-version-'))
+/** A stub @aspiralabs/ai package outside any node_modules, holding a stub <agent> folder whose local.ts records a run. */
+async function makeAgentPackage(parent: string, launcher: Launcher, version = AI_VERSION): Promise<{ pkg: string; agentDir: string }> {
+  const pkg = join(parent, 'aspira-ai')
+  const agentDir = join(pkg, launcher.name)
+  await mkdir(join(agentDir, 'scripts'), { recursive: true })
+  await mkdir(join(agentDir, 'skill'), { recursive: true })
+  await writeFile(join(pkg, 'package.json'), JSON.stringify({ name: '@aspiralabs/ai', version }, null, 2))
+  await writeFile(join(agentDir, 'scripts', 'local.ts'), STUB_LOCAL_TS)
+  return { pkg, agentDir }
+}
+
+type World = {
+  root: string
+  home: string
+  project: string
+  scriptPath: string
+  /** The agent folder `kit package-dir` names. */
+  agentDir: string
+  path: string
+  versionFile: string
+}
+
+/**
+ * A temp HOME holding the launcher at <HOME>/.claude/skills/aspira-<name>/ with .kit-version at
+ * `skillVersion`, a project (aspira.json, git repository) as the working directory, and a `kit` on PATH
+ * whose `package-dir` prints a stub package at AI_VERSION. With `heal`, `kit package-dir` first rewrites
+ * the skill's .kit-version to AI_VERSION, the way the kit's self-heal does. With `withKit` false there is
+ * no kit on PATH at all.
+ */
+async function makeWorld(launcher: Launcher, options: { heal: boolean; withKit?: boolean; skillVersion?: string }): Promise<World> {
+  const root = await mkdtemp(join(tmpdir(), 'launcher-version-'))
+  const home = join(root, 'home')
+  const project = join(root, 'project')
+  await mkdir(home, { recursive: true })
+  await mkdir(project, { recursive: true })
   execFileSync('git', ['init', '-q'], { cwd: project })
+  await writeFile(join(project, 'aspira.json'), JSON.stringify({ board: 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6' }))
 
-  const aiDir = join(project, 'node_modules', '@aspiralabs', 'ai')
-  await mkdir(aiDir, { recursive: true })
-  await writeFile(join(aiDir, 'package.json'), JSON.stringify({ name: '@aspiralabs/ai', version: AI_VERSION }, null, 2))
-
-  const stubDir = join(aiDir, launcher.name)
-  await mkdir(join(stubDir, 'scripts'), { recursive: true })
-  await mkdir(join(stubDir, 'skill'), { recursive: true })
-  await writeFile(join(stubDir, 'scripts', 'local.ts'), STUB_LOCAL_TS)
-
-  // The kit-development override points at a kit source checkout, never at node_modules: Node's
-  // built-in type stripping refuses any .ts under node_modules, and only the real amaro hook (a
-  // no-op stub here) lifts that, so an override aimed at the installed stub could never run it.
-  const sourceDir = join(project, 'aspira-kit', 'packages', 'ai', launcher.name)
-  await mkdir(join(sourceDir, 'scripts'), { recursive: true })
-  await mkdir(join(sourceDir, 'skill'), { recursive: true })
-  await writeFile(join(project, 'aspira-kit', 'packages', 'ai', 'package.json'), JSON.stringify({ name: '@aspiralabs/ai', version: SKILL_KIT_VERSION }, null, 2))
-  await writeFile(join(sourceDir, 'scripts', 'local.ts'), STUB_LOCAL_TS)
-
-  const amaroDir = join(project, 'node_modules', 'amaro', 'dist')
-  await mkdir(amaroDir, { recursive: true })
-  await writeFile(join(amaroDir, 'register-strip.mjs'), 'export {}\n')
-
-  const skillTarget = join(project, '.claude', 'skills', `aspira-${launcher.name}`)
+  const skillTarget = join(home, '.claude', 'skills', `aspira-${launcher.name}`)
   await cp(join(ROOT, launcher.skillDir), skillTarget, { recursive: true })
-  await writeFile(join(skillTarget, '.kit-version'), `${SKILL_KIT_VERSION}\n`)
+  const versionFile = join(skillTarget, '.kit-version')
+  await writeFile(versionFile, `${options.skillVersion ?? SKILL_KIT_VERSION}\n`)
   const scriptPath = join(skillTarget, 'scripts', `${launcher.name}.sh`)
   await chmod(scriptPath, 0o755)
 
-  return { project, scriptPath, stubDir, sourceDir }
+  const { pkg, agentDir } = await makeAgentPackage(join(root, 'global'), launcher)
+  const bin = join(root, 'global', 'bin')
+  await mkdir(bin, { recursive: true })
+  let path = (process.env.PATH ?? '').split(':').filter((dir) => dir !== '' && !existsKit(dir)).join(':')
+  if (options.withKit !== false) {
+    const heal = options.heal ? `printf '%s\\n' '${AI_VERSION}' > '${versionFile}'\n` : ''
+    await writeFile(join(bin, 'kit'), `#!/bin/sh\nif [ "$1" = package-dir ]; then\n${heal}echo '${pkg}'\nfi\n`)
+    await chmod(join(bin, 'kit'), 0o755)
+    path = `${bin}:${path}`
+  }
+  return { root, home, project, scriptPath, agentDir, path, versionFile }
 }
 
-function runLocal(project: string, scriptPath: string, args: string[], envVar: string, agentDir?: string): { stdout: string; status: number | null } {
-  const env: NodeJS.ProcessEnv = { ...process.env }
-  delete env.NOTION_TOKEN
-  delete env.NOTION_API_KEY
-  delete env.AI_GATEWAY_API_KEY
-  if (agentDir !== undefined) env[envVar] = agentDir
-  else delete env[envVar]
-  const result = spawnSync('bash', [scriptPath, ...args], { cwd: project, env, encoding: 'utf8', timeout: 15_000 })
+function existsKit(dir: string): boolean {
+  return spawnSync('test', ['-e', join(dir, 'kit')]).status === 0
+}
+
+function runLauncher(world: World, launcher: Launcher, extraEnv: Record<string, string> = {}, args: string[] = launcher.args, cwd = world.project): { stdout: string; status: number | null } {
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: world.home, USERPROFILE: world.home, PATH: world.path, ...extraEnv }
+  for (const key of ['NOTION_TOKEN', 'NOTION_API_KEY', 'AI_GATEWAY_API_KEY']) delete env[key]
+  if (!(launcher.envVar in extraEnv)) delete env[launcher.envVar]
+  const result = spawnSync('bash', [world.scriptPath, ...args], { cwd, env, encoding: 'utf8', timeout: 15_000 })
   return { stdout: `${result.stdout ?? ''}${result.stderr ?? ''}`, status: result.status }
 }
 
-async function ran(stubDir: string): Promise<boolean> {
+async function ran(agentDir: string): Promise<boolean> {
   try {
-    await access(join(stubDir, 'ran.marker'))
+    await access(join(agentDir, 'ran.marker'))
     return true
   } catch {
     return false
   }
 }
 
-describe.each(LAUNCHERS)('$name .kit-version vs. installed @aspiralabs/ai (T67, T16, F5, F8)', (launcher) => {
-  let project: string
+describe.each(LAUNCHERS)('$name .kit-version vs. the global kit (T40, T41, F5, F20)', (launcher) => {
+  let root: string
 
   afterEach(async () => {
-    await rm(project, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true })
   })
 
-  it('an installed mismatch blocks the run, prints kit init, and the agent never runs', async () => {
-    const made = await makeProject(launcher)
-    project = made.project
-    const result = runLocal(project, made.scriptPath, launcher.args, launcher.envVar)
+  it('T40 stops after a self-heal rewrote the skill pin: skills were updated, run the command again, and the agent never runs', async () => {
+    const world = await makeWorld(launcher, { heal: true })
+    root = world.root
+    const result = runLauncher(world, launcher)
     expect(result.status).not.toBe(0)
-    expect(result.stdout).toContain('kit init')
-    expect(result.stdout).toContain(`@aspiralabs/ai ${SKILL_KIT_VERSION}`)
+    expect(result.stdout).toContain(`skills were updated to ${AI_VERSION}; run the command again`)
+    expect(await ran(world.agentDir)).toBe(false)
+  })
+
+  it('T41 a pin that stays different blocks the run and names kit update, never kit init', async () => {
+    const world = await makeWorld(launcher, { heal: false })
+    root = world.root
+    const result = runLauncher(world, launcher)
+    expect(result.status).not.toBe(0)
+    expect(result.stdout).toContain(`pinned to @aspiralabs/ai ${SKILL_KIT_VERSION}`)
     expect(result.stdout).toContain(AI_VERSION)
-    expect(result.stdout).not.toContain('@aspiralabs/agents')
-    expect(await ran(made.stubDir)).toBe(false)
+    expect(result.stdout).toContain('kit update')
+    expect(result.stdout).not.toContain('kit init')
+    expect(await ran(world.agentDir)).toBe(false)
   })
 
-  it('matching versions run the agent', async () => {
-    const made = await makeProject(launcher)
-    project = made.project
-    await writeFile(join(project, '.claude', 'skills', `aspira-${launcher.name}`, '.kit-version'), `${AI_VERSION}\n`)
-    // Node refuses to strip types from a .ts under node_modules unless the real amaro hook is loaded
-    // (the stub amaro here is a no-op), so the installed folder is a symlink to the kit source: the
-    // launcher resolves it to its real path (pwd -P), still takes it as the installed agent, and runs it.
-    await rm(made.stubDir, { recursive: true, force: true })
-    await symlink(made.sourceDir, made.stubDir)
-    const result = runLocal(project, made.scriptPath, launcher.args, launcher.envVar)
-    expect(await ran(made.sourceDir)).toBe(true)
-    expect(result.stdout).not.toContain('@aspiralabs/agents')
+  it('T41 with no kit on PATH the cannot-find message names kit update, never kit init', async () => {
+    const world = await makeWorld(launcher, { heal: false, withKit: false })
+    root = world.root
+    const result = runLauncher(world, launcher)
+    expect(result.status).not.toBe(0)
+    expect(result.stdout).toContain(`cannot find ${launcher.name}`)
+    expect(result.stdout).toContain('kit update')
+    expect(result.stdout).not.toContain('kit init')
   })
 
-  it('the AGENT_DIR kit-development override only warns about the mismatch, and the agent runs', async () => {
-    const made = await makeProject(launcher)
-    project = made.project
-    const result = runLocal(project, made.scriptPath, launcher.args, launcher.envVar, made.sourceDir)
-    expect(result.stdout.toLowerCase()).toMatch(/mismatch/)
-    expect(result.stdout).not.toContain('@aspiralabs/agents')
-    expect(await ran(made.sourceDir)).toBe(true)
-    expect(await ran(made.stubDir)).toBe(false)
+  it('a pin equal to the global kit version runs the global agent', async () => {
+    const world = await makeWorld(launcher, { heal: false, skillVersion: AI_VERSION })
+    root = world.root
+    runLauncher(world, launcher)
+    expect(await ran(world.agentDir)).toBe(true)
   })
 })
 
-/** A project with no @aspiralabs/ai under it and a global one: a `kit` on PATH whose `kit package-dir` prints a package
- * at AI_VERSION holding a stub <agent> folder. The package sits outside any node_modules so Node strips the stub's types. */
-async function makeGlobalProject(launcher: Launcher): Promise<{ project: string; scriptPath: string; stubDir: string; path: string }> {
-  const project = await mkdtemp(join(tmpdir(), 'launcher-global-'))
-  execFileSync('git', ['init', '-q'], { cwd: project })
-  const pkg = join(project, 'global', 'aspira-ai')
-  const stubDir = join(pkg, launcher.name)
-  await mkdir(join(stubDir, 'scripts'), { recursive: true })
-  await mkdir(join(stubDir, 'skill'), { recursive: true })
-  await writeFile(join(pkg, 'package.json'), JSON.stringify({ name: '@aspiralabs/ai', version: AI_VERSION }, null, 2))
-  await writeFile(join(stubDir, 'scripts', 'local.ts'), STUB_LOCAL_TS)
-  const bin = join(project, 'global', 'bin')
-  await mkdir(bin, { recursive: true })
-  await writeFile(join(bin, 'kit'), `#!/bin/sh\n[ "$1" = package-dir ] && echo '${pkg}'\n`)
-  await chmod(join(bin, 'kit'), 0o755)
-  const skillTarget = join(project, '.claude', 'skills', `aspira-${launcher.name}`)
-  await cp(join(ROOT, launcher.skillDir), skillTarget, { recursive: true })
-  await writeFile(join(skillTarget, '.kit-version'), `${SKILL_KIT_VERSION}\n`)
-  const scriptPath = join(skillTarget, 'scripts', `${launcher.name}.sh`)
-  await chmod(scriptPath, 0o755)
-  return { project, scriptPath, stubDir, path: `${bin}:${process.env.PATH ?? ''}` }
-}
-
-describe.each(LAUNCHERS)('$name runs the global @aspiralabs/ai when the project has none', (launcher) => {
-  let project: string
+describe.each(LAUNCHERS)('$name runs the global kit only (T44, F12)', (launcher) => {
+  let root: string
 
   afterEach(async () => {
-    await rm(project, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true })
   })
 
-  const run = (made: Awaited<ReturnType<typeof makeGlobalProject>>) => {
-    const env: NodeJS.ProcessEnv = { ...process.env, PATH: made.path }
-    for (const key of ['NOTION_TOKEN', 'NOTION_API_KEY', 'AI_GATEWAY_API_KEY', launcher.envVar]) delete env[key]
-    const result = spawnSync('bash', [made.scriptPath, ...launcher.args], { cwd: made.project, env, encoding: 'utf8', timeout: 15_000 })
-    return { stdout: `${result.stdout ?? ''}${result.stderr ?? ''}`, status: result.status }
-  }
+  it('T44 starts the global agent, not the project node_modules one, and the AGENT_DIR override wins over both', async () => {
+    const world = await makeWorld(launcher, { heal: false, skillVersion: AI_VERSION })
+    root = world.root
+    // The project's own copy: node_modules/@aspiralabs/ai/<agent> is a symlink to a stub outside node_modules, so a launcher that took it would run it.
+    const projectPackage = await makeAgentPackage(join(world.root, 'project-copy'), launcher)
+    const installed = join(world.project, 'node_modules', '@aspiralabs')
+    await mkdir(installed, { recursive: true })
+    await symlink(projectPackage.pkg, join(installed, 'ai'))
+    const override = await makeAgentPackage(join(world.root, 'override'), launcher)
 
-  it('a skill pinned to another version than the global install is blocked and says kit init', async () => {
-    const made = await makeGlobalProject(launcher)
-    project = made.project
-    const result = run(made)
-    expect(result.status).not.toBe(0)
-    expect(result.stdout).toContain(`pinned to @aspiralabs/ai ${SKILL_KIT_VERSION} but the global @aspiralabs/ai is ${AI_VERSION}; run kit init`)
-    expect(await ran(made.stubDir)).toBe(false)
+    runLauncher(world, launcher)
+    expect(await ran(world.agentDir)).toBe(true)
+    expect(await ran(projectPackage.agentDir)).toBe(false)
+
+    runLauncher(world, launcher, { [launcher.envVar]: override.agentDir })
+    expect(await ran(override.agentDir)).toBe(true)
+    expect(await ran(projectPackage.agentDir)).toBe(false)
+  })
+})
+
+describe.each(LAUNCHERS)('$name stops looking for the project (REBA1.1)', (launcher) => {
+  let root: string
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true })
   })
 
-  it('a skill pinned to the global version runs the global agent', async () => {
-    const made = await makeGlobalProject(launcher)
-    project = made.project
-    await writeFile(join(project, '.claude', 'skills', `aspira-${launcher.name}`, '.kit-version'), `${AI_VERSION}\n`)
-    run(made)
-    expect(await ran(made.stubDir)).toBe(true)
-  })
+  it('a relative --repo outside any project fails instead of walking up forever', async () => {
+    root = await mkdtemp(join(tmpdir(), 'launcher-walk-'))
+    const bare = join(root, 'bare')
+    execFileSync('git', ['init', '-q', bare])
+    const script = join(ROOT, launcher.skillDir, 'scripts', `${launcher.name}.sh`)
+    for (const sub of ['local', 'start']) {
+      const result = spawnSync('bash', [script, sub, 'KIT-2', '--repo', 'some/relative/dir'], { cwd: bare, env: { ...process.env, HOME: root }, encoding: 'utf8', timeout: 10_000 })
+      expect(result.error, `${launcher.name} ${sub} hung`).toBeUndefined()
+      expect(result.status, `${launcher.name} ${sub}`).not.toBe(0)
+    }
+  }, 30_000)
 })

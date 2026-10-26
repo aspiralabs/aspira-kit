@@ -410,8 +410,8 @@ export async function writeTelemetry(folder: string, runId: string, document: Ot
     }
     await releaseRunId(folder, runId)
     return { ok: true, path: target }
-  } catch {
-    return { ok: false, reason: 'the telemetry file could not be written' }
+  } catch (error) {
+    return { ok: false, reason: `the telemetry file could not be written (${error instanceof Error ? error.message : String(error)})` }
   } finally {
     await unlink(temp).catch(() => undefined)
   }

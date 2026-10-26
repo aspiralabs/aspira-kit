@@ -9,23 +9,24 @@
 // `options.seams` (the isolation module's seams; only `stripe` is used, to list endpoints). The Stripe
 // seam is a synchronous process runner, so doctor stays synchronous.
 import { execFileSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { readApp } from './aspira.js'
-import { doctor, hookCommand, mcpServer } from './doctor.js'
+import { doctor, mcpServer } from './doctor.js'
 import { ISOLATION_CONFIG, startMocks, type Mocks } from './isolation-mocks.test.js'
-import { AGENTS, HOOKS, installHooks, KIT_SKILLS, VERSION_FILE } from './skills.js'
+import { writeGlobalHarness } from './skills.js'
 
 const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6'
 const KIT_VERSION = '0.9.0'
-const AI_VERSION = (JSON.parse(readFileSync(join(dirname(dirname(fileURLToPath(import.meta.url))), 'package.json'), 'utf8')) as { version: string }).version
-const IGNORE = ['.work/', '.aspira/', '.worktrees/', '.env.local']
+/** The .gitignore lines a project keeps now: the harness is global (a temp home), so .work/, .aspira/ and .worktrees/ are not the project's. */
+const IGNORE = ['.env.local']
+/** A temp home holding a current global harness, so doctor's harness check passes and these suites keep testing the environment checks. */
+let home: string
 
 /**
- * A project kit init has fully set up, in a git repository, so every other doctor check passes and the
+ * A project kit init has fully set up, in a git repository with no project .claude folder, so every other doctor check passes and the
  * exit code turns on the isolation checks alone. `ignore` is the .gitignore body.
  */
 function project(config: Record<string, unknown>, ignore: string[]): string {
@@ -42,19 +43,10 @@ function project(config: Record<string, unknown>, ignore: string[]): string {
   writeFileSync(join(root, 'tsconfig.json'), JSON.stringify({ extends: '@aspiralabs/config/tsconfig' }))
   mkdirSync(join(root, 'app'), { recursive: true })
   writeFileSync(join(root, 'app', 'globals.css'), '@import "@aspiralabs/ui/tokens.css";\n')
-  writeFileSync(join(root, 'AGENTS.md'), '<!-- aspiralabs:begin -->\n<!-- aspiralabs:end -->\n')
   writeFileSync(join(root, '.mcp.json'), JSON.stringify({ mcpServers: { 'aspiralabs-ui': app ? mcpServer(app) : { command: 'npx', args: ['--no', 'aspiralabs-ui-mcp'] } } }))
-  mkdirSync(join(root, '.claude'), { recursive: true })
-  writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify({ hooks: { SessionStart: [{ matcher: '', hooks: HOOKS.map((name) => ({ command: hookCommand(name) })) }] } }))
-  installHooks({ projectRoot: root, dryRun: false, log: () => {} })
+  home = realpathSync(mkdtempSync(join(tmpdir(), 'kit-doctor-env-home-')))
+  writeGlobalHarness({ home })
   writeFileSync(join(root, '.gitignore'), `${ignore.join('\n')}\n`)
-  for (const agent of [...AGENTS, ...KIT_SKILLS]) {
-    const dir = join(root, '.claude', 'skills', `aspira-${agent}`)
-    mkdirSync(join(dir, 'scripts'), { recursive: true })
-    writeFileSync(join(dir, 'SKILL.md'), `---\nname: aspira-${agent}\n---\n`)
-    writeFileSync(join(dir, 'scripts', `${agent}.sh`), '#!/bin/bash\n')
-    writeFileSync(join(dir, VERSION_FILE), `${AI_VERSION}\n`)
-  }
   return root
 }
 
@@ -71,7 +63,7 @@ const notion = { check: (checks: { key: string }[]) => Object.fromEntries(checks
 function run(root: string, options: Record<string, unknown>): { code: number; lines: string[] } {
   const lines: string[] = []
   // Built apart from the call so the optional `seams` key does not trip the options type before the kit has it.
-  const full = { ...notion, ...options }
+  const full = { home, ...notion, ...options }
   const code = doctor(root, (line) => lines.push(line), undefined, full)
   return { code, lines }
 }
@@ -149,6 +141,13 @@ describe('kit doctor with isolation keys in aspira.json (T28, F1 F6 F27)', () =>
     expect(lines.filter(isFail)).toEqual([])
     expect(lines.at(-1)).toBe('healthy')
     expect(code).toBe(0)
+  })
+
+  it('T46 passes with no project .claude folder: no line asks for a project .claude/settings.json or .claude/skills', () => {
+    const root = project({}, IGNORE)
+    const { code, lines } = run(root, { env: bareEnv() })
+    expect(code).toBe(0)
+    expect(lines.filter((line) => /\.claude\/(settings\.json|skills)/.test(line) && !line.includes('~/'))).toEqual([])
   })
 })
 

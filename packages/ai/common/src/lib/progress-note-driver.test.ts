@@ -19,7 +19,7 @@ import type { Board } from './board'
 import { parseNextAction, parseProgressNote } from './progress-note'
 import { GATES, renderTicketMd, type TicketRecord } from './ticket'
 import { ticketCli } from './ticket-cli'
-import { afterRun, beforeRun, handleRunError, verifyRun, type BeforeRun, type DriverContext } from './ticket-driver'
+import { NO_RUN_ID_NOTICE, NO_SESSION_USAGE_NOTICE, afterRun, beforeRun, handleRunError, verifyRun, type BeforeRun, type DriverContext } from './ticket-driver'
 import { writeBoardTrace } from './ticket-flow'
 
 let repo: string
@@ -132,13 +132,26 @@ describe('T14: beforeRun writes a continuation note at the board stage, before a
   })
 })
 
+describe('T33: the driver note and the telemetry notices point at the global kit', () => {
+  it('names the ~/.claude/skills launcher, and both telemetry notices say kit update, never kit init', async () => {
+    await writeTicket(baseTicket())
+    await beforeRun(context, { positional: 'KIT-2' })
+    const action = parseNextAction(await note())
+    expect(action?.run.join(' ')).toContain('~/.claude/skills/aspira-')
+    for (const notice of [NO_RUN_ID_NOTICE, NO_SESSION_USAGE_NOTICE]) {
+      expect(notice).toContain('kit update')
+      expect(notice).not.toContain('kit init')
+    }
+  })
+})
+
 describe('T14: afterRun records Status, Expected Status and the --verify Next action', () => {
   it('writes the board-end note once the ticket is claimed and the run has ended', async () => {
     const before = await driveToReady(baseTicket())
     const exportDir = join(folder, 'plan.review')
     await mkdir(join(exportDir, 'trace'), { recursive: true })
     await writeFile(join(exportDir, 'plan.reviewed.md'), '## Plan\n\n- [ ] F1: ship it.\n')
-    const verifyCommand = '.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 --verify'
+    const verifyCommand = '~/.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 --verify'
     await afterRun(context, before, { status: 'ready', exportDir, verifyCommand })
     const parsed = parseProgressNote(await note())
     const action = parseNextAction(await note())
@@ -166,7 +179,7 @@ describe('T14: a refusal at the board gate keeps the existing Next action and ad
     await mkdir(folder, { recursive: true })
     await writeFile(
       join(folder, 'progress.md'),
-      ['# KIT-2: Every skill writes a progress note', '', '## Ticket', '', 'Run id: r0', 'Written: 2026-10-10T00:00:00.000Z', '', '## Next action', '', 'Step: Step 6: build', 'Run: /aspira-implementor KIT-2', 'Session: .claude/skills/aspira-implementor/scripts/implementor.sh local KIT-2', ''].join('\n'),
+      ['# KIT-2: Every skill writes a progress note', '', '## Ticket', '', 'Run id: r0', 'Written: 2026-10-10T00:00:00.000Z', '', '## Next action', '', 'Step: Step 6: build', 'Run: /aspira-implementor KIT-2', 'Session: ~/.claude/skills/aspira-implementor/scripts/implementor.sh local KIT-2', ''].join('\n'),
     )
     // The live ticket is in a Status the planner's gate does not accept: a second call throws FlowRefused.
     await writeTicket(baseTicket({ status: 'In Review: Plan' }))
@@ -182,7 +195,7 @@ describe('T14: a refusal at the board gate keeps the existing Next action and ad
     expect(caught).toBeInstanceOf(Error)
     await handleRunError(context, caught, { positional: 'KIT-2' })
     const text = await note()
-    expect(parseNextAction(text)).toEqual({ step: 'Step 6: build', do: [], run: ['/aspira-implementor KIT-2'], session: '.claude/skills/aspira-implementor/scripts/implementor.sh local KIT-2' })
+    expect(parseNextAction(text)).toEqual({ step: 'Step 6: build', do: [], run: ['/aspira-implementor KIT-2'], session: '~/.claude/skills/aspira-implementor/scripts/implementor.sh local KIT-2' })
     const openIssues = text.slice(text.indexOf('## Open issues'), text.indexOf('## Next action'))
     expect(openIssues).toMatch(/\d{4}-\d{2}-\d{2}/)
   })

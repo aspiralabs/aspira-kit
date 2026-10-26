@@ -34,6 +34,8 @@ async function sandbox() {
   await mkdir(bin)
   await exec('git', ['init', '-q', repo])
   await writeFile(join(repo, 'aspira.json'), JSON.stringify({ board: 'https://app.notion.com/p/3e93e59b225881bba552f8e336ad08ad' }))
+  // The launcher runs only the global kit: a `kit` on PATH whose package-dir names this package.
+  await writeFile(join(bin, 'kit'), `#!/bin/sh\n[ "$1" = package-dir ] && echo '${dirname(root)}'\nexit 0\n`, { mode: 0o755 })
   for (const name of ['node', 'claude']) await writeFile(join(bin, name), `#!/bin/bash\necho "${name} $*" >> "$CAPTURE"\necho '{}'\n`, { mode: 0o755 })
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CAPTURE: capture, BUILD_FEATURE_AGENT_DIR: '', NOTION_TOKEN: '', NOTION_API_KEY: '' }
   return { repo, env, calls: () => readFile(capture, 'utf8').catch(() => '') }

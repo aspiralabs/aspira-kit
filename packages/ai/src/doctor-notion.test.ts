@@ -18,14 +18,14 @@
 // the root's, matching `next.ts`'s existing precedence) and fails doctor, naming the files, when no
 // token is set anywhere.
 
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { readApp } from './aspira.js'
-import { doctor, hookCommand, mcpServer, type UrlCheckResult, type UrlChecker } from './doctor.js'
-import { AGENTS, HOOKS, installHooks, KIT_SKILLS, VERSION_FILE } from './skills.js'
+import { doctor, mcpServer, type UrlCheckResult, type UrlChecker } from './doctor.js'
+import { writeGlobalHarness } from './skills.js'
 
 const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6'
 const RELEASES = 'https://www.notion.so/3f13e59b22588106ab5dc457a42b0e1c'
@@ -35,6 +35,8 @@ type Check = Parameters<UrlChecker>[0][number]
 type CheckResult = UrlCheckResult
 
 let root: string
+/** A temp home holding a current global harness (written by the kit's own writer), so doctor's harness check passes and these suites test the Notion and package checks. */
+let home: string
 
 // The kit packages are declared at it; @aspiralabs/ai is the running package (the global install), so every skill is pinned to its version.
 const KIT_VERSION = '0.9.0'
@@ -42,8 +44,8 @@ const AI_VERSION = (JSON.parse(readFileSync(join(dirname(dirname(fileURLToPath(i
 
 /** A project kit init has fully set up, so every one of doctor's other checks passes and its exit
  * code turns on the Notion and token checks alone: ui and config declared and installed, the kit's
- * eslint, tsconfig, tokens, AGENTS.md block, .mcp.json, hooks and .gitignore entries, and every
- * /aspira-* skill pinned to the global @aspiralabs/ai's version. `declared` is what package.json declares. */
+ * eslint, tsconfig, tokens and .mcp.json. The harness is global now (a temp `home`), so the project
+ * has no .claude folder. `declared` is what package.json declares. */
 function project(config: Record<string, unknown>, declared: string[] = ['@aspiralabs/ui', '@aspiralabs/config']) {
   root = mkdtempSync(join(tmpdir(), 'kit-doctor-notion-'))
   const kit = Object.fromEntries(declared.map((name) => [name, KIT_VERSION]))
@@ -58,19 +60,9 @@ function project(config: Record<string, unknown>, declared: string[] = ['@aspira
   writeFileSync(join(root, 'tsconfig.json'), JSON.stringify({ extends: '@aspiralabs/config/tsconfig' }))
   mkdirSync(join(root, 'app'), { recursive: true })
   writeFileSync(join(root, 'app', 'globals.css'), '@import "@aspiralabs/ui/tokens.css";\n')
-  writeFileSync(join(root, 'AGENTS.md'), '<!-- aspiralabs:begin -->\n<!-- aspiralabs:end -->\n')
   writeFileSync(join(root, '.mcp.json'), JSON.stringify({ mcpServers: { 'aspiralabs-ui': app ? mcpServer(app) : { command: 'npx', args: ['--no', 'aspiralabs-ui-mcp'] } } }))
-  mkdirSync(join(root, '.claude'), { recursive: true })
-  writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify({ hooks: { SessionStart: [{ matcher: '', hooks: HOOKS.map((name) => ({ command: hookCommand(name) })) }] } }))
-  installHooks({ projectRoot: root, dryRun: false, log: () => {} })
-  writeFileSync(join(root, '.gitignore'), '.work/\n.aspira/\n')
-  for (const agent of [...AGENTS, ...KIT_SKILLS]) {
-    const dir = join(root, '.claude', 'skills', `aspira-${agent}`)
-    mkdirSync(join(dir, 'scripts'), { recursive: true })
-    writeFileSync(join(dir, 'SKILL.md'), `---\nname: aspira-${agent}\n---\n`)
-    writeFileSync(join(dir, 'scripts', `${agent}.sh`), '#!/bin/bash\n')
-    writeFileSync(join(dir, VERSION_FILE), `${AI_VERSION}\n`)
-  }
+  home = realpathSync(mkdtempSync(join(tmpdir(), 'kit-doctor-home-')))
+  writeGlobalHarness({ home })
   return root
 }
 
@@ -102,7 +94,7 @@ describe('kit doctor checks aspira.json\'s Notion URLs (T42, F38)', () => {
 
   it('fails the 404 key, naming it, its URL and the status', () => {
     const { lines, log } = logs()
-    const code = doctor(root, log, undefined, { check: stub })
+    const code = doctor(root, log, undefined, { home, check: stub })
     expect(lines.some((line) => line.startsWith('FAIL') && line.includes('releases') && line.includes(RELEASES) && line.includes('404'))).toBe(true)
     // The project is otherwise healthy, so that 404 is the one problem doctor fails on.
     expect(lines.filter((line) => line.startsWith('FAIL'))).toHaveLength(1)
@@ -110,9 +102,9 @@ describe('kit doctor checks aspira.json\'s Notion URLs (T42, F38)', () => {
   })
 
   it('reports a rate limit or a network error as "not checked: Notion unreachable (...)" without failing doctor', () => {
-    doctor(root, logs().log, undefined, { check: stub }) // round 1, to advance the stub
+    doctor(root, logs().log, undefined, { home, check: stub }) // round 1, to advance the stub
     const { lines, log } = logs()
-    const code = doctor(root, log, undefined, { check: stub })
+    const code = doctor(root, log, undefined, { home, check: stub })
     expect(lines.some((line) => /not checked: Notion unreachable \(.*\)/.test(line) && line.includes('board'))).toBe(true)
     expect(lines.some((line) => line.startsWith('FAIL') && line.includes('board'))).toBe(false)
     expect(code).toBe(0)
@@ -120,7 +112,7 @@ describe('kit doctor checks aspira.json\'s Notion URLs (T42, F38)', () => {
 
   it('checks the board URL as a database and passes it; repository and app are never sent to the checker', () => {
     const { log } = logs()
-    doctor(root, log, undefined, { check: stub })
+    doctor(root, log, undefined, { home, check: stub })
     const keys = seen.flat().map((check) => check.key)
     expect(keys).toContain('board')
     expect(keys).not.toContain('repository')
@@ -130,7 +122,7 @@ describe('kit doctor checks aspira.json\'s Notion URLs (T42, F38)', () => {
 
   it('never prints the token, and never a response line longer than one line', () => {
     const { lines, log } = logs()
-    doctor(root, log, undefined, { check: stub })
+    doctor(root, log, undefined, { home, check: stub })
     expect(lines.some((line) => line.includes(TOKEN))).toBe(false)
     expect(lines.every((line) => !line.includes('\n'))).toBe(true)
   })
@@ -145,7 +137,7 @@ describe('kit doctor only checks the keys aspira.json names (T43, F39)', () => {
       return Object.fromEntries(checks.map(({ key }) => [key, { ok: true }]))
     }
     const { lines, log } = logs()
-    doctor(root, log, undefined, { check: stub })
+    doctor(root, log, undefined, { home, check: stub })
     const keys = seen.flat().map((check) => check.key)
     expect(keys).toEqual(['board'])
     expect(lines.some((line) => line.startsWith('FAIL') && /releases|glossary|decisions/.test(line))).toBe(false)
@@ -164,7 +156,7 @@ describe('kit doctor checks NOTION_TOKEN, in order: process env, the app\'s .env
   it('fails, naming the process environment, apps/web/.env.local and .env.local, when no token is set anywhere, and says the URL checks are "not checked: no NOTION_TOKEN"', () => {
     appProject()
     const { lines, log } = logs()
-    doctor(root, log, undefined, { check: okChecker, env: {} })
+    doctor(root, log, undefined, { home, check: okChecker, env: {} })
     const tokenFail = lines.find((line) => line.startsWith('FAIL') && line.includes('NOTION_TOKEN'))
     expect(tokenFail).toBeDefined()
     expect(tokenFail).toEqual(expect.stringContaining('apps/web/.env.local'))
@@ -176,7 +168,7 @@ describe('kit doctor checks NOTION_TOKEN, in order: process env, the app\'s .env
     appProject()
     writeFileSync(join(root, 'apps', 'web', '.env.local'), `NOTION_TOKEN=${TOKEN}\n`)
     const { lines, log } = logs()
-    doctor(root, log, undefined, { check: okChecker, env: {} })
+    doctor(root, log, undefined, { home, check: okChecker, env: {} })
     expect(lines.some((line) => line.includes('ok') && line.includes('apps/web/.env.local') && line.includes('NOTION_TOKEN'))).toBe(true)
   })
 
@@ -185,7 +177,7 @@ describe('kit doctor checks NOTION_TOKEN, in order: process env, the app\'s .env
     writeFileSync(join(root, '.env.local'), 'NOTION_TOKEN=ntn_root\n')
     writeFileSync(join(root, 'apps', 'web', '.env.local'), 'NOTION_TOKEN=ntn_app\n')
     const { lines, log } = logs()
-    doctor(root, log, undefined, { check: okChecker, env: {} })
+    doctor(root, log, undefined, { home, check: okChecker, env: {} })
     expect(lines.some((line) => line.includes('apps/web/.env.local') && !line.includes('ntn_'))).toBe(true)
     expect(lines.some((line) => /\bsources? *root.*\.env\.local\b/i.test(line))).toBe(false)
   })
@@ -195,7 +187,7 @@ describe('kit doctor checks NOTION_TOKEN, in order: process env, the app\'s .env
     writeFileSync(join(root, '.env.local'), 'NOTION_TOKEN=ntn_root\n')
     writeFileSync(join(root, 'apps', 'web', '.env.local'), 'NOTION_TOKEN=ntn_app\n')
     const { lines, log } = logs()
-    doctor(root, log, undefined, { check: okChecker, env: { NOTION_TOKEN: 'ntn_env' } })
+    doctor(root, log, undefined, { home, check: okChecker, env: { NOTION_TOKEN: 'ntn_env' } })
     expect(lines.some((line) => line.includes('ok') && /process environment/i.test(line) && line.includes('NOTION_TOKEN'))).toBe(true)
   })
 })
@@ -206,14 +198,14 @@ describe('kit doctor checks the kit packages, with @aspiralabs/ai global (T8, F3
   const run = (declared?: string[]) => {
     project({ board: BOARD }, declared)
     const { lines, log } = logs()
-    return { code: doctor(root, log, undefined, { check, env }), lines }
+    return { code: doctor(root, log, undefined, { home, check, env }), lines }
   }
 
-  it('passes a healthy project and names neither @aspiralabs/kit nor @aspiralabs/agents', () => {
+  it('T45: passes a healthy project with no project .claude folder and names neither @aspiralabs/kit nor @aspiralabs/agents', () => {
     const { code, lines } = run()
     expect(code).toBe(0)
     expect(lines.filter((line) => line.includes('@aspiralabs/kit') || line.includes('@aspiralabs/agents'))).toEqual([])
-    expect(lines.filter((line) => line.startsWith('ok   .claude/skills/aspira-') && line.endsWith('matches @aspiralabs/ai'))).toHaveLength(11)
+    expect(lines.filter((line) => line.startsWith('ok   .claude/skills/aspira-'))).toEqual([])
   })
 
   it('names the global @aspiralabs/ai, fails while the project declares it, and fails when ui or config is missing', () => {

@@ -1,6 +1,6 @@
 // The Next.js profile. Each step is idempotent: run init twice, get the same project.
 // Two directories: `projectRoot`, where Claude Code runs and the Claude-facing files go (AGENTS.md,
-// CLAUDE.md, .mcp.json, .claude/, aspira.json, .gitignore), and the app that owns package.json and
+// CLAUDE.md, .mcp.json, .claude/, aspira.json (git-ignored, never committed), .gitignore), and the app that owns package.json and
 // node_modules, where the package steps go (.npmrc, the install, eslint, prettier, tsconfig, css).
 // They are the same directory unless `--app <dir>` says otherwise (apps/web in a multi-app repository).
 // With `--app` there are two layouts. In a repository with no root package.json, the app is on its own
@@ -8,14 +8,14 @@
 // the registry mapping, the lockfile, allowBuilds and a shared prettier config belong to the root:
 // init uses the root's and writes none into the app, and keeps @aspiralabs packages the root already
 // declares on the same version as the app's.
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { join, basename } from 'node:path'
+import { join, basename, relative } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { deepMerge, hasJsonComments, readJson, writeIfAbsent, writeJson, type Log } from '../fs.js'
-import { appRoot, isWorkspaceRoot, normalizeApp, readAspira, writeAspira } from '../aspira.js'
+import { appRoot, isWorkspaceRoot, normalizeApp, readApp, readAspira, restoreAspira, untrackAspira, writeAspira } from '../aspira.js'
 import { ENV_DEVELOPMENT_ENTRY, ENV_LOCAL_ENTRY, envDevelopmentIgnored, envLocalIgnored, gitRootOf, hasLine, isolates, mcpServer, WORKTREES_ENTRY } from '../doctor.js'
-import { AI_PACKAGE, HOOKS_DIR, installHooks, installSkills } from '../skills.js'
+import { AGENTS, AI_PACKAGE, HOOKS_DIR, KIT_SKILLS, RETIRED_SKILLS, VERSION_FILE } from '../skills.js'
 
 export type InitOptions = { projectRoot: string; app?: string; dryRun: boolean; log: Log; board?: string; releases?: string }
 
@@ -256,10 +256,12 @@ function css(opts: Resolved): void {
   }
 }
 
-// The kit's own hook groups are replaced, not merged: a group from an earlier kit (the retired
-// @aspiralabs/config path, or the hooks under node_modules before they were copied) would otherwise stay beside
-// the current one, since the merge keeps arrays. Everything else in the settings is the project's.
-function dropKitHooks(settings: Record<string, unknown>): Record<string, unknown> {
+// The kit's own hook commands are removed before the template's are added, not merged: a command from an
+// earlier kit (the retired @aspiralabs/config path, the hooks under node_modules, or a project's
+// .claude/hooks/aspira) would otherwise stay beside the current one, since the merge keeps arrays. Only the
+// kit's commands go: a group's other commands are the engineer's, a group left empty is dropped, and so is
+// an event left empty. The global writer and the leftover removal share this matcher.
+export function dropKitHooks(settings: Record<string, unknown>): Record<string, unknown> {
   const hooks = settings.hooks
   if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
     return settings
@@ -267,9 +269,25 @@ function dropKitHooks(settings: Record<string, unknown>): Record<string, unknown
   const kit = (entry: unknown): boolean => /@aspiralabs\/(config\/agent|kit|ai)\/hooks\/|\.claude\/hooks\/aspira\//.test(JSON.stringify(entry))
   const next: Record<string, unknown> = {}
   for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
-    next[event] = Array.isArray(groups) ? groups.filter((g) => !kit(g)) : groups
+    if (!Array.isArray(groups)) {
+      next[event] = groups
+      continue
+    }
+    const kept: unknown[] = []
+    for (const group of groups as unknown[]) {
+      const inner = group !== null && typeof group === 'object' ? (group as { hooks?: unknown }).hooks : undefined
+      if (!Array.isArray(inner)) {
+        if (!kit(group)) kept.push(group)
+        continue
+      }
+      const left = inner.filter((hook) => !kit(hook))
+      if (left.length === inner.length) kept.push(group)
+      else if (left.length > 0) kept.push({ ...(group as object), hooks: left })
+    }
+    if (kept.length > 0 || groups.length === 0) next[event] = kept
   }
-  return { ...settings, hooks: next }
+  const { hooks: _dropped, ...rest } = settings
+  return Object.keys(next).length > 0 ? { ...rest, hooks: next } : rest
 }
 
 function agentFiles(opts: Resolved): void {
@@ -278,30 +296,20 @@ function agentFiles(opts: Resolved): void {
   // relative to the project root, where Claude Code runs them.
   const templatesDir = fileURLToPath(new URL('../../templates/agent/', import.meta.url))
   const appPrefix = opts.app ? `${opts.app}/` : ''
-  const appLine = opts.app ? `- **The app:** \`${opts.app}\` owns \`package.json\` and \`node_modules\`; run package commands (install, lint, test, check) there. Claude Code runs at this root.\n` : ''
   const tpl = (name: string, fallback: string): string => {
     const p = join(templatesDir, name)
-    return (existsSync(p) ? readFileSync(p, 'utf8') : fallback).replaceAll('{{app}}', appPrefix).replaceAll('{{app-line}}\n', appLine)
+    return (existsSync(p) ? readFileSync(p, 'utf8') : fallback).replaceAll('{{app}}', appPrefix)
   }
   const project = basename(opts.projectRoot)
 
-  // AGENTS.md: managed block is replaced, everything outside it is kept.
+  // AGENTS.md is the project's own: written from the template when absent (no harness in it), never touched after.
   const agentsPath = join(opts.projectRoot, 'AGENTS.md')
-  const template = tpl('AGENTS.md', `# ${project}\n\n<!-- aspiralabs:begin -->\nThis project is on the Aspira Labs kit.\n<!-- aspiralabs:end -->\n`).replace('{{project}}', project)
-  const block = template.match(/<!-- aspiralabs:begin[\s\S]*?<!-- aspiralabs:end -->/)?.[0] ?? ''
   if (existsSync(agentsPath)) {
-    const current = readFileSync(agentsPath, 'utf8')
-    const next = /<!-- aspiralabs:begin[\s\S]*?<!-- aspiralabs:end -->/.test(current)
-      ? current.replace(/<!-- aspiralabs:begin[\s\S]*?<!-- aspiralabs:end -->/, block)
-      : `${current.trimEnd()}\n\n${block}\n`
-    opts.log(next === current ? `keep   ${agentsPath} (managed block current)` : `update ${agentsPath} (managed block)`)
-    if (!opts.dryRun && next !== current) {
-      writeFileSync(agentsPath, next)
-    }
+    opts.log(`keep   ${agentsPath} (the project's own)`)
   } else {
     opts.log(`write  ${agentsPath}`)
     if (!opts.dryRun) {
-      writeFileSync(agentsPath, template)
+      writeFileSync(agentsPath, tpl('AGENTS.md', `# ${project}\n\n## About this project\n\n## Gotchas\n`).replace('{{project}}', project))
     }
   }
 
@@ -319,20 +327,13 @@ function agentFiles(opts: Resolved): void {
   if (!opts.dryRun) {
     writeJson(mcpPath, mcpNext)
   }
-
-  const settingsPath = join(opts.projectRoot, '.claude', 'settings.json')
-  const settingsTemplate = JSON.parse(tpl('claude-settings.json', '{}')) as Record<string, unknown>
-  const settingsNext = deepMerge(dropKitHooks(readJson<Record<string, unknown>>(settingsPath) ?? {}), settingsTemplate)
-  opts.log(`${existsSync(settingsPath) ? 'update' : 'write '} ${settingsPath} (session-start, deny-tier3, audit-log hooks from ${HOOKS_DIR})`)
-  if (!opts.dryRun) {
-    writeJson(settingsPath, settingsNext)
-  }
 }
 
-/** The entries kit init adds to the root .gitignore, each with the comment above it. */
-export const GITIGNORE_ENTRIES: ReadonlyArray<readonly [entry: string, comment: string]> = [
+/** The ignore lines an earlier kit wrote into .gitignore, each with the comment above it; the global ignore holds them now, so init removes them. */
+export const gitignoreEntries = (): ReadonlyArray<readonly [entry: string, comment: string]> => [
   ['.work/', '# per-ticket working folders (pulled from the Notion ticket, never committed)'],
   ['.aspira/', "# the audit log the kit's hooks write (.aspira/audit.jsonl)"],
+  [WORKTREES_ENTRY[0], WORKTREES_ENTRY[1]],
 ]
 
 const readText = (path: string): string => (existsSync(path) ? readFileSync(path, 'utf8') : '')
@@ -346,28 +347,17 @@ function appendIgnore(path: string, current: string, entries: ReadonlyArray<read
 }
 
 function gitignore(opts: Resolved): void {
-  // Per-ticket working folders are pulled from the Notion ticket and never committed; the audit log
-  // the hooks write at the root would otherwise dirty the tree on the first tool call.
+  // The harness ignore lines (.work/, .aspira/, .worktrees/) are in the global git ignore. The project's own
+  // .gitignore keeps the secrets kit worktree links: .env.local unless git already ignores every linked copy,
+  // through a glob such as .env*.local. Outside a git repository neither applies.
   const path = join(opts.projectRoot, '.gitignore')
   const current = readText(path)
-  const wanted: Array<readonly [string, string]> = [...GITIGNORE_ENTRIES]
-  const missing = GITIGNORE_ENTRIES.filter(([entry]) => !new RegExp(`^${entry.replace('.', '\\.').replace(/\/$/, '')}/?$`, 'm').test(current))
-  // Ticket worktrees live at the git repository root, so .worktrees/ goes into that root's .gitignore.
-  // .env.local (the secrets kit worktree links) goes into the project's unless git already ignores
-  // every linked copy, through a glob such as .env*.local. Outside a git repository neither applies.
+  const wanted: Array<readonly [string, string]> = []
+  const missing: Array<readonly [string, string]> = []
   const gitRoot = gitRootOf(opts.projectRoot)
   if (gitRoot === undefined) {
-    opts.log(`skip   ${WORKTREES_ENTRY[0]} and ${ENV_LOCAL_ENTRY[0]} ignore lines (not in a git repository)`)
+    opts.log(`skip   ${ENV_LOCAL_ENTRY[0]} ignore line (not in a git repository)`)
   } else {
-    if (gitRoot === opts.projectRoot) {
-      wanted.push(WORKTREES_ENTRY)
-      if (!hasLine(current, WORKTREES_ENTRY[0])) missing.push(WORKTREES_ENTRY)
-    } else {
-      const rootPath = join(gitRoot, '.gitignore')
-      const rootCurrent = readText(rootPath)
-      if (hasLine(rootCurrent, WORKTREES_ENTRY[0])) opts.log(`keep   ${rootPath} (${WORKTREES_ENTRY[0]} ignored)`)
-      else appendIgnore(rootPath, rootCurrent, [WORKTREES_ENTRY], opts)
-    }
     if (hasLine(current, ENV_LOCAL_ENTRY[0]) || !envLocalIgnored(opts.projectRoot, opts.app)) {
       wanted.push(ENV_LOCAL_ENTRY)
       if (!hasLine(current, ENV_LOCAL_ENTRY[0])) missing.push(ENV_LOCAL_ENTRY)
@@ -379,14 +369,147 @@ function gitignore(opts: Resolved): void {
     }
   }
   if (missing.length === 0) {
-    opts.log(`keep   ${path} (${wanted.map(([entry]) => entry).join(', ')} ignored)`)
+    if (wanted.length > 0) opts.log(`keep   ${path} (${wanted.map(([entry]) => entry).join(', ')} ignored)`)
     return
   }
   appendIgnore(path, current, missing, opts)
 }
 
+/** One thing an earlier kit left in a project's working tree: where it is (absolute), what to call it, and how to remove it. */
+export type Leftover = { path: string; label: string; remove: () => void }
+
+const MANAGED_BLOCK = /<!-- aspiralabs:begin[\s\S]*?<!-- aspiralabs:end -->/
+
+const isFolder = (path: string): boolean => {
+  try {
+    const stat = lstatSync(path)
+    return stat.isDirectory() && !stat.isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
+/** `text` without the given kit ignore lines, each with the comment directly above it when that comment is the kit's own words. */
+function withoutKitIgnores(text: string, entries: ReadonlyArray<readonly [string, string]>): string {
+  const lines = text.split('\n')
+  const drop = new Set<number>()
+  lines.forEach((line, index) => {
+    const found = entries.find(([entry]) => line.trimEnd() === entry || line.trimEnd() === entry.replace(/\/$/, ''))
+    if (found === undefined) return
+    drop.add(index)
+    if (index > 0 && lines[index - 1]!.trimEnd() === found[1]) drop.add(index - 1)
+  })
+  return lines.filter((_, index) => !drop.has(index)).join('\n')
+}
+
+const kitIgnoresIn = (text: string, entries: ReadonlyArray<readonly [string, string]>): string[] => entries.filter(([entry]) => withoutKitIgnores(text, [[entry, '']]) !== text).map(([entry]) => entry)
+
+/**
+ * What an earlier kit committed into the project and the working tree still holds: the kit's skill folders (those carrying
+ * .kit-version), .claude/hooks/aspira/, the kit's hook commands in .claude/settings.json, the managed block in AGENTS.md, and the
+ * .work/, .aspira/ and .worktrees/ ignore lines (the git root's .gitignore too, for a project below it, for .worktrees/). Read from
+ * the files only, never from git's index. `kit init` removes them (removeHarness); `kit doctor` reports them.
+ */
+export function harnessLeftovers(projectRoot: string): Leftover[] {
+  const out: Leftover[] = []
+  const rel = (path: string): string => relative(projectRoot, path) || '.'
+  const skills = join(projectRoot, '.claude', 'skills')
+  for (const name of [...AGENTS, ...KIT_SKILLS, ...RETIRED_SKILLS]) {
+    const dir = join(skills, `aspira-${name}`)
+    if (isFolder(dir) && existsSync(join(dir, VERSION_FILE))) out.push({ path: dir, label: rel(dir), remove: () => rmSync(dir, { recursive: true, force: true }) })
+  }
+  const hooks = join(projectRoot, HOOKS_DIR)
+  if (isFolder(hooks)) out.push({ path: hooks, label: rel(hooks), remove: () => rmSync(hooks, { recursive: true, force: true }) })
+  const settingsPath = join(projectRoot, '.claude', 'settings.json')
+  const settings = readJson<Record<string, unknown>>(settingsPath)
+  if (settings !== undefined) {
+    const kept = dropKitHooks(settings)
+    if (JSON.stringify(kept) !== JSON.stringify(settings)) {
+      out.push({
+        path: settingsPath,
+        label: `${rel(settingsPath)} (the kit's hook commands)`,
+        remove: () => {
+          if (Object.keys(kept).length === 0) rmSync(settingsPath)
+          else writeJson(settingsPath, kept)
+        },
+      })
+    }
+  }
+  const agentsPath = join(projectRoot, 'AGENTS.md')
+  if (MANAGED_BLOCK.test(readText(agentsPath))) {
+    out.push({ path: agentsPath, label: `${rel(agentsPath)} (the aspiralabs managed block)`, remove: () => writeFileSync(agentsPath, readText(agentsPath).replace(MANAGED_BLOCK, '')) })
+  }
+  const gitRoot = gitRootOf(projectRoot)
+  const ignoreFiles: Array<[string, ReadonlyArray<readonly [string, string]>]> = [[join(projectRoot, '.gitignore'), gitignoreEntries()]]
+  if (gitRoot !== undefined && gitRoot !== projectRoot) ignoreFiles.push([join(gitRoot, '.gitignore'), [WORKTREES_ENTRY]])
+  for (const [path, entries] of ignoreFiles) {
+    const found = kitIgnoresIn(readText(path), entries)
+    if (found.length === 0) continue
+    out.push({
+      path,
+      label: `${rel(path)} (still lists ${found.join(', ')}; the global ignore does that now)`,
+      remove: () => writeFileSync(path, withoutKitIgnores(readText(path), entries)),
+    })
+  }
+  return out
+}
+
+/** The path as printed in a git command: relative to the project root, quoted when it has a space. */
+const gitPath = (projectRoot: string, path: string): string => {
+  const shown = relative(projectRoot, path) || '.'
+  return /\s/.test(shown) ? `'${shown}'` : shown
+}
+
+/** Removes the harness an earlier kit committed into the project (harnessLeftovers) and returns what it removed; a dry run only lists. */
+export function removeLeftovers(projectRoot: string, dryRun: boolean, log: Log): Leftover[] {
+  const leftovers = harnessLeftovers(projectRoot)
+  for (const item of leftovers) {
+    log(`remove ${item.label}`)
+    if (!dryRun) item.remove()
+  }
+  if (dryRun) return leftovers
+  for (const dir of [join(projectRoot, '.claude', 'skills'), join(projectRoot, '.claude', 'hooks')]) {
+    if (isFolder(dir) && readdirSync(dir).length === 0) rmdirSync(dir)
+  }
+  return leftovers
+}
+
+/** The message of the commit that records a project's move to the global harness. */
+export const MIGRATION_COMMIT = 'chore: move to the global Aspira harness'
+
+/**
+ * The `git add` and `git commit` that record the removed leftovers and an untracked aspira.json. The commit is limited to the removed
+ * paths, unless aspira.json was untracked: a path-limited commit takes each path from the working tree and would keep it tracked, so
+ * then the commit takes the index, where `git rm --cached` staged its removal.
+ */
+export function recordCommands(projectRoot: string, removed: readonly Leftover[], untracked: boolean): string[] {
+  const paths = removed.map((item) => gitPath(projectRoot, item.path)).join(' ')
+  const add = paths === '' ? [] : [`git add -A -- ${paths}`]
+  return [...add, untracked || paths === '' ? `git commit -m "${MIGRATION_COMMIT}"` : `git commit -m "${MIGRATION_COMMIT}" -- ${paths}`]
+}
+
+/**
+ * Removes the harness an earlier kit committed into the project (removeLeftovers); the global harness replaces it. Stops tracking a
+ * committed aspira.json, which is git-ignored now (the file stays). A dry run only lists. After a change it prints the `git add` and
+ * `git commit` that record it (recordCommands) and commits nothing; with nothing to change it prints no commit command.
+ */
+function removeHarness(opts: Resolved): void {
+  const removed = removeLeftovers(opts.projectRoot, opts.dryRun, opts.log)
+  const untracked = untrackAspira(opts.projectRoot, opts.dryRun, opts.log)
+  if (removed.length === 0 && !untracked) {
+    opts.log('keep   nothing to remove (no committed Aspira harness in the project)')
+    return
+  }
+  if (opts.dryRun) return
+  opts.log(`note   ${removed.length === 0 ? 'aspira.json is git-ignored now' : 'the global harness replaces these files'}; record the change (init commits nothing${untracked ? '; the commit takes everything staged, so check git status first' : ''}):`)
+  for (const command of recordCommands(opts.projectRoot, removed, untracked)) opts.log(`       ${command}`)
+}
+
 export async function initNext(options: InitOptions): Promise<void> {
-  const app = options.app === undefined ? undefined : normalizeApp(options.app)
+  // An aspira.json a pull deleted (the commit that stopped tracking it) comes back first, with the app it names.
+  const restored = restoreAspira(options.projectRoot, options.dryRun, options.log)
+  const appOption = options.app ?? (restored ? readApp(options.projectRoot) : undefined)
+  const app = appOption === undefined ? undefined : normalizeApp(appOption)
   const appDir = appRoot(options.projectRoot, app)
   const workspace = isWorkspaceRoot(options.projectRoot, app)
   const opts: Resolved = { ...options, app: app === '.' ? undefined : app, appDir, workspace, workspaceDir: workspaceDirOf(options.projectRoot, app) }
@@ -401,9 +524,8 @@ export async function initNext(options: InitOptions): Promise<void> {
   tsconfig(opts)
   css(opts)
   agentFiles(opts)
-  // The /aspira-* skills and the hooks, copied from the global @aspiralabs/ai into the root; the skills pinned to its version.
-  installSkills({ projectRoot: opts.projectRoot, app: opts.app, dryRun: opts.dryRun, log: opts.log })
-  installHooks({ projectRoot: opts.projectRoot, app: opts.app, dryRun: opts.dryRun, log: opts.log })
+  // The /aspira-* skills and hooks are global (~/.claude, written by `kit`); an earlier kit's copies in the project are removed.
+  removeHarness(opts)
   gitignore(opts)
   // The Feature Board the skills and kit next read, when the project has one, and the app the launchers and kit next resolve the packages under.
   writeAspira({ projectRoot: opts.projectRoot, board: opts.board, releases: opts.releases, app: opts.app, dryRun: opts.dryRun, log: opts.log })

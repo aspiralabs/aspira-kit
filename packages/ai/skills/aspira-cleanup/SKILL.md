@@ -7,7 +7,7 @@ description: Remove the .work/ folders and ticket worktrees of Released or Dropp
 
 This skill is a launcher for `kit cleanup` and has no rules of its own. `kit cleanup` decides what is deleted, kept or skipped from each card's live Status; this file covers only the confirmation in chat and the session's own folder.
 
-Use the absolute path to `scripts/cleanup.sh` beside this file. The launcher runs the kit installed under the project's app (`app` in `aspira.json`, else the root), prints what `kit cleanup` prints and exits with its code.
+Use the absolute path to `scripts/cleanup.sh` beside this file. The launcher runs the global kit (the `kit` on PATH), not a kit under the project's app; it prints what `kit cleanup` prints and exits with its code.
 
 ## 1. List
 

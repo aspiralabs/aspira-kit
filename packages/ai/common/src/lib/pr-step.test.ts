@@ -69,6 +69,8 @@ async function ghEnv(options: { gh?: boolean } = {}): Promise<{ env: NodeJS.Proc
   await mkdir(join(ghDir, 'calls'), { recursive: true })
   await mkdir(bin, { recursive: true })
   if (options.gh !== false) await writeFile(join(bin, 'gh'), FAKE_GH, { mode: 0o755 })
+  // Without gh: shadow any gh the machine has on /usr/bin (CI runners ship one) with a stub that fails like a missing command.
+  else await writeFile(join(bin, 'gh'), '#!/bin/bash\necho "gh: command not found" >&2\nexit 127\n', { mode: 0o755 })
   const { NOTION_TOKEN: _token, NOTION_API_KEY: _key, ...rest } = process.env
   return { env: { ...rest, PATH: `${bin}:/usr/bin:/bin`, GH_DIR: ghDir }, ghDir }
 }

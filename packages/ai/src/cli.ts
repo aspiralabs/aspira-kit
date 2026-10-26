@@ -7,8 +7,11 @@
 // kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
 // kit db migrate --name <n> [prisma args] [--app <dir>] [--cwd <path>]
 // kit dev [--app <dir>] [--cwd <path>]
+// kit update (pnpm add -g @aspiralabs/ai@latest, then the new kit writes the global harness)
+// kit upgrade [--dry-run] [--app <dir>] [--cwd <path>] (moves a repository an earlier kit set up to the global harness)
 // kit playbook
 // kit package-dir (prints this @aspiralabs/ai's directory; the /aspira-* launchers find the global install with it)
+import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { readApp, resolveProjectRoot, writeAspira } from './aspira.js'
@@ -21,7 +24,8 @@ import { next } from './next.js'
 import { renderPlaybook } from './playbook.js'
 import { initNext, KIT_VERSION } from './stacks/next.js'
 import { addAuthNext } from './stacks/next-auth.js'
-import { kitPackageDir } from './skills.js'
+import { harnessCurrent, kitPackageDir, writeGlobalHarness } from './skills.js'
+import { upgrade } from './upgrade.js'
 import { checkVersion } from './version-check.js'
 import { worktree } from './worktree.js'
 
@@ -35,10 +39,10 @@ const flag = (name: string): string | boolean | undefined => {
   const next = argv[i + 1]
   return next && !next.startsWith('--') ? next : true
 }
-// The project root: --cwd, else the working directory. For doctor, next, cleanup and worktree, a working directory
+// The project root: --cwd, else the working directory. For doctor, next, cleanup, worktree and upgrade, a working directory
 // inside the app of a multi-app project (apps/web, where the kit's bin is) stands for the root that wired it.
 const explicitCwd = typeof flag('cwd') === 'string' ? resolve(flag('cwd') as string) : undefined
-const rootFromApp = command === 'doctor' || command === 'next' || command === 'cleanup' || command === 'worktree' || command === 'dev' || command === 'db'
+const rootFromApp = command === 'doctor' || command === 'next' || command === 'cleanup' || command === 'worktree' || command === 'dev' || command === 'db' || command === 'upgrade'
 const cwd = explicitCwd ?? (rootFromApp ? resolveProjectRoot(process.cwd()) : process.cwd())
 const log = (line: string) => console.log(line)
 // --app <dir>: the app that owns package.json and node_modules, relative to the root (apps/web).
@@ -54,6 +58,8 @@ const usage = `usage:
   kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
   kit db migrate --name <n> [prisma args] [--app <dir>] [--cwd <path>]
   kit dev [--app <dir>] [--cwd <path>]
+  kit update
+  kit upgrade [--dry-run] [--app <dir>] [--cwd <path>]
   kit playbook
 
   --app <dir>: in a repository whose app (package.json, node_modules) is not the root, that directory,
@@ -123,6 +129,17 @@ async function main(): Promise<number> {
   if (command === 'dev') {
     return await dev({ projectRoot: cwd, app, log, warn: (line) => console.error(line) })
   }
+  if (command === 'update') {
+    const install = spawnSync('pnpm', ['add', '-g', '@aspiralabs/ai@latest'], { stdio: ['inherit', 'inherit', 'inherit'] })
+    if (install.status !== 0) return install.status ?? 1
+    // The kit now on PATH is the new version; running it self-heals the harness.
+    const healed = spawnSync('kit', ['package-dir'], { stdio: ['inherit', 'ignore', 'inherit'] })
+    return healed.status ?? 1
+  }
+  if (command === 'upgrade') {
+    // Only the harness migration; --app is accepted like every project command, and the harness lives at the root.
+    return upgrade({ projectRoot: cwd, dryRun: flag('dry-run') === true, log })
+  }
   if (command === 'playbook') {
     process.stdout.write(renderPlaybook())
     return 0
@@ -173,7 +190,18 @@ async function printNotice(): Promise<void> {
   }
 }
 
+/** Bring the global harness up to this kit's version when it drifted. Never fails the command: one warning on stderr. */
+function selfHeal(): void {
+  try {
+    if (harnessCurrent().length === 0) return
+    writeGlobalHarness()
+  } catch (err) {
+    process.stderr.write(`warning  could not write the global harness: ${err instanceof Error ? err.message : String(err)}\n`)
+  }
+}
+
 try {
+  if (command !== 'update') selfHeal()
   if (command === 'package-dir') {
     process.stdout.write(`${kitPackageDir()}\n`)
     process.exit(0)

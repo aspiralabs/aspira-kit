@@ -97,7 +97,7 @@ const stepOf = (command: string): StepName => {
 }
 
 /** One launcher command line: the step's own script, the subcommand (`local`, `start`, `wait`) and its arguments. */
-const launcherLine = (step: StepName, sub: 'local' | 'start' | 'wait', args: string): string => `.claude/skills/aspira-${step}/scripts/${step}.sh ${sub} ${args}`.trim()
+const launcherLine = (step: StepName, sub: 'local' | 'start' | 'wait', args: string): string => `~/.claude/skills/aspira-${step}/scripts/${step}.sh ${sub} ${args}`.trim()
 
 /**
  * `command`'s launcher form (F44): the step's own script instead of the slash command, so a

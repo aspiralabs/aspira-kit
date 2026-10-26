@@ -40,6 +40,7 @@ import { randomUUID } from 'node:crypto'
 import { RESEARCH_RULE } from '@aspiralabs/ai/common/lib/research-rule'
 import { existsSync, mkdirSync } from 'node:fs'
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { basename, join, relative } from 'node:path'
 import { z } from 'zod'
 import { nextAction, writeProgressNote, type NextAction } from '@aspiralabs/ai/common/lib/progress-note'
@@ -70,7 +71,7 @@ import { step8Phase } from '#build-feature/step8.ts'
 import { renderBuildSummary } from '#build-feature/summary.ts'
 import { shown, system } from '#build-feature/system.ts'
 import { runSpans } from '#build-feature/telemetry.ts'
-import { carryTicketFolder, existingWorktree, insideWorktree, isolateIn, locate, prepareWorktree, ticketTypeOf, worktreePath, type Place } from '#build-feature/worktree.ts'
+import { carryTicketFolder, existingWorktree, insideWorktree, isolateIn, linkAspira, locate, prepareWorktree, ticketTypeOf, worktreePath, type Place } from '#build-feature/worktree.ts'
 
 export const STAGE_KINDS = ['resolve', 'approval', 'overrides', 'worktree', 'step', 'ask', 'move', 'set-pr', 'visual-verify', 'gate', 'step10', 'fix', 'release-row', 'merge', 'summary', 'telemetry', 'end'] as const
 export type StageKind = (typeof STAGE_KINDS)[number]
@@ -305,19 +306,24 @@ export const SKILL_CHECKS = ['visual-verify'] as const
 const VERSION_TEXT = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]{1,40})?$/
 
 /**
- * Refuse (exit 1, no stage, nothing recorded) when a step skill's `.claude/skills/aspira-<step>/.kit-version`
+ * Refuse (exit 1, no stage, nothing recorded) when a step skill's `~/.claude/skills/aspira-<step>/.kit-version`
  * is missing or names another kit version than this driver's: an older launcher would reject the
  * `--parent-run` option every step command now carries (KIT-19 F6, F22).
  */
 export async function checkKitVersion(repo: string, skills: readonly string[] = [...STEPS, ...SKILL_CHECKS]): Promise<void> {
   const version = await driverVersion()
+  const problems: string[] = []
   for (const step of skills) {
-    const file = join('.claude', 'skills', `aspira-${step}`, '.kit-version')
-    const text = await readFile(join(repo, file), 'utf8').catch(() => null)
-    if (text === null) throw new Refusal(`step skills are from kit (none: ${file} is missing), the driver is ${version}: run kit init`)
+    const file = `~/.claude/skills/aspira-${step}/.kit-version`
+    const text = await readFile(join(homedir(), '.claude', 'skills', `aspira-${step}`, '.kit-version'), 'utf8').catch(() => null)
+    if (text === null) {
+      problems.push(`step skills are from kit (none: ${file} is missing), the driver is ${version}: run kit update`)
+      continue
+    }
     const found = text.trim()
-    if (found !== version) throw new Refusal(`step skills are from kit ${VERSION_TEXT.test(found) ? found : `(unreadable: ${file})`}, the driver is ${version}: run kit init (${file})`)
+    if (found !== version) problems.push(`step skills are from kit ${VERSION_TEXT.test(found) ? found : `(unreadable: ${file})`}, the driver is ${version}: run kit update (${file})`)
   }
+  if (problems.length > 0) throw new Refusal(problems.join('; '))
 }
 
 type Written = { state: RunState; result: WriteResult | null }
@@ -671,6 +677,8 @@ async function moveIntoWorktree(ctx: Ctx, state: RunState, place: Place, type: N
 /** A new invocation, or a call, outside the ticket's existing worktree: continue there (nothing is recorded here). */
 async function redirectStage(input: DriverInput, place: Place, worktree: string, folder: string): Promise<Stage> {
   await carryTicketFolder(folder, worktree)
+  // aspira.json is git-ignored (KIT-71): a worktree that lacks it gets the main checkout's before the run continues there.
+  linkAspira(place.main, worktree)
   // A rerun from the main checkout completes missing isolation before it sends the session on (KIT-67 F1); a merged ticket's is never rebuilt.
   const carried = await readRunState(await workFolder(worktree, input.id)).catch(() => null)
   if (carried === null || mergeRecordOf(carried) === null) {
@@ -889,7 +897,7 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
   // outside --autonomous and --cloud the build-feature session runs it itself.
   const inSession = ctx.mode === 'local' && step === 'groomer' && !ctx.autonomous
   const launcher = launcherFor(command, ctx.mode)
-  const skillMd = `.claude/skills/aspira-${step}/SKILL.md`
+  const skillMd = `~/.claude/skills/aspira-${step}/SKILL.md`
   // The nonce is minted first so the printed command and launcher can carry it; what is stored keeps both without it.
   const nonce = randomUUID()
   const shownCommand = `${command}${runFlags}${parentRun(ctx.runId, nonce)}`
@@ -1245,8 +1253,8 @@ export async function nextStage(input: DriverInput): Promise<Stage> {
     // --autonomous rides on the default mode: the cloud step agents take neither --take-recommended nor --autonomous (KIT-24).
     if (input.autonomous && input.mode !== 'local') throw new Refusal(`--autonomous does not apply with --cloud; run it in this session: ${RESUME(input.id, 'local', true)}`)
     refuseInProgress(input, state)
-    // The skills the driver runs itself (KIT-58 F16) are refused at the start, before any stage or record.
-    await checkKitVersion(input.repo, SKILL_CHECKS)
+    // Every skill the driver runs (the steps and KIT-58's visual-verify) is refused at the start, before any stage or record.
+    await checkKitVersion(input.repo)
     const ctx: Ctx = { ...base, runId: await reserveNewRunId(initialFolder, state, input.now), mode: input.mode, autonomous: input.autonomous, resume: RESUME(input.id, input.mode, input.autonomous) }
     return save(ctx, await startRun(ctx, state))
   }

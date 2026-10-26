@@ -16,7 +16,7 @@ Use the absolute path to `scripts/next.sh` beside this file, from the project th
 <skill-dir>/scripts/next.sh [<ticket ID>]
 ```
 
-With an ID it looks that ticket up on the board. Without one, `kit next` uses the one folder under `.work/` that holds a `ticket.md`; with none or several it says to name the ticket. The launcher runs the kit installed under the project's app (`app` in `aspira.json`, else the root), prints what `kit next` prints and exits with its code.
+With an ID it looks that ticket up on the board. Without one, `kit next` uses the one folder under `.work/` that holds a `ticket.md`; with none or several it says to name the ticket. The launcher runs the global kit (the `kit` on PATH), prints what `kit next` prints and exits with its code.
 
 ## Relay, then offer
 
