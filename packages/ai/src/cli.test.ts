@@ -71,7 +71,7 @@ describe('kit stderr notice', () => {
     const last = newer.stderr.trimEnd().split('\n').at(-1) ?? ''
     expect(last).toContain('99.0.0')
     expect(last).toContain(ownVersion())
-    expect(last).toContain('pnpm add -g @aspiralabs/ai@latest')
+    expect(last).toContain('Upgrade: kit update')
 
     const playbookPlain = kit(['playbook'], { home: homeWithCache(null) })
     const playbookNewer = kit(['playbook'], { home: homeWithCache('99.0.0') })

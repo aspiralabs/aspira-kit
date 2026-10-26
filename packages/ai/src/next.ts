@@ -119,10 +119,10 @@ function bestNote(folders: readonly string[], mainFolder: string): NoteCandidate
 
 const hasCommand = (row: PlaybookRow): row is PlaybookRow & { command: string } => row.command !== null
 
-/** The launcher form of any Playbook agent's slash command: `.claude/skills/aspira-<agent>/scripts/
+/** The launcher form of any Playbook agent's slash command: `~/.claude/skills/aspira-<agent>/scripts/
  * <agent>.sh local <ID>`, with `--app <dir>`, `--verify` and `--pr-url <url>` (Step 8's PR-open
  * commands) optionally after it. */
-const LAUNCHER_SHAPE = /^\.claude\/skills\/aspira-[a-z][a-z-]*\/scripts\/[a-z][a-z-]*\.sh local [A-Za-z0-9-]+( --app [^\s]+)?( --verify)?( --pr-url \S+)?( --replace-pending)?$/
+const LAUNCHER_SHAPE = /^~\/\.claude\/skills\/aspira-[a-z][a-z-]*\/scripts\/[a-z][a-z-]*\.sh local [A-Za-z0-9-]+( --app [^\s]+)?( --verify)?( --pr-url \S+)?( --replace-pending)?$/
 
 /**
  * The Run-line shapes a progress note's Next action may use (F28): every Playbook slash command

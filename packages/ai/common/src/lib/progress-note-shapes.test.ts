@@ -12,7 +12,7 @@ type Shapes = { commands: string[]; examples: { good: string[]; rejected: string
 const SHAPES = JSON.parse(readFileSync(join(import.meta.dirname, 'progress-note-shapes.json'), 'utf8')) as Shapes
 const patterns = SHAPES.commands.map((pattern) => new RegExp(pattern))
 const matches = (line: string) => patterns.some((pattern) => pattern.test(line))
-const LAUNCHER = /^\.claude\/skills\/aspira-[a-z-]+\/scripts\/[a-z-]+\.sh local /
+const LAUNCHER = /^~\/\.claude\/skills\/aspira-[a-z-]+\/scripts\/[a-z-]+\.sh local /
 
 describe('progress-note-shapes.json covers every Step 8 command step8Commands emits (DEX2.1)', () => {
   const cases: { title: string; paths: string[] }[] = [

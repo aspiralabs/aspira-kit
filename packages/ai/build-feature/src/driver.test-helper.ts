@@ -173,8 +173,8 @@ type ProjectOptions = {
   /** Extra variables in the session's environment (such as a fake credential the gate must strip). */
   env?: Record<string, string>
   /**
-   * The kit version kit init leaves in every step skill's `.claude/skills/aspira-<step>/.kit-version`,
-   * committed on main (so every worktree has it). Default: this package's version; null leaves the files out.
+   * The kit version kit init leaves in every step skill's `<HOME>/.claude/skills/aspira-<step>/.kit-version`,
+   * written under the run's temp HOME. Default: this package's version; null leaves the files out.
    */
   kitVersion?: string | null
   /** The Feature Board rules page the default summary handler writes. Default: BOARD_RULES_WITHOUT_SUMMARY. */
@@ -217,8 +217,14 @@ export async function project(options: ProjectOptions) {
   await writeFile(join(main, 'README.md'), '# Fixture\n')
   await writeFile(join(main, 'src/app.ts'), 'export const app = 1\n')
   const kitVersion = options.kitVersion === undefined ? PACKAGE_VERSION : options.kitVersion
-  const kitFiles = kitVersion === null ? {} : Object.fromEntries(STEP_SKILLS.map((step) => [`.claude/skills/aspira-${step}/.kit-version`, `${kitVersion}\n`]))
-  for (const [path, content] of Object.entries({ ...kitFiles, ...options.mainFiles })) {
+  // The global harness keeps each skill's .kit-version under HOME (this run's temp dir), never in the repository (KIT-71 F10).
+  if (kitVersion !== null) {
+    for (const step of STEP_SKILLS) {
+      await mkdir(join(dir, '.claude', 'skills', `aspira-${step}`), { recursive: true })
+      await writeFile(join(dir, '.claude', 'skills', `aspira-${step}`, '.kit-version'), `${kitVersion}\n`)
+    }
+  }
+  for (const [path, content] of Object.entries({ ...options.mainFiles })) {
     await mkdir(dirname(join(main, path)), { recursive: true })
     await writeFile(join(main, path), content)
   }

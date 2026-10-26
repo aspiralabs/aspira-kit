@@ -542,7 +542,7 @@ function preflight(options: IsolateOptions, p: Plan): string | undefined {
     throw new StepError('env', `git does not ignore ${p.envFile}; add the line .env.development.local to .gitignore (kit init adds it) before the kit writes secrets there`)
   }
   if (p.zone !== undefined && !isGitIgnored(options.worktree, '.aspira/cloudflared.yml')) {
-    throw new StepError('tunnel', `git does not ignore ${p.yml}; add the line .aspira/ to .gitignore (kit init adds it) before the kit writes the tunnel config there`)
+    throw new StepError('tunnel', `git does not ignore ${p.yml}; run kit update (it sets the global ignore for .aspira/) before the kit writes the tunnel config there`)
   }
   return p.webhooks.length > 0 ? stripeKey(options, p) : undefined
 }

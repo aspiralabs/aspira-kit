@@ -53,19 +53,19 @@ export function step8Commands(ticket: { id: string; title: string }, branch: str
     addCommit,
     `git push -u origin ${branch}`,
     `gh pr create --base main --head ${branch} --title ${shellQuote(ticket.title)} --body-file ${prBodyFile}`,
-    `.claude/skills/aspira-implementor/scripts/implementor.sh local ${ticket.id} --verify --pr-url <url>`,
+    `~/.claude/skills/aspira-implementor/scripts/implementor.sh local ${ticket.id} --verify --pr-url <url>`,
   ]
   return { ok: true, commands, excluded }
 }
 
 /** Step 7 (static analysis), once per app directory. */
 export function step7Command(id: string, app?: string): string {
-  return ['.claude/skills/aspira-code-analyzer/scripts/code-analyzer.sh', 'local', id, ...(app === undefined ? [] : ['--app', app])].join(' ')
+  return ['~/.claude/skills/aspira-code-analyzer/scripts/code-analyzer.sh', 'local', id, ...(app === undefined ? [] : ['--app', app])].join(' ')
 }
 
 /** The command a verify step runs once Step 7 (static analysis) or Step 8's PR is confirmed. */
 export function verifyCommand(skill: string, id: string, extra: readonly string[] = []): string {
-  return [`.claude/skills/aspira-${skill}/scripts/${skill}.sh`, 'local', id, '--verify', ...extra].join(' ')
+  return [`~/.claude/skills/aspira-${skill}/scripts/${skill}.sh`, 'local', id, '--verify', ...extra].join(' ')
 }
 
 /** The command that puts a run on its dedicated branch, creating it from the current commit when it does not exist yet. */

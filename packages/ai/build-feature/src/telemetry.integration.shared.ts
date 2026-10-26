@@ -11,8 +11,11 @@ export const SLOW = 240_000
 /** This package's version, the one every step skill's .kit-version must name. */
 export const VERSION = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(PACKAGE, '..', 'package.json'), 'utf8'))).version
 export const STEP_SKILLS = ['groomer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer']
-/** The .kit-version file kit init leaves in every step skill, as committed files. */
-export const kitVersions = (version = VERSION): Record<string, string> => Object.fromEntries(STEP_SKILLS.map((step) => [`.claude/skills/aspira-${step}/.kit-version`, `${version}\n`]))
+/**
+ * The repository files that carry the step skills' .kit-version: none, since the global harness keeps them under the
+ * run's temp HOME, where project() writes them (KIT-71 F10). Kept so suites passing `files: kitVersions()` stay as they are.
+ */
+export const kitVersions = (_version = VERSION): Record<string, string> => ({})
 
 /** The Feature Board rules page with BOARD-003 naming the run telemetry file block (the 2026-10-15 amendment). */
 export const RULES_WITH_TELEMETRY =

@@ -250,9 +250,9 @@ async function writeCause(folder: string): Promise<string> {
 }
 
 /** The notice for a hand run that has no run id: its launcher predates run telemetry. */
-export const NO_RUN_ID_NOTICE = 'Telemetry not written: no run id; run kit init'
+export const NO_RUN_ID_NOTICE = 'Telemetry not written: no run id; run kit update'
 /** The notice for a --local run whose driver passed no session usage report: the driver predates run telemetry. */
-export const NO_SESSION_USAGE_NOTICE = 'Telemetry not written: the local driver passed no session usage report; run kit init'
+export const NO_SESSION_USAGE_NOTICE = 'Telemetry not written: the local driver passed no session usage report; run kit update'
 
 /**
  * Write a hand run's telemetry file (KIT-19, F1, F5, F16): the root span is the skill run from its
@@ -516,7 +516,7 @@ export async function handleRunError(context: DriverContext, error: unknown, arg
   }
   const ticket = await readTicketMd(folder).catch(() => null)
   if (ticket === null) return result
-  const command = `.claude/skills/aspira-${context.skill}/scripts/${context.skill}.sh local ${ticket.id}`
+  const command = `~/.claude/skills/aspira-${context.skill}/scripts/${context.skill}.sh local ${ticket.id}`
   await writeProgressNote({
     folder,
     repo: context.repo,
