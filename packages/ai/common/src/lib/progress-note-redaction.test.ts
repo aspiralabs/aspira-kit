@@ -45,11 +45,13 @@ describe('writeProgressNote redacts free text from a trace (T13)', () => {
       repo,
       app: 'apps/web',
       notionToken: NOTION_TOKEN,
-      note: { id: 'KIT-2', title: 'Every skill writes a progress note', skill: 'planner', runId: 'r1', runStatus: 'incomplete', status: 'In Progress: Plan', expectedStatus: null, outputs: [], completed: [], decisions: [], openIssues: [REASON], nextAction: { step: 'rerun the stage', do: [], run: ['/aspira-planner KIT-2'], session: '.claude/skills/aspira-planner/scripts/planner.sh local KIT-2' } },
+      note: { id: 'KIT-2', title: 'Every skill writes a progress note', skill: 'planner', runId: 'r1', runStatus: 'incomplete', status: 'In Progress: Plan', expectedStatus: null, outputs: [], completed: [], decisions: [], openIssues: [REASON], nextAction: { step: 'rerun the stage', do: [], run: ['/aspira-planner KIT-2'], session: '~/.claude/skills/aspira-planner/scripts/planner.sh local KIT-2' } },
     })
     const text = await readFile(join(folder, 'progress.md'), 'utf8')
     expect(text).toContain('[redacted]')
     expect(text).not.toContain(APP_SECRET)
+    expect(text).toContain('~/.claude/skills/aspira-planner/scripts/planner.sh local KIT-2')
+    expect(text).toContain('/aspira-planner KIT-2')
   })
 
   it('redacts the NOTION_TOKEN value in use wherever it would otherwise appear', async () => {

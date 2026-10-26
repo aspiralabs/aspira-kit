@@ -16,19 +16,26 @@
 //   - The phase's record is state.phases['visual-verify'] { status, skipReason, ... }.
 
 import { existsSync, readFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { BOARD, PACKAGE, REPOSITORY, SLUG, STEP_SKILLS, cleanup, kinds, ofKind, project, type Project, type Result, type Stage } from './driver.test-helper.ts'
+import { BOARD, PACKAGE, REPOSITORY, SLUG, cleanup, kinds, ofKind, project, type Project, type Result, type Stage } from './driver.test-helper.ts'
 import { SLOW } from './driver.integration.shared.ts'
+import { homeVersionFile, stageKitHome } from './kit-home.test-helper.ts'
 
 afterAll(cleanup)
 
 const VERSION = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(PACKAGE, '..', 'package.json'), 'utf8'))).version
-const SKILL_VERSION_FILE = '.claude/skills/aspira-visual-verify/.kit-version'
-/** The .kit-version of the new skill, committed on main so every worktree has it (the helper's STEP_SKILLS may not list it yet). */
-const KIT_FILES = { [SKILL_VERSION_FILE]: `${VERSION}\n` }
+const SKILL_DIR = '.claude/skills/aspira-visual-verify'
+
+/** The step skills as the global harness installs them: .kit-version for each, and visual-verify's SKILL.md, under the run's temp HOME (KIT-71 F9, F10). */
+async function stageSkills(home: string, options: { versionFile?: boolean } = {}): Promise<void> {
+  await stageKitHome(home, VERSION)
+  await mkdir(join(home, SKILL_DIR), { recursive: true })
+  await writeFile(join(home, SKILL_DIR, 'SKILL.md'), '# aspira-visual-verify\n')
+  if (options.versionFile === false) await rm(homeVersionFile(home, 'visual-verify'), { force: true })
+}
 const PLAN_FILE = `.work/${SLUG}/plan.review/trace/plan.json`
 const REPORT_FILE = (h: Project) => join(h.folder, 'visual-verify', 'report.md')
 
@@ -68,8 +75,9 @@ async function built(options: BuiltOptions = {}) {
     ...(options.mode === undefined ? {} : { mode: options.mode }),
     ...(options.env === undefined ? {} : { env: options.env }),
     files: { ...GATE_AGENTS, ...options.files },
-    mainFiles: KIT_FILES,
+    kitVersion: null,
   })
+  await stageSkills(h.dir)
   await h.write(PLAN_FILE, planJson(options.paths ?? [UI_PATH]))
   const implementor = await h.advance({}, await h.start(options.start))
   await h.report(implementor.stage!, 'complete')
@@ -316,20 +324,25 @@ describe('T15 F21: one outcome per build', () => {
   }, SLOW)
 })
 
-describe('T16 F16: the visual-verify skill is installed at the driver version', () => {
-  const STEP_FILES = Object.fromEntries(STEP_SKILLS.filter((step) => step !== 'visual-verify').map((step) => [`.claude/skills/aspira-${step}/.kit-version`, `${VERSION}\n`]))
+describe('T16 F16, KIT-71 T37: the visual-verify skill is installed under ~/.claude at the driver version', () => {
   it.each([
-    { name: 'is missing', options: { kitVersion: null, mainFiles: STEP_FILES } },
-    { name: 'names 0.0.1', options: { mainFiles: { [SKILL_VERSION_FILE]: '0.0.1\n' } } },
-  ])('refuses the start with exit 1 naming the file and "run kit init" when its .kit-version $name', async ({ options }) => {
-    const h = await project({ status: 'Ready: Plan', ...options })
+    { name: 'is missing', stage: (home: string) => stageSkills(home, { versionFile: false }) },
+    { name: 'names 0.0.1', stage: async (home: string) => { await stageSkills(home); await writeFile(homeVersionFile(home, 'visual-verify'), '0.0.1\n') } },
+  ])('refuses the start with exit 1 naming the ~/.claude file and "run kit update" when its .kit-version $name', async ({ stage }) => {
+    const h = await project({ status: 'Ready: Plan', kitVersion: null })
+    await stage(h.dir)
     const started = await h.start()
     expect({
       code: started.code,
-      names: started.text.includes('.claude/skills/aspira-visual-verify/.kit-version') && started.text.includes('run kit init'),
+      names: started.text.includes('~/.claude/skills/aspira-visual-verify/.kit-version') && started.text.includes('run kit update') && !started.text.includes('kit init'),
       stage: started.stage,
       recorded: existsSync(join(h.stateDir, 'state.json')),
     }).toEqual({ code: 1, names: true, stage: null, recorded: false })
+  }, SLOW)
+
+  it('T37 hands the visual-verify step its SKILL.md under the temp HOME, not under the repository', async () => {
+    const { h, next } = await built()
+    expect({ stage: next.stage?.stage, skill: next.stage?.skill }).toEqual({ stage: 'visual-verify', skill: join(h.dir, SKILL_DIR, 'SKILL.md') })
   }, SLOW)
 })
 

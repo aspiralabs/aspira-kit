@@ -464,3 +464,16 @@ describe('global-only resolution', () => {
     expect(skillLines.every((line) => line.startsWith('ok'))).toBe(true)
   })
 })
+
+describe('kit doctor outside an Aspira repo', () => {
+  it('T26: says the tier-3 deny hook does not apply in a git repository with no aspira.json', () => {
+    const project = temp('plain-repo')
+    writeFileSync(join(project, 'package.json'), JSON.stringify({ name: 'plain', version: '1.0.0', private: true }))
+    execFileSync('git', ['init', '-q', project])
+    const result = kit(['doctor', '--cwd', project], { home: homeWithCache(null) })
+    expect(result.stdout).toMatch(/tier-3 deny hook does not apply/)
+    // And inside an Aspira repo the same line is not printed.
+    const aspira = kit(['doctor', '--cwd', gitProject()], { home: homeWithCache(null) })
+    expect(aspira.stdout).not.toMatch(/tier-3 deny hook does not apply/)
+  })
+})

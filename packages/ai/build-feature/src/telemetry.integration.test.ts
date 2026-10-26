@@ -17,7 +17,7 @@
 //     `.local/telemetry/attached/<runId>.json` ({ runId, blockId }).
 //   - end: a telemetry file that is not attached adds `Telemetry not attached: <reason>; the file is at <path>`.
 //   - a run refuses (exit 1, no stage) before its first step when a step skill's
-//     `.claude/skills/aspira-<step>/.kit-version` is missing or differs from this package's version.
+//     `~/.claude/skills/aspira-<step>/.kit-version` is missing or differs from this package's version.
 // Span attributes read here: aspira.status, aspira.duration_ms, aspira.orchestration.duration_ms,
 // aspira.segment, aspira.not_measured, aspira.gap, aspira.partial, aspira.usage_scope,
 // aspira.tokens.input, aspira.tokens.output, aspira.tokens.total, aspira.cost_usd, and a model attribute.
@@ -27,10 +27,12 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
+import { homeVersionFile, stageKitHome } from './kit-home.test-helper.ts'
 import { PR_URL, SLUG, cleanup, ofKind, project, worktreeFor, writeStepExport, type Result, type Stage } from './driver.test-helper.ts'
 import {
   SLOW,
   VERSION,
+  STEP_SKILLS,
   kitVersions,
   RULES_WITH_TELEMETRY,
   at,
@@ -137,26 +139,42 @@ describe('KIT-19 T23 F6 F7 F8 F14: one telemetry file for a build-feature run wi
 // T24: --parent-run on the printed step command only.
 // ---------------------------------------------------------------------------------------------
 
-describe('KIT-19 T25 F6 F22: a run refuses before its first step when the step skills are from another kit version', () => {
-  it('exits 1 naming both versions, with no step stage and no step record, when a step skill is from kit 0.0.1', async () => {
-    const h = await project({ status: 'Ready: Spec', files: kitVersions() })
-    await h.write('.claude/skills/aspira-planner/.kit-version', '0.0.1\n')
+describe('KIT-19 T25 F6 F22, KIT-71 T35 T36: a run refuses before its first step when the step skills under ~/.claude are from another kit version', () => {
+  it('T35 exits 1 naming the ~/.claude file and kit update, with no step stage and no step record, when a step skill is from kit 0.0.1', async () => {
+    const h = await project({ status: 'Ready: Spec', kitVersion: null })
+    await stageKitHome(h.dir)
+    await writeFile(homeVersionFile(h.dir, 'planner'), '0.0.1\n')
     const result = await h.advance({}, await h.start())
     const steps = existsSync(join(h.stateDir, 'state.json')) ? ((await h.state()).steps ?? []) : []
-    expect({ code: result.code, said: result.text.includes(`step skills are from kit 0.0.1, the driver is ${VERSION}: run kit init`), stepStages: ofKind(h.stages, 'step').length, steps }).toEqual({
-      code: 1,
-      said: true,
-      stepStages: 0,
-      steps: [],
-    })
+    expect({
+      code: result.code,
+      said: result.text.includes(`step skills are from kit 0.0.1, the driver is ${VERSION}: run kit update`),
+      named: result.text.includes('~/.claude/skills/aspira-planner/.kit-version'),
+      stepStages: ofKind(h.stages, 'step').length,
+      steps,
+    }).toEqual({ code: 1, said: true, named: true, stepStages: 0, steps: [] })
   }, SLOW)
 
-  it('exits 1 naming the missing .kit-version, with no step stage and no step record, when a step skill has none', async () => {
-    const h = await project({ status: 'Ready: Spec', files: kitVersions() })
-    await rm(join(h.repo, '.claude/skills/aspira-planner/.kit-version'), { force: true })
+  it('T35 exits 1 naming the missing ~/.claude .kit-version and run kit update, with no step stage and no step record, when a step skill has none', async () => {
+    const h = await project({ status: 'Ready: Spec', kitVersion: null })
+    await stageKitHome(h.dir)
+    await rm(homeVersionFile(h.dir, 'planner'), { force: true })
     const result = await h.advance({}, await h.start())
     const steps = existsSync(join(h.stateDir, 'state.json')) ? ((await h.state()).steps ?? []) : []
-    expect({ code: result.code, named: result.text.includes('aspira-planner/.kit-version'), stepStages: ofKind(h.stages, 'step').length, steps }).toEqual({ code: 1, named: true, stepStages: 0, steps: [] })
+    expect({
+      code: result.code,
+      named: result.text.includes('~/.claude/skills/aspira-planner/.kit-version'),
+      update: result.text.includes('run kit update') && !result.text.includes('kit init'),
+      stepStages: ofKind(h.stages, 'step').length,
+      steps,
+    }).toEqual({ code: 1, named: true, update: true, stepStages: 0, steps: [] })
+  }, SLOW)
+
+  it('T36 a repo-local .kit-version with the right version does not satisfy the gate: exit 1 naming the missing ~/.claude file, no step stage', async () => {
+    const copies = Object.fromEntries(STEP_SKILLS.map((step) => [`.claude/skills/aspira-${step}/.kit-version`, `${VERSION}\n`]))
+    const h = await project({ status: 'Ready: Spec', kitVersion: null, files: copies })
+    const result = await h.advance({}, await h.start())
+    expect({ code: result.code, named: result.text.includes('~/.claude/skills/aspira-planner/.kit-version'), stepStages: ofKind(h.stages, 'step').length }).toEqual({ code: 1, named: true, stepStages: 0 })
   }, SLOW)
 })
 

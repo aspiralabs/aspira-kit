@@ -124,8 +124,9 @@ describe('F21: a ready code-analyzer run picks Step 7 or Step 8 from the impleme
       "git add -- 'apps/web/fixed.ts' && git commit -m 'KIT-2: static analysis'",
       `git push -u origin ${BRANCH}`,
       `gh pr create --base main --head ${BRANCH} --title 'A renamed card' --body-file .work/${SLUG}/pr-body.md`,
-      '.claude/skills/aspira-implementor/scripts/implementor.sh local KIT-2 --verify --pr-url <url>',
+      '~/.claude/skills/aspira-implementor/scripts/implementor.sh local KIT-2 --verify --pr-url <url>',
     ])
+    expect(next?.run.some((command) => command.startsWith('.claude/skills/'))).toBe(false)
     expect(existsSync(join(folder, 'pr-body.md'))).toBe(true)
     const body = await readFile(join(folder, 'pr-body.md'), 'utf8')
     expect(body.indexOf('## Summary')).toBeLessThan(body.indexOf('## Evidence'))

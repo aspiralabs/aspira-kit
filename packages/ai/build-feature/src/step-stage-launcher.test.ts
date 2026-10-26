@@ -19,25 +19,32 @@ import { runStateSchema, stateDirOf, writeRunState } from '#build-feature/run-st
 
 const NOW = '2026-10-15T00:00:00.000Z'
 const temps: string[] = []
+const realHome = process.env.HOME
 
 afterAll(async () => {
+  if (realHome === undefined) delete process.env.HOME
+  else process.env.HOME = realHome
   for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true })
 })
 
 /** A build-feature run for KIT-2 at Ready: Spec, already past approval/resolve/worktree/overrides: one call goes straight to routing. */
-async function seedReadySpecRun(): Promise<{ repo: string; folder: string; runId: string }> {
+async function seedReadySpecRun(): Promise<{ repo: string; home: string; folder: string; runId: string }> {
   const repo = await mkdtemp(join(tmpdir(), 'build-feature-step-stage-launcher-'))
   temps.push(repo)
   await writeFile(join(repo, 'aspira.json'), `${JSON.stringify({ board: 'https://app.notion.com/p/kit-2-board', repository: 'aspiralabs/kit' }, null, 2)}\n`)
-  const skillDir = join(repo, '.claude/skills/aspira-planner')
+  // The global harness keeps the skills under <HOME>/.claude/skills; the project holds none (KIT-71 F9, F10).
+  const home = await mkdtemp(join(tmpdir(), 'build-feature-step-stage-home-'))
+  temps.push(home)
+  process.env.HOME = home
+  const skillDir = join(home, '.claude/skills/aspira-planner')
   await mkdir(join(skillDir, 'scripts'), { recursive: true })
   await writeFile(join(skillDir, 'SKILL.md'), '# aspira-planner\n')
   await writeFile(join(skillDir, 'scripts/planner.sh'), '#!/bin/bash\necho planner\n', { mode: 0o755 })
   // KIT-19: the driver refuses a step when any step skill's .kit-version is missing or differs from its own version.
   const kitVersion = (JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', 'package.json'), 'utf8')) as { version: string }).version
   for (const step of STEP_SKILLS) {
-    await mkdir(join(repo, '.claude/skills', `aspira-${step}`), { recursive: true })
-    await writeFile(join(repo, '.claude/skills', `aspira-${step}`, '.kit-version'), `${kitVersion}\n`)
+    await mkdir(join(home, '.claude/skills', `aspira-${step}`), { recursive: true })
+    await writeFile(join(home, '.claude/skills', `aspira-${step}`, '.kit-version'), `${kitVersion}\n`)
   }
   const folder = join(repo, '.work', 'kit-2-x')
   await mkdir(folder, { recursive: true })
@@ -46,43 +53,44 @@ async function seedReadySpecRun(): Promise<{ repo: string; folder: string; runId
   const run = { runId, command: '/aspira-build-feature KIT-2', startedAt: NOW, endedAt: null, ended: null, mode: 'local' as const }
   const state = runStateSchema.parse({ runs: [run], inProgress: { runId, startedAt: NOW }, card })
   await writeRunState(folder, state)
-  return { repo, folder, runId }
+  return { repo, home, folder, runId }
 }
 
 describe('T30 F44: the step stage tells the subagent to run the launcher, not the slash command', () => {
   it("names the step's own SKILL.md and runs the launcher form, never the bare slash command, for the planner's Ready: Spec step", async () => {
-    const { repo, runId } = await seedReadySpecRun()
-    const input: DriverInput = { id: 'KIT-2', repo, run: runId, forceRun: false, finish: false, mode: 'local', autonomous: false, now: NOW, env: {} }
+    const { repo, home, runId } = await seedReadySpecRun()
+    const input: DriverInput = { id: 'KIT-2', repo, run: runId, forceRun: false, finish: false, mode: 'local', autonomous: false, now: NOW, env: { HOME: home } }
     const stage = await nextStage(input)
     const promptPath = typeof stage.prompt === 'string' ? stage.prompt : ''
     const prompt = promptPath === '' ? '' : await readFile(promptPath, 'utf8')
     expect({
-      namesSkillMd: prompt.includes('.claude/skills/aspira-planner/SKILL.md'),
-      runsLauncher: prompt.includes('.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 --take-recommended'),
+      launched: stage.stage === 'step',
+      namesSkillMd: prompt.includes('~/.claude/skills/aspira-planner/SKILL.md'),
+      runsLauncher: prompt.includes('~/.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 --take-recommended'),
       dropsSlashCommand: !prompt.includes('/aspira-planner KIT-2'),
-    }).toEqual({ namesSkillMd: true, runsLauncher: true, dropsSlashCommand: true })
+    }).toEqual({ launched: true, namesSkillMd: true, runsLauncher: true, dropsSlashCommand: true })
   })
 
   it('records both the Playbook command and the launcher command on the printed step stage', async () => {
-    const { repo, runId } = await seedReadySpecRun()
-    const input: DriverInput = { id: 'KIT-2', repo, run: runId, forceRun: false, finish: false, mode: 'local', autonomous: false, now: NOW, env: {} }
+    const { repo, home, runId } = await seedReadySpecRun()
+    const input: DriverInput = { id: 'KIT-2', repo, run: runId, forceRun: false, finish: false, mode: 'local', autonomous: false, now: NOW, env: { HOME: home } }
     const stage = await nextStage(input)
     // The printed stage carries --parent-run <runId>:<nonce> (KIT-19 F6); the forms themselves are what this test pins.
     const bare = (text: unknown) => String(text).replace(/ --parent-run \S+$/, '')
     expect({ command: bare(stage.command), launcher: (stage.launcher as string[]).map(bare) }).toEqual({
       command: '/aspira-planner KIT-2 --take-recommended',
-      launcher: ['.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 --take-recommended'],
+      launcher: ['~/.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 --take-recommended'],
     })
   })
 
   it('persists both forms in the run state, not only in the printed stage', async () => {
-    const { repo, folder, runId } = await seedReadySpecRun()
-    const input: DriverInput = { id: 'KIT-2', repo, run: runId, forceRun: false, finish: false, mode: 'local', autonomous: false, now: NOW, env: {} }
+    const { repo, home, folder, runId } = await seedReadySpecRun()
+    const input: DriverInput = { id: 'KIT-2', repo, run: runId, forceRun: false, finish: false, mode: 'local', autonomous: false, now: NOW, env: { HOME: home } }
     await nextStage(input)
     const persisted = JSON.parse(await readFile(join(stateDirOf(folder), 'state.json'), 'utf8')) as { pending: { stage: { command?: string; launcher?: string[] } } | null }
     expect({ command: persisted.pending?.stage.command, launcher: persisted.pending?.stage.launcher }).toEqual({
       command: '/aspira-planner KIT-2 --take-recommended',
-      launcher: ['.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 --take-recommended'],
+      launcher: ['~/.claude/skills/aspira-planner/scripts/planner.sh local KIT-2 --take-recommended'],
     })
   })
 })

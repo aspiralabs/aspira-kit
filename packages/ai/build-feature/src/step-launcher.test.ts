@@ -19,8 +19,8 @@ const APP = 'apps/web'
  */
 const launcherOf = (route: StepRoute): string[] | undefined => (route as StepRoute & { launcher?: string[] }).launcher
 
-const localLine = (step: string, args: string): string[] => [`.claude/skills/aspira-${step}/scripts/${step}.sh local ${args}`.trim()]
-const startWait = (step: string, args: string): string[] => [`.claude/skills/aspira-${step}/scripts/${step}.sh start ${args}`.trim(), `.claude/skills/aspira-${step}/scripts/${step}.sh wait <RUN>`]
+const localLine = (step: string, args: string): string[] => [`~/.claude/skills/aspira-${step}/scripts/${step}.sh local ${args}`.trim()]
+const startWait = (step: string, args: string): string[] => [`~/.claude/skills/aspira-${step}/scripts/${step}.sh start ${args}`.trim(), `~/.claude/skills/aspira-${step}/scripts/${step}.sh wait <RUN>`]
 
 type Case = { status: string; step: string; local: { command: string; launcher: string[] }; cloud: { command: string; launcher: string[] } }
 

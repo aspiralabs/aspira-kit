@@ -28,6 +28,12 @@ describe('the Playbook module', () => {
     expect(commandFor(nextStep('Released')!, 'NOM-4')).toBeNull()
   })
 
+  it('T34: the Step 8 row names the ~/.claude/skills implementor launcher and no skill path lacks the ~/ prefix', () => {
+    const markdown = renderPlaybook()
+    expect(markdown).toContain('~/.claude/skills/aspira-implementor/scripts/implementor.sh')
+    expect(markdown).not.toMatch(/(?<!~\/)\.claude\/skills\//)
+  })
+
   it('renders the Playbook section that From Idea to Release carries, from the same rows, with no emoji', () => {
     const markdown = renderPlaybook()
     expect(markdown.startsWith('## Playbook: what to run next\n')).toBe(true)

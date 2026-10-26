@@ -1,5 +1,6 @@
 // T14 (F12): the kit resolves its own package, never a copy in a project's node_modules. The writer,
 // the self-healing and kit doctor's harness check are covered at the CLI seam in cli.test.ts (T4-T13).
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -35,5 +36,24 @@ describe('aiPackageDir', () => {
     } finally {
       process.chdir(before)
     }
+  })
+})
+
+describe('skill paths in the kit source', () => {
+  it('T39: no tracked packages/ai file outside tests and fixtures names .claude/skills/aspira- without the ~/ prefix', () => {
+    const root = dirname(dirname(fileURLToPath(import.meta.url)))
+    const tracked = execFileSync('git', ['ls-files', '-z', '--', '.'], { cwd: root, encoding: 'utf8' }).split('\0').filter((file) => file !== '')
+    const skipped = /(^|\/)CHANGELOG\.md$|(\.test\.ts|\.test-helper\.ts|\.integration\.shared\.ts)$|(^|\/)(fixtures?|node_modules)\//
+    const text = /\.(ts|tsx|js|mjs|sh|md|json|yml|yaml)$/
+    const offenders: string[] = []
+    for (const file of tracked) {
+      if (skipped.test(file) || !text.test(file)) continue
+      readFileSync(join(root, file), 'utf8')
+        .split('\n')
+        .forEach((line, index) => {
+          if (/(?<!~\/)\.claude\/skills\/aspira-/.test(line)) offenders.push(`${file}:${String(index + 1)}`)
+        })
+    }
+    expect(offenders).toEqual([])
   })
 })

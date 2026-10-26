@@ -17,7 +17,7 @@
 //     `.local/telemetry/attached/<runId>.json` ({ runId, blockId }).
 //   - end: a telemetry file that is not attached adds `Telemetry not attached: <reason>; the file is at <path>`.
 //   - a run refuses (exit 1, no stage) before its first step when a step skill's
-//     `.claude/skills/aspira-<step>/.kit-version` is missing or differs from this package's version.
+//     `<HOME>/.claude/skills/aspira-<step>/.kit-version` is missing or differs from this package's version.
 // Span attributes read here: aspira.status, aspira.duration_ms, aspira.orchestration.duration_ms,
 // aspira.segment, aspira.not_measured, aspira.gap, aspira.partial, aspira.usage_scope,
 // aspira.tokens.input, aspira.tokens.output, aspira.tokens.total, aspira.cost_usd, and a model attribute.
