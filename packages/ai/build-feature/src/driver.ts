@@ -60,7 +60,7 @@ import { PACKET_STEPS, writeRunPacket } from '#build-feature/packet-file.ts'
 import { BACKWARD_MOVES_SKILL_MAY_MAKE, decideOverrides, findOverrides, overridesStage, recordOverrides } from '#build-feature/overrides.ts'
 import { renderPrBody } from '#build-feature/pr-body.ts'
 import { acceptResolution, cardDifferences, resolveStage, resolveWithToken, type Resolution } from '#build-feature/resolve.ts'
-import { mergePhase, mergeRecordOf } from '#build-feature/merge.ts'
+import { mergePhase, mergeRecordOf, teardownNote } from '#build-feature/merge.ts'
 import { assertNever, launcherFor, MERGE_MOVE, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, STEPS, type EndRoute, type Mode, type PhaseName, type StepName } from '#build-feature/route.ts'
 import { reviewPhase } from '#build-feature/review-loop.ts'
 import { readRunState, stateDirOf, writeRunState, type Card, type Failure, type Pending, type PhaseRecord, type RunState, type Usage } from '#build-feature/run-state.ts'
@@ -70,7 +70,7 @@ import { step8Phase } from '#build-feature/step8.ts'
 import { renderBuildSummary } from '#build-feature/summary.ts'
 import { shown, system } from '#build-feature/system.ts'
 import { runSpans } from '#build-feature/telemetry.ts'
-import { carryTicketFolder, existingWorktree, insideWorktree, locate, prepareWorktree, ticketTypeOf, worktreePath, type Place } from '#build-feature/worktree.ts'
+import { carryTicketFolder, existingWorktree, insideWorktree, isolateIn, locate, prepareWorktree, ticketTypeOf, worktreePath, type Place } from '#build-feature/worktree.ts'
 
 export const STAGE_KINDS = ['resolve', 'approval', 'overrides', 'worktree', 'step', 'ask', 'move', 'set-pr', 'visual-verify', 'gate', 'step10', 'fix', 'release-row', 'merge', 'summary', 'telemetry', 'end'] as const
 export type StageKind = (typeof STAGE_KINDS)[number]
@@ -629,13 +629,18 @@ async function worktreeGate(ctx: Ctx, state: RunState): Promise<Out> {
     return stop(ctx, state, message, { stopped: true, reason: { kind: 'worktree-prerequisite' }, failure: { action: 'worktree', message } })
   }
   const target = join(place.main, worktreePath(type, ctx.input.id))
-  if (place.top === target) return afterStart(ctx, withRun(state, ctx.runId, { worktree: target }))
+  if (place.top === target) {
+    // A rerun from inside the worktree completes missing isolation like a failed install halts (KIT-67 F1); a merged ticket's is never rebuilt.
+    const isolated = mergeRecordOf(state) === null ? await isolateIn({ place, id: ctx.input.id, worktree: target, env: ctx.input.env, onlyIfPending: true }) : { ok: true as const }
+    if (!isolated.ok) return stop(ctx, state, isolated.message, { stopped: true, reason: { kind: 'worktree-command' }, failure: { action: 'worktree', command: isolated.command, exitCode: isolated.exitCode, output: isolated.output, message: isolated.message } })
+    return afterStart(ctx, withRun(state, ctx.runId, { worktree: target }))
+  }
   return moveIntoWorktree(ctx, state, place, type, card.type!)
 }
 
 async function moveIntoWorktree(ctx: Ctx, state: RunState, place: Place, type: NonNullable<ReturnType<typeof ticketTypeOf>>, cardType: string): Promise<Out> {
   const card = state.card!
-  const prepared = await prepareWorktree({ place, id: ctx.input.id, title: card.title, type, cardType, env: ctx.input.env, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }) })
+  const prepared = await prepareWorktree({ place, id: ctx.input.id, title: card.title, type, cardType, env: ctx.input.env, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }), ...(mergeRecordOf(state) === null ? {} : { skipIsolation: true }) })
   if (!prepared.ok) return stop(ctx, state, prepared.message, { stopped: true, reason: { kind: 'worktree-command' }, failure: { action: 'worktree', command: prepared.command, exitCode: prepared.exitCode, output: prepared.output, message: prepared.message } })
   const { worktree, branch } = prepared
   const folder = await carryTicketFolder(ctx.folder, worktree)
@@ -666,6 +671,12 @@ async function moveIntoWorktree(ctx: Ctx, state: RunState, place: Place, type: N
 /** A new invocation, or a call, outside the ticket's existing worktree: continue there (nothing is recorded here). */
 async function redirectStage(input: DriverInput, place: Place, worktree: string, folder: string): Promise<Stage> {
   await carryTicketFolder(folder, worktree)
+  // A rerun from the main checkout completes missing isolation before it sends the session on (KIT-67 F1); a merged ticket's is never rebuilt.
+  const carried = await readRunState(await workFolder(worktree, input.id)).catch(() => null)
+  if (carried === null || mergeRecordOf(carried) === null) {
+    const isolated = await isolateIn({ place, id: input.id, worktree, env: input.env, onlyIfPending: true })
+    if (!isolated.ok) throw new Refusal(isolated.message)
+  }
   const branch = await system.gitCurrentBranch({ cwd: worktree, env: input.env })
   const again = input.run === undefined ? `the same command (${invoked(input)})` : `the driver with --run ${input.run}`
   return {
@@ -797,7 +808,8 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
     }
     case 'end':
       // The merge ends the run through its move, past the sequence that collected the release row's skip note.
-      if (next.reason === 'finished' && facts.merged && (ctx.aspira?.releases ?? '').trim() === '') return endRoute(ctx, state, { ...next, message: `${next.message}\n${RELEASE_SKIPPED}` })
+      if (next.reason === 'finished' && facts.merged && (ctx.aspira?.releases ?? '').trim() === '') return endRoute(ctx, state, { ...next, message: [next.message, RELEASE_SKIPPED, teardownNote(state)].filter((line) => line !== null).join('\n') })
+      if (facts.merged) return endRoute(ctx, state, { ...next, message: [next.message, teardownNote(state)].filter((line) => line !== null).join('\n') })
       return endRoute(ctx, state, next)
     default:
       return assertNever(next)
@@ -1222,7 +1234,9 @@ export async function nextStage(input: DriverInput): Promise<Stage> {
   const place = await locate(input.repo, input.env)
   if (place !== null && insideWorktree(place, input.id) === null) {
     const worktree = existingWorktree(place, input.id)
-    if (worktree !== null) return redirectStage(input, place, worktree, initialFolder)
+    // A run still open in this folder (a start whose isolation failed, so it stopped here) goes on here; one that moved is told to continue in the worktree.
+    const openHere = input.run !== undefined && (await readRunState(initialFolder)).runs.some((run) => run.runId === input.run && (run.ended ?? null) === null)
+    if (worktree !== null && !openHere) return redirectStage(input, place, worktree, initialFolder)
   }
   const state = await readRunState(initialFolder)
   const base = { input, folder: initialFolder, dir: stateDirOf(initialFolder), aspira: null }

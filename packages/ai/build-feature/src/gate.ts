@@ -25,6 +25,7 @@ import { dirname, join, relative } from 'node:path'
 import { z } from 'zod'
 import type { Phase, PhaseContext, PhaseResult } from '#build-feature/driver.ts'
 import { tail } from '@aspiralabs/ai/common/lib/redact'
+import { worktreeDatabaseEnv, worktreeIdentity } from '@aspiralabs/ai/common/lib/worktree-env'
 import { CREDENTIALS, credentialNames, withoutCredentials } from '@aspiralabs/ai/common/lib/visual-verify'
 import type { Pending, RunState } from '#build-feature/run-state.ts'
 import { gitShowFile, gitStatus, packageManagerOf, parseStatus } from '#build-feature/system.ts'
@@ -307,6 +308,21 @@ async function dirtyTracked(context: PhaseContext): Promise<string[]> {
 
 const withRecord = (state: RunState, record: GateRecord): RunState => ({ ...state, phases: { ...state.phases, gate: record } })
 
+const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
+
+/**
+ * KIT-67 Q1: in an isolated worktree each run line starts by exporting the worktree's database variables, read by the
+ * shell from <app>/.env.development.local, so no command falls back to the shared database in .env.local. The values
+ * are read when the line runs and never appear in the stage body. Empty outside an isolated worktree.
+ */
+async function databaseExports(repo: string, app: string): Promise<string> {
+  if ((await worktreeIdentity(repo)) === null) return ''
+  const names = Object.keys(await worktreeDatabaseEnv(repo)).filter((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
+  if (names.length === 0) return ''
+  const file = shellQuote(join(repo, app, '.env.development.local'))
+  return `${names.map((name) => `export ${name}="$(sed -n 's/^${name}=//p' ${file} | tail -n 1)"`).join('; ')}; `
+}
+
 /** Gate stage after an implementor 'complete': nothing when this build's gate is recorded, else the commands to run. */
 export async function gateStage(context: PhaseContext, state: RunState, buildOf?: string): Promise<PhaseResult> {
   const key = buildOf ?? (await buildKey(context.folder, state))
@@ -323,13 +339,14 @@ export async function gateStage(context: PhaseContext, state: RunState, buildOf?
     if (changed.length > 0 && reviewOf(state)?.key !== scriptsKey(changed)) return scriptsAsk(state, changed, relative(context.repo, join(context.repo, app, 'package.json')))
   }
   const unset = credentialNames(context.env)
+  const database = await databaseExports(context.repo, app)
   return {
     kind: 'stage',
     state,
     stage: 'gate',
     body: {
       commands: gate.commands,
-      run: gate.commands.map((command) => withoutCredentials(command, unset)),
+      run: gate.commands.map((command) => `${database}${withoutCredentials(command, unset)}`),
       unset,
       cwd: gate.cwd,
       cwds: gate.cwds,

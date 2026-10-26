@@ -100,7 +100,7 @@ async function main(): Promise<number> {
       console.error(`${args.reason}\n${usage}`)
       return 2
     }
-    return worktree({ projectRoot: cwd, app: args.app, ref: args.ref, install: args.install, log })
+    return await worktree({ projectRoot: cwd, app: args.app, ref: args.ref, install: args.install, log })
   }
   if (command === 'playbook') {
     process.stdout.write(renderPlaybook())

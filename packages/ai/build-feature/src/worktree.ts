@@ -117,8 +117,50 @@ export function linkEnvLocal(from: string, to: string, dirs: readonly string[]):
 
 const errorOf = (result: CommandResult): string => tail((result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`).trim(), 20)
 
+const resourceKeys = z.looseObject({
+  app: z.string().optional(),
+  database: z.looseObject({ envVars: z.array(z.union([z.string(), z.looseObject({ name: z.string() })])).default([]) }).optional(),
+  tunnel: z.looseObject({}).optional(),
+  webhooks: z.array(z.looseObject({ secretEnvVar: z.string().optional() })).optional(),
+})
+
+/**
+ * Whether an existing worktree still lacks something its aspira.json asks the kit to make: a database variable
+ * in the app's .env.development.local, the tunnel config, a webhook secret. A project with none of those keys
+ * (a placeholder dev url alone is `kit worktree`'s) and a worktree that has them all are not pending.
+ */
+export async function isolationPending(worktree: string): Promise<boolean> {
+  const raw = await readFile(join(worktree, 'aspira.json'), 'utf8').catch(() => null)
+  if (raw === null) return false
+  let config: z.infer<typeof resourceKeys>
+  try {
+    config = resourceKeys.parse(JSON.parse(raw))
+  } catch {
+    return false
+  }
+  const webhooks = config.webhooks ?? []
+  if (config.database === undefined && config.tunnel === undefined && webhooks.length === 0) return false
+  const app = config.app === undefined || config.app === '' ? '.' : config.app
+  const text = await readFile(join(worktree, app, '.env.development.local'), 'utf8').catch(() => '')
+  const has = (name: string): boolean => new RegExp(`^\\s*${name}\\s*=\\s*\\S`, 'm').test(text)
+  if (config.database?.envVars.some((entry) => !has(typeof entry === 'string' ? entry : entry.name))) return true
+  if ((config.tunnel !== undefined || webhooks.length > 0) && !existsSync(join(worktree, app, '.aspira', 'cloudflared.yml')) && !existsSync(join(worktree, '.aspira', 'cloudflared.yml'))) return true
+  return webhooks.some((hook) => !has(hook.secretEnvVar ?? 'STRIPE_WEBHOOK_SECRET'))
+}
+
+type Failed = Extract<Prepared, { ok: false }>
+
+/** Run the kit's isolation in an existing ticket worktree: ok, or a failure naming the step (the worktree is kept; a rerun resumes). */
+export async function isolateIn(input: { place: Place; id: string; worktree: string; env: NodeJS.ProcessEnv; onlyIfPending?: boolean }, sys: System = system): Promise<{ ok: true } | Failed> {
+  if (input.onlyIfPending === true && !(await isolationPending(input.worktree))) return { ok: true }
+  const result = await sys.isolateWorktree({ main: input.place.main, worktree: input.worktree, ticket: input.id, env: input.env })
+  if (result.ok) return { ok: true }
+  const command = `isolation: ${result.step}`
+  return { ok: false, message: `the worktree's isolation failed at the ${result.step} step: ${result.reason}; the worktree is kept, rerun the run to resume it`, command, exitCode: 1, output: tail(result.reason, 20) }
+}
+
 /** Make the ticket's worktree (or reuse it), exclude .worktrees/, and run the install and build in a new one, in the project's `app` directory from aspira.json when it names one (KIT-21). */
-export async function prepareWorktree(input: { place: Place; id: string; title: string; type: TicketType; cardType: string; env: NodeJS.ProcessEnv; app?: string }, sys: System = system): Promise<Prepared> {
+export async function prepareWorktree(input: { place: Place; id: string; title: string; type: TicketType; cardType: string; env: NodeJS.ProcessEnv; app?: string; skipIsolation?: boolean }, sys: System = system): Promise<Prepared> {
   const { place, id, title, type, env } = input
   const path = worktreePath(type, id)
   const worktree = join(place.main, path)
@@ -128,7 +170,14 @@ export async function prepareWorktree(input: { place: Place; id: string; title: 
     const output = errorOf(result)
     return { ok: false, message: `${why}: \`${command}\` exited ${result.code}: ${output}`, command, exitCode: result.code, output }
   }
-  if (existsSync(worktree)) return { ok: true, worktree, branch, created: false, ran: [] }
+  if (existsSync(worktree)) {
+    // A rerun completes missing isolation instead of returning (KIT-67 F1); a merged ticket's is never rebuilt.
+    if (input.skipIsolation !== true) {
+      const isolated = await isolateIn({ place, id, worktree, env, onlyIfPending: true }, sys)
+      if (!isolated.ok) return isolated
+    }
+    return { ok: true, worktree, branch, created: false, ran: [] }
+  }
   const fetched = await sys.gitFetchMain(options)
   if (fetched.code !== 0) return fail(shown('git', GIT_ARGS.fetchMain), fetched, `the run could not fetch origin/main to start ${path} from it`)
   const exists = (await sys.gitBranchExists(options, branch)).code === 0
@@ -142,6 +191,9 @@ export async function prepareWorktree(input: { place: Place; id: string; title: 
   // the install and the first step need the project's keys, and a worktree has none of its own.
   const linked = linkEnvLocal(place.main, worktree, ['', ...(input.app === undefined || input.app === '.' ? [] : [input.app])])
   const ran: string[] = [...linked]
+  // Isolation after the worktree exists and before the install, so the install and build see the branch's own environment (KIT-67).
+  const isolated = await isolateIn({ place, id, worktree, env }, sys)
+  if (!isolated.ok) return isolated
   const installDir = join(worktree, input.app ?? '.')
   for (const { command, args } of await installCommands(installDir)) {
     const result = await sys.projectCommand({ cwd: installDir, env }, command, args)

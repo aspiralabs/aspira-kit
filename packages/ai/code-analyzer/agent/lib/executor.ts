@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import type { SandboxSession } from 'eve/sandbox'
+import { worktreeDatabaseEnv, worktreeIdentity } from '@aspiralabs/ai/common/lib/worktree-env'
 
 export type RunResult = { exitCode: number; stdout: string; stderr: string; timedOut: boolean }
 export type RunOptions = { cwd?: string; timeoutMs?: number; signal?: AbortSignal }
@@ -44,15 +45,20 @@ export function analyzerEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 export function hostExecutor(root: string): Executor {
-  const exec = (command: string, options: RunOptions = {}): Promise<RunResult> => new Promise((done) => {
-    const cwd = options.cwd ? resolve(root, options.cwd) : root
-    const child = execFile('bash', ['-c', command], { cwd, env: analyzerEnv(process.env), maxBuffer: 64 * 1024 * 1024, timeout: options.timeoutMs, killSignal: 'SIGKILL', signal: options.signal }, (error, stdout, stderr) => {
-      const killed = Boolean(error && 'killed' in error && (error as { killed?: boolean }).killed)
-      const code = error && typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : error ? 1 : 0
-      done({ exitCode: killed ? 124 : code, stdout: String(stdout), stderr: String(stderr), timedOut: killed && Boolean(options.timeoutMs) })
+  // KIT-67 Q1: in an isolated worktree the branch's database variables go over the process env, so no command reaches the shared database; credentials stay stripped.
+  const childEnv = async (): Promise<NodeJS.ProcessEnv> => analyzerEnv({ ...process.env, ...((await worktreeIdentity(root)) === null ? {} : await worktreeDatabaseEnv(root)) })
+  const exec = async (command: string, options: RunOptions = {}): Promise<RunResult> => {
+    const env = await childEnv()
+    return new Promise((done) => {
+      const cwd = options.cwd ? resolve(root, options.cwd) : root
+      const child = execFile('bash', ['-c', command], { cwd, env, maxBuffer: 64 * 1024 * 1024, timeout: options.timeoutMs, killSignal: 'SIGKILL', signal: options.signal }, (error, stdout, stderr) => {
+        const killed = Boolean(error && 'killed' in error && (error as { killed?: boolean }).killed)
+        const code = error && typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : error ? 1 : 0
+        done({ exitCode: killed ? 124 : code, stdout: String(stdout), stderr: String(stderr), timedOut: killed && Boolean(options.timeoutMs) })
+      })
+      void child
     })
-    void child
-  })
+  }
   return {
     kind: 'host', root, canInstall: false, run: exec,
     async readFile(path) {

@@ -83,7 +83,7 @@ async function call(service: string, method: string, url: string, token: string 
 }
 
 const NeonBranchList = z.object({
-  branches: z.array(z.looseObject({ id: z.string(), name: z.string(), default: z.boolean().optional(), primary: z.boolean().optional(), parent_id: z.string().optional(), expires_at: z.string().optional() })),
+  branches: z.array(z.looseObject({ id: z.string(), name: z.string(), default: z.boolean().optional(), primary: z.boolean().optional(), parent_id: z.string().nullish(), expires_at: z.string().nullish() })),
 })
 const NeonCreated = z.object({
   branch: z.looseObject({ id: z.string() }),
@@ -106,8 +106,8 @@ export function neonSeam(options: { baseUrl?: string | undefined; apiKey: string
         id: branch.id,
         name: branch.name,
         default: branch.default === true || branch.primary === true,
-        ...(branch.parent_id === undefined ? {} : { parentId: branch.parent_id }),
-        ...(branch.expires_at === undefined ? {} : { expiresAt: branch.expires_at }),
+        ...(branch.parent_id == null ? {} : { parentId: branch.parent_id }),
+        ...(branch.expires_at == null ? {} : { expiresAt: branch.expires_at }),
       }))
     },
     async createBranch(projectId, spec) {
