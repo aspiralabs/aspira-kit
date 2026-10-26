@@ -22,8 +22,8 @@ const recordSchema = z.object({
   url: z.string(),
   mergedAt: z.string(),
   releasePage: z.enum(['updated']).optional(),
-  /** KIT-67 F24: the worktree's database branch, tunnel and webhooks torn down once after the merge; 'failed' names the step in `teardownStep`. */
-  teardown: z.enum(['done', 'failed']).optional(),
+  /** KIT-67 F24: the worktree's database branch, tunnel and webhooks torn down once after the merge; 'error' names the step in `teardownStep`. */
+  teardown: z.enum(['done', 'error']).optional(),
   teardownStep: z.string().optional(),
   teardownReason: z.string().optional(),
 })
@@ -44,7 +44,7 @@ const moveOf = (context: PhaseContext, state: RunState): PhaseResult => ({ kind:
 /** The follow-up line for a teardown that failed (the run goes on), or null. */
 export function teardownNote(state: { phases?: Record<string, unknown> }): string | null {
   const record = mergeRecordOf(state)
-  if (record?.teardown !== 'failed') return null
+  if (record?.teardown !== 'error') return null
   return `The worktree's teardown failed at the ${record.teardownStep ?? 'unknown'} step${record.teardownReason === undefined ? '' : ` (${record.teardownReason})`}: run kit cleanup to remove what is left of its database branch, tunnel and webhooks.`
 }
 
@@ -53,7 +53,7 @@ async function tearDown(context: PhaseContext, state: RunState, record: MergeRec
   if (record.teardown !== undefined) return { state, record }
   const place = await locate(context.repo, context.env, sys)
   const result = place === null ? ({ ok: true } as const) : await sys.teardownWorktree({ main: place.main, worktree: context.repo, ticket: context.id, env: context.env })
-  const next: MergeRecord = result.ok ? { ...record, teardown: 'done' } : { ...record, teardown: 'failed', teardownStep: result.step, teardownReason: result.reason }
+  const next: MergeRecord = result.ok ? { ...record, teardown: 'done' } : { ...record, teardown: 'error', teardownStep: result.step, teardownReason: result.reason }
   return { state: { ...state, phases: { ...state.phases, merge: next } }, record: next }
 }
 

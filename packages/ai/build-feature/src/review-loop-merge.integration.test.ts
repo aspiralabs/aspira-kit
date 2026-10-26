@@ -222,6 +222,6 @@ describe('KIT-67 T34: the teardown after the merge', () => {
       moves: ofKind(h.stages, 'move').map((stage) => String(stage.to)),
       end: end.stage?.stage,
       stopped: Boolean(end.stage?.stopped),
-    }).toEqual({ teardown: 'failed', step: true, followUp: true, releaseRow: true, moves: ['Ready: Implementation'], end: 'end', stopped: false })
+    }).toEqual({ teardown: 'error', step: true, followUp: true, releaseRow: true, moves: ['Ready: Implementation'], end: 'end', stopped: false })
   }, SLOW)
 })
