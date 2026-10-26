@@ -155,7 +155,8 @@ describe('today\'s aspira.json readers (F7)', () => {
       if (state !== 'missing') expect(kit(['map-codebase'], { home: h, cwd: root }).code, state).toBe(0)
       if (state === 'stale') writeFileSync(join(root, 'src', 'b.ts'), 'export const b = 2\n')
       const doctor = kit(['doctor', '--cwd', root], { home: h, cwd: root })
-      const lines = doctor.stdout.split('\n').filter((line) => /\bmap\b/i.test(line))
+      // the installed-skill check line for aspira-map-codebase is not the map status line
+      const lines = doctor.stdout.split('\n').filter((line) => /\bmap\b/i.test(line) && !line.includes('~/.claude/skills/aspira-map-codebase'))
       expect(lines, `${state}: ${doctor.stdout}`).toHaveLength(1)
       expect(lines[0], state).toMatch(new RegExp(`\\b${state}\\b`, 'i'))
       expect(lines[0], state).toContain('.codebase-map')

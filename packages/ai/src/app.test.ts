@@ -520,7 +520,7 @@ describe('kit init --stack next --app apps/web in a workspace whose root has its
 // ---- kit init removes the harness an earlier kit committed (KIT-71, F15) ----
 
 const KIT_HOOKS = ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh']
-const TWELVE_SKILLS = [...AGENTS, ...KIT_SKILLS]
+const THIRTEEN_SKILLS = [...AGENTS, ...KIT_SKILLS]
 const BEGIN_MARKER = '<!-- aspiralabs:begin (managed by @aspiralabs/ai; do not edit inside this block) -->'
 const END_MARKER = '<!-- aspiralabs:end -->'
 const AGENTS_BEFORE = '# nomnomzz\n\nHand-written intro.\n\n'
@@ -533,7 +533,7 @@ const KIT_SESSION = hookGroup('sh .claude/hooks/aspira/session-start.sh')
 const KIT_PRE = ['sh .claude/hooks/aspira/deny-tier3.sh', 'sh .claude/hooks/aspira/audit-log.sh']
 
 /**
- * An earlier kit's project, laid out by hand and committed once: the twelve skill folders (each with .kit-version), the retired
+ * An earlier kit's project, laid out by hand and committed once: the thirteen skill folders (each with .kit-version), the retired
  * aspira-spec-reviewer, a skill of the engineer's own, the three hooks, settings.json, the managed block and the wired .gitignore,
  * and with `aspira`, a committed aspira.json.
  */
@@ -541,7 +541,7 @@ function earlierKit(options: { mixedSettings?: boolean; commentAbove?: string; a
   const { root } = repository()
   if (options.aspira === true) writeFileSync(join(root, 'aspira.json'), `${JSON.stringify({ board: BOARD, app: 'apps/web' }, null, 2)}\n`)
   const mixed = options.mixedSettings ?? true
-  for (const name of [...TWELVE_SKILLS, 'spec-reviewer']) {
+  for (const name of [...THIRTEEN_SKILLS, 'spec-reviewer']) {
     const dir = join(root, '.claude', 'skills', `aspira-${name}`)
     mkdirSync(join(dir, 'scripts'), { recursive: true })
     writeFileSync(join(dir, 'SKILL.md'), `# ${name}\n`)
@@ -606,7 +606,7 @@ describe('kit init removes the committed harness (KIT-71)', () => {
   it('T19: removes the skill folders, hooks, kit hook commands, managed block and ignore lines, prints the git commands and commits nothing', async () => {
     const { root } = earlierKit()
     const lines = await init(root, { app: 'apps/web', board: BOARD })
-    for (const name of [...TWELVE_SKILLS, 'spec-reviewer']) expect(existsSync(join(root, '.claude', 'skills', `aspira-${name}`)), name).toBe(false)
+    for (const name of [...THIRTEEN_SKILLS, 'spec-reviewer']) expect(existsSync(join(root, '.claude', 'skills', `aspira-${name}`)), name).toBe(false)
     expect(existsSync(join(root, '.claude', 'skills', 'aspira-other', 'SKILL.md'))).toBe(true)
     expect(existsSync(join(root, '.claude', 'hooks', 'aspira'))).toBe(false)
     const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf8')) as { permissions?: unknown; hooks: Record<string, HookGroup[]> }
@@ -644,7 +644,7 @@ describe('kit init removes the committed harness (KIT-71)', () => {
     const before = bytesOf(root)
     const lines = await init(root, { app: 'apps/web', board: BOARD, dryRun: true })
     const text = lines.join('\n')
-    for (const name of [...TWELVE_SKILLS, 'spec-reviewer']) expect(text, name).toContain(`aspira-${name}`)
+    for (const name of [...THIRTEEN_SKILLS, 'spec-reviewer']) expect(text, name).toContain(`aspira-${name}`)
     expect(lines.filter((l) => /\.claude\/(skills|hooks)/.test(l) && /^(write|update|keep|skip)\b/.test(l)), 'no install line for the harness').toEqual([])
     expect(text).not.toContain('aspira-other')
     expect(text).toContain('.claude/hooks/aspira')
@@ -826,7 +826,7 @@ describe('kit upgrade (KIT-71)', () => {
     const { code, lines } = runUpgrade(root, home)
     expect(code).toBe(0)
     expect(harnessCurrent({ home, env: harnessEnv(home) })).toEqual([])
-    for (const name of [...TWELVE_SKILLS, 'spec-reviewer']) expect(existsSync(join(root, '.claude', 'skills', `aspira-${name}`)), name).toBe(false)
+    for (const name of [...THIRTEEN_SKILLS, 'spec-reviewer']) expect(existsSync(join(root, '.claude', 'skills', `aspira-${name}`)), name).toBe(false)
     expect(existsSync(join(root, '.claude', 'skills', 'aspira-other', 'SKILL.md'))).toBe(true)
     expect(existsSync(join(root, '.claude', 'hooks', 'aspira'))).toBe(false)
     expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toBe(AGENTS_BEFORE.concat(AGENTS_AFTER))

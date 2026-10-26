@@ -80,7 +80,7 @@ describe('a project on the global install', () => {
     for (const hook of ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh']) expect(readFileSync(join(home, '.claude', 'hooks', 'aspira', hook), 'utf8')).toBe(readFileSync(join(globalDir, 'hooks', hook), 'utf8'))
     const report = spawnSync('kit', ['doctor'], { cwd: app, encoding: 'utf8' }).stdout.split('\n')
     const skillLines = report.filter((l) => l.startsWith('ok') && l.includes('~/.claude/skills/aspira-'))
-    expect(skillLines.length).toBe(12)
+    expect(skillLines.length).toBe(13)
     expect(report.filter((l) => l.startsWith('ok') && ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh'].some((hook) => l.includes(hook))).length).toBeGreaterThanOrEqual(3)
     // The scratch project names a board and has no NOTION_TOKEN: that one unrelated check fails by design; every harness check passes.
     expect(report.filter((l) => l.startsWith('FAIL') && !l.startsWith('FAIL NOTION_TOKEN is not set'))).toEqual([])

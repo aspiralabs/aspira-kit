@@ -1,8 +1,8 @@
-// The /aspira-* skills and the hooks that go with them: eight agent skills and four kit launchers, all
+// The /aspira-* skills and the hooks that go with them: eight agent skills and five kit launchers, all
 // from one package, @aspiralabs/ai. Each agent ships its skill under <agent>/skill/aspira-<agent>/ and the
 // kit skills sit under skills/aspira-<name>/ (SKILL.md and scripts/<name>.sh). They are a global harness,
 // written once per engineer into ~/.claude (skills/aspira-<name>/, hooks/aspira/, and the kit's hook groups
-// in settings.json) plus four lines in the global git ignore, never into a project. Each skill is stamped
+// in settings.json) plus five lines in the global git ignore, never into a project. Each skill is stamped
 // with the running kit's version in .kit-version; `kit` rewrites the harness before any command when
 // harnessCurrent finds it stale, and `kit doctor` reports the same items.
 // @aspiralabs/ai is installed globally (pnpm add -g), so the source is always the running kit's own package;
@@ -24,13 +24,13 @@ export const RETIRED_SKILLS = ['spec-reviewer'] as const
 export type Agent = (typeof AGENTS)[number]
 
 /** The skills @aspiralabs/ai ships for the kit itself, each a /aspira-<name> launcher for `kit <name>`. */
-export const KIT_SKILLS = ['cleanup', 'next', 'upgrade', 'worktree'] as const
+export const KIT_SKILLS = ['cleanup', 'map-codebase', 'next', 'upgrade', 'worktree'] as const
 export type KitSkill = (typeof KIT_SKILLS)[number]
 
 /** Any /aspira-* skill kit installs: an agent's or one of the kit's own. */
 export type SkillName = Agent | KitSkill
 
-/** The one package that brings the kit, every agent and all twelve skills into a project. */
+/** The one package that brings the kit, every agent and all thirteen skills into a project. */
 export const AI_PACKAGE = '@aspiralabs/ai'
 /** Where a skill records the kit version it was installed from. */
 export const VERSION_FILE = '.kit-version'
@@ -95,7 +95,7 @@ export const HOOKS = ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh'] as co
 /** Where the hooks live, relative to the home folder. */
 export const HOOKS_DIR = '.claude/hooks/aspira'
 /** The lines the global git ignore needs, so a project's working folders never show up in git status, and aspira.json is never committed. */
-export const IGNORE_ENTRIES = ['.work/', '.aspira/', '.worktrees/', 'aspira.json'] as const
+export const IGNORE_ENTRIES = ['.work/', '.aspira/', '.worktrees/', 'aspira.json', '.codebase-map/map/'] as const
 
 export type HarnessOptions = {
   /** The home folder to write under; defaults to the user's. */
@@ -354,10 +354,10 @@ function writeIgnore(home: string, env: NodeJS.ProcessEnv | undefined, log: Log)
 }
 
 /**
- * Write the global harness under <home>/.claude: the twelve skills (each a regular folder copied from this kit
+ * Write the global harness under <home>/.claude: the thirteen skills (each a regular folder copied from this kit
  * and stamped with its version, swapped in whole so no reader sees a partial one; a symlinked aspira-<name>
  * is replaced, the engineer's other skills are untouched), the three hooks at 0755, the kit's hook groups
- * in settings.json (left alone with a warning when it is not strict JSON) and the four lines of the global
+ * in settings.json (left alone with a warning when it is not strict JSON) and the five lines of the global
  * git ignore. Retired skill folders are removed. Every step runs; the failures are thrown together at the end.
  * Never reads or writes ~/.claude/CLAUDE.md.
  */
