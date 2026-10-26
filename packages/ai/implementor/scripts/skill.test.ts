@@ -255,4 +255,8 @@ it('T55 runs the agent `kit package-dir` names, never the project node_modules o
   await exec('git', ['init', '-q', bare])
   await writeFile(join(bare, 'idea.md'), 'Let people save items.')
   await expect(exec('bash', [launcher, 'local', 'specs/x.md', '--no-ticket'], { cwd: bare, env: local })).rejects.toThrow('no Aspira project here')
-})
+  // A relative --repo (owner/name or a relative directory) outside a project stops too, and does not walk up forever (REBA1.1).
+  for (const repo of ['aspiralabs/nomnomzz', 'some/relative/dir']) {
+    await expect(exec('bash', [launcher, 'start', 'specs/x.md', '--no-ticket', '--repo', repo], { cwd: bare, env: local, timeout: 10_000 })).rejects.toThrow('no Aspira project here')
+  }
+}, 30_000)

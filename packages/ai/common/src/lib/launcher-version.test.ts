@@ -195,3 +195,23 @@ describe.each(LAUNCHERS)('$name runs the global kit only (T44, F12)', (launcher)
     expect(await ran(projectPackage.agentDir)).toBe(false)
   })
 })
+
+describe.each(LAUNCHERS)('$name stops looking for the project (REBA1.1)', (launcher) => {
+  let root: string
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it('a relative --repo outside any project fails instead of walking up forever', async () => {
+    root = await mkdtemp(join(tmpdir(), 'launcher-walk-'))
+    const bare = join(root, 'bare')
+    execFileSync('git', ['init', '-q', bare])
+    const script = join(ROOT, launcher.skillDir, 'scripts', `${launcher.name}.sh`)
+    for (const sub of ['local', 'start']) {
+      const result = spawnSync('bash', [script, sub, 'KIT-2', '--repo', 'some/relative/dir'], { cwd: bare, env: { ...process.env, HOME: root }, encoding: 'utf8', timeout: 10_000 })
+      expect(result.error, `${launcher.name} ${sub} hung`).toBeUndefined()
+      expect(result.status, `${launcher.name} ${sub}`).not.toBe(0)
+    }
+  }, 30_000)
+})

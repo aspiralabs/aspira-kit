@@ -27,7 +27,7 @@ global_install() {
 # (`kit init --app`) the project is the app aspira.json names; otherwise the nearest package.json above
 # the working directory, else the git root, else the working directory.
 project_root() {
-  local start dir app_dir
+  local start dir next app_dir
   for start in "$PWD" "${REPO:-}"; do
     [ -n "$start" ] || continue
     dir=$start
@@ -38,14 +38,17 @@ project_root() {
         dir=$start
         while :; do
           if [ -f "$dir/package.json" ]; then printf '%s\n' "$dir"; return 0; fi
-          [ "$dir" != / ] || break
-          dir=$(dirname "$dir")
+          next=$(dirname "$dir")
+          [ "$next" != "$dir" ] || break
+          dir=$next
         done
         git -C "$start" rev-parse --show-toplevel 2>/dev/null || printf '%s\n' "$start"
         return 0
       fi
-      [ "$dir" != / ] || break
-      dir=$(dirname "$dir")
+      # Stop at the dirname fixed point: / for an absolute path, . for a relative --repo (REBA1.1).
+      next=$(dirname "$dir")
+      [ "$next" != "$dir" ] || break
+      dir=$next
     done
   done
   die "no Aspira project here (no aspira.json at or above $PWD)"
