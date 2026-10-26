@@ -11,13 +11,8 @@ is_agent() {
   [ "$(basename "$1")" = "$NAME" ] && [ -d "$1/skill" ] && { [ -d "$1/agent" ] || [ -d "$1/src" ] || [ -d "$1/scripts" ]; } \
     && grep -qs '"name": "@aspiralabs/ai"' "$1/../package.json"
 }
-# The agent folder under DIR/node_modules/@aspiralabs/ai.
-installed_in() {
-  local dir=$1/node_modules/@aspiralabs/ai/$NAME
-  if is_agent "$dir"; then (cd "$dir" && pwd -P); return; fi
-  return 1
-}
 # The agent folder of the global @aspiralabs/ai (pnpm add -g), from the kit on PATH, which prints its own directory.
+# `kit package-dir` also rewrites the global skills when they are behind the kit (self-healing).
 global_install() {
   local pkg
   command -v kit >/dev/null 2>&1 || return 1
@@ -25,92 +20,72 @@ global_install() {
   if is_agent "$pkg/$NAME"; then (cd "$pkg/$NAME" && pwd -P); return; fi
   return 1
 }
-# The project the agent serves, when it is not the one the agent is installed in: the nearest
-# package.json above the working directory, else the git root, else the working directory.
+# The project the agent serves, found from the working directory only (or the --repo the caller names),
+# never from this script's own location (the skills live in ~/.claude, not in a project). A directory
+# with no aspira.json at or above it is not an Aspira project. In a multi-app repository
+# (`kit init --app`) the project is the app aspira.json names; otherwise the nearest package.json above
+# the working directory, else the git root, else the working directory.
 project_root() {
-  local dir=$PWD
-  while :; do
-    if [ -f "$dir/package.json" ]; then printf '%s\n' "$dir"; return; fi
-    [ "$dir" != / ] || break
-    dir=$(dirname "$dir")
+  local start dir app_dir
+  for start in "$PWD" "${REPO:-}"; do
+    [ -n "$start" ] || continue
+    dir=$start
+    while :; do
+      if [ -f "$dir/aspira.json" ]; then
+        app_dir=$(sed -nE 's/.*"app"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$dir/aspira.json" | head -n 1)
+        if [ -n "$app_dir" ] && [ -d "$dir/$app_dir" ]; then (cd "$dir/$app_dir" && pwd -P); return 0; fi
+        dir=$start
+        while :; do
+          if [ -f "$dir/package.json" ]; then printf '%s\n' "$dir"; return 0; fi
+          [ "$dir" != / ] || break
+          dir=$(dirname "$dir")
+        done
+        git -C "$start" rev-parse --show-toplevel 2>/dev/null || printf '%s\n' "$start"
+        return 0
+      fi
+      [ "$dir" != / ] || break
+      dir=$(dirname "$dir")
+    done
   done
-  git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || printf '%s\n' "$PWD"
+  die "no Aspira project here (no aspira.json at or above $PWD)"
 }
-# In a multi-app repository (apps/web owns package.json and node_modules, Claude Code runs at the
-# root) `kit init --app` records the app in the root's aspira.json. Prints that app's directory from
-# the nearest aspira.json at or above DIR (this script's location, under <root>/.claude/skills/),
-# or nothing when there is none: the single-app case, where the walk-up below finds the package.
-configured_app() {
-  local dir=$1 app_dir
-  while :; do
-    if [ -f "$dir/aspira.json" ]; then
-      app_dir=$(sed -nE 's/^[[:space:]]*"app"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$dir/aspira.json" | head -n 1)
-      if [ -n "$app_dir" ] && [ -d "$dir/$app_dir" ]; then (cd "$dir/$app_dir" && pwd -P); fi
-      return 0
-    fi
-    [ "$dir" != / ] || return 0
-    dir=$(dirname "$dir")
-  done
-}
-# Which groomer runs, in this order: GROOMER_AGENT_DIR (kit development only; the report says so),
-# the groomer folder of @aspiralabs/ai installed under the project (the app named in the root's aspira.json, then
-# walking up from the working directory, then from this script's location), then this script's own agent folder. $ASPIRA_KIT is never consulted.
-# then the global @aspiralabs/ai (the usual case: kit init no longer installs it in the project).
-# Sets AGENT, AGENT_SOURCE (env | installed | package | global), AGENT_VERSION and PROJECT.
+# Which NAME runs, in this order: GROOMER_AGENT_DIR (kit development only; the report says so), then
+# the global @aspiralabs/ai on PATH (`kit package-dir`). A project's own node_modules copy and $ASPIRA_KIT are never consulted.
+# Sets AGENT, AGENT_SOURCE (env | global), AGENT_VERSION and PROJECT.
 resolve_agent() {
-  local here dir app_dir own skill_kit_version ai_version ai_where
+  local here dir pinned="" current
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  # The skill's pin, read before the kit runs: `kit package-dir` rewrites a stale global skill.
+  [ ! -f "$here/../.kit-version" ] || pinned=$(tr -d '[:space:]' < "$here/../.kit-version")
   AGENT="" AGENT_SOURCE="" PROJECT=""
   for dir in "${GROOMER_AGENT_DIR:-}"; do
     [ -n "$dir" ] || continue
     is_agent "$dir" || die "GROOMER_AGENT_DIR is not the $NAME folder of @aspiralabs/ai: $dir"
     AGENT=$(cd "$dir" && pwd -P); AGENT_SOURCE=env; break
   done
-  if [ -z "$AGENT" ]; then
-    app_dir=$(configured_app "$here")
-    if [ -n "$app_dir" ] && AGENT=$(installed_in "$app_dir"); then AGENT_SOURCE=installed; PROJECT=$app_dir; fi
-  fi
-  if [ -z "$AGENT" ]; then
-    # A kit checkout that installs its own agents (to run /aspira-* on itself) finds this very
-    # package through its root node_modules. That is the package, not a project install, so the
-    # project is still the working directory's.
-    own=$( (cd "$here/../../.." 2>/dev/null && pwd -P) || true)
-    for dir in "$PWD" "$here"; do
-      while :; do
-        if AGENT=$(installed_in "$dir"); then
-          if [ "$AGENT" = "$own" ]; then AGENT_SOURCE=package; else AGENT_SOURCE=installed; PROJECT=$dir; fi
-          break 2
-        fi
-        [ "$dir" != / ] || break
-        dir=$(dirname "$dir")
-      done
-    done
-  fi
-  if [ -z "$AGENT" ] && is_agent "$here/../../.."; then AGENT=$(cd "$here/../../.." && pwd -P); AGENT_SOURCE=package; fi
   if [ -z "$AGENT" ] && AGENT=$(global_install); then AGENT_SOURCE=global; fi
-  [ -n "$AGENT" ] || die "cannot find $NAME: install @aspiralabs/ai globally (pnpm add -g @aspiralabs/ai) and run kit init, or set GROOMER_AGENT_DIR for kit development"
-  [ -n "$PROJECT" ] || PROJECT=$(project_root)
+  [ -n "$AGENT" ] || die "cannot find $NAME: install @aspiralabs/ai globally (pnpm add -g @aspiralabs/ai) and run kit update, or set GROOMER_AGENT_DIR for kit development"
+  PROJECT=$(project_root)
   AGENT_VERSION=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$AGENT/../package.json" | head -n 1)
   case $AGENT_SOURCE:$AGENT in
     env:*) echo "$NAME: GROOMER_AGENT_DIR is set: running kit source at $AGENT, not the installed @aspiralabs/ai" >&2 ;;
     *:*/node_modules/*) ;;
     *) echo "$NAME: running kit source at $AGENT, not the installed @aspiralabs/ai" >&2 ;;
   esac
-  # kit init pins the installed skill to the @aspiralabs/ai version it was copied from
-  # (.kit-version, packages/kit/src/skills.ts). An installed launcher whose pin no longer matches
-  # what is installed is blocked before anything starts; running from source (env or package) only
-  # warns, since kit development deliberately runs ahead of (or without) an installed pin (F8).
-  if [ -f "$here/../.kit-version" ]; then
-    skill_kit_version=$(tr -d '[:space:]' < "$here/../.kit-version")
-    ai_version=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$PROJECT/node_modules/@aspiralabs/ai/package.json" 2>/dev/null | head -n 1 || true)
-    ai_where="$PROJECT has $ai_version installed"
-    if [ "$AGENT_SOURCE" = global ]; then ai_version=$AGENT_VERSION; ai_where="the global @aspiralabs/ai is $ai_version"; fi
-    if [ -n "$ai_version" ] && [ "$skill_kit_version" != "$ai_version" ]; then
-      if [ "$AGENT_SOURCE" = installed ] || [ "$AGENT_SOURCE" = global ]; then
-        die "blocked: this skill is pinned to @aspiralabs/ai $skill_kit_version but $ai_where; run kit init to update the skill"
-      else
-        echo "$NAME: mismatch: this skill is pinned to @aspiralabs/ai $skill_kit_version but $PROJECT has $ai_version installed; continuing from $AGENT_SOURCE" >&2
+  # The skill is pinned to the @aspiralabs/ai version it was copied from (.kit-version). A global skill
+  # whose pin differs from the kit is blocked before anything starts: when kit package-dir just rewrote
+  # it, say so and stop, so the next command runs the updated skill; when it is still behind, point at
+  # kit update. Running from source (env) only warns, since kit development runs ahead of any pin.
+  if [ -n "$pinned" ] && [ -n "$AGENT_VERSION" ] && [ "$pinned" != "$AGENT_VERSION" ]; then
+    if [ "$AGENT_SOURCE" = global ]; then
+      current=$(tr -d '[:space:]' < "$here/../.kit-version" 2>/dev/null || true)
+      if [ "$current" = "$AGENT_VERSION" ]; then
+        echo "$NAME: skills were updated to $AGENT_VERSION; run the command again" >&2
+        exit 1
       fi
+      die "blocked: this skill is pinned to @aspiralabs/ai $pinned but the global @aspiralabs/ai is $AGENT_VERSION; run kit update"
+    else
+      echo "$NAME: mismatch: this skill is pinned to @aspiralabs/ai $pinned but the kit is $AGENT_VERSION; continuing from $AGENT_SOURCE" >&2
     fi
   fi
 }

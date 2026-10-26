@@ -5,26 +5,13 @@ set -euo pipefail
 
 NAME=next
 die() { echo "aspira-$NAME: $*" >&2; exit 1; }
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-# The project root: the nearest aspira.json at or above this script (installed under
-# <root>/.claude/skills/aspira-<name>/scripts/), else the folder that holds .claude/.
-project_root() {
-  local dir=$here
-  while :; do
-    if [ -f "$dir/aspira.json" ]; then printf '%s\n' "$dir"; return 0; fi
-    [ "$dir" != / ] || break
-    dir=$(dirname "$dir")
-  done
-  (cd "$here/../../../.." && pwd -P)
-}
-ROOT=$(project_root)
-# In a multi-app repository `kit init --app` records the app that owns package.json and
-# node_modules in the root's aspira.json; the kit is installed there, else at the root.
-APP=""
-[ ! -f "$ROOT/aspira.json" ] || APP=$(sed -nE 's/.*"app"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$ROOT/aspira.json" | head -n 1)
-OWNER=$ROOT
-if [ -n "$APP" ] && [ "$APP" != . ]; then OWNER="$ROOT/$APP"; fi
-# A project copy from an earlier kit wins; otherwise the global install (pnpm add -g @aspiralabs/ai) on PATH.
-KIT="$OWNER/node_modules/.bin/kit"
-[ -x "$KIT" ] || KIT=$(command -v kit) || die "cannot find kit: install @aspiralabs/ai globally (pnpm add -g @aspiralabs/ai) and run kit init"
+# The project is found from the working directory only (this script lives in ~/.claude/skills, not in
+# a project): the nearest aspira.json at or above it.
+dir=$PWD
+while [ ! -f "$dir/aspira.json" ]; do
+  [ "$dir" != / ] || die "no Aspira project here (no aspira.json at or above $PWD)"
+  dir=$(dirname "$dir")
+done
+# Only the global kit (pnpm add -g @aspiralabs/ai) on PATH runs; a project's own node_modules copy is never used.
+KIT=$(command -v kit) || die "cannot find kit: install @aspiralabs/ai globally (pnpm add -g @aspiralabs/ai) and run kit update"
 exec "$KIT" "$NAME" "$@"
