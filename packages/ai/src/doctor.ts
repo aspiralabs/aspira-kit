@@ -46,7 +46,7 @@ function findUpModule(dir: string, relative: string): string | undefined {
 export function liveUrlChecker(projectRoot: string, appDir: string): UrlChecker {
   return (checks) => {
     const unreachable = (reason: string): Record<string, UrlCheckResult> => Object.fromEntries(checks.map((check) => [check.key, { ok: false, unreachable: true, reason }]))
-    const ai = aiPackageDir(appDir)
+    const ai = aiPackageDir()
     if (ai === undefined) return unreachable('@aspiralabs/ai is not installed; cannot check Notion')
     const common = join(ai, 'common')
     const script = join(common, 'scripts', 'check-notion-urls.ts')
@@ -160,7 +160,7 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
     log(`FAIL ${AI_PACKAGE} is in ${app ? `${app}/` : ''}package.json; it is installed globally now: pnpm remove ${AI_PACKAGE}${app ? ` (in ${app})` : ''}, then kit init`)
     problems += 1
   } else {
-    log(`${AI_PACKAGE.padEnd(20)} global ${aiVersion(appDir) ?? '(not found)'}`)
+    log(`${AI_PACKAGE.padEnd(20)} global ${aiVersion() ?? '(not found)'}`)
   }
   // A workspace root that declares @aspiralabs packages itself (shared eslint or prettier config) keeps them on the app's version.
   if (isWorkspaceRoot(projectRoot, app)) {

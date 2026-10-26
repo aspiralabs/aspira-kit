@@ -31,4 +31,4 @@ pnpm exec eve invoke "Groom the ticket in /absolute/.work/<id>-<slug> for /absol
 
 `/aspira-groomer <ticket>` uses `skill/aspira-groomer/`. By default (`--cloud` launches the agent instead) each round runs in the calling Claude Code session through `pnpm run groom:local --repo <repo> [--ticket ID] [--guidelines FILE] [--verify] [--finish]` (`agent/lib/local.ts`): the board stage, the knowledge stage, then per round a `round` task, the chat `answers`, a `summary` task on a confirm, and the `board` stage that renders Grooming Decisions for the session to write, followed by `--verify`. It makes no model calls and needs no gateway key.
 
-Symlink the skill directory into your tool's skills directory (for Claude Code, `~/.claude/skills/aspira-groomer`); the launcher resolves symlinked package paths.
+The skill is written to `~/.claude/skills/aspira-groomer/` by the kit (`kit init`, `kit update`); nothing to symlink.

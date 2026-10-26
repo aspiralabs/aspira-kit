@@ -69,11 +69,11 @@ function toTicket(output: ResolvedOutput): ResolvedTicket {
 
 const kitFailure = (detail: string): TicketLookupFailure => ({ reason: 'board unreachable', detail, cause: 'kit' })
 
-/** The default lookup: the common folder of the project's @aspiralabs/ai (aiPackageDir: the global install, or a copy under the app), run with its resolve script and the project's .env.local (the root's, then the app's, which wins). */
+/** The default lookup: the common folder of the running kit (aiPackageDir: the global @aspiralabs/ai), run with its resolve script and the project's .env.local (the root's, then the app's, which wins). */
 export const lookupTicket: TicketLookup = (board, ref, projectRoot, appDir) => {
-  const ai = aiPackageDir(appDir)
+  const ai = aiPackageDir()
   if (ai === undefined) {
-    return kitFailure(`@aspiralabs/ai is not found in ${appDir} or as the running kit (install it globally: pnpm add -g @aspiralabs/ai)`)
+    return kitFailure('@aspiralabs/ai is not found as the running kit (install it globally: pnpm add -g @aspiralabs/ai)')
   }
   const common = join(ai, 'common')
   const script = join(common, 'scripts', 'resolve-ticket.ts')

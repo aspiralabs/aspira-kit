@@ -29,7 +29,7 @@ Use `/aspira-planner /absolute/path/to/spec.reviewed.md`. Add `--guidelines /abs
 
 By default (`planner.sh local <spec>`, or `pnpm run plan:local <spec> <repo>`; `--cloud` launches the agent instead), the same pipeline runs inside a Claude Code session and makes no model call itself. It first prints a `knowledge` stage listing the Notion pages this agent's knowledge configuration loads (`KNOWLEDGE_PAGE`, `KNOWLEDGE_REQUIRED`, then the topic pages the required pages route to), and refuses to start without them or a `--guidelines` snapshot. Then it prints the research and planning tasks, each prompt assembled at that moment from `agent/instructions.md` and `agent/lib/prompts.ts`, validates each output against `agent/lib/plan.ts`'s schemas (one resend on failure, `--finish` to export as incomplete) and exports the same `plan.review/` through the runner's own assessment code, with the rules used in `trace/knowledge.json`.
 
-The skill source is `skill/aspira-planner/`. `kit init` copies it into a project's `.claude/skills/aspira-planner/` from the installed package. Its launcher supports `start`, `status`, bounded `wait`/`watch`, and `local` commands.
+The skill source is `skill/aspira-planner/`. `kit` writes it to `~/.claude/skills/aspira-planner/` from the global package, never into the project. Its launcher supports `start`, `status`, bounded `wait`/`watch`, and `local` commands.
 
 ## Context and models
 

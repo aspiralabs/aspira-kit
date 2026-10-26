@@ -127,15 +127,15 @@ const LAUNCHER_SHAPE = /^\.claude\/skills\/aspira-[a-z][a-z-]*\/scripts\/[a-z][a
 /**
  * The Run-line shapes a progress note's Next action may use (F28): every Playbook slash command
  * (`<ID>` and `<app-dir>` wildcarded), kit's own launcher form, and whatever extra shell-command
- * shapes (`git push`, `gh pr create`, ...) `progress-note-shapes.json` names in the common folder of the installed
+ * shapes (`git push`, `gh pr create`, ...) `progress-note-shapes.json` names in the common folder of the running
  * `@aspiralabs/ai` — read as plain JSON (NOVA1.1), never its TypeScript.
  */
-export function loadNoteShapes(appDir: string): RegExp[] {
+export function loadNoteShapes(): RegExp[] {
   const builtin: RegExp[] = [
     ...PLAYBOOK.filter(hasCommand).map((row) => new RegExp(`^${row.command.replaceAll('<ID>', '[A-Za-z0-9-]+').replaceAll('<app-dir>', '[\\w./-]+')}$`)),
     LAUNCHER_SHAPE,
   ]
-  const ai = aiPackageDir(appDir)
+  const ai = aiPackageDir()
   const file = ai === undefined ? undefined : join(ai, 'common', 'src', 'lib', 'progress-note-shapes.json')
   const shapes = file === undefined ? undefined : readJson<{ commands?: unknown }>(file)
   const commands = Array.isArray(shapes?.commands) ? shapes.commands.filter((pattern): pattern is string => typeof pattern === 'string') : []
@@ -212,7 +212,7 @@ export function next(projectRoot: string, ref: string | undefined, log: Log, res
   if (localEntry !== null) {
     const candidate = bestNote(noteFolders(projectRoot, basename(localEntry.folder)), localEntry.folder)
     if (candidate !== null) {
-      const match = noteMatches(candidate.note, ticket.status, loadNoteShapes(appDir))
+      const match = noteMatches(candidate.note, ticket.status, loadNoteShapes())
       if (match.ok) usedNote = candidate
       else noteReason = match.reason
     }

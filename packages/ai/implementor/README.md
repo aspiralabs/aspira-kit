@@ -4,9 +4,7 @@ Builds a feature test-first from a `planner` plan, a spec or a ticket, under the
 
 ## In Claude Code: `/aspira-implementor`
 
-```bash
-ln -sfn "$ASPIRA_KIT/packages/ai/implementor/skill/aspira-implementor" ~/.claude/skills/aspira-implementor
-```
+The kit writes the skill to `~/.claude/skills/aspira-implementor/` (`kit init`, `kit update`); nothing to symlink.
 
 The skill (`skill/aspira-implementor/`) only calls the agent:
 

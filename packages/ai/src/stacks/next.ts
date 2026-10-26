@@ -256,10 +256,12 @@ function css(opts: Resolved): void {
   }
 }
 
-// The kit's own hook groups are replaced, not merged: a group from an earlier kit (the retired
-// @aspiralabs/config path, or the hooks under node_modules before they were copied) would otherwise stay beside
-// the current one, since the merge keeps arrays. Everything else in the settings is the project's.
-function dropKitHooks(settings: Record<string, unknown>): Record<string, unknown> {
+// The kit's own hook commands are removed before the template's are added, not merged: a command from an
+// earlier kit (the retired @aspiralabs/config path, the hooks under node_modules, or a project's
+// .claude/hooks/aspira) would otherwise stay beside the current one, since the merge keeps arrays. Only the
+// kit's commands go: a group's other commands are the engineer's, a group left empty is dropped, and so is
+// an event left empty. The global writer and the leftover removal share this matcher.
+export function dropKitHooks(settings: Record<string, unknown>): Record<string, unknown> {
   const hooks = settings.hooks
   if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
     return settings
@@ -267,9 +269,25 @@ function dropKitHooks(settings: Record<string, unknown>): Record<string, unknown
   const kit = (entry: unknown): boolean => /@aspiralabs\/(config\/agent|kit|ai)\/hooks\/|\.claude\/hooks\/aspira\//.test(JSON.stringify(entry))
   const next: Record<string, unknown> = {}
   for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
-    next[event] = Array.isArray(groups) ? groups.filter((g) => !kit(g)) : groups
+    if (!Array.isArray(groups)) {
+      next[event] = groups
+      continue
+    }
+    const kept: unknown[] = []
+    for (const group of groups as unknown[]) {
+      const inner = group !== null && typeof group === 'object' ? (group as { hooks?: unknown }).hooks : undefined
+      if (!Array.isArray(inner)) {
+        if (!kit(group)) kept.push(group)
+        continue
+      }
+      const left = inner.filter((hook) => !kit(hook))
+      if (left.length === inner.length) kept.push(group)
+      else if (left.length > 0) kept.push({ ...(group as object), hooks: left })
+    }
+    if (kept.length > 0 || groups.length === 0) next[event] = kept
   }
-  return { ...settings, hooks: next }
+  const { hooks: _dropped, ...rest } = settings
+  return Object.keys(next).length > 0 ? { ...rest, hooks: next } : rest
 }
 
 function agentFiles(opts: Resolved): void {
