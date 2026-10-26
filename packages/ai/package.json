@@ -17,6 +17,7 @@
       "default": "./dist/isolation.js"
     },
     "./package.json": "./package.json",
+    "./codebase-map": "./codebase-map/src/brief.ts",
     "./common/tools/*": "./common/src/tools/*.ts",
     "./common/lib/*.json": "./common/src/lib/*.json",
     "./common/lib/*": "./common/src/lib/*.ts",
@@ -25,13 +26,14 @@
   },
   "imports": {
     "#build-feature/*": "./build-feature/src/*",
+    "#codebase-map/*": "./codebase-map/src/*",
     "#visual-verify/*": "./visual-verify/src/*"
   },
   "scripts": {
     "build:kit": "tsc -p tsconfig.json",
     "build": "pnpm build:kit && (cd code-analyzer && eve build) && (cd groomer && eve build) && (cd implementor && eve build) && (cd planner && eve build) && (cd spec-writer && eve build)",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p build-feature/tsconfig.json --noEmit && tsc -p code-analyzer/tsconfig.json --noEmit && tsc -p common/tsconfig.json --noEmit && tsc -p groomer/tsconfig.json --noEmit && tsc -p implementor/tsconfig.json --noEmit && tsc -p planner/tsconfig.json --noEmit && tsc -p pr-reviewer/tsconfig.json --noEmit && tsc -p spec-reviewer/tsconfig.json --noEmit && tsc -p spec-writer/tsconfig.json --noEmit && tsc -p visual-verify/tsconfig.json --noEmit",
-    "lint": "eslint src && (cd build-feature && eslint src scripts) && (cd code-analyzer && eslint agent scripts) && (cd common && eslint src) && (cd groomer && eslint agent scripts) && (cd implementor && eslint agent scripts) && (cd planner && eslint agent scripts) && (cd pr-reviewer && eslint agent scripts) && (cd spec-reviewer && eslint agent scripts) && (cd spec-writer && eslint agent scripts) && (cd visual-verify && eslint scripts)",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p build-feature/tsconfig.json --noEmit && tsc -p codebase-map/tsconfig.json --noEmit && tsc -p code-analyzer/tsconfig.json --noEmit && tsc -p common/tsconfig.json --noEmit && tsc -p groomer/tsconfig.json --noEmit && tsc -p implementor/tsconfig.json --noEmit && tsc -p planner/tsconfig.json --noEmit && tsc -p pr-reviewer/tsconfig.json --noEmit && tsc -p spec-reviewer/tsconfig.json --noEmit && tsc -p spec-writer/tsconfig.json --noEmit && tsc -p visual-verify/tsconfig.json --noEmit",
+    "lint": "eslint src && (cd build-feature && eslint src scripts) && (cd codebase-map && eslint src scripts) && (cd code-analyzer && eslint agent scripts) && (cd common && eslint src) && (cd groomer && eslint agent scripts) && (cd implementor && eslint agent scripts) && (cd planner && eslint agent scripts) && (cd pr-reviewer && eslint agent scripts) && (cd spec-reviewer && eslint agent scripts) && (cd spec-writer && eslint agent scripts) && (cd visual-verify && eslint scripts)",
     "test": "vitest run"
   },
   "dependencies": {
@@ -40,6 +42,7 @@
     "ai": "^7.0.105",
     "amaro": "^1.2.1",
     "eve": "^0.63.0",
+    "typescript": "^5.9.0",
     "undici": "^7.29.1",
     "zod": "4.5.4"
   },
@@ -47,7 +50,6 @@
     "@aspiralabs/config": "workspace:*",
     "@types/node": "^24",
     "eslint": "^9.39.0",
-    "typescript": "^5.9.0",
     "vitest": "^3.2.4"
   },
   "engines": {
@@ -65,6 +67,9 @@
     "build-feature/src",
     "build-feature/scripts",
     "build-feature/skill",
+    "codebase-map/src",
+    "codebase-map/scripts",
+    "THIRD_PARTY_NOTICES",
     "visual-verify/src",
     "visual-verify/scripts",
     "visual-verify/skill",

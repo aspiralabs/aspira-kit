@@ -24,6 +24,7 @@ export default defineConfig({
         },
       },
       './build-feature/vitest.config.ts',
+      './codebase-map/vitest.config.ts',
       './visual-verify/vitest.config.ts',
       // The launcher and driver tests spawn bash, git and node, which outgrow vitest's 5s default once every suite shares the machine.
       ...AGENTS.map((agent) => ({ test: { name: agent, root: `./${agent}`, setupFiles: [GIT, SETUP], testTimeout: 60_000, hookTimeout: 60_000 } })),
