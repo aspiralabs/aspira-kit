@@ -68,6 +68,8 @@
     "build-feature/scripts",
     "build-feature/skill",
     "codebase-map/src",
+    "!codebase-map/src/**/*.test.ts",
+    "!codebase-map/src/fixture.test-helper.ts",
     "codebase-map/scripts",
     "THIRD_PARTY_NOTICES",
     "visual-verify/src",
