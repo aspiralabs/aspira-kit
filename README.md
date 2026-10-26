@@ -6,7 +6,7 @@ The Aspira Labs development kit. One repo that says everything the organization 
 |---|---|---|
 | `@aspiralabs/ui` | Components, `tokens.css`, component docs (MDX), and an MCP server that serves those docs to agents | `pnpm add @aspiralabs/ui` |
 | `@aspiralabs/config` | `eslint/next`, `eslint/base`, `eslint/library`, `tsconfig/*`, `prettier`, and `agent/*` (constraints, guides, hooks, personas, templates) | `pnpm add -D @aspiralabs/config` |
-| `@aspiralabs/ai` | Everything AI in one package: the `kit` CLI (`kit init --stack next` wires a project, `kit add auth` scaffolds Better Auth, `kit doctor` reports its version and drift), the agents (`groomer`, `spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer`) and the skill-only `build-feature` and `visual-verify`, with their `/aspira-*` skills. Global only, once per engineer (`pnpm add -g @aspiralabs/ai`, then `kit update` to refresh the harness); never a project dependency. `kit` checks once a day for a newer version. [Reference](packages/ai/README.md) | `pnpm add -g @aspiralabs/ai` |
+| `@aspiralabs/ai` | Everything AI in one package: the `kit` CLI (`kit init --stack next` wires a project, `kit add auth` scaffolds Better Auth, `kit doctor` reports its version and drift, `kit map-codebase` maps a repository's imports for the agents), the agents (`groomer`, `spec-writer`, `spec-reviewer`, `planner`, `implementor`, `code-analyzer`, `pr-reviewer`) and the skill-only `build-feature` and `visual-verify`, with their `/aspira-*` skills. Global only, once per engineer (`pnpm add -g @aspiralabs/ai`, then `kit update` to refresh the harness); never a project dependency. `kit` checks once a day for a newer version. [Reference](packages/ai/README.md) | `pnpm add -g @aspiralabs/ai` |
 
 Every package is published to **GitHub Packages** under the `aspiralabs` org and versioned in lockstep: one version number across the three packages.
 
@@ -37,6 +37,7 @@ kit init --stack next             # installs ui + config, writes eslint/prettier
                                   # AGENTS.md, CLAUDE.md, .mcp.json  (the hooks and /aspira-* skills live globally in ~/.claude; `kit update` writes them)
 kit add auth                      # optional: base Better Auth setup the project then owns
 kit doctor                        # what version you are on, what is wired
+kit map-codebase                  # optional: the codebase map of the repo you are in, for blast radius
 ```
 
 Every command, flag and file the CLI writes is in the [ai README](packages/ai/README.md).
