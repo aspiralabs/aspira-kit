@@ -1,5 +1,23 @@
 # @aspiralabs/kit
 
+## 0.19.0
+
+### Minor Changes
+
+- b31d5bc: A codebase map the agents can query for blast radius. `kit map-codebase` builds a per-repo map of files, packages and import edges (TypeScript compiler resolution against each repo's own tsconfig, so `@/` aliases and workspace packages resolve as internal edges), `--check` reports freshness, `brief <target>` prints a bounded packet (read-first paths, impact paths, focused tests, accepted notes, stale warnings), and `notes` runs a step driver whose subagents propose candidate notes that a person accepts or retires. The map lives in `.codebase-map/` in the repo, or under the folder named by the new optional `codebaseMaps` key of the nearest `aspira.json` for a client harness; `kit update` adds `.codebase-map/map/` to the global git ignore. New `/aspira-map-codebase` skill (thirteen skills now), a `kit doctor` information line for the map, and `brief` importable from `@aspiralabs/ai/codebase-map`. `typescript` moves from devDependencies to dependencies. Adapted from cartographer (Apache-2.0); see `THIRD_PARTY_NOTICES`.
+- ded5382: The Aspira skills, hooks and process pointers now live on the engineer's machine, not in each product repo. `kit update` installs the latest global kit and writes the twelve `/aspira-*` skills and three hooks to `~/.claude`; every `kit` command refreshes them when they are behind the running kit. `kit init` stops writing the harness and removes what earlier kits committed (skills, hooks, hook entries, the `AGENTS.md` managed block and the kit's `.gitignore` lines), then prints the commit to make. `kit doctor` checks the global harness and fails while committed leftovers remain. Launchers find the project from the working directory and run only the global kit.
+
+### Patch Changes
+
+- 5ba647a: Codebase map: @aspiralabs/codebase-map and kit map-codebase (KIT-69)
+- ef351ed: Global harness: /aspira-\* skills, hooks and process live only in the engineer's ~/.claude, never in a project repo (KIT-71)
+
+  aspira.json is git-ignored in every repo, never committed: the global ignore lists it, `kit init` stops tracking a committed one (the file stays) and restores one a pull deleted, ticket worktrees link the main checkout's, and `kit doctor` fails while git tracks it (KIT-71)
+
+  `kit upgrade` and the /aspira-upgrade skill move an existing project to the global harness: update the global kit, remove the committed harness, stop tracking aspira.json, and commit on a yes; no stack wiring is touched (KIT-71)
+
+- 9f90243: A `Telemetry not written: the telemetry file could not be written` notice now names the error that stopped the write (for example `EACCES` or `EEXIST`), whatever the cause, instead of only a folder it cannot write.
+
 ## 0.18.0
 
 ### Minor Changes
