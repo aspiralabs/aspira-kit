@@ -1,4 +1,4 @@
-// The three kit-owned skill launchers (/aspira-next, /aspira-cleanup, /aspira-worktree), copied under a
+// The four kit-owned skill launchers (/aspira-next, /aspira-cleanup, /aspira-worktree, /aspira-upgrade), copied under a
 // temporary HOME's .claude/skills (where the global harness puts them) and run with bash from inside a
 // project. The kit binary they call is the process boundary: a fake `kit` on PATH (the global one) that
 // records its arguments, prints fixed lines and exits with the code FAKE_KIT_EXIT names. A second fake in
@@ -27,7 +27,7 @@ function fakeKit(calls: string): string {
 }
 
 /**
- * A temp HOME holding the three kit launchers under .claude/skills, a project with aspira.json (and the
+ * A temp HOME holding the four kit launchers under .claude/skills, a project with aspira.json (and the
  * app folder it names, when `app` is set) as the working directory, a recording `kit` on PATH and a
  * second recording `kit` in the owning folder's node_modules/.bin.
  */
@@ -41,7 +41,7 @@ function project(app?: string): Project {
   mkdirSync(home, { recursive: true })
   mkdirSync(bin, { recursive: true })
   mkdirSync(root, { recursive: true })
-  for (const name of ['next', 'cleanup', 'worktree']) {
+  for (const name of ['next', 'cleanup', 'worktree', 'upgrade']) {
     const target = join(home, '.claude', 'skills', `aspira-${name}`)
     cpSync(join(SKILLS, `aspira-${name}`), target, { recursive: true })
     chmodSync(join(target, 'scripts', `${name}.sh`), 0o755)
@@ -62,14 +62,14 @@ function project(app?: string): Project {
 }
 
 /** Run a launcher the way a skill does: `bash ~/.claude/skills/aspira-<name>/scripts/<name>.sh ...` from the project. */
-function launch(made: Project, name: string, args: string[], exitCode: number): { status: number | null; stdout: string } {
+function launch(made: Project, name: string, args: string[], exitCode: number, cwd = made.root): { status: number | null; stdout: string; stderr: string } {
   const script = join(made.home, '.claude', 'skills', `aspira-${name}`, 'scripts', `${name}.sh`)
   const run = spawnSync('bash', [script, ...args], {
-    cwd: made.root,
+    cwd,
     encoding: 'utf8',
     env: { ...process.env, HOME: made.home, USERPROFILE: made.home, PATH: `${made.bin}:${process.env.PATH ?? ''}`, FAKE_KIT_EXIT: String(exitCode) },
   })
-  return { status: run.status, stdout: run.stdout }
+  return { status: run.status, stdout: run.stdout, stderr: run.stderr }
 }
 
 const recorded = (calls: string): string[] => (existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter((line) => line !== '') : [])
@@ -130,5 +130,32 @@ describe('the /aspira-worktree launcher', () => {
     expect(refused.status).toBe(1)
     expect(refused.stdout).toContain(RUN_LINE)
     expect(recorded(calls)).toEqual(['worktree KIT-13', 'worktree KIT-13'])
+  })
+})
+
+describe('the /aspira-upgrade launcher', () => {
+  it('passes its arguments to kit upgrade verbatim, from inside the app too, and exits with its code', () => {
+    const made = project('apps/web')
+    const listing = launch(made, 'upgrade', ['--dry-run'], 0, join(made.root, 'apps', 'web'))
+    expect(listing.status).toBe(0)
+    const applied = launch(made, 'upgrade', [], 1)
+    expect(applied.status).toBe(1)
+    expect(recorded(made.calls)).toEqual(['upgrade --dry-run', 'upgrade'])
+    expect(recorded(made.projectCalls)).toEqual([])
+  })
+
+  it('runs in a git repository whose aspira.json a pull deleted, so kit upgrade can restore it, and refuses outside one', () => {
+    const made = project()
+    rmSync(join(made.root, 'aspira.json'))
+    expect(spawnSync('git', ['init', '-q', made.root]).status).toBe(0)
+    mkdirSync(join(made.root, 'src'), { recursive: true })
+    expect(launch(made, 'upgrade', ['--dry-run'], 0, join(made.root, 'src')).status).toBe(0)
+    expect(recorded(made.calls)).toEqual(['upgrade --dry-run'])
+    const outside = project()
+    rmSync(join(outside.root, 'aspira.json'))
+    const refused = launch(outside, 'upgrade', [], 0)
+    expect(refused.status).toBe(1)
+    expect(refused.stderr).toContain('aspira-upgrade')
+    expect(recorded(outside.calls)).toEqual([])
   })
 })

@@ -93,9 +93,9 @@ describe('@aspiralabs/ai holds the moved packages as folders (F2)', () => {
     expect(files).toContain('build-feature/src')
   })
 
-  it('has all eleven skills and the three hooks on disk', () => {
-    const skills = ['skills/aspira-cleanup', 'skills/aspira-next', 'skills/aspira-worktree', ...['groomer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'build-feature', 'visual-verify'].map((agent) => `${agent}/skill/aspira-${agent}`)]
-    expect(skills).toHaveLength(11)
+  it('has all twelve skills and the three hooks on disk', () => {
+    const skills = ['skills/aspira-cleanup', 'skills/aspira-next', 'skills/aspira-upgrade', 'skills/aspira-worktree', ...['groomer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer', 'build-feature', 'visual-verify'].map((agent) => `${agent}/skill/aspira-${agent}`)]
+    expect(skills).toHaveLength(12)
     for (const dir of skills) expect(existsSync(join(AI, dir, 'SKILL.md')), `${dir}/SKILL.md`).toBe(true)
     for (const hook of ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh']) expect(existsSync(join(AI, 'hooks', hook)), hook).toBe(true)
   })

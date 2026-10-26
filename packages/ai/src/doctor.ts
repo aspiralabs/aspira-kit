@@ -202,7 +202,7 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
     checks.push([item.ok ? item.label : item.reason ?? item.label, () => item.ok])
   }
   for (const leftover of harnessLeftovers(projectRoot)) {
-    checks.push([`${leftover.label} is left from an earlier kit; kit init --stack next removes it`, () => false])
+    checks.push([`${leftover.label} is left from an earlier kit; kit upgrade removes it`, () => false])
   }
   // The tier-3 deny hook is global and only guards a repository that has an aspira.json.
   if (!hasAspiraJson(projectRoot, gitRoot)) log('skip the tier-3 deny hook does not apply in this repository (no aspira.json from here up to the git root)')

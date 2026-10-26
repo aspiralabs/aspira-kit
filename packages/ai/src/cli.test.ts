@@ -124,7 +124,7 @@ describe('global kit', () => {
 
 // ---- The global harness: kit update, the writer, self-healing and kit doctor (KIT-71) ----
 
-const SKILL_NAMES = ['build-feature', 'cleanup', 'code-analyzer', 'groomer', 'implementor', 'next', 'planner', 'pr-reviewer', 'spec-writer', 'visual-verify', 'worktree']
+const SKILL_NAMES = ['build-feature', 'cleanup', 'code-analyzer', 'groomer', 'implementor', 'next', 'planner', 'pr-reviewer', 'spec-writer', 'upgrade', 'visual-verify', 'worktree']
 const HOOK_NAMES = ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh']
 const KIT_PACKAGE_DIR = dirname(dirname(CLI))
 const hookCmd = (name: string): string => `sh ~/.claude/hooks/aspira/${name}`
@@ -195,7 +195,7 @@ function gitProject(): string {
 }
 
 describe('kit update', () => {
-  it('T1: installs the latest kit globally with pnpm, then writes the eleven skills and three hooks to ~/.claude', () => {
+  it('T1: installs the latest kit globally with pnpm, then writes the twelve skills and three hooks to ~/.claude', () => {
     const home = homeWithCache(null)
     const stub = stubBin()
     const result = kit(['update'], { home, env: stub.env })
@@ -228,8 +228,21 @@ describe('kit update', () => {
   })
 })
 
+describe('kit upgrade', () => {
+  it('is in the usage, and on a repository with no committed harness says it is already on the global harness and exits 0', () => {
+    const home = homeWithCache(null)
+    const bare = kit([], { home })
+    expect(bare.stdout + bare.stderr).toContain('kit upgrade [--dry-run]')
+    const project = gitProject()
+    const result = kit(['upgrade', '--cwd', project], { home })
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain('already on the global harness')
+    expect(result.stdout).not.toContain('git commit')
+  })
+})
+
 describe('the global harness writer', () => {
-  it('T4: writes the eleven skills as regular folders, retires aspira-spec-reviewer and keeps the engineer\'s own skills and symlink targets', () => {
+  it('T4: writes the twelve skills as regular folders, retires aspira-spec-reviewer and keeps the engineer\'s own skills and symlink targets', () => {
     const home = homeWithCache(null)
     const skills = skillsDir(home)
     mkdirSync(join(skills, 'aspira-spec-reviewer'), { recursive: true })
@@ -466,7 +479,7 @@ describe('global-only resolution', () => {
     for (const output of [doctor.stdout + doctor.stderr, next.stdout + next.stderr]) expect(output).not.toContain(copy)
     expect(doctor.stdout).not.toContain('0.1.0')
     const skillLines = doctor.stdout.split('\n').filter((line) => line.includes('~/.claude/skills/aspira-'))
-    expect(skillLines.length).toBe(11)
+    expect(skillLines.length).toBe(12)
     expect(skillLines.every((line) => line.startsWith('ok'))).toBe(true)
   })
 })
