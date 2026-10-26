@@ -187,7 +187,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
 
   const result = await writePipeline({ idea, guidelines, context, uiRequired, answers, areas: prepared.areas, ...(spec === undefined ? {} : { spec }) }, call)
   if (tasks.length) {
-    tasks.sort((a, b) => orderOf(a.phase) - orderOf(b.phase))
+    // Explore tasks share one order and are pushed as their prompt writes finish, so they tie-break by area (the areas are sorted).
+    tasks.sort((a, b) => orderOf(a.phase) - orderOf(b.phase) || a.phase.localeCompare(b.phase))
     return { pending: true as const, status: 'pending', stage: STAGES[stageOf(tasks[0]!.phase)], workDir: work, orchestrator, tasks }
   }
 
