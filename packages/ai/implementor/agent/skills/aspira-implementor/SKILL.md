@@ -146,7 +146,7 @@ Work this out from `plan.json` (the reviewed one, or the one you drafted in sect
 3. Two tasks whose write sets overlap conflict. Add an edge from the earlier task to the later one in plan order.
 4. **Hot files** always conflict, even when the plan forgot to list them: package manifests and lockfiles, root configs (`tsconfig`, eslint, vite/next config), barrel files (`index.ts` that re-export), `schema.prisma` and other schemas, migrations (they are ordered), route/nav registries, i18n catalogs, DI/provider roots and generated code. If a task will have to touch one to finish (for example exporting a new component), count it in that task's write set.
 5. If a task's instructions use a symbol that another task creates and there is no path between them, add the edge. Note that you inferred it.
-6. `verification` tasks, dependency installs, codegen and migrations that must run against a database belong to you (the orchestrator), never to workers.
+6. `verification` tasks, dependency installs, codegen and migrations that must run against a database belong to you (the orchestrator), never to workers. Run migrations with `kit db migrate --name <n>` in the worktree; bare `prisma migrate` is denied.
 7. `handoff` tasks are not built. Prepare exactly what the person needs (the file content to place, the page text, the commands) and list each one under **Handoffs** in the report with what confirms it is done.
 
 **Cut it into waves and lanes.**

@@ -15,6 +15,8 @@ export const devServerSchema = z.object({
   cwd: z.string().default('.'),
   command: z.string().trim().min(1),
   url: z.string(),
+  /** Variables the kit sets to the resolved url in a worktree's env file (KIT-67). */
+  urlEnvVars: z.array(z.string()).optional(),
   /** True when the app's backend is deployed, so a route the dev server cannot reach is not "backend not deployed" (A4). */
   backendDeployed: z.boolean().default(false),
 })
@@ -24,12 +26,18 @@ export type DevServer = z.infer<typeof devServerSchema>
 export function localDevUrl(url: string): { ok: true } | { ok: false; reason: string } {
   try {
     const parsed = new URL(url)
-    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
+    const host = parsed.hostname
+    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(host) || (host.endsWith('.localhost') && host.length > '.localhost'.length && !host.startsWith('.'))
     if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && loopback) return { ok: true }
   } catch {
     // falls through to the reason
   }
   return { ok: false, reason: `The dev url ${url} is not an http(s) url on localhost, 127.0.0.1 or [::1]; visual verify only opens a local server.` }
+}
+
+/** `url` with {name} and {port} replaced by the worktree's name and port; a url without braces is returned unchanged. */
+export function resolveDevUrl(url: string, worktree: { name: string; port: number }): string {
+  return url.replaceAll('{name}', worktree.name).replaceAll('{port}', String(worktree.port))
 }
 
 /** How bad a visual finding is, its own scale; never counted by severity.ts. */
@@ -46,6 +54,7 @@ export const SKIP_REASONS = [
   'dev server did not start or answer',
   'not signed in',
   'a server from another checkout is answering at the url',
+  'dev.url needs a kit worktree; run kit worktree',
 ] as const
 export type SkipReason = (typeof SKIP_REASONS)[number]
 
