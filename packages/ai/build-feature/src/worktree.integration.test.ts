@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterAll, describe, expect, it } from 'vitest'
 import { BOARD, REPOSITORY, SLUG, branchFor, cleanup, kinds, ofKind, project, worktreeFor, type Project, type Result } from './driver.test-helper.ts'
+import { ISOLATED_ASPIRA, ISOLATED_IGNORE, isolationWorld, type World } from './isolation.test-helper.ts'
 
 const exec = promisify(execFile)
 afterAll(cleanup)
@@ -138,5 +139,124 @@ describe('F50: the run works the ticket in its own worktree', () => {
       worktrees: false,
       steps: 0,
     })
+  }, SLOW)
+})
+
+// KIT-67 T33 (F1, F25): step 1 brings the worktree to its isolated state. The driver is a child process, so
+// the isolation seams are stood in for at the boundary it crosses (isolation.test-helper.ts): Neon and
+// Cloudflare DNS through NEON_API_BASE_URL and CLOUDFLARE_API_BASE_URL, cloudflared and the Stripe CLI as
+// fake executables on PATH, all over one in-memory state. A project without isolation keys calls none of them.
+describe('KIT-67 T33: the run isolates the ticket\'s worktree', () => {
+  const worlds: World[] = []
+  afterAll(async () => {
+    for (const world of worlds) await world.close()
+  })
+  const newWorld = async (): Promise<World> => {
+    const world = await isolationWorld()
+    worlds.push(world)
+    return world
+  }
+
+  /** The main checkout at Ready: Spec with the isolation keys in aspira.json (or `aspira`), the ticket's spec in its .work/, and the fake services wired in. */
+  async function isolatedProject(world: World, aspira: Record<string, unknown> | undefined = ISOLATED_ASPIRA): Promise<Project> {
+    const h = await project({ layout: 'checkout', status: 'Ready: Spec', ...(aspira === undefined ? {} : { aspira }), mainFiles: { '.gitignore': ISOLATED_IGNORE }, env: world.env })
+    await world.install(h.dir)
+    await mkdir(h.folder, { recursive: true })
+    await writeFile(join(h.folder, 'spec.md'), SPEC)
+    return h
+  }
+
+  /** A worktree made before isolation existed: plain git, no env file, no resources. */
+  async function preexisting(h: Project): Promise<string> {
+    const worktree = worktreeFor(h.main)
+    await exec('git', ['-C', h.main, 'worktree', 'add', '-q', '-b', 'feat/kit-11-x', worktree, 'main'])
+    return worktree
+  }
+
+  const addsOf = async (h: Project) => (await h.gitCalls()).filter((args) => args[0] === 'worktree' && args[1] === 'add').length
+
+  const envOf = async (worktree: string): Promise<Record<string, string>> => {
+    const text = await readFile(join(worktree, '.env.development.local'), 'utf8').catch(() => '')
+    return Object.fromEntries(text.split('\n').filter((line) => line.includes('=')).map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]))
+  }
+
+  /** What isolation leaves for KIT-11: the same state T7, T13, T14 and T16 assert, read back from the mocks and the worktree. */
+  async function isolatedState(h: Project, world: World) {
+    const worktree = worktreeFor(h.main)
+    const env = await envOf(worktree)
+    const config = await readFile(join(worktree, '.aspira/cloudflared.yml'), 'utf8').catch(() => '')
+    const { state } = world.mocks
+    return {
+      branch: state.branches.map((branch) => branch.name).filter((name) => name.startsWith('wt/')),
+      database: /^postgres(?:ql)?:\/\/.*wt-kit-11/.test(env.DATABASE_URL ?? ''),
+      port: /^\d+$/.test(env.PORT ?? ''),
+      urls: [env.BETTER_AUTH_URL, env.NEXT_PUBLIC_APP_URL],
+      expectedUrl: `http://kit-11.localhost:${env.PORT}`,
+      tunnels: state.tunnels.map((tunnel) => tunnel.name),
+      cname: state.cnames.map((cname) => cname.name),
+      tunnelConfig: config.includes('kit-11-branch.aspiralabs.co') && config.includes(`http://localhost:${env.PORT}`),
+      endpoints: state.endpoints.map((endpoint) => endpoint.metadata.aspira_worktree),
+      secret: env.STRIPE_WEBHOOK_SECRET !== undefined && env.STRIPE_WEBHOOK_SECRET === state.endpoints[0]?.secret,
+    }
+  }
+
+  const ISOLATED = { branch: ['wt/kit-11'], database: true, port: true, tunnels: ['wt-kit-11'], cname: ['kit-11-branch.aspiralabs.co'], tunnelConfig: true, endpoints: ['kit-11'], secret: true }
+  const settled = async (h: Project, world: World) => {
+    const { urls, expectedUrl, ...rest } = await isolatedState(h, world)
+    return { ...rest, urls: urls.map((url) => url === expectedUrl) }
+  }
+  const ISOLATED_URLS = [true, true]
+
+  it('creates the worktree isolated: branch, PORT, URL variables, tunnel config and endpoint secret, with one git worktree add, before any step', async () => {
+    const world = await newWorld()
+    const h = await isolatedProject(world)
+    const result = await h.advance({}, await h.start())
+    expect({ stage: result.stage?.stage, adds: await addsOf(h), steps: ofKind(h.stages, 'step').length, ...(await settled(h, world)) }).toEqual({ stage: 'worktree', adds: 1, steps: 0, ...ISOLATED, urls: ISOLATED_URLS })
+  }, SLOW)
+
+  it('completes missing isolation on a rerun from the main checkout: the redirect stage is still worktree and no worktree is added', async () => {
+    const world = await newWorld()
+    const h = await isolatedProject(world)
+    await preexisting(h)
+    const redirect = await h.start()
+    expect({ stage: redirect.stage?.stage, adds: await addsOf(h), ...(await settled(h, world)) }).toEqual({ stage: 'worktree', adds: 0, ...ISOLATED, urls: ISOLATED_URLS })
+  }, SLOW)
+
+  it('completes missing isolation on a rerun from inside the worktree: the run goes on to the step and no worktree is added', async () => {
+    const world = await newWorld()
+    const h = await isolatedProject(world)
+    const worktree = await preexisting(h)
+    h.cd(worktree)
+    await h.write(`.work/${SLUG}/spec.md`, SPEC)
+    const step = await h.advance({}, await h.start())
+    expect({ command: commandOf(step), adds: await addsOf(h), ...(await settled(h, world)) }).toEqual({ command: '/aspira-planner KIT-11 --take-recommended', adds: 0, ...ISOLATED, urls: ISOLATED_URLS })
+  }, SLOW)
+
+  it('a project with no isolation keys makes the worktree as before and calls no database, tunnel or Stripe service', async () => {
+    const world = await newWorld()
+    const h = await isolatedProject(world, { board: BOARD, repository: REPOSITORY })
+    const result = await h.advance({}, await h.start())
+    const worktree = worktreeFor(h.main)
+    expect({
+      stage: result.stage?.stage,
+      adds: await addsOf(h),
+      branches: world.mocks.state.branches.map((branch) => branch.name),
+      resources: [world.mocks.state.tunnels.length, world.mocks.state.cnames.length, world.mocks.state.endpoints.length],
+      calls: [world.mocks.calls.cloudflared.length, world.mocks.calls.stripe.length, world.mocks.events.length],
+      envFile: existsSync(join(worktree, '.env.development.local')),
+      tunnelConfig: existsSync(join(worktree, '.aspira')),
+    }).toEqual({ stage: 'worktree', adds: 1, branches: ['main', 'dev'], resources: [0, 0, 0], calls: [0, 0, 0], envFile: false, tunnelConfig: false })
+  }, SLOW)
+
+  it('halts naming the database step when Neon fails, keeps the worktree, and a rerun from the main checkout completes the isolation', async () => {
+    const world = await newWorld()
+    world.mocks.failNeonCreate = true
+    const h = await isolatedProject(world)
+    const failed = await h.advance({}, await h.start())
+    const text = `${failed.text}\n${await h.summary()}`
+    const halted = { end: failed.stage?.stage, stopped: failed.stage?.stopped, named: /database/i.test(text), steps: ofKind(h.stages, 'step').length, kept: existsSync(worktreeFor(h.main)) }
+    world.mocks.failNeonCreate = false
+    const rerun = await h.start()
+    expect({ halted, rerun: rerun.stage?.stage, adds: await addsOf(h), ...(await settled(h, world)) }).toEqual({ halted: { end: 'end', stopped: true, named: true, steps: 0, kept: true }, rerun: 'worktree', adds: 1, ...ISOLATED, urls: ISOLATED_URLS })
   }, SLOW)
 })

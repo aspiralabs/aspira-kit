@@ -363,6 +363,47 @@ describe('kit init and kit doctor: the .worktrees/ and .env.local ignore lines',
     }).toEqual({ code: 0, worktrees: true, envLocal: true, allSkipped: true })
   })
 
+  it('T27 case A: a database entry in aspira.json adds a .env.development.local line that git then honours for the app file, once', async () => {
+    const { root } = repository()
+    expect(git(root, 'init', '-q').status).toBe(0)
+    writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/web', database: { provider: 'neon', projectId: 'proj-1', parentBranch: 'dev', envVars: ['DATABASE_URL'] } }))
+    await init(root, { app: 'apps/web', board: BOARD })
+    const first = readFileSync(join(root, '.gitignore'), 'utf8')
+    expect(first.split('\n')).toContain('.env.development.local')
+    expect(first.split('\n')).toContain('.env.local')
+    expect(git(root, 'check-ignore', '-q', '--no-index', 'apps/web/.env.development.local').status).toBe(0)
+    await init(root, { app: 'apps/web', board: BOARD })
+    expect(readFileSync(join(root, '.gitignore'), 'utf8')).toBe(first)
+  })
+
+  it('T27 case A: webhooks, or a placeholder dev.url, ask for the same line', async () => {
+    for (const keys of [{ webhooks: [{ provider: 'stripe', path: '/api/webhooks/stripe' }] }, { dev: { command: 'next dev', url: 'http://{name}.localhost:{port}' } }]) {
+      const { root } = repository()
+      expect(git(root, 'init', '-q').status).toBe(0)
+      writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/web', ...keys }))
+      await init(root, { app: 'apps/web', board: BOARD })
+      expect(readFileSync(join(root, '.gitignore'), 'utf8').split('\n')).toContain('.env.development.local')
+    }
+  })
+
+  it('T27 adds no .env.development.local line when a glob such as .env*.local already ignores it', async () => {
+    const { root } = repository()
+    writeFileSync(join(root, '.gitignore'), 'node_modules\n.env*.local\n')
+    expect(git(root, 'init', '-q').status).toBe(0)
+    writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/web', database: { provider: 'neon', projectId: 'proj-1', parentBranch: 'dev', envVars: ['DATABASE_URL'] } }))
+    await init(root, { app: 'apps/web', board: BOARD })
+    expect(readFileSync(join(root, '.gitignore'), 'utf8').split('\n')).not.toContain('.env.development.local')
+    expect(git(root, 'check-ignore', '-q', '--no-index', 'apps/web/.env.development.local').status).toBe(0)
+  })
+
+  it('T27 case B: with no database, webhooks or placeholder dev.url the .gitignore equals today\'s', async () => {
+    const { root } = repository()
+    expect(git(root, 'init', '-q').status).toBe(0)
+    writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/web', dev: { command: 'next dev', url: 'http://localhost:3000' } }))
+    await init(root, { app: 'apps/web', board: BOARD })
+    expect(readFileSync(join(root, '.gitignore'), 'utf8')).toBe(WIRED_GITIGNORE)
+  })
+
   it("this repository's own .gitignore ignores .worktrees/ and .env.local", () => {
     const top = git(kit, 'rev-parse', '--show-toplevel').stdout.trim()
     const committed = readFileSync(join(top, '.gitignore'), 'utf8')

@@ -7,7 +7,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { devServerSchema, localDevUrl, visualVerifyLines, visualVerifyReport, type VisualVerifyResult } from './visual-verify.ts'
+import { devServerSchema, localDevUrl, resolveDevUrl, visualVerifyLines, visualVerifyReport, type VisualVerifyResult } from './visual-verify.ts'
 
 const temps: string[] = []
 afterEach(async () => {
@@ -33,6 +33,35 @@ describe('devServerSchema and localDevUrl (T1)', () => {
       expect(result.ok, url).toBe(false)
       expect('reason' in result ? result.reason : '').toContain(url)
     }
+  })
+
+  it('accepts any *.localhost host, a worktree name included (T1, F11)', () => {
+    for (const url of ['http://scoop-7.localhost:3003', 'http://localhost:3000', 'http://127.0.0.1:3000', 'http://[::1]:5173']) {
+      expect(localDevUrl(url), url).toEqual({ ok: true })
+    }
+  })
+
+  it('refuses a host that only contains or resembles localhost, with a reason naming the url (T1, F11)', () => {
+    for (const url of ['http://localhost.evil.com', 'http://evil.localhost.com', 'http://evil-localhost.com', 'http://notlocalhost', 'http://user@localhost.evil.com', 'http://.localhost:3000']) {
+      const result = localDevUrl(url)
+      expect(result.ok, url).toBe(false)
+      expect('reason' in result ? result.reason : '', url).toContain(url)
+    }
+  })
+
+  it('resolves {name} and {port} into the worktree url (T2, F10, F11)', () => {
+    expect(resolveDevUrl('http://{name}.localhost:{port}', { name: 'scoop-7', port: 3001 })).toBe('http://scoop-7.localhost:3001')
+  })
+
+  it('returns a url with no braces unchanged whatever name and port are passed (T2, F1)', () => {
+    for (const url of ['http://localhost:3000', 'https://127.0.0.1:8443/admin', 'http://[::1]:5173']) {
+      expect(resolveDevUrl(url, { name: 'scoop-7', port: 3001 }), url).toBe(url)
+    }
+  })
+
+  it('keeps urlEnvVars on the parsed dev block instead of stripping it (T2, F10)', () => {
+    const parsed = devServerSchema.parse({ command: 'pnpm dev', url: 'http://{name}.localhost:{port}', urlEnvVars: ['APP_URL'] })
+    expect(parsed.urlEnvVars).toEqual(['APP_URL'])
   })
 
   it('defaults cwd to "." and backendDeployed to false', () => {

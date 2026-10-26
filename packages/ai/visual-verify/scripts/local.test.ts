@@ -23,15 +23,23 @@ afterAll(async () => {
   for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true })
 })
 
-type Options = { dev?: typeof DEV | null; planPath?: string; answer?: unknown }
+type Dev = Record<string, unknown>
+/** `worktree` puts the repository at <tmp>/.worktrees/<name>; `app` is aspira.json's app folder; `env` is the app's .env.development.local. */
+type Options = { dev?: Dev | null; planPath?: string; answer?: unknown; worktree?: string; app?: string; env?: string }
 
 /** A git repository with aspira.json and .work/kit-9-x/ holding a reviewed spec and a plan. */
 async function project(options: Options = {}) {
-  const repo = await realpath(await mkdtemp(join(tmpdir(), 'visual-verify-local-')))
-  temps.push(repo)
+  const main = await realpath(await mkdtemp(join(tmpdir(), 'visual-verify-local-')))
+  temps.push(main)
+  const repo = options.worktree === undefined ? main : join(main, '.worktrees', options.worktree)
+  await mkdir(repo, { recursive: true })
   await exec('git', ['init', '-q', repo])
   const dev = options.dev === undefined ? DEV : options.dev
-  await writeFile(join(repo, 'aspira.json'), JSON.stringify({ board: BOARD, ...(dev === null ? {} : { dev }) }))
+  await writeFile(join(repo, 'aspira.json'), JSON.stringify({ board: BOARD, ...(options.app === undefined ? {} : { app: options.app }), ...(dev === null ? {} : { dev }) }))
+  if (options.env !== undefined) {
+    await mkdir(join(repo, options.app ?? '.'), { recursive: true })
+    await writeFile(join(repo, options.app ?? '.', '.env.development.local'), options.env)
+  }
   const folder = join(repo, '.work/kit-9-x')
   await mkdir(join(folder, 'spec.reviewed'), { recursive: true })
   await mkdir(join(folder, 'plan.review/trace'), { recursive: true })
@@ -110,6 +118,36 @@ describe.sequential('T27 F17 F2: standalone run that can check hands the session
       output: printed.output?.endsWith('.work/kit-9-x/visual-verify/answer.json') ?? false,
       files: ['build-summary.md', 'pr-body.md'].filter((name) => existsSync(join(folder, name)) || existsSync(join(out, name))),
     }).toEqual({ code: 0, url: 'http://localhost:3000', stripped: true, output: true, files: [] })
+  })
+})
+
+describe.sequential('T4 F1 F11 F13: standalone run with a placeholder dev url', () => {
+  const PLACEHOLDER = { cwd: '.', command: 'pnpm dev', url: 'http://{name}.localhost:{port}' }
+
+  it('A: resolves the url from the worktree name and PORT and hands a kit dev run line with the credential names unset', async () => {
+    const { repo } = await project({ dev: PLACEHOLDER, worktree: 'FEATURE-SCOOP-7', app: 'web', env: 'PORT=3003\nDATABASE_URL=postgres://branch\n' })
+    const outcome = await run(['local', 'KIT-9', '--repo', repo, '--status', 'In Review: Implementation'], { GITHUB_TOKEN: 'g' })
+    const printed = JSON.parse(outcome.stdout) as { devServer?: { url?: string; run?: string } }
+    expect({
+      code: outcome.code,
+      url: printed.devServer?.url,
+      starts: printed.devServer?.run?.startsWith('env ') ?? false,
+      stripped: printed.devServer?.run?.includes('-u GITHUB_TOKEN ') ?? false,
+      ends: printed.devServer?.run?.endsWith(' kit dev') ?? false,
+    }).toEqual({ code: 0, url: 'http://scoop-7.localhost:3003', starts: true, stripped: true, ends: true })
+  })
+
+  it('B: skips with exit 0 and the reason "dev.url needs a kit worktree; run kit worktree" in the main checkout, printing no devServer', async () => {
+    const { repo } = await project({ dev: PLACEHOLDER })
+    const outcome = await run(['local', 'KIT-9', '--repo', repo, '--status', 'In Review: Implementation'])
+    expect({ code: outcome.code, reason: outcome.text.includes('dev.url needs a kit worktree; run kit worktree'), devServer: outcome.text.includes('devServer') }).toEqual({ code: 0, reason: true, devServer: false })
+  })
+
+  it('C: leaves the url and the run line of a brace-free dev block exactly as they are today', async () => {
+    const { repo } = await project({ worktree: 'FEATURE-SCOOP-7', app: 'web', env: 'PORT=3003\n' })
+    const outcome = await run(['local', 'KIT-9', '--repo', repo, '--status', 'In Review: Implementation'], { GITHUB_TOKEN: 'g' })
+    const printed = JSON.parse(outcome.stdout) as { devServer?: { url?: string; run?: string } }
+    expect({ code: outcome.code, url: printed.devServer?.url, run: printed.devServer?.run?.endsWith(' pnpm dev') ?? false, kitDev: printed.devServer?.run?.includes('kit dev') ?? false }).toEqual({ code: 0, url: 'http://localhost:3000', run: true, kitDev: false })
   })
 })
 

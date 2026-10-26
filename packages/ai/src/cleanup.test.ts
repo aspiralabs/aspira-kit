@@ -9,8 +9,9 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup } from './cleanup.js'
+import { forbiddenSeams, ISOLATION_CONFIG, setServiceEnv, startMocks, type MockSeams, type Mocks } from './isolation-mocks.test.js'
 import { lookupTicket, type TicketLookup, type TicketLookupResult } from './ticket-lookup.js'
 
 const kit = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -56,7 +57,7 @@ const hasBranch = (repo: string, branch: string): boolean => spawnSync('git', ['
  * project root, which is the checkout's root or `<root>/<project>`. The process stands in the
  * temporary directory (not a git repository), so nothing here can reach the kit's own checkout.
  */
-function repository(opts: { project?: string; board?: boolean } = {}): Repo {
+function repository(opts: { project?: string; board?: boolean; config?: Record<string, unknown> } = {}): Repo {
   const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'kit-cleanup-')))
   temporary.push(tmp)
   const origin = join(tmp, 'origin.git')
@@ -66,7 +67,7 @@ function repository(opts: { project?: string; board?: boolean } = {}): Repo {
   git(root, 'init', '-q', '-b', 'main')
   const project = opts.project === undefined ? root : join(root, opts.project)
   mkdirSync(project, { recursive: true })
-  writeFileSync(join(project, 'aspira.json'), JSON.stringify(opts.board === false ? {} : { board: BOARD }))
+  writeFileSync(join(project, 'aspira.json'), JSON.stringify(opts.board === false ? {} : { board: BOARD, ...opts.config }))
   writeFileSync(join(root, '.gitignore'), '.work/\n.worktrees/\n.env.local\nnode_modules/\n')
   writeFileSync(join(root, 'README.md'), '# fixture\n')
   git(root, 'add', '-A')
@@ -130,18 +131,21 @@ function board(cards: Cards): TicketLookup {
   }
 }
 
-async function run(projectRoot: string, cards: Cards | TicketLookup, opts: { yes?: boolean; only?: string[]; ask?: Ask } = {}): Promise<{ code: number; lines: string[]; warnings: string[] }> {
+async function run(projectRoot: string, cards: Cards | TicketLookup, opts: { yes?: boolean; only?: string[]; ask?: Ask; seams?: MockSeams } = {}): Promise<{ code: number; lines: string[]; warnings: string[] }> {
   const lines: string[] = []
   const warnings: string[] = []
-  const code = await cleanup({
+  // Built apart from the call so the optional `seams` key does not trip the options type before the kit has it.
+  const options = {
     projectRoot,
     yes: opts.yes ?? false,
     ...(opts.only === undefined ? {} : { only: opts.only }),
     lookup: typeof cards === 'function' ? cards : board(cards),
     ...(opts.ask === undefined ? {} : { ask: opts.ask }),
-    log: (line) => lines.push(line),
-    warn: (line) => warnings.push(line.trimEnd()),
-  })
+    ...(opts.seams === undefined ? {} : { seams: opts.seams }),
+    log: (line: string) => lines.push(line),
+    warn: (line: string) => warnings.push(line.trimEnd()),
+  }
+  const code = await cleanup(options)
   return { code, lines, warnings }
 }
 
@@ -570,5 +574,85 @@ describe('kit cleanup and the board', () => {
       shapes: invocations.filter((argv) => !(Array.isArray(argv) && argv.length === 4 && argv[0] === script && argv[2] === '--board' && argv[3] === BOARD)),
       refs: [...new Set(refs)].sort(),
     }).toEqual({ shapes: [], refs: ['KIT-1', 'KIT-2'] })
+  })
+})
+
+describe('kit cleanup tears down an isolated worktree before removing it (T25, T26, F21 F23 F30)', () => {
+  let mocks: Mocks
+  let restore: () => void
+  beforeEach(async () => {
+    mocks = await startMocks()
+    restore = setServiceEnv()
+  })
+  afterEach(async () => {
+    restore()
+    await mocks.close()
+  })
+
+  const both = { 'KIT-1': card('KIT-1', 'Released'), 'KIT-2': card('KIT-2', 'Released') }
+
+  it('T25 deletes the endpoints, tunnel, CNAME and branch before git worktree remove, and removes the folder without --force', async () => {
+    const repo = repository({ config: ISOLATION_CONFIG })
+    const wt = worktree(repo, 'FEATURE-KIT-1', 'feat/kit-1-x')
+    mocks.seed('kit-1')
+    mocks.seed('kit-9')
+    mocks.probe = () => (existsSync(wt) ? 'folder-present' : 'folder-gone')
+    const { code, lines } = await run(repo.root, { 'KIT-1': card('KIT-1', 'Released') }, { yes: true, seams: mocks.seams })
+    expect(code).toBe(0)
+    expect(mocks.events.map((event) => `${event.op} ${event.name} ${event.observed}`).toSorted()).toEqual([
+      'dns.delete kit-1-branch.aspiralabs.co folder-present',
+      'neon.delete wt/kit-1 folder-present',
+      'stripe.delete kit-1 folder-present',
+      'tunnel.delete wt-kit-1 folder-present',
+    ])
+    // Only kit-1's resources went; the other worktree's stay.
+    expect(mocks.state.branches.map((branch) => branch.name)).toEqual(['main', 'dev', 'wt/kit-9'])
+    expect(mocks.state.tunnels.map((tunnel) => tunnel.name)).toEqual(['wt-kit-9'])
+    expect(mocks.state.cnames.map((cname) => cname.name)).toEqual([`kit-9-branch.aspiralabs.co`])
+    expect(mocks.state.endpoints.map((endpoint) => endpoint.metadata.aspira_worktree)).toEqual(['kit-9'])
+    expect(existsSync(wt)).toBe(false)
+    expect(lines.some((line) => line.startsWith('removed') && line.includes(wt))).toBe(true)
+  })
+
+  it('T25 keeps a worktree whose Neon delete fails, logs failed with the database step, exits non-zero, still removes the other, and a later healthy run removes it', async () => {
+    const repo = repository({ config: ISOLATION_CONFIG })
+    const first = worktree(repo, 'FEATURE-KIT-1', 'feat/kit-1-x')
+    const second = worktree(repo, 'FEATURE-KIT-2', 'feat/kit-2-x')
+    mocks.seed('kit-1')
+    mocks.seed('kit-2')
+    mocks.failNeonDelete.add('wt/kit-2')
+    const failing = await run(repo.root, both, { yes: true, seams: mocks.seams })
+    expect(failing.code).not.toBe(0)
+    expect(existsSync(first)).toBe(false)
+    expect(existsSync(second)).toBe(true)
+    expect(failing.lines.some((line) => line.startsWith('failed') && line.includes(second) && /database/i.test(line))).toBe(true)
+    expect(failing.lines.some((line) => line.startsWith('removed') && line.includes(first))).toBe(true)
+    expect(failing.lines.some((line) => line.startsWith('removed') && line.includes(second))).toBe(false)
+    mocks.failNeonDelete.clear()
+    const healthy = await run(repo.root, { 'KIT-2': card('KIT-2', 'Released') }, { yes: true, seams: mocks.seams })
+    expect(healthy.code).toBe(0)
+    expect(existsSync(second)).toBe(false)
+    expect(mocks.state.branches.map((branch) => branch.name)).toEqual(['main', 'dev'])
+  })
+
+  it('T26 case A: with no isolation keys it prints and exits as before and calls no seam', async () => {
+    const repo = repository()
+    const { seams, used } = forbiddenSeams()
+    const wt = worktree(repo, 'FEATURE-KIT-1', 'feat/kit-1-x')
+    const { code, lines } = await run(repo.root, { 'KIT-1': card('KIT-1', 'Released') }, { yes: true, seams })
+    expect(code).toBe(0)
+    expect(lines).toEqual([`${wt}  KIT-1  Released  delete`, `removed  ${wt}`, 'branch deleted  feat/kit-1-x'])
+    expect(used()).toEqual([])
+  })
+
+  it('T26 case B: a Released worktree already torn down by the merge removes with teardown a no-op', async () => {
+    const repo = repository({ config: ISOLATION_CONFIG })
+    const wt = worktree(repo, 'FEATURE-KIT-1', 'feat/kit-1-x')
+    const { code, lines } = await run(repo.root, { 'KIT-1': card('KIT-1', 'Released') }, { yes: true, seams: mocks.seams })
+    expect(code).toBe(0)
+    expect(existsSync(wt)).toBe(false)
+    expect(lines.some((line) => line.startsWith('removed') && line.includes(wt))).toBe(true)
+    expect(lines.some((line) => line.startsWith('failed'))).toBe(false)
+    expect(mocks.events).toEqual([])
   })
 })
