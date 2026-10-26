@@ -7,13 +7,20 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { checkAspira, normalizeApp, readApp, resolveProjectRoot, writeAspira } from './aspira.js'
 import { doctor } from './doctor.js'
 import { hasJsonComments, readJson } from './fs.js'
 import { liveResolver, next, type Resolver } from './next.js'
 import { AGENTS, KIT_SKILLS, writeGlobalHarness } from './skills.js'
 import { initNext } from './stacks/next.js'
+
+// The kit runs only as the global @aspiralabs/ai: a test points aiPackageDir() at a fake package to run its resolve script.
+const fakeAi = vi.hoisted(() => ({ dir: undefined as string | undefined }))
+vi.mock('./skills.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./skills.js')>()
+  return { ...actual, aiPackageDir: () => fakeAi.dir ?? actual.aiPackageDir() }
+})
 
 const kit = dirname(dirname(fileURLToPath(import.meta.url)))
 const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6'
@@ -819,11 +826,11 @@ describe('kit next with an app', () => {
   })
 
   const amaro = [join(kit, 'node_modules', 'amaro'), join(dirname(dirname(kit)), 'node_modules', 'amaro'), join(dirname(dirname(kit)), 'packages', 'agents', 'implementor', 'node_modules', 'amaro')].find((dir) => existsSync(dir)) ?? ''
-  it.skipIf(amaro === '')('runs the installed common resolve script from the app, with the app\'s .env.local', () => {
+  it.skipIf(amaro === '')('runs the global kit common resolve script from the app, with the app\'s .env.local', () => {
     const { root, app } = repository()
     writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/web' }))
-    // A copy an earlier kit installed under the app: it wins over the global install.
-    const installed = join(app, 'node_modules', '@aspiralabs', 'ai')
+    // The global @aspiralabs/ai the kit runs from (a copy under the app's node_modules would never be used).
+    const installed = join(root, 'global', '@aspiralabs', 'ai')
     mkdirSync(join(installed, 'node_modules'), { recursive: true })
     writeFileSync(join(installed, 'package.json'), JSON.stringify({ name: '@aspiralabs/ai', version: VERSION, type: 'module' }))
     symlinkSync(realpathSync(amaro), join(installed, 'node_modules', 'amaro'))
@@ -831,7 +838,12 @@ describe('kit next with an app', () => {
     writeFileSync(join(installed, 'common', 'scripts', 'resolve-ticket.ts'), "const ref: string = process.argv[2]!\nconsole.log(`id=${ref}\\ntitle=Explore pagination\\nurl=https://www.notion.so/nom-4\\nstatus=${process.env.FAKE_STATUS ?? 'Idea'}`)\n")
     writeFileSync(join(app, '.env.local'), 'FAKE_STATUS=In Review: Spec\n')
     const { lines, log } = logs()
-    expect(next(root, 'NOM-4', log, liveResolver)).toBe(0)
+    fakeAi.dir = installed
+    try {
+      expect(next(root, 'NOM-4', log, liveResolver)).toBe(0)
+    } finally {
+      fakeAi.dir = undefined
+    }
     expect(lines).toContain('status   In Review: Spec')
     expect(lines).toContain('run      /aspira-spec-writer NOM-4')
   })

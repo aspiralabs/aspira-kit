@@ -57,7 +57,7 @@ describe('audit-log.sh guard and check-ignore', () => {
     expect(logged.code).toBe(0)
     const log = lines(join(web, '.aspira', 'audit.jsonl'))
     expect(log).toHaveLength(1)
-    expect(() => JSON.parse(log[0])).not.toThrow()
+    expect(() => JSON.parse(log[0] ?? '')).not.toThrow()
     const denied = run(DENY, web, home, 'prisma migrate reset')
     expect(denied.code).toBe(2)
     expect(denied.stderr).toContain('DENIED (tier 3)')

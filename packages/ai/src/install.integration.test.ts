@@ -82,7 +82,8 @@ describe('a project on the global install', () => {
     const skillLines = report.filter((l) => l.startsWith('ok') && l.includes('~/.claude/skills/aspira-'))
     expect(skillLines.length).toBe(11)
     expect(report.filter((l) => l.startsWith('ok') && ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh'].some((hook) => l.includes(hook))).length).toBeGreaterThanOrEqual(3)
-    expect(report.some((l) => l.startsWith('FAIL'))).toBe(false)
+    // The scratch project names a board and has no NOTION_TOKEN: that one unrelated check fails by design; every harness check passes.
+    expect(report.filter((l) => l.startsWith('FAIL') && !l.startsWith('FAIL NOTION_TOKEN is not set'))).toEqual([])
     expect(report.some((l) => l.startsWith('@aspiralabs/ai') && l.includes(`global ${version}`))).toBe(true)
     expect(report.some((l) => l.includes('@aspiralabs/kit') || l.includes('@aspiralabs/agents'))).toBe(false)
     const playbook = spawnSync('kit', ['playbook'], { cwd: app, encoding: 'utf8' })

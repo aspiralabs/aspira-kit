@@ -146,9 +146,14 @@ describe('no shipped file names a retired package (F14)', () => {
     expect(offenders).toEqual([])
   })
 
-  it.each(['AGENTS.md', 'packages/ai/templates/agent/AGENTS.md', 'packages/ai/skills/aspira-next/SKILL.md', 'packages/config/README.md'])('%s names @aspiralabs/ai and no retired package', (path) => {
+  it.each(['AGENTS.md', 'packages/ai/skills/aspira-next/SKILL.md', 'packages/config/README.md'])('%s names @aspiralabs/ai and no retired package', (path) => {
     const text = readFileSync(join(ROOT, path), 'utf8')
     expect(text).toContain('@aspiralabs/ai')
     expect(text).not.toMatch(RETIRED)
+  })
+
+  // The template carries no managed block since KIT-71 (the process pointers live in ~/.claude), so it need not name @aspiralabs/ai.
+  it('packages/ai/templates/agent/AGENTS.md names no retired package', () => {
+    expect(readFileSync(join(ROOT, 'packages/ai/templates/agent/AGENTS.md'), 'utf8')).not.toMatch(RETIRED)
   })
 })

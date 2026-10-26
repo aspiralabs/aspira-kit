@@ -67,9 +67,8 @@ describe('SessionStart JSON', () => {
     const version = (JSON.parse(readFileSync(PACKAGE_JSON, 'utf8')) as { version: string }).version
     expect(output.systemMessage).toContain('99.0.0')
     expect(output.systemMessage).toContain(version)
-    expect(output.systemMessage).toContain('pnpm add -g @aspiralabs/ai@latest')
+    expect(output.systemMessage).toContain('Upgrade: kit update')
     expect(output.systemMessage).not.toContain('pnpm add -D')
-    expect(output.systemMessage).toContain('kit init')
 
     const plain = runHook(HOOK, homeWithCache(null))
     expect(plain.code).toBe(0)

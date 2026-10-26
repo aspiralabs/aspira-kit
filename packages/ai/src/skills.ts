@@ -41,7 +41,7 @@ const KIT_DIR = dirname(dirname(fileURLToPath(import.meta.url)))
 /** The home folder the harness is written under: `home` when given, else the user's. */
 const homeOf = (home?: string): string => home ?? homedir()
 
-/** <home>/.claude/skills/aspira-<name>/, the global skill folder. */
+/** The global skill folder: ~/.claude/skills/aspira-<name>/ under `home`. */
 export const skillDir = (home: string, name: SkillName | (typeof RETIRED_SKILLS)[number]): string => join(home, '.claude', 'skills', `aspira-${name}`)
 
 /** The kit-owned skill's source folder in this kit package. */

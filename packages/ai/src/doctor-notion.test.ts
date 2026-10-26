@@ -198,7 +198,7 @@ describe('kit doctor checks the kit packages, with @aspiralabs/ai global (T8, F3
   const run = (declared?: string[]) => {
     project({ board: BOARD }, declared)
     const { lines, log } = logs()
-    return { code: doctor(root, log, undefined, { check, env }), lines }
+    return { code: doctor(root, log, undefined, { home, check, env }), lines }
   }
 
   it('T45: passes a healthy project with no project .claude folder and names neither @aspiralabs/kit nor @aspiralabs/agents', () => {
