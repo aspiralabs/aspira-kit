@@ -1,6 +1,6 @@
 {
   "name": "@aspiralabs/ai",
-  "version": "0.17.1",
+  "version": "0.18.0",
   "description": "The Aspira Labs AI package: the agents and /aspira-* skills (groomer, spec-writer, planner, implementor, code-analyzer, pr-reviewer, build-feature, visual-verify) and the kit command that installs them into a project. Install it globally, once per engineer; it is never a project dependency.",
   "type": "module",
   "license": "MIT",

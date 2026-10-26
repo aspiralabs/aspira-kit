@@ -1,5 +1,15 @@
 # @aspiralabs/kit
 
+## 0.18.0
+
+### Minor Changes
+
+- 885bf72: Ticket worktrees are isolated: each gets its own database branch, dev server and webhooks, set up by `kit worktree` (rerun it to resume a failed step) and torn down after the merge or by `kit cleanup`. New `kit dev` starts the worktree's dev server, which visual verify uses, and `kit db migrate --name <n>` runs migrations against the worktree's own database.
+
+### Patch Changes
+
+- 16ae13b: The planner accepts a spec criterion that keeps behaviour unchanged when a tests task writes a test pinning it, with no implementation task; before, such a criterion could never pass ("No implementation maps to F14", NOM-43). In a default (not `--autonomous`, not `--cloud`) build-feature run, the groomer step runs in the build-feature session instead of a subagent, so its exit-criterion questions and Confirm reach the human; before, a subagent could not ask them and the run always stopped incomplete at grooming.
+
 ## 0.17.1
 
 ### Patch Changes
