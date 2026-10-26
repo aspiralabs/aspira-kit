@@ -1,5 +1,0 @@
----
-'@aspiralabs/ai': minor
----
-
-A codebase map the agents can query for blast radius. `kit map-codebase` builds a per-repo map of files, packages and import edges (TypeScript compiler resolution against each repo's own tsconfig, so `@/` aliases and workspace packages resolve as internal edges), `--check` reports freshness, `brief <target>` prints a bounded packet (read-first paths, impact paths, focused tests, accepted notes, stale warnings), and `notes` runs a step driver whose subagents propose candidate notes that a person accepts or retires. The map lives in `.codebase-map/` in the repo, or under the folder named by the new optional `codebaseMaps` key of the nearest `aspira.json` for a client harness; `kit update` adds `.codebase-map/map/` to the global git ignore. New `/aspira-map-codebase` skill (thirteen skills now), a `kit doctor` information line for the map, and `brief` importable from `@aspiralabs/ai/codebase-map`. `typescript` moves from devDependencies to dependencies. Adapted from cartographer (Apache-2.0); see `THIRD_PARTY_NOTICES`.
