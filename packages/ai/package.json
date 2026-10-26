@@ -12,6 +12,10 @@
       "types": "./dist/playbook.d.ts",
       "default": "./dist/playbook.js"
     },
+    "./isolation": {
+      "types": "./dist/isolation.d.ts",
+      "default": "./dist/isolation.js"
+    },
     "./package.json": "./package.json",
     "./common/tools/*": "./common/src/tools/*.ts",
     "./common/lib/*.json": "./common/src/lib/*.json",

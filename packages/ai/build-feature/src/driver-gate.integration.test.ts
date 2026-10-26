@@ -5,8 +5,10 @@
 // gh, and time. The Playbook and the shared decisions module run for real. KIT-11 plan P5:
 // T12, T14-T26, T34-T36, T42-T44. The stage contract is described in driver.test-helper.ts.
 
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { afterAll, describe, expect, it } from 'vitest'
-import { RESUME_CLOUD, cleanup, ofKind, project } from './driver.test-helper.ts'
+import { BOARD, REPOSITORY, RESUME_CLOUD, cleanup, ofKind, project } from './driver.test-helper.ts'
 import { SLOW, returnOn, lastLine, commandOf } from './driver.integration.shared.ts'
 
 afterAll(cleanup)
@@ -120,5 +122,32 @@ describe('AVA3.1: the project gate runs without credentials, and in cloud mode n
   it('in the default mode, runs changed gate scripts without asking (the implementor ran in this session)', async () => {
     const { h, next } = await built({ mode: 'local', main: BASE_SCRIPTS, branch: CHANGED_SCRIPTS })
     expect({ stage: next.stage?.stage, asks: ofKind(h.stages, 'ask').length }).toEqual({ stage: 'gate', asks: 0 })
+  }, SLOW)
+})
+
+// KIT-67 T35 (F25, spec decision Q1): a gate command the run lists for the session starts with the worktree's
+// database variables from <app>/.env.development.local, so none falls back to the shared database in .env.local,
+// and the stage body never carries the connection string. The command here prints DATABASE_URL.
+describe('KIT-67 T35: a gate command in an isolated worktree sees the branch database', () => {
+  const BRANCH_URL = 'postgres://branch'
+  const SHARED_URL = 'postgres://shared'
+
+  it('runs the first run line with DATABASE_URL set to the branch URL, and the stage text does not hold it', async () => {
+    const h = await project({
+      status: 'Ready: Plan',
+      aspira: { board: BOARD, repository: REPOSITORY, database: { provider: 'neon', projectId: 'proj-1', parentBranch: 'dev', envVars: ['DATABASE_URL'] }, gates: [{ command: 'printenv DATABASE_URL' }] },
+      mainFiles: { '.env.local': `DATABASE_URL=${SHARED_URL}\n` },
+      files: { '.env.development.local': `DATABASE_URL=${BRANCH_URL}\nPORT=3001\n` },
+    })
+    const implementor = await h.advance({}, await h.start())
+    await h.report(implementor.stage!, 'complete')
+    const next = await h.advance()
+    const run = ((next.stage?.run ?? []) as string[])[0] ?? ''
+    // The session's shell: its own environment holds the shared URL, as a shell that loaded .env.local would.
+    const shell = await promisify(execFile)('/bin/sh', ['-c', run], { cwd: h.repo, env: { PATH: '/usr/bin:/bin', DATABASE_URL: SHARED_URL } }).then(
+      ({ stdout }) => stdout.trim(),
+      (error: { stdout?: string }) => `failed: ${error.stdout ?? ''}`,
+    )
+    expect({ stage: next.stage?.stage, printed: shell, leaked: JSON.stringify(next.stage).includes(BRANCH_URL) || next.text.includes(BRANCH_URL) }).toEqual({ stage: 'gate', printed: BRANCH_URL, leaked: false })
   }, SLOW)
 })

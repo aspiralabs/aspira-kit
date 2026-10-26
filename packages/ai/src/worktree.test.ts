@@ -5,9 +5,10 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { ResolvedTicket } from './next.js'
 import type { TicketLookup, TicketLookupResult } from './ticket-lookup.js'
+import { forbiddenSeams, ISOLATION_CONFIG, setServiceEnv, startMocks, type MockSeams, type Mocks } from './isolation-mocks.test.js'
 import { worktree } from './worktree.js'
 
 const BOARD = 'https://www.notion.so/d9e768e6e79643118781b4e393d4a4a6'
@@ -56,6 +57,10 @@ type Variant = {
   build?: 'ok' | 'fail' | 'none'
   /** A dependency npm cannot install (a file: tarball that does not exist). */
   brokenInstall?: boolean
+  /** Extra aspira.json keys beside the board (the KIT-67 isolation keys). */
+  config?: Record<string, unknown>
+  /** Extra .gitignore lines beside the defaults. */
+  ignore?: string[]
 }
 
 type Fixture = { tmp: string; origin: string; main: string }
@@ -83,8 +88,8 @@ function fixture(variant: Variant = {}): Fixture {
   git(seed, 'init', '-q', '-b', 'main')
   const app = variant.app ?? 'root'
   const build = variant.build ?? 'ok'
-  writeFileSync(join(seed, '.gitignore'), ['.worktrees/', '.env.local', 'node_modules/', MARKER, ''].join('\n'))
-  writeFileSync(join(seed, 'aspira.json'), json(app === 'root' ? { board: BOARD } : { board: BOARD, app: 'apps/web' }))
+  writeFileSync(join(seed, '.gitignore'), ['.worktrees/', '.env.local', 'node_modules/', MARKER, ...(variant.ignore ?? []), ''].join('\n'))
+  writeFileSync(join(seed, 'aspira.json'), json(app === 'root' ? { board: BOARD, ...variant.config } : { board: BOARD, app: 'apps/web', ...variant.config }))
   if (app === 'root') {
     const dependencies = variant.brokenInstall === true ? { missing: 'file:./missing.tgz' } : {}
     writePackage(seed, { name: 'fixture', version: '1.0.0', private: true, dependencies }, build)
@@ -109,7 +114,7 @@ function fixture(variant: Variant = {}): Fixture {
   git(tmp, 'clone', '-q', '--bare', seed, origin)
   git(tmp, 'clone', '-q', origin, main)
   git(main, 'checkout', '-q', '-b', 'chore/other')
-  writeFileSync(join(main, '.env.local'), 'NOTION_TOKEN=secret\n')
+  writeFileSync(join(main, '.env.local'), variant.config === undefined ? 'NOTION_TOKEN=secret\n' : 'NOTION_TOKEN=secret\nSTRIPE_SECRET_KEY=sk_test_x\n')
   return { tmp, origin, main }
 }
 
@@ -124,12 +129,14 @@ const answer =
 
 type Run = { code: number; lines: string[]; out: string }
 
-async function run(projectRoot: string, ref: string, result: TicketLookupResult, install = false): Promise<Run> {
+async function run(projectRoot: string, ref: string, result: TicketLookupResult, install = false, seams?: MockSeams): Promise<Run> {
   const lines: string[] = []
   const log = (line: string): void => {
     lines.push(...line.split('\n'))
   }
-  const code = await Promise.resolve(worktree({ projectRoot, app: undefined, ref, lookup: answer(result), install, log }))
+  // Built apart from the call so the optional `seams` key does not trip the options type before the kit has it.
+  const options = { projectRoot, app: undefined, ref, lookup: answer(result), install, log, ...(seams === undefined ? {} : { seams }) }
+  const code = await Promise.resolve(worktree(options))
   while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
   return { code, lines, out: lines.join('\n') }
 }
@@ -451,5 +458,106 @@ describe('kit worktree: install or build failing', () => {
     expect(result.code).toBe(1)
     expect(result.lines.some((line) => /install/i.test(line) && /fail/i.test(line))).toBe(true)
     expect(isRegistered(main, handlePath(main, 'FEATURE-KIT-13'))).toBe(true)
+  })
+})
+
+/** The KIT-67 isolation keys with the .env.development.local and .aspira/ ignore lines the kit needs before it writes there. */
+const ISOLATED = { config: ISOLATION_CONFIG, ignore: ['.env.development.local', '.aspira/'] } satisfies Variant
+
+describe('kit worktree: a project with no isolation keys (T23, F1)', () => {
+  it('T23 creates and then reports the existing worktree exactly as before, and calls no seam', async () => {
+    const { main } = fixture()
+    const { seams, used } = forbiddenSeams()
+    const wt = handlePath(main, 'FEATURE-KIT-13')
+    const created = await run(main, 'KIT-13', feature(), false, seams)
+    expect(created.code).toBe(0)
+    expect(created.lines.slice(-2)).toEqual([wt, 'feat/kit-13-kit-qol-cleanup'])
+    expect(lineWith(created.lines, 'created', wt)).toBeDefined()
+    const again = await run(main, 'KIT-13', feature(), false, seams)
+    expect(again.code).toBe(0)
+    expect(again.lines.filter((line) => !line.startsWith('ticket') && !line.startsWith('fetch'))).toEqual([`exists   ${wt} (already a worktree on feat/kit-13-kit-qol-cleanup)`, wt, 'feat/kit-13-kit-qol-cleanup'])
+    expect(used()).toEqual([])
+    expect(existsSync(join(wt, '.env.development.local'))).toBe(false)
+    expect(existsSync(join(wt, '.aspira'))).toBe(false)
+  })
+})
+
+describe('kit worktree: isolating an existing worktree (T24, F4 F5 F6)', () => {
+  let mocks: Mocks
+  let restore: () => void
+
+  beforeEach(async () => {
+    mocks = await startMocks()
+    restore = setServiceEnv()
+  })
+
+  afterEach(async () => {
+    restore()
+    await mocks.close()
+  })
+
+  /** A worktree made before isolation existed: plain git, no env file, no resources. */
+  function preexisting(main: string): string {
+    const wt = handlePath(main, 'FEATURE-KIT-13')
+    git(main, 'worktree', 'add', '-q', '-b', 'feat/kit-13-kit-qol-cleanup', wt, 'origin/main')
+    return wt
+  }
+
+  it('T24 runs the missing isolation on a rerun and exits 0 instead of returning at "exists"', async () => {
+    const { main } = fixture(ISOLATED)
+    const wt = preexisting(main)
+    const result = await run(main, 'KIT-13', feature(), false, mocks.seams)
+    expect(result.code).toBe(0)
+    expect(mocks.state.branches.map((branch) => branch.name)).toContain('wt/kit-13')
+    expect(mocks.state.tunnels.map((tunnel) => tunnel.name)).toEqual(['wt-kit-13'])
+    expect(mocks.state.endpoints.map((endpoint) => endpoint.metadata.aspira_worktree)).toEqual(['kit-13'])
+    const env = readFileSync(join(wt, '.env.development.local'), 'utf8')
+    expect(env).toMatch(/^DATABASE_URL=/m)
+    expect(env).toMatch(/^PORT=\d+$/m)
+    expect(git(wt, 'status', '--porcelain')).toBe('')
+    expect(result.lines.slice(-2)).toEqual([wt, 'feat/kit-13-kit-qol-cleanup'])
+  })
+
+  it('T24 a second rerun creates nothing new', async () => {
+    const { main } = fixture(ISOLATED)
+    preexisting(main)
+    expect((await run(main, 'KIT-13', feature(), false, mocks.seams)).code).toBe(0)
+    expect(mocks.state.branches.map((branch) => branch.name)).toContain('wt/kit-13')
+    const before = JSON.stringify(mocks.state)
+    expect((await run(main, 'KIT-13', feature(), false, mocks.seams)).code).toBe(0)
+    expect(JSON.stringify(mocks.state)).toBe(before)
+  })
+
+  it('T24 with a failing Neon mock exits 1 naming the database step, and the worktree folder remains', async () => {
+    const { main } = fixture(ISOLATED)
+    const wt = preexisting(main)
+    mocks.failNeonCreate = true
+    const result = await run(main, 'KIT-13', feature(), false, mocks.seams)
+    expect(result.code).toBe(1)
+    expect(result.lines.some((line) => /database/i.test(line))).toBe(true)
+    expect(isRegistered(main, wt)).toBe(true)
+    // A rerun with a healthy mock resumes and finishes.
+    mocks.failNeonCreate = false
+    expect((await run(main, 'KIT-13', feature(), false, mocks.seams)).code).toBe(0)
+  })
+
+  it('T24 without the .env.development.local ignore line exits 1 naming that line, and writes no env file', async () => {
+    const { main } = fixture({ config: ISOLATION_CONFIG, ignore: ['.aspira/'] })
+    const wt = preexisting(main)
+    const result = await run(main, 'KIT-13', feature(), false, mocks.seams)
+    expect(result.code).toBe(1)
+    expect(result.lines.some((line) => line.includes('.env.development.local') && /ignore/i.test(line))).toBe(true)
+    expect(existsSync(join(wt, '.env.development.local'))).toBe(false)
+    expect(isRegistered(main, wt)).toBe(true)
+  })
+
+  it('T24 isolates a newly created worktree in the same run, after the git worktree exists', async () => {
+    const { main } = fixture(ISOLATED)
+    const result = await run(main, 'KIT-13', feature(), false, mocks.seams)
+    const wt = handlePath(main, 'FEATURE-KIT-13')
+    expect(result.code).toBe(0)
+    expect(mocks.state.branches.map((branch) => branch.name)).toContain('wt/kit-13')
+    expect(existsSync(join(wt, '.env.development.local'))).toBe(true)
+    expect(result.lines.slice(-2)).toEqual([wt, 'feat/kit-13-kit-qol-cleanup'])
   })
 })

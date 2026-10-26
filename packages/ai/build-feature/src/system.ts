@@ -10,7 +10,9 @@
 
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { defaultSeams, isolate, teardown, type IsolateResult, type TeardownResult } from '@aspiralabs/ai/isolation'
 import type { PrChecks } from '@aspiralabs/ai/common/lib/pr-step'
 
 export type CommandResult = { code: number; stdout: string; stderr: string }
@@ -113,6 +115,15 @@ export const gitShowFile = (options: SystemOptions, rev: string, path: string) =
 /** A project command such as `pnpm install` (the worktree's install and build). */
 export const projectCommand = (options: SystemOptions, command: string, args: readonly string[]) => run(command, args, options)
 
+/** What the kit's isolation takes for one ticket worktree (KIT-67): the main checkout, the worktree, the ticket ID and the environment (keys, optional base URL overrides, PATH for cloudflared and stripe). */
+export type IsolationInput = { main: string; worktree: string; ticket: string; env: NodeJS.ProcessEnv }
+
+/** Bring the worktree to its isolated state: database branch, port and URL, tunnel, webhooks, each only when aspira.json asks for it. Never throws. */
+export const isolateWorktree = (input: IsolationInput): Promise<IsolateResult> => isolate({ ...input, seams: defaultSeams(input.env), now: () => Date.now(), home: homedir(), log: () => undefined })
+
+/** Delete what the kit made for the ticket's worktree (the folder itself stays). Never throws. */
+export const teardownWorktree = (input: IsolationInput): Promise<TeardownResult> => teardown({ ...input, seams: defaultSeams(input.env), home: homedir(), log: () => undefined })
+
 export type PackageManager = 'pnpm' | 'yarn' | 'bun' | 'npm'
 
 /** The package manager one directory's lock files name, or null when it has none. */
@@ -188,6 +199,8 @@ export const system = {
   gitCheckIgnore,
   gitShowFile,
   projectCommand,
+  isolateWorktree,
+  teardownWorktree,
   ghPrList,
   ghPrCreate,
   ghPrEdit,

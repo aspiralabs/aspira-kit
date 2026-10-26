@@ -6,9 +6,11 @@
 // stands in last and nothing printed after its result.
 import { accessSync, constants, existsSync, lstatSync, readdirSync, realpathSync, rmSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { homedir } from 'node:os'
 import { appRoot, isNotionUrl, readApp, readAspira } from './aspira.js'
 import { type Log } from './fs.js'
 import { git, listWorktrees, repositoryRoot, type Worktree } from './git.js'
+import { defaultSeams, seamsFromCommand, teardown, type CommandSeams } from './isolation.js'
 import { readWorkTicket, type ResolvedTicket } from './next.js'
 import { nextStep } from './playbook.js'
 import { parseHandle, ticketTypeOf, type TicketHandle } from './ticket-handle.js'
@@ -33,6 +35,8 @@ export type CleanupOptions = {
   log: Log
   /** Where the `kit cleanup: <cause>` lines go; stderr by default. */
   warn?: Log | undefined
+  /** The isolation services' seams; the live ones by default. */
+  seams?: CommandSeams | undefined
 }
 
 const VERSION_SKEW = "the installed @aspiralabs/ai does not report the card's Type; install @aspiralabs/ai at the kit's version and run kit init"
@@ -281,7 +285,7 @@ export async function cleanup(opts: CleanupOptions): Promise<number> {
   const removals = chosen.filter((candidate): candidate is WorktreeCandidate => candidate.kind === 'worktree' && candidate !== current)
   if (current !== undefined) removals.push(current)
   for (const candidate of removals) {
-    if (!removeWorktree(candidate, mainRoot ?? candidate.path, log)) failed = true
+    if (!(await removeWorktree(candidate, mainRoot ?? candidate.path, projectRel, opts.seams, log))) failed = true
   }
   return failed ? 1 : 0
 }
@@ -307,12 +311,28 @@ function deleteFolder(candidate: FolderCandidate): string {
   return `deleted  ${path}`
 }
 
-/** `git worktree remove` (never --force), then `git branch -d` on its branch; false on a failed removal. */
-function removeWorktree(candidate: WorktreeCandidate, mainRoot: string, log: Log): boolean {
+/**
+ * Tears the ticket's isolation down (what the kit marked, nothing else), then `git worktree remove` (never
+ * --force), then `git branch -d` on its branch; false on a failed teardown or removal, the folder kept.
+ */
+async function removeWorktree(candidate: WorktreeCandidate, mainRoot: string, projectRel: string, seams: CommandSeams | undefined, log: Log): Promise<boolean> {
   const { path, worktree } = candidate
   if (!existsSync(path)) {
     log(`already gone  ${path}`)
     return true
+  }
+  const torn = await teardown({
+    main: mainRoot,
+    worktree: join(path, projectRel),
+    ticket: candidate.id,
+    seams: seams === undefined ? defaultSeams() : seamsFromCommand(seams),
+    env: process.env,
+    home: homedir(),
+    log,
+  })
+  if (!torn.ok) {
+    log(`failed  ${path}: teardown ${torn.step}: ${firstLine(torn.reason)}`)
+    return false
   }
   const removed = git(mainRoot, ['worktree', 'remove', path])
   if (removed.status !== 0) {

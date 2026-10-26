@@ -16,7 +16,7 @@ Two modes, chosen by the invocation and kept for the whole run: by default every
 <skill-dir>/scripts/build-feature.sh local <ticket ID | Notion URL> [--cloud] [--autonomous] [--run RUNID] [--force-run]
 ```
 
-Pass `--cloud` and `--autonomous` exactly when the human did. The run works the ticket in its own git worktree under `.worktrees/`; once the driver names it (a `worktree` stage), run every later command, including this one, from inside it.
+Pass `--cloud` and `--autonomous` exactly when the human did. The run works the ticket in its own isolated git worktree under `.worktrees/` (its own database branch, dev server and webhooks; visual verify runs `kit dev` there, and a failed teardown after the merge is a follow-up: run `kit cleanup`); once the driver names it (a `worktree` stage), run every later command, including this one, from inside it.
 
 ## The loop
 

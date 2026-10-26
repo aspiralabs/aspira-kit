@@ -3,7 +3,7 @@
 // credentials build-feature's gate unsets (packages/ai/build-feature/src/gate.ts CREDENTIALS
 // plus every *_TOKEN/_SECRET/_KEY/_PASSWORD variable).
 
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -45,5 +45,49 @@ describe('the analyzer child environment', () => {
     expect(result.exitCode).toBe(0)
     expect(result.stdout).not.toContain(FAKE)
     expect(result.stdout).toContain('CI=1')
+  })
+})
+
+// KIT-67 T36 (F25, spec decision Q1): in an isolated worktree (.worktrees/<HANDLE>-<ID> with aspira.json
+// database.envVars and the kit's .env.development.local) a host analyzer command gets the branch database
+// variables over the process environment, so it never reaches the shared database; credentials stay dropped.
+describe('the analyzer child environment in an isolated worktree', () => {
+  const BRANCH_URL = 'postgres://branch'
+  const SHARED_URL = 'postgres://shared'
+
+  /** A checkout laid out as the kit leaves a ticket worktree; `isolated` false leaves out the env file and the .worktrees folder. */
+  async function checkout(isolated: boolean): Promise<string> {
+    const base = await mkdtemp(join(tmpdir(), 'ca-exec-wt-'))
+    dirs.push(base)
+    const root = isolated ? join(base, '.worktrees', 'FEATURE-SCOOP-7') : base
+    await mkdir(root, { recursive: true })
+    await writeFile(join(root, 'aspira.json'), JSON.stringify({ database: { provider: 'neon', projectId: 'p', parentBranch: 'dev', envVars: ['DATABASE_URL'] } }))
+    if (isolated) await writeFile(join(root, '.env.development.local'), `PORT=3003\nDATABASE_URL=${BRANCH_URL}\n`)
+    return root
+  }
+
+  const setEnv = (name: string, value: string) => {
+    saved.set(name, process.env[name])
+    process.env[name] = value
+  }
+
+  it('a command run through hostExecutor rooted at the worktree sees the branch DATABASE_URL, not the process one', async () => {
+    setEnv('DATABASE_URL', SHARED_URL)
+    const result = await hostExecutor(await checkout(true)).run('echo "$DATABASE_URL"')
+    expect({ exitCode: result.exitCode, stdout: result.stdout.trim() }).toEqual({ exitCode: 0, stdout: BRANCH_URL })
+  })
+
+  it('still drops credential-named variables there', async () => {
+    setEnv('DATABASE_URL', SHARED_URL)
+    setEnv('NEON_API_KEY', FAKE)
+    setEnv('STRIPE_SECRET', FAKE)
+    const result = await hostExecutor(await checkout(true)).run('echo "$DATABASE_URL|${NEON_API_KEY-unset}|${STRIPE_SECRET-unset}"')
+    expect(result.stdout.trim()).toBe(`${BRANCH_URL}|unset|unset`)
+  })
+
+  it('leaves the process DATABASE_URL alone outside an isolated worktree', async () => {
+    setEnv('DATABASE_URL', SHARED_URL)
+    const result = await hostExecutor(await checkout(false)).run('echo "$DATABASE_URL"')
+    expect(result.stdout.trim()).toBe(SHARED_URL)
   })
 })

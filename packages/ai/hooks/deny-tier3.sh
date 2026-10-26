@@ -9,7 +9,7 @@ deny() { echo "DENIED (tier 3): $1. This action needs a named human." >&2; exit 
 
 case "$cmd" in
   *"git push"*" main"*|*"git push"*" master"*|*"git push --force"*|*"git push -f"*) deny "push to a protected branch" ;;
-  *"prisma migrate deploy"*|*"prisma db push"*) deny "database migration" ;;
+  *"prisma migrate"*|*"prisma db push"*) deny "database migration" ;;
   *"rm -rf"*) deny "recursive delete" ;;
 esac
 

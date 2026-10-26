@@ -14,7 +14,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { touchesUi } from '@aspiralabs/ai/common/lib/plan'
-import { localDevUrl, planChangesSchema, visualVerifyAnswerSchema, visualVerifyLines, visualVerifyReport, visualVerifyResultSchema, type SkipReason, type VisualVerifyAnswer } from '@aspiralabs/ai/common/lib/visual-verify'
+import { worktreeIdentity } from '@aspiralabs/ai/common/lib/worktree-env'
+import { hasDevPlaceholder, localDevUrl, planChangesSchema, resolveDevUrl, startsWithKitDev, visualVerifyAnswerSchema, visualVerifyLines, visualVerifyReport, visualVerifyResultSchema, type SkipReason, type VisualVerifyAnswer } from '@aspiralabs/ai/common/lib/visual-verify'
 import type { Phase, PhaseContext, PhaseResult } from '#build-feature/driver.ts'
 import { buildKey, credentialNames, withoutCredentials } from '#build-feature/gate.ts'
 import { outsideFindings, type Finding } from '#build-feature/review-loop.ts'
@@ -72,6 +73,15 @@ function parsePlanTasks(raw: string): z.infer<typeof planChangesSchema> | null {
   }
 }
 
+/** The dev server as the stage hands it: the url resolved with the worktree's name and PORT (null when it needs a worktree this checkout is not) and whether `kit dev` starts it. */
+async function devOf(context: PhaseContext): Promise<{ url: string | null; command: string }> {
+  const dev = context.aspira.dev!
+  const command = startsWithKitDev(dev.url, context.aspira) ? 'kit dev' : dev.command
+  if (!hasDevPlaceholder(dev.url)) return { url: dev.url, command }
+  const identity = await worktreeIdentity(context.repo)
+  return { url: identity === null ? null : resolveDevUrl(dev.url, identity), command }
+}
+
 /** The skip reason known before any stage: a plan without UI (Q1), --cloud, or no dev entry; null when the check runs. */
 async function skipBefore(context: PhaseContext): Promise<SkipReason | null> {
   const raw = await readFile(join(context.folder, 'plan.review/trace/plan.json'), 'utf8').catch(() => null)
@@ -79,6 +89,7 @@ async function skipBefore(context: PhaseContext): Promise<SkipReason | null> {
   if (parsed === null || !touchesUi(parsed)) return 'plan without UI'
   if (context.mode === 'cloud') return '--cloud'
   if (context.aspira.dev === undefined) return 'no aspira.json dev entry'
+  if ((await devOf(context)).url === null) return 'dev.url needs a kit worktree; run kit worktree'
   return null
 }
 
@@ -94,6 +105,7 @@ async function dirtyTracked(context: PhaseContext, sys: System): Promise<string[
 /** The verify stage for verification n. */
 async function verifyStage(context: PhaseContext, state: RunState, key: string, n: number, sys: System): Promise<PhaseResult> {
   const dev = context.aspira.dev!
+  const { url, command } = await devOf(context)
   const unset = credentialNames(context.env)
   return {
     kind: 'stage',
@@ -101,7 +113,7 @@ async function verifyStage(context: PhaseContext, state: RunState, key: string, 
     stage: 'visual-verify',
     body: {
       verification: n,
-      devServer: { cwd: join(context.repo, dev.cwd), command: dev.command, run: withoutCredentials(dev.command, unset), unset, url: dev.url, backendDeployed: dev.backendDeployed },
+      devServer: { cwd: join(context.repo, dev.cwd), command, run: withoutCredentials(command, unset), unset, url: url as string, backendDeployed: dev.backendDeployed },
       autonomous: context.autonomous,
       screenshotsDir: folderOf(context),
       spec: join(context.folder, 'spec.reviewed/spec.reviewed.md'),
@@ -123,7 +135,7 @@ async function nextStage(context: PhaseContext, state: RunState, sys: System): P
     const record: VisualVerifyRecord = { status: 'skipped', verifications: 0, skipReason: reason, ...blank, key, dirtyBefore: [] }
     return { kind: 'done', state: await settle(context, state, record), note: `Visual verify skipped: ${reason}.` }
   }
-  const local = localDevUrl(context.aspira.dev!.url)
+  const local = localDevUrl((await devOf(context)).url as string)
   if (!local.ok) {
     const record: VisualVerifyRecord = { status: 'halted', verifications: 0, ...blank, key, dirtyBefore: [] }
     return stopWith(await settle(context, state, record), local.reason, { action: 'visual-verify', message: local.reason })

@@ -8,7 +8,22 @@ import { readJson, writeJson, type Log } from './fs.js'
 
 export const ASPIRA_FILE = 'aspira.json'
 
-export type AspiraConfig = { board: string; releases?: string; glossary?: string; decisions?: string; app?: string; knowledge?: string }
+/** The optional keys that isolate a worktree (KIT-67). `src/isolation.ts` validates them; `checkAspira` ignores them. */
+export type DatabaseConfig = { provider: string; projectId: string; parentBranch: string; envVars: Array<string | { name: string; pooled?: boolean }> }
+export type WebhookConfig = { provider: string; path: string; events: string[]; connect?: boolean; secretEnvVar?: string; connectSecretEnvVar?: string }
+
+export type AspiraConfig = {
+  board: string
+  releases?: string
+  glossary?: string
+  decisions?: string
+  app?: string
+  knowledge?: string
+  database?: DatabaseConfig
+  webhooks?: WebhookConfig[]
+  tunnel?: { zone: string }
+  dev?: { command?: string; cwd?: string; url?: string; urlEnvVars?: string[] }
+}
 
 /** aspira.json's Notion keys that `kit doctor` resolves by id: the Feature Board (a database or,
  * for a collection:// value, a data source) and four pages, once those keys exist. `knowledge` is

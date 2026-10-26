@@ -13,8 +13,8 @@ import { fileURLToPath } from 'node:url'
 import { join, basename } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { deepMerge, hasJsonComments, readJson, writeIfAbsent, writeJson, type Log } from '../fs.js'
-import { appRoot, isWorkspaceRoot, normalizeApp, writeAspira } from '../aspira.js'
-import { ENV_LOCAL_ENTRY, envLocalIgnored, gitRootOf, hasLine, mcpServer, WORKTREES_ENTRY } from '../doctor.js'
+import { appRoot, isWorkspaceRoot, normalizeApp, readAspira, writeAspira } from '../aspira.js'
+import { ENV_DEVELOPMENT_ENTRY, ENV_LOCAL_ENTRY, envDevelopmentIgnored, envLocalIgnored, gitRootOf, hasLine, isolates, mcpServer, WORKTREES_ENTRY } from '../doctor.js'
 import { AI_PACKAGE, HOOKS_DIR, installHooks, installSkills } from '../skills.js'
 
 export type InitOptions = { projectRoot: string; app?: string; dryRun: boolean; log: Log; board?: string; releases?: string }
@@ -371,6 +371,11 @@ function gitignore(opts: Resolved): void {
     if (hasLine(current, ENV_LOCAL_ENTRY[0]) || !envLocalIgnored(opts.projectRoot, opts.app)) {
       wanted.push(ENV_LOCAL_ENTRY)
       if (!hasLine(current, ENV_LOCAL_ENTRY[0])) missing.push(ENV_LOCAL_ENTRY)
+    }
+    // The per-worktree file kit worktree writes (database URL, port, webhook secrets), only for a project that isolates.
+    if (isolates(readAspira(opts.projectRoot)) && (hasLine(current, ENV_DEVELOPMENT_ENTRY[0]) || !envDevelopmentIgnored(opts.projectRoot, opts.app))) {
+      wanted.push(ENV_DEVELOPMENT_ENTRY)
+      if (!hasLine(current, ENV_DEVELOPMENT_ENTRY[0])) missing.push(ENV_DEVELOPMENT_ENTRY)
     }
   }
   if (missing.length === 0) {

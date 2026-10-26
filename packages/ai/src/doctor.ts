@@ -3,11 +3,12 @@
 // package.json (`--app`, or `app` in aspira.json; the root itself for a single-app project); the
 // Claude-facing items (AGENTS.md, .mcp.json, .claude/, .gitignore, aspira.json) live at the root.
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { appRoot, checkAspira, isWorkspaceRoot, notionTargets, notionTokenCandidates, notionTokenSource, readAspira, readApp, type NotionTarget } from './aspira.js'
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { delimiter, dirname, join } from 'node:path'
+import { appRoot, checkAspira, type AspiraConfig, isWorkspaceRoot, notionTargets, notionTokenCandidates, notionTokenSource, readAspira, readApp, type NotionTarget } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 import { isGitIgnored, repositoryRoot } from './git.js'
+import type { CommandSeams } from './isolation.js'
 import { AI_PACKAGE, aiPackageDir, aiVersion, checkSkills, HOOKS, HOOKS_DIR } from './skills.js'
 
 type Pkg = { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
@@ -78,6 +79,16 @@ export const WORKTREES_ENTRY = ['.worktrees/', '# per-ticket git worktrees (kit 
 /** The ignore line for local secrets, written to the project's .gitignore unless git already ignores every linked .env.local. */
 export const ENV_LOCAL_ENTRY = ['.env.local', '# local secrets such as NOTION_TOKEN; kit worktree links them into each ticket worktree'] as const
 
+/** The ignore line for the per-worktree env file kit worktree writes, added when aspira.json isolates (database, tunnel, webhooks or a placeholder dev.url). */
+export const ENV_DEVELOPMENT_ENTRY = ['.env.development.local', '# per-worktree database URL, port and webhook secrets that kit worktree writes'] as const
+
+/** Whether aspira.json asks for isolation: a database, a tunnel, webhooks, or a dev.url with a {name} or {port} placeholder. */
+export const isolates = (config: Partial<AspiraConfig> | undefined): boolean =>
+  config?.database !== undefined || config?.tunnel !== undefined || (config?.webhooks?.length ?? 0) > 0 || /\{(name|port)\}/.test(config?.dev?.url ?? '')
+
+/** Whether git ignores the app's .env.development.local (the root's when there is no app), asked of git at the project root. */
+export const envDevelopmentIgnored = (projectRoot: string, app: string | undefined): boolean => isGitIgnored(projectRoot, app ? `${app}/.env.development.local` : '.env.development.local')
+
 /** Whether `text` (a .gitignore body) has `entry` as an exact line. */
 export const hasLine = (text: string, entry: string): boolean => text.split('\n').some((line) => line.trimEnd() === entry)
 
@@ -94,7 +105,36 @@ export function gitRootOf(projectRoot: string): string | undefined {
   return realpathSync(root) === realpathSync(projectRoot) ? projectRoot : root
 }
 
-export function doctor(projectRoot: string, log: Log, appFlag?: string, options?: { check?: UrlChecker; env?: Record<string, string | undefined> }): number {
+const readText = (path: string): string => (existsSync(path) ? readFileSync(path, 'utf8') : '')
+
+/** Whether an executable `name` is in a directory of env.PATH. */
+function onPath(name: string, env: Record<string, string | undefined>): boolean {
+  return (env.PATH ?? '').split(delimiter).some((dir) => dir !== '' && existsSync(join(dir, name)))
+}
+
+/** Stripe endpoints tagged aspira_worktree=<name> where no .worktrees/<TYPE>-<name> folder exists (case-insensitive), sorted by name; all pages. */
+function staleEndpoints(projectRoot: string, apiKey: string, env: Record<string, string | undefined>, seams: CommandSeams | undefined): Array<{ id: string; url: string; name: string }> {
+  const run: CommandSeams['stripe'] = seams?.stripe ?? ((args, options) => spawnSync('stripe', args, { env: options.env as NodeJS.ProcessEnv, encoding: 'utf8' }))
+  const runEnv = { ...env, STRIPE_API_KEY: apiKey }
+  const endpoints: Array<{ id: string; url: string; metadata?: Record<string, string> }> = []
+  for (let after: string | undefined; ; ) {
+    const result = run(['webhook_endpoints', 'list', '--limit', '100', ...(after === undefined ? [] : ['--starting-after', after])], { env: runEnv })
+    if (result.status !== 0) throw new Error((result.stderr ?? '').split('\n')[0] || 'the Stripe CLI failed')
+    const page = JSON.parse(result.stdout) as { data: typeof endpoints; has_more?: boolean }
+    endpoints.push(...page.data)
+    const last = page.data.at(-1)
+    if (page.has_more !== true || last === undefined) break
+    after = last.id
+  }
+  const dir = join(gitRootOf(projectRoot) ?? projectRoot, '.worktrees')
+  const folders = existsSync(dir) ? readdirSync(dir).map((name) => name.toLowerCase()) : []
+  return endpoints
+    .flatMap((endpoint) => (endpoint.metadata?.aspira_worktree ? [{ id: endpoint.id, url: endpoint.url, name: endpoint.metadata.aspira_worktree }] : []))
+    .filter(({ name }) => !folders.some((folder) => folder === name.toLowerCase() || folder.endsWith(`-${name.toLowerCase()}`)))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export function doctor(projectRoot: string, log: Log, appFlag?: string, options?: { check?: UrlChecker; env?: Record<string, string | undefined>; seams?: CommandSeams }): number {
   const app = appFlag ?? readApp(projectRoot)
   const appDir = appRoot(projectRoot, app)
   const pkg = readJson<Pkg>(join(appDir, 'package.json'))
@@ -174,6 +214,34 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
       problems += 1
     }
     log(`${pass ? 'ok  ' : 'FAIL'} ${label}`)
+  }
+  // Isolation (KIT-67): the ignore line is a counted check; the keys and tools it needs are advice only.
+  const config = readAspira(projectRoot)
+  if (isolates(config)) {
+    const env = options?.env ?? process.env
+    const ignored = gitRoot === undefined ? hasLine(readText(join(projectRoot, '.gitignore')), ENV_DEVELOPMENT_ENTRY[0]) : envDevelopmentIgnored(projectRoot, app)
+    log(`${ignored ? 'ok  ' : 'FAIL'} ${inApp('.env.development.local')} git-ignored (per-worktree secrets kit worktree writes)`)
+    if (!ignored) problems += 1
+    const warn = (text: string) => log(`warn ${text}`)
+    const stripeHooks = (config?.webhooks ?? []).filter((hook) => hook.provider === 'stripe')
+    const tunnels = config?.tunnel !== undefined || stripeHooks.length > 0
+    if (config?.database !== undefined && !env.NEON_API_KEY?.trim()) warn('NEON_API_KEY is not set: kit worktree cannot branch the database')
+    if (tunnels) {
+      if (!env.CLOUDFLARE_API_TOKEN?.trim()) warn('CLOUDFLARE_API_TOKEN is not set: kit worktree cannot route the tunnel hostname')
+      if (!onPath('cloudflared', env)) warn('cloudflared is not installed or not on PATH: kit worktree cannot run the tunnel')
+      if (!existsSync(join(env.HOME ?? '', '.cloudflared', 'cert.pem'))) warn('cloudflared login cert (~/.cloudflared/cert.pem) is missing: run cloudflared tunnel login')
+    }
+    if (stripeHooks.length > 0) {
+      if (!onPath('stripe', env)) warn('the Stripe CLI (stripe) is not installed or not on PATH: kit worktree cannot create webhook endpoints')
+      const key = env.STRIPE_SECRET_KEY?.trim()
+      if (key && !key.startsWith('sk_live_') && !key.startsWith('rk_live_')) {
+        try {
+          for (const stale of staleEndpoints(projectRoot, key, env, options?.seams)) warn(`Stripe endpoint ${stale.id} (${stale.url}) is tagged for worktree ${stale.name}, which has no folder in .worktrees/; delete it in the Stripe dashboard`)
+        } catch (error) {
+          warn(`Stripe endpoints not listed: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+    }
   }
   // aspira.json's Notion URLs (board, releases, glossary, decisions once set) and the NOTION_TOKEN
   // they need. A missing or unreachable token/check is advisory (doctor does not fail for it: the

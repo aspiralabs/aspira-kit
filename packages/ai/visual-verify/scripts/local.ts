@@ -12,7 +12,8 @@ import { parseArgs } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { z } from 'zod'
 import { touchesUi } from '@aspiralabs/ai/common/lib/plan'
-import { credentialNames, devServerSchema, localDevUrl, planChangesSchema, visualVerifyAnswerSchema, visualVerifyReport, withoutCredentials, type SkipReason, type VisualVerifyResult } from '@aspiralabs/ai/common/lib/visual-verify'
+import { worktreeIdentity } from '@aspiralabs/ai/common/lib/worktree-env'
+import { credentialNames, devServerSchema, hasDevPlaceholder, localDevUrl, planChangesSchema, resolveDevUrl, startsWithKitDev, visualVerifyAnswerSchema, visualVerifyReport, withoutCredentials, type SkipReason, type VisualVerifyResult } from '@aspiralabs/ai/common/lib/visual-verify'
 
 const ACCEPTED = ['In Progress: Implementation', 'In Review: Implementation'] as const
 const REFUSED_EXIT = 3
@@ -76,7 +77,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
   const plan = planChangesSchema.safeParse(await readJson(join(folder, 'plan.review/trace/plan.json')))
   const dev = config.success ? config.data.dev : undefined
-  const reason: SkipReason | null = !plan.success || !touchesUi(plan.data) ? 'plan without UI' : values.cloud ? '--cloud' : dev === undefined ? 'no aspira.json dev entry' : null
+  const identity = dev !== undefined && hasDevPlaceholder(dev.url) ? await worktreeIdentity(repo) : null
+  const reason: SkipReason | null = !plan.success || !touchesUi(plan.data) ? 'plan without UI' : values.cloud ? '--cloud' : dev === undefined ? 'no aspira.json dev entry' : hasDevPlaceholder(dev.url) && identity === null ? 'dev.url needs a kit worktree; run kit worktree' : null
   if (reason !== null || dev === undefined) {
     const result = skippedResult(reason ?? 'no aspira.json dev entry')
     const text = await visualVerifyReport(result, [], repo, options)
@@ -85,7 +87,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     say(text)
     return 0
   }
-  const local = localDevUrl(dev.url)
+  const url = identity === null ? dev.url : resolveDevUrl(dev.url, identity)
+  const startCommand = startsWithKitDev(dev.url, config.success ? config.data : {}) ? 'kit dev' : dev.command
+  const local = localDevUrl(url)
   if (!local.ok) {
     fail(local.reason)
     return 1
@@ -94,7 +98,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   say(
     JSON.stringify(
       {
-        devServer: { cwd: join(repo, dev.cwd), command: dev.command, run: withoutCredentials(dev.command, unset), unset, url: dev.url, backendDeployed: dev.backendDeployed },
+        devServer: { cwd: join(repo, dev.cwd), command: startCommand, run: withoutCredentials(startCommand, unset), unset, url, backendDeployed: dev.backendDeployed },
         screenshotsDir: out,
         spec: join(folder, 'spec.reviewed/spec.reviewed.md'),
         plan: join(folder, 'plan.review/trace/plan.json'),

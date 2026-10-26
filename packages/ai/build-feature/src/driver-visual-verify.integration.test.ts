@@ -158,6 +158,38 @@ describe('T7 T8 F1 F2 F3: the verify stage and the local-address check', () => {
   }, SLOW)
 })
 
+describe('T5 F11 F13: a placeholder dev url resolves per worktree', () => {
+  const PLACEHOLDER = { cwd: '.', command: 'pnpm dev', url: 'http://{name}.localhost:{port}' }
+  const ENV_FILE = '.env.development.local'
+  const NO_WORKTREE = 'dev.url needs a kit worktree; run kit worktree'
+  /** The name the ticket's worktree gives the url: its folder without the handle prefix, lower case. */
+  const nameOf = (h: Project) => basename(h.repo).replace(/^[A-Za-z]+-/, '').toLowerCase()
+
+  it('gives two worktrees of one project their own url and a kit dev run line, and skips neither', async () => {
+    const first = await built({ dev: PLACEHOLDER, files: { [ENV_FILE]: 'PORT=3001\n' } })
+    const second = await built({ dev: PLACEHOLDER, files: { [ENV_FILE]: 'PORT=3002\n' } })
+    const [a, b] = [devServerOf(first.next.stage), devServerOf(second.next.stage)]
+    expect({
+      stages: [first.next.stage?.stage, second.next.stage?.stage],
+      urls: [a.url, b.url],
+      runs: [a.run?.endsWith(' kit dev') ?? false, b.run?.endsWith(' kit dev') ?? false],
+    }).toEqual({ stages: ['visual-verify', 'visual-verify'], urls: [`http://${nameOf(first.h)}.localhost:3001`, `http://${nameOf(second.h)}.localhost:3002`], runs: [true, true] })
+  }, SLOW)
+
+  it('skips a checkout without a PORT line with "dev.url needs a kit worktree; run kit worktree" in the Build Summary and prints no stage', async () => {
+    const { h, next } = await built({ dev: PLACEHOLDER })
+    await h.stop()
+    const state = await record(h)
+    expect({ next: next.stage?.stage, stages: ofKind(h.stages, 'visual-verify').length, status: state?.status, reason: state?.skipReason, summary: names(await h.summary(), NO_WORKTREE) }).toEqual({ next: 'gate', stages: 0, status: 'skipped', reason: NO_WORKTREE, summary: true })
+  }, SLOW)
+
+  it('stops before any stage when the resolved url is not a local address, naming the resolved url in the Build Summary', async () => {
+    const { h, next } = await built({ dev: { ...PLACEHOLDER, url: 'http://{name}.evil.com:{port}' }, files: { [ENV_FILE]: 'PORT=3001\n' } })
+    const summary = await h.summary()
+    expect({ end: next.stage?.stage, shown: kinds(h.stages).some((kind) => kind === 'visual-verify' || kind === 'gate'), url: summary.includes(`http://${nameOf(h)}.evil.com:3001`) }).toEqual({ end: 'end', shown: false, url: true })
+  }, SLOW)
+})
+
 describe('T9 T10 T20 F1 F8 F11 F12 F19: the answer to the verify stage', () => {
   it('records major and minor findings only: major before minor, the not-exercised action apart, no fix stage, then the gate', async () => {
     const { h, next } = await built()

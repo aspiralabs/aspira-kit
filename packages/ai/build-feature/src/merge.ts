@@ -14,10 +14,19 @@ import type { Phase, PhaseContext, PhaseResult } from '#build-feature/driver.ts'
 import { MERGE_MOVE } from '#build-feature/route.ts'
 import type { Pending, RunState } from '#build-feature/run-state.ts'
 import { GH_ARGS, shown, system, type System } from '#build-feature/system.ts'
+import { locate } from '#build-feature/worktree.ts'
 
 const IN_REVIEW = 'In Review: Implementation'
 
-const recordSchema = z.object({ url: z.string(), mergedAt: z.string(), releasePage: z.enum(['updated']).optional() })
+const recordSchema = z.object({
+  url: z.string(),
+  mergedAt: z.string(),
+  releasePage: z.enum(['updated']).optional(),
+  /** KIT-67 F24: the worktree's database branch, tunnel and webhooks torn down once after the merge; 'error' names the step in `teardownStep`. */
+  teardown: z.enum(['done', 'error']).optional(),
+  teardownStep: z.string().optional(),
+  teardownReason: z.string().optional(),
+})
 export type MergeRecord = z.infer<typeof recordSchema>
 
 /** The merge this run recorded (state.phases.merge), or null. */
@@ -31,6 +40,22 @@ const answerSchema = z.union([z.object({ nonce: z.string(), merged: z.literal(tr
 const releaseAnswer = z.union([z.object({ nonce: z.string(), done: z.literal(true) }), z.object({ nonce: z.string(), error: z.string().min(1) })])
 
 const moveOf = (context: PhaseContext, state: RunState): PhaseResult => ({ kind: 'move', state, from: MERGE_MOVE.from, to: MERGE_MOVE.to, expect: { status: IN_REVIEW, pr: context.card.pr, dev: context.card.dev } })
+
+/** The follow-up line for a teardown that failed (the run goes on), or null. */
+export function teardownNote(state: { phases?: Record<string, unknown> }): string | null {
+  const record = mergeRecordOf(state)
+  if (record?.teardown !== 'error') return null
+  return `The worktree's teardown failed at the ${record.teardownStep ?? 'unknown'} step${record.teardownReason === undefined ? '' : ` (${record.teardownReason})`}: run kit cleanup to remove what is left of its database branch, tunnel and webhooks.`
+}
+
+/** Once after the merge record, tear down what the kit made for the worktree; a failure is recorded and never blocks (the folder stays, kit cleanup removes it). */
+async function tearDown(context: PhaseContext, state: RunState, record: MergeRecord, sys: System): Promise<{ state: RunState; record: MergeRecord }> {
+  if (record.teardown !== undefined) return { state, record }
+  const place = await locate(context.repo, context.env, sys)
+  const result = place === null ? ({ ok: true } as const) : await sys.teardownWorktree({ main: place.main, worktree: context.repo, ticket: context.id, env: context.env })
+  const next: MergeRecord = result.ok ? { ...record, teardown: 'done' } : { ...record, teardown: 'error', teardownStep: result.step, teardownReason: result.reason }
+  return { state: { ...state, phases: { ...state.phases, merge: next } }, record: next }
+}
 
 /** After the merge: the release page update when aspira.json names `releases` and it is not done, else the move. */
 function afterMerge(context: PhaseContext, state: RunState, record: MergeRecord): PhaseResult {
@@ -62,10 +87,13 @@ function afterMerge(context: PhaseContext, state: RunState, record: MergeRecord)
 }
 
 /** The merge stage, or what follows it when the PR is already merged. */
-export async function mergeStage(context: PhaseContext, state: RunState): Promise<PhaseResult> {
+export async function mergeStage(context: PhaseContext, state: RunState, sys: System = system): Promise<PhaseResult> {
   if (context.card.status !== IN_REVIEW) return { kind: 'done', state }
   const merged = mergeRecordOf(state)
-  if (merged !== null) return afterMerge(context, state, merged)
+  if (merged !== null) {
+    const torn = await tearDown(context, state, merged, sys)
+    return afterMerge(context, torn.state, torn.record)
+  }
   const url = state.step8.prUrl ?? context.card.pr
   if (url === null) return { kind: 'stop', state, message: 'the run has no PR to merge', failure: { action: 'merge', message: 'the run has no PR to merge' } }
   return {
@@ -96,7 +124,8 @@ export async function acceptMerge(context: PhaseContext, state: RunState, pendin
     return { kind: 'stop', state, message, failure: { action: 'merge', command: shown('gh', GH_ARGS.prView(url)), message } }
   }
   const record: MergeRecord = { url, mergedAt: context.now }
-  return afterMerge(context, { ...state, phases: { ...state.phases, merge: record } }, record)
+  const torn = await tearDown(context, { ...state, phases: { ...state.phases, merge: record } }, record, sys)
+  return afterMerge(context, torn.state, torn.record)
 }
 
 /** The release page answer: recorded, then the move. A failed update stops the run after the merge, before the move. */

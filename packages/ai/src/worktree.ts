@@ -6,10 +6,12 @@
 // command runs as `git -C <main checkout root>`, so it behaves the same from inside another worktree.
 import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, realpathSync, symlinkSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
 import { z } from 'zod'
 import { appRoot, isNotionUrl, readApp, readAspira } from './aspira.js'
 import { readJson, type Log } from './fs.js'
+import { defaultSeams, isolate, seamsFromCommand, type CommandSeams } from './isolation.js'
 import { git, listWorktrees, mainCheckoutRoot, repositoryRoot, type Worktree } from './git.js'
 import type { ResolvedTicket } from './next.js'
 import { nextStep } from './playbook.js'
@@ -28,6 +30,8 @@ export type WorktreeOptions = {
   lookup?: TicketLookup
   /** `--install`: run install and build even on a reused branch this machine did not make under today's name. */
   install?: boolean | undefined
+  /** The isolation services' seams; the live ones by default. */
+  seams?: CommandSeams | undefined
   log: Log
 }
 
@@ -42,6 +46,9 @@ const FINISHED = ['Released', 'Dropped']
 
 /** How many trailing lines of a failed install or build to show. */
 const TAIL_LINES = 15
+
+/** A DNS label: the lower-cased ticket ID names the tunnel host. */
+const DNS_LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 
 const say = (log: Log, message: string): void => log(`kit worktree: ${message}`)
 
@@ -141,13 +148,31 @@ function linkEnvLocal(log: Log, from: string, to: string, dir: string): void {
   }
 }
 
+/** Runs the isolation in the worktree's project root; false (after saying why) when a step fails. */
+async function isolateWorktree(options: WorktreeOptions, id: string, main: string, worktreeProject: string): Promise<boolean> {
+  const seams = options.seams
+  const result = await isolate({
+    main,
+    worktree: worktreeProject,
+    ticket: id,
+    seams: seams === undefined ? defaultSeams() : seamsFromCommand(seams),
+    now: () => (seams?.now === undefined ? Date.now() : seams.now().getTime()),
+    env: process.env,
+    home: homedir(),
+    log: options.log,
+  })
+  if (result.ok) return true
+  say(options.log, `isolation failed at the ${result.step} step: ${result.reason}; the worktree stays at ${worktreeProject}, rerun kit worktree ${id} to resume`)
+  return false
+}
+
 /**
  * Create or reuse the ticket's worktree at `<main checkout root>/.worktrees/<HANDLE>-<ID>` (GIT-002) on
  * its `<prefix>/<folder>` branch (GIT-001), link .env.local, install and build. Ends with the worktree's
  * path and branch on their own lines. Exit 0 when the worktree was created or already existed, 1 when
  * it refuses or install or build fails (the worktree stays), 2 for a ref that is not a ticket.
  */
-export function worktree(options: WorktreeOptions): number {
+export async function worktree(options: WorktreeOptions): Promise<number> {
   const { projectRoot, ref, log } = options
   const lookup = options.lookup ?? lookupTicket
   if (!isTicketRef(ref)) {
@@ -157,6 +182,11 @@ export function worktree(options: WorktreeOptions): number {
   const config = readAspira(projectRoot)
   if (!isNotionUrl(config?.board)) {
     log('no aspira.json with a Feature Board here; run kit init --board <Feature Board URL>')
+    return 1
+  }
+  const isolates = config.database !== undefined || config.tunnel !== undefined || (config.webhooks?.length ?? 0) > 0 || (config.dev?.url !== undefined && config.dev.url.includes('{'))
+  if (isolates && !DNS_LABEL.test(ref.toLowerCase()) && !/^https?:/i.test(ref)) {
+    say(log, `${ref} is not a DNS label once lower-cased, so it cannot name a tunnel host; use a ticket ID of letters, digits and hyphens`)
     return 1
   }
   const appOption = options.app ?? readApp(projectRoot)
@@ -202,6 +232,7 @@ export function worktree(options: WorktreeOptions): number {
       return 1
     }
     log(`exists   ${target} (already a worktree${registered.branch === undefined ? '' : ` on ${registered.branch}`})`)
+    if (isolates && !(await isolateWorktree(options, id, main, join(target, projectPath)))) return 1
     log(target)
     log(registered.branch ?? '(detached HEAD)')
     return 0
@@ -248,6 +279,8 @@ export function worktree(options: WorktreeOptions): number {
   const worktreeProject = join(target, projectPath)
   const envDirs = app === undefined ? [''] : ['', app]
   for (const dir of envDirs) linkEnvLocal(log, mainProject, worktreeProject, dir)
+
+  if (isolates && !(await isolateWorktree(options, id, main, worktreeProject))) return 1
 
   // 6. Install and build where kit init installs.
   const workDir = workspaceDirOf(worktreeProject, app)
