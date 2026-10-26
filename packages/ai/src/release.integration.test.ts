@@ -11,7 +11,7 @@ import { expect, it } from 'vitest'
 const repo = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))))
 const PACKAGES = ['ui', 'config', 'ai']
 
-it('bumps the three published packages to one version from a single changeset', () => {
+it('T16 (F19): bumps the three published packages to one version from a single changeset', () => {
   const config = JSON.parse(readFileSync(join(repo, '.changeset', 'config.json'), 'utf8')) as { fixed: string[][]; ignore: string[] }
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kit-release-')))
   mkdirSync(join(dir, '.changeset'))

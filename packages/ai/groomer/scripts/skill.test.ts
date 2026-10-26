@@ -4,7 +4,7 @@
 // path through the launcher can reach the real Notion API.
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -50,9 +50,12 @@ async function sandbox(prefix: string) {
   await writeFile(join(bin, 'screen'), '#!/bin/bash\necho "$@" >> "$SCREENS"\nexec "$3"\n', { mode: 0o755 })
   const capture = join(dir, 'arguments')
   await writeFile(capture, '')
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, REAL_NODE: process.execPath, CAPTURE: capture, SCREENS: screens, GROOMER_AGENT_DIR: '', ASPIRA_KIT: '', AI_GATEWAY_API_KEY: 'test', NOTION_TOKEN: '', NOTION_API_KEY: '', TICKET_FOLDER: folder, START_EXIT: '', START_ERROR: '', FINISH_STATUS: '', REAL_RECORD: '' }
+  // HOME and USERPROFILE are a temp folder, so no run can reach a real harness; the agent is named by the kit-development override.
+  const home = join(dir, 'home')
+  await mkdir(home)
+  const env = { ...process.env, HOME: home, USERPROFILE: home, PATH: `${bin}:${process.env.PATH}`, REAL_NODE: process.execPath, CAPTURE: capture, SCREENS: screens, GROOMER_AGENT_DIR: root, ASPIRA_KIT: '', AI_GATEWAY_API_KEY: 'test', NOTION_TOKEN: '', NOTION_API_KEY: '', TICKET_FOLDER: folder, START_EXIT: '', START_ERROR: '', FINISH_STATUS: '', REAL_RECORD: '' }
   const calls = async (): Promise<string[][]> => (await readFile(capture, 'utf8')).split('---\n').filter((call) => call.trim() !== '').map((call) => call.split('\n').filter(Boolean))
-  return { dir, repo, folder, env, calls, screens }
+  return { dir, repo, folder, env, calls, screens, home }
 }
 
 /** A finished run directory as `start` leaves it, whose output may hold a groom record. */
@@ -106,6 +109,17 @@ describe('status and wait', () => {
     const waited = await exec('bash', [launcher, 'wait', run, '--max', '5'], { env })
     const watched = await exec('bash', [launcher, 'watch', run, '--max', '5'], { env })
     expect({ zero: zero.code !== 0, sixtyOne: sixtyOne.code !== 0, waited: lines(waited.stdout).includes('Status: needs-author'), watched: lines(watched.stdout).includes('Status: needs-author') }).toEqual({ zero: true, sixtyOne: true, waited: true, watched: true })
+  })
+})
+
+describe('the launcher under a temp HOME', () => {
+  it('T59 prints the same status for a finished run and never creates a .claude folder in HOME', async () => {
+    const { dir, env, home } = await sandbox('groomer-home-')
+    const { run, output } = await finishedRun(dir, { status: 'needs-author', open: 3, page: { url: 'https://notion.so/gd' } })
+    const { stdout } = await exec('bash', [launcher, 'status', run], { env })
+    const shown = ['Status: needs-author', 'Grooming Decisions: https://notion.so/gd', 'Open questions: 3', `Decisions: ${output}/trace/decisions.md`, `Run analysis: ${output}/run-analysis.md`]
+    expect(shown.filter((line) => !lines(stdout).includes(line))).toEqual([])
+    expect(await readdir(home)).toEqual([])
   })
 })
 

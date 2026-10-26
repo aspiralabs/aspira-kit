@@ -9,12 +9,23 @@ import { expect, it } from 'vitest'
 
 const exec = promisify(execFile)
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
-const launcher = join(root, 'skill/aspira-planner/scripts/planner.sh')
 // What the launcher puts in front of every agent script: amaro as the type-stripping hook, then the env files that exist.
 const loader = join(dirname(root), 'node_modules/amaro/dist/register-strip.mjs')
 const eve = join(dirname(root), 'node_modules/eve/bin/eve.js')
 const envArgs = (args: string[]) => args.filter((a) => a.startsWith('--env-file='))
 const command = (args: string[]) => args.filter((a) => !a.startsWith('--env-file='))
+
+// The skill as the global harness installs it: a copy under <HOME>/.claude/skills with .kit-version at the
+// package's version, and a `kit` on PATH whose package-dir names this package (the only agent a launcher runs).
+async function installGlobal(dir: string, bin: string) {
+  const home = join(dir, 'home')
+  const skill = join(home, '.claude/skills/aspira-planner')
+  await cp(join(root, 'skill/aspira-planner'), skill, { recursive: true })
+  const { version } = JSON.parse(await readFile(join(dirname(root), 'package.json'), 'utf8')) as { version: string }
+  await writeFile(join(skill, '.kit-version'), `${version}\n`)
+  await writeFile(join(bin, 'kit'), `#!/bin/sh\n[ "$1" = package-dir ] && echo '${dirname(root)}'\nexit 0\n`, { mode: 0o755 })
+  return { home, launcher: join(skill, 'scripts/planner.sh') }
+}
 
 // A node that records its arguments (one per line, one block per call) instead of running, answers the
 // ticket step with a fake working folder, and a screen that runs the job in the foreground.
@@ -37,19 +48,21 @@ async function stubs(prefix: string) {
     { mode: 0o755 },
   )
   const capture = join(dir, 'arguments')
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CAPTURE: capture, PLANNER_AGENT_DIR: '', SPEC_TO_PLAN_AGENT_DIR: '', ASPIRA_KIT: '', AI_GATEWAY_API_KEY: 'test', TICKET_FOLDER: '', TICKET_INPUT: '' }
+  const { home, launcher } = await installGlobal(dir, bin)
+  const env = { ...process.env, HOME: home, USERPROFILE: home, PATH: `${bin}:${process.env.PATH}`, CAPTURE: capture, PLANNER_AGENT_DIR: '', SPEC_TO_PLAN_AGENT_DIR: '', ASPIRA_KIT: '', AI_GATEWAY_API_KEY: 'test', TICKET_FOLDER: '', TICKET_INPUT: '' }
   /** The arguments of the last node call. */
   const captured = async (): Promise<string[]> => calls().then((all) => all.at(-1) ?? [])
   const calls = async (): Promise<string[][]> => (await readFile(capture, 'utf8')).split('---\n').filter((block) => block.trim() !== '').map((block) => block.split('\n').filter(Boolean))
   const reset = () => writeFile(capture, '')
-  return { dir, env, captured, calls, reset }
+  return { dir, env, captured, calls, reset, launcher }
 }
 
 it('routes the skill to the official CLI or Notion-loading eve entry point with literal paths', async () => {
-  const { dir, env, calls, reset } = await stubs('planner-skill-')
+  const { dir, env, calls, reset, launcher } = await stubs('planner-skill-')
   const repo = join(dir, 'repo with spaces')
   await mkdir(repo)
   await exec('git', ['init', repo])
+  await writeFile(join(repo, 'aspira.json'), '{}')
   const spec = join(repo, 'spec $literal.md')
   const guidelines = join(repo, 'required rules.md')
   await writeFile(spec, '# Test spec')
@@ -63,11 +76,10 @@ it('routes the skill to the official CLI or Notion-loading eve entry point with 
   // The project's .env.local is read first; the agent's own env files only when they exist (kit development).
   expect(envArgs(args)[0]).toBe(`--env-file=${join(repo, '.env.local')}`)
   expect(direct.stdout).toContain('agent: planner@')
-  expect(direct.stdout).toContain(`(package, ${root})`)
-  expect(direct.stderr).toContain(`planner: running kit source at ${root}, not the installed @aspiralabs/ai`)
+  expect(direct.stdout).toContain(`(global, ${root})`)
   const run = direct.stdout.match(/^run: (.+)$/m)![1]!
   // What status and wait report, and the export records: the agent package, version, where it ran from.
-  expect(JSON.parse(await readFile(join(run, 'agent.json'), 'utf8'))).toEqual({ name: 'planner', version: expect.stringMatching(/^\d+\.\d+\.\d+/), path: root, source: 'package', installed: false })
+  expect(JSON.parse(await readFile(join(run, 'agent.json'), 'utf8'))).toEqual({ name: 'planner', version: expect.stringMatching(/^\d+\.\d+\.\d+/), path: root, source: 'global', installed: false })
   const status = await exec('bash', [launcher, 'status', run], { cwd: repo, env })
   expect(status.stdout).toContain('agent: planner@')
   expect(status.stdout).toContain('plan.review/plan.reviewed.md')
@@ -88,16 +100,18 @@ it('routes the skill to the official CLI or Notion-loading eve entry point with 
   expect((await calls())[0]!.at(-1)).toBe(join(repo, 'plan.review'))
   const custom = join(dir, 'custom output')
   await reset()
+  await writeFile(join(dir, 'aspira.json'), '{}')
   await exec('bash', [launcher, 'start', spec, '--no-ticket', '--repo', repo, '--output', custom, '--guidelines', guidelines], { cwd: dir, env })
   expect((await calls())[0]!.slice(-3)).toEqual([repo, guidelines, custom])
   await expect(exec('bash', [launcher, 'start', spec, '--no-ticket', '--rounds', '2'], { cwd: repo, env })).rejects.toThrow('unknown option')
 })
 
 it('steps --local through the agent package without launching the agent', async () => {
-  const { dir, env, captured, reset } = await stubs('planner-skill-local-')
+  const { dir, env, captured, reset, launcher } = await stubs('planner-skill-local-')
   const repo = join(dir, 'repo')
   await mkdir(join(repo, 'spec.reviewed'), { recursive: true })
   await exec('git', ['init', repo])
+  await writeFile(join(repo, 'aspira.json'), '{}')
   const spec = join(repo, 'spec.reviewed', 'spec.reviewed.md')
   const guidelines = join(repo, 'REQUIRED.md')
   await writeFile(spec, '# Reviewed spec')
@@ -124,11 +138,12 @@ it('steps --local through the agent package without launching the agent', async 
 })
 
 it('start with a ticket runs the board step first, plans the pulled spec, and finishes on the board after the run', async () => {
-  const { dir, env, calls } = await stubs('planner-skill-ticket-')
+  const { dir, env, calls, launcher } = await stubs('planner-skill-ticket-')
   const repo = join(dir, 'repo')
   const folder = join(repo, '.work', 'nom-4-explore-pagination')
   await mkdir(join(folder, 'spec.reviewed'), { recursive: true })
   await exec('git', ['init', repo])
+  await writeFile(join(repo, 'aspira.json'), '{}')
   const spec = join(folder, 'spec.reviewed', 'spec.reviewed.md')
   await writeFile(spec, '# Reviewed spec')
   await writeFile(join(repo, '.env.local'), 'AI_GATEWAY_API_KEY=from-project\n')
@@ -150,8 +165,27 @@ it('start with a ticket runs the board step first, plans the pulled spec, and fi
   await expect(exec('bash', [launcher, 'start', 'NOM-4'], { cwd: repo, env: ticketEnv })).rejects.toMatchObject({ code: 3, stderr: expect.stringContaining('refused') })
 })
 
-it('resolves the agent in order: PLANNER_AGENT_DIR, the package installed under the project, then its own location; never $ASPIRA_KIT', async () => {
-  const { dir, env, captured } = await stubs('planner-skill-resolve-')
+it('T42 finds the project from the working directory: no aspira.json up to HOME is refused, an app named in the root aspira.json is the project', async () => {
+  const { dir, env, captured, launcher } = await stubs('planner-skill-project-')
+  // (a) A folder with no aspira.json at or above it.
+  const bare = await realpath(await mkdtemp(join(tmpdir(), 'planner-skill-bare-')))
+  await exec('git', ['init', bare])
+  await writeFile(join(bare, 'spec.md'), '# Spec')
+  await expect(exec('bash', [launcher, 'local', 'spec.md', '--no-ticket'], { cwd: bare, env })).rejects.toThrow(`no Aspira project here (no aspira.json at or above ${bare})`)
+  // (b) Claude Code runs in the app folder of a repository whose root aspira.json names it: that folder is the project directory.
+  const repo = join(dir, 'repo')
+  const app = join(repo, 'apps/web')
+  await mkdir(app, { recursive: true })
+  await exec('git', ['init', repo])
+  await writeFile(join(repo, 'aspira.json'), JSON.stringify({ app: 'apps/web' }))
+  await writeFile(join(app, '.env.local'), 'KNOWLEDGE_PAGE=x\n')
+  await writeFile(join(app, 'spec.md'), '# Spec')
+  await exec('bash', [launcher, 'local', 'spec.md', '--no-ticket'], { cwd: app, env })
+  expect(envArgs(await captured())).toEqual([`--env-file=${join(app, '.env.local')}`])
+})
+
+it('T43 runs only the global kit: the package installed under the project is never taken, and PLANNER_AGENT_DIR is the one override', async () => {
+  const { dir, env, captured, launcher } = await stubs('planner-skill-resolve-')
   // A project with @aspiralabs/ai installed by pnpm: the package sits in the store, symlinked into the project's node_modules, with amaro beside it.
   const app = join(dir, 'app')
   const store = join(app, 'node_modules/.pnpm/@aspiralabs+ai@9.9.9/node_modules')
@@ -166,43 +200,30 @@ it('resolves the agent in order: PLANNER_AGENT_DIR, the package installed under 
   await mkdir(join(app, 'node_modules/@aspiralabs'), { recursive: true })
   await symlink(pkg, join(app, 'node_modules/@aspiralabs/ai'))
   await writeFile(join(app, 'package.json'), '{"name":"app"}')
-  await writeFile(join(app, '.env.local'), 'KNOWLEDGE_PAGE=x\n')
+  await writeFile(join(app, 'aspira.json'), '{}')
   await mkdir(join(app, 'docs/feature'), { recursive: true })
   await exec('git', ['init', app])
   const spec = join(app, 'docs/feature/spec.md')
   await writeFile(spec, '# Spec')
-  // The skill as kit init installs it: a copy under the project's .claude/skills/.
-  const copy = join(app, '.claude/skills/aspira-planner/scripts/planner.sh')
-  await cp(launcher, copy)
-  const stale = join(dir, 'stale-kit/packages/ai/planner')
 
-  // Installed: found walking up from the working directory, even a subdirectory; the project's env file goes with it.
-  const fromApp = await exec('bash', [copy, 'local', spec, '--no-ticket'], { cwd: join(app, 'docs'), env: { ...env, ASPIRA_KIT: stale } })
-  expect(command(await captured())).toEqual(['--import', join(store, 'amaro/dist/register-strip.mjs'), '--experimental-strip-types', join(installed, 'scripts/local.ts'), '--repo', app, '--no-ticket', spec, '--output', join(app, 'docs/feature/plan.review')])
-  expect(envArgs(await captured())).toEqual([`--env-file=${join(app, '.env.local')}`])
-  expect(fromApp.stderr).not.toContain('kit source')
-  // The installed package also beats the kit launcher's own location when the kit's launcher runs inside the project.
-  await exec('bash', [launcher, 'local', spec, '--no-ticket'], { cwd: app, env })
-  expect(command(await captured())[3]).toBe(join(installed, 'scripts/local.ts'))
-  // The kit launcher outside any project: its own package, and it says so.
-  const elsewhere = join(dir, 'elsewhere')
-  await mkdir(elsewhere)
-  await exec('git', ['init', elsewhere])
-  const own = await exec('bash', [launcher, 'local', spec, '--no-ticket', '--repo', elsewhere], { cwd: elsewhere, env })
-  expect(command(await captured())[3]).toBe(join(root, 'scripts/local.ts'))
-  expect(own.stderr).toContain(`planner: running kit source at ${root}, not the installed @aspiralabs/ai`)
-  // PLANNER_AGENT_DIR wins over the installed package, and the report says it is set.
-  const override = await exec('bash', [copy, 'local', spec, '--no-ticket'], { cwd: app, env: { ...env, PLANNER_AGENT_DIR: root } })
-  expect(command(await captured())[3]).toBe(join(root, 'scripts/local.ts'))
-  expect(override.stderr).toContain(`planner: PLANNER_AGENT_DIR is set: running kit source at ${root}, not the installed @aspiralabs/ai`)
-  await expect(exec('bash', [copy, 'local', spec, '--no-ticket'], { cwd: app, env: { ...env, PLANNER_AGENT_DIR: dir } })).rejects.toThrow('PLANNER_AGENT_DIR is not the planner folder of @aspiralabs/ai')
-  // Nothing installed (no global kit on PATH either), and the copied launcher is not inside a package: a clear error, with no $ASPIRA_KIT fallback.
-  const bare = join(dir, 'bare')
-  await mkdir(join(bare, '.claude/skills/aspira-planner/scripts'), { recursive: true })
-  await cp(launcher, join(bare, '.claude/skills/aspira-planner/scripts/planner.sh'))
-  await exec('git', ['init', bare])
-  await writeFile(join(bare, 'spec.md'), '# Spec')
-  await expect(exec('bash', [join(bare, '.claude/skills/aspira-planner/scripts/planner.sh'), 'local', 'spec.md', '--no-ticket'], { cwd: bare, env: { ...env, ASPIRA_KIT: dirname(dirname(dirname(root))), PATH: (process.env.PATH ?? '').split(':').filter((dir) => !existsSync(join(dir, 'kit'))).join(':') } })).rejects.toThrow('cannot find planner: install @aspiralabs/ai')
+  // The global kit's agent runs, from a subdirectory too; the project's installed copy does not.
+  const fromApp = await exec('bash', [launcher, 'local', spec, '--no-ticket'], { cwd: join(app, 'docs'), env })
+  expect(command(await captured())).toEqual(['--import', loader, '--experimental-strip-types', join(root, 'scripts/local.ts'), '--repo', app, '--no-ticket', spec, '--output', join(app, 'docs/feature/plan.review')])
+  expect(fromApp.stdout + fromApp.stderr).not.toContain(installed)
+  // PLANNER_AGENT_DIR wins over the global kit, and the report says it is set.
+  const overridePkg = join(dir, 'override/aspira-ai')
+  const override = join(overridePkg, 'planner')
+  await mkdir(join(override, 'scripts'), { recursive: true })
+  await mkdir(join(override, 'skill'))
+  await writeFile(join(overridePkg, 'package.json'), JSON.stringify({ name: '@aspiralabs/ai', version: '9.9.9' }, null, 2))
+  await writeFile(join(override, 'scripts/local.ts'), '')
+  const forced = await exec('bash', [launcher, 'local', spec, '--no-ticket'], { cwd: app, env: { ...env, PLANNER_AGENT_DIR: override } })
+  expect(command(await captured())).toContain(join(override, 'scripts/local.ts'))
+  expect(forced.stderr).toContain(`planner: PLANNER_AGENT_DIR is set: running kit source at ${override}, not the installed @aspiralabs/ai`)
+  await expect(exec('bash', [launcher, 'local', spec, '--no-ticket'], { cwd: app, env: { ...env, PLANNER_AGENT_DIR: dir } })).rejects.toThrow('PLANNER_AGENT_DIR is not the planner folder of @aspiralabs/ai')
+  // No kit on PATH: a clear error naming kit update, and no $ASPIRA_KIT fallback.
+  const noKit = (process.env.PATH ?? '').split(':').filter((entry) => !existsSync(join(entry, 'kit'))).join(':')
+  await expect(exec('bash', [launcher, 'local', spec, '--no-ticket'], { cwd: app, env: { ...env, ASPIRA_KIT: dirname(dirname(dirname(root))), PATH: noKit } })).rejects.toThrow(/cannot find planner[^\n]*kit update/)
 })
 
 it('keeps SKILL.md to mechanics: it names agent/instructions.md and copies none of its rules', async () => {
