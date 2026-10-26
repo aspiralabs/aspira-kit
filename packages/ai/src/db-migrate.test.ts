@@ -2,7 +2,7 @@
 // git worktree fixture. The system boundaries are faked: a node:http mock of the Neon API (the branch list of
 // the project; the CLI reaches it through NEON_API_BASE_URL) and a fake `prisma` executable first on PATH that
 // records its argv and the database variables it saw. Nothing talks to a live service.
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -108,7 +108,8 @@ const prismaCalls = (f: Fixture): Call[] =>
         .map((line) => JSON.parse(line) as Call)
     : []
 
-function kit(f: Fixture, base: string, args: string[]) {
+// Async on purpose: the Neon mock lives in this process, so a blocking spawnSync would starve it.
+async function kit(f: Fixture, base: string, args: string[]): Promise<{ code: number | null; out: string }> {
   const home = temp('home')
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -125,8 +126,15 @@ function kit(f: Fixture, base: string, args: string[]) {
   }
   for (const key of ['NOTION_TOKEN', 'NOTION_API_KEY', 'KIT_REEXEC', 'ASPIRA_KIT_REEXEC']) delete env[key]
   // stdin is a pipe, never a TTY (F26).
-  const result = spawnSync(process.execPath, [CLI, ...args], { cwd: f.worktree, env, input: '', encoding: 'utf8', timeout: 60_000 })
-  return { code: result.status, out: `${result.stdout}${result.stderr}` }
+  const child = spawn(process.execPath, [CLI, ...args], { cwd: f.worktree, env, stdio: ['pipe', 'pipe', 'pipe'] })
+  let out = ''
+  child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()))
+  child.stderr.on('data', (chunk: Buffer) => (out += chunk.toString()))
+  child.stdin.end()
+  const timer = setTimeout(() => child.kill('SIGKILL'), 60_000)
+  const code = await new Promise<number | null>((done) => child.on('close', (status) => done(status)))
+  clearTimeout(timer)
+  return { code, out }
 }
 
 const MIGRATE = ['db', 'migrate', '--name', 'add_x']
@@ -134,7 +142,7 @@ const MIGRATE = ['db', 'migrate', '--name', 'add_x']
 describe('kit db migrate', () => {
   it('T30: runs prisma migrate dev --name add_x on the branch values and exits 0', async () => {
     const f = fixture()
-    const result = kit(f, await neonMock(['main', 'dev', BRANCH]), MIGRATE)
+    const result = await kit(f, await neonMock(['main', 'dev', BRANCH]), MIGRATE)
     expect(result.code).toBe(0)
     const calls = prismaCalls(f)
     expect(calls).toHaveLength(1)
@@ -149,7 +157,7 @@ describe('kit db migrate', () => {
 
   it('T30: exits 1 and never invokes prisma when the worktree has no branch URL', async () => {
     const f = fixture({ envFile: null })
-    const result = kit(f, await neonMock(['main', 'dev', BRANCH]), MIGRATE)
+    const result = await kit(f, await neonMock(['main', 'dev', BRANCH]), MIGRATE)
     expect(result.code).toBe(1)
     expect(result.out).toMatch(/branch/i)
     expect(prismaCalls(f)).toEqual([])
@@ -157,7 +165,7 @@ describe('kit db migrate', () => {
 
   it('T30: exits 1 saying the branch expired and to rerun kit worktree when Neon no longer lists it', async () => {
     const f = fixture()
-    const result = kit(f, await neonMock(['main', 'dev']), MIGRATE)
+    const result = await kit(f, await neonMock(['main', 'dev']), MIGRATE)
     expect(result.code).toBe(1)
     expect(result.out).toMatch(/expired/i)
     expect(result.out).toContain('kit worktree')
@@ -168,7 +176,7 @@ describe('kit db migrate', () => {
     const f = fixture({
       schema: `datasource db {\n  provider          = "postgresql"\n  url               = env("DATABASE_URL")\n  directUrl         = env("DIRECT_URL")\n  shadowDatabaseUrl = env("SHADOW_URL")\n}\n`,
     })
-    const result = kit(f, await neonMock(['main', 'dev', BRANCH]), MIGRATE)
+    const result = await kit(f, await neonMock(['main', 'dev', BRANCH]), MIGRATE)
     expect(result.code).toBe(1)
     expect(result.out).toContain('SHADOW_URL')
     expect(prismaCalls(f)).toEqual([])
@@ -183,7 +191,7 @@ console.error('Prisma Migrate has detected that the environment is non-interacti
 process.exit(1)
 `,
     })
-    const result = kit(f, await neonMock(['main', 'dev', BRANCH]), MIGRATE)
+    const result = await kit(f, await neonMock(['main', 'dev', BRANCH]), MIGRATE)
     expect(result.code).toBe(1)
     expect(result.out).toContain('Prisma Migrate has detected that the environment is non-interactive')
     const calls = prismaCalls(f)
@@ -196,7 +204,7 @@ process.exit(1)
 
   it('T31: completes with exit 0 from a child process whose stdin is a pipe, the migration name given on the command line', async () => {
     const f = fixture()
-    const result = kit(f, await neonMock(['main', 'dev', BRANCH]), MIGRATE)
+    const result = await kit(f, await neonMock(['main', 'dev', BRANCH]), MIGRATE)
     expect(result.code).toBe(0)
     const calls = prismaCalls(f)
     expect(calls).toHaveLength(1)

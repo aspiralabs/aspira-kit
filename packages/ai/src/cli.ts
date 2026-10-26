@@ -5,13 +5,17 @@
 // kit next [<ticket>] [--app <dir>] [--cwd <path>]
 // kit cleanup [--yes] [--only <path>...] [--app <dir>] [--cwd <path>]
 // kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
+// kit db migrate --name <n> [prisma args] [--app <dir>] [--cwd <path>]
+// kit dev [--app <dir>] [--cwd <path>]
 // kit playbook
 // kit package-dir (prints this @aspiralabs/ai's directory; the /aspira-* launchers find the global install with it)
 import { resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { readApp, resolveProjectRoot, writeAspira } from './aspira.js'
 import { cleanup, type Ask } from './cleanup.js'
-import { parseCleanupArgs, parseWorktreeArgs } from './command-args.js'
+import { parseCleanupArgs, parseDbMigrateArgs, parseWorktreeArgs } from './command-args.js'
+import { dbMigrate } from './db-migrate.js'
+import { dev } from './dev.js'
 import { doctor } from './doctor.js'
 import { next } from './next.js'
 import { renderPlaybook } from './playbook.js'
@@ -34,7 +38,7 @@ const flag = (name: string): string | boolean | undefined => {
 // The project root: --cwd, else the working directory. For doctor, next, cleanup and worktree, a working directory
 // inside the app of a multi-app project (apps/web, where the kit's bin is) stands for the root that wired it.
 const explicitCwd = typeof flag('cwd') === 'string' ? resolve(flag('cwd') as string) : undefined
-const rootFromApp = command === 'doctor' || command === 'next' || command === 'cleanup' || command === 'worktree'
+const rootFromApp = command === 'doctor' || command === 'next' || command === 'cleanup' || command === 'worktree' || command === 'dev' || command === 'db'
 const cwd = explicitCwd ?? (rootFromApp ? resolveProjectRoot(process.cwd()) : process.cwd())
 const log = (line: string) => console.log(line)
 // --app <dir>: the app that owns package.json and node_modules, relative to the root (apps/web).
@@ -48,6 +52,8 @@ const usage = `usage:
   kit next [<ticket>] [--app <dir>] [--cwd <path>]
   kit cleanup [--yes] [--only <path>...] [--app <dir>] [--cwd <path>]
   kit worktree <ticket> [--install] [--app <dir>] [--cwd <path>]
+  kit db migrate --name <n> [prisma args] [--app <dir>] [--cwd <path>]
+  kit dev [--app <dir>] [--cwd <path>]
   kit playbook
 
   --app <dir>: in a repository whose app (package.json, node_modules) is not the root, that directory,
@@ -101,6 +107,21 @@ async function main(): Promise<number> {
       return 2
     }
     return await worktree({ projectRoot: cwd, app: args.app, ref: args.ref, install: args.install, log })
+  }
+  if (command === 'db') {
+    if (argv[1] !== 'migrate') {
+      console.error(`unknown db command (have: migrate)\n${usage}`)
+      return 2
+    }
+    const args = parseDbMigrateArgs(argv.slice(2))
+    if (!args.ok) {
+      console.error(`${args.reason}\n${usage}`)
+      return 2
+    }
+    return await dbMigrate({ projectRoot: cwd, app: args.app, name: args.name, passthrough: args.passthrough, log, warn: (line) => console.error(line) })
+  }
+  if (command === 'dev') {
+    return await dev({ projectRoot: cwd, app, log, warn: (line) => console.error(line) })
   }
   if (command === 'playbook') {
     process.stdout.write(renderPlaybook())
