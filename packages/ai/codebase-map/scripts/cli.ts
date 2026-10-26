@@ -6,6 +6,8 @@ import { dirname } from 'node:path'
 import { buildMap, checkMap } from '../src/build.ts'
 import { BriefError, TARGET_KINDS, brief, formatBrief, type TargetKind } from '../src/brief.ts'
 import { mapDirs } from '../src/map-root.ts'
+import { NoteError, acceptNote, retireNote } from '../src/notes.ts'
+import { notesStep } from '../src/notes-driver.ts'
 
 const USAGE = 'usage: map-codebase --repo <dir> --map-root <dir> [--check] [brief <target>... [--json] [--kind k] [--changed] | notes [accept|retire <id>]]'
 
@@ -14,7 +16,7 @@ async function main(): Promise<number> {
   const repo = typeof values.repo === 'string' ? values.repo : undefined
   const mapRoot = typeof values['map-root'] === 'string' ? values['map-root'] : undefined
   const [command] = positionals
-  if (repo === undefined || mapRoot === undefined || (command !== undefined && command !== 'brief')) {
+  if (repo === undefined || mapRoot === undefined || (command !== undefined && command !== 'brief' && command !== 'notes')) {
     console.error(USAGE)
     return 2
   }
@@ -35,7 +37,25 @@ async function main(): Promise<number> {
       return 1
     }
   }
-  const root = dirname((await mapDirs(repo, mapRoot)).mapDir)
+  const dirs = await mapDirs(repo, mapRoot)
+  if (command === 'notes') {
+    const [, verb, id, ...extra] = positionals
+    if (verb === undefined) return notesStep(repo, mapRoot)
+    if ((verb !== 'accept' && verb !== 'retire') || id === undefined || extra.length > 0) {
+      console.error(USAGE)
+      return 2
+    }
+    try {
+      const note = await (verb === 'accept' ? acceptNote : retireNote)(dirs.notesDir, repo, id)
+      console.log(`${note.id}: ${note.status}`)
+      return 0
+    } catch (error) {
+      if (!(error instanceof NoteError)) throw error
+      console.error(`map-codebase: ${error.message}`)
+      return 1
+    }
+  }
+  const root = dirname(dirs.mapDir)
   if (values.check === true) {
     const freshness = await checkMap(repo, root)
     if (freshness.state === 'fresh') {
@@ -51,7 +71,7 @@ async function main(): Promise<number> {
     console.log('run kit map-codebase to refresh it')
     return 1
   }
-  const summary = await buildMap(repo, root)
+  const summary = await buildMap(repo, root, dirs.notesDir)
   console.log(`map root: ${summary.mapRoot}`)
   console.log(`commit: ${summary.commit.slice(0, 7)}`)
   console.log(`${summary.files} files`)

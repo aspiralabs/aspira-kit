@@ -9,6 +9,7 @@ import { basename, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import ts from 'typescript'
 import { SOURCE_EXTENSIONS, extractFacts, resolveEdges, type SyntaxFacts } from './imports.ts'
+import { markStale, readNotes } from './notes.ts'
 import { MANIFEST_FILE, compareManifest, readManifest, type Freshness, type Manifest } from './manifest.ts'
 import { packageForPath, surfaceForPath, type PackageInfo } from './membership.ts'
 import { dirtyFiles, scanFiles, type ScannedFile } from './scan.ts'
@@ -137,7 +138,8 @@ async function swapIn(mapRoot: string, tmp: string): Promise<void> {
   await rm(old, { recursive: true, force: true })
 }
 
-export async function buildMap(repo: string, mapRoot: string): Promise<BuildSummary> {
+/** `notesDir` is the shared notes folder; accepted notes whose cited file changed become stale on every build. */
+export async function buildMap(repo: string, mapRoot: string, notesDir: string = join(mapRoot, 'notes')): Promise<BuildSummary> {
   await assertSameRepo(repo, mapRoot)
   await mkdir(mapRoot, { recursive: true })
   const release = await takeLock(mapRoot)
@@ -149,6 +151,8 @@ export async function buildMap(repo: string, mapRoot: string): Promise<BuildSumm
     await mkdir(tmp)
 
     const { scanned, now } = await current(repo, mapRoot)
+    for (const warning of (await readNotes(notesDir)).warnings) console.error(`map-codebase: ${warning}`)
+    await markStale(notesDir, repo, now.files)
     const previous = readCache(join(mapDirOf(mapRoot), GRAPH_FILE))
     const facts = new Map<string, SyntaxFacts>()
     const cache = new Map<string, CacheEntry>()
