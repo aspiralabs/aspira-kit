@@ -32,6 +32,7 @@ Then in the project, committed:
 
 ```bash
 pnpm add -g @aspiralabs/ai        # once per engineer: kit, the agents and the skills, never a project dependency
+kit update                        # then regularly: latest kit, and the skills and hooks rewritten in ~/.claude
 kit init --stack next             # installs ui + config, writes eslint/prettier/tsconfig wiring, globals.css imports,
                                   # AGENTS.md, CLAUDE.md, .mcp.json  (the hooks and /aspira-* skills live globally in ~/.claude; `kit update` writes them)
 kit add auth                      # optional: base Better Auth setup the project then owns
