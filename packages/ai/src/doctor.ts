@@ -4,10 +4,10 @@
 // Claude-facing items (AGENTS.md, .mcp.json, .claude/, .gitignore, aspira.json) live at the root.
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
-import { delimiter, dirname, join } from 'node:path'
-import { appRoot, aspiraTracked, checkAspira, type AspiraConfig, isWorkspaceRoot, notionTargets, notionTokenCandidates, notionTokenSource, readAspira, readApp, type NotionTarget } from './aspira.js'
+import { basename, delimiter, dirname, join } from 'node:path'
+import { appRoot, aspiraTracked, codebaseMapsFolder, checkAspira, type AspiraConfig, isWorkspaceRoot, notionTargets, notionTokenCandidates, notionTokenSource, readAspira, readApp, type NotionTarget } from './aspira.js'
 import { readJson, type Log } from './fs.js'
-import { isGitIgnored, repositoryRoot } from './git.js'
+import { isGitIgnored, mainCheckoutRoot, repositoryRoot } from './git.js'
 import type { CommandSeams } from './isolation.js'
 import { AI_PACKAGE, aiPackageDir, aiVersion, harnessItems } from './skills.js'
 import { harnessLeftovers } from './stacks/next.js'
@@ -138,6 +138,26 @@ function staleEndpoints(projectRoot: string, apiKey: string, env: Record<string,
     .flatMap((endpoint) => (endpoint.metadata?.aspira_worktree ? [{ id: endpoint.id, url: endpoint.url, name: endpoint.metadata.aspira_worktree }] : []))
     .filter(({ name }) => !folders.some((folder) => folder === name.toLowerCase() || folder.endsWith(`-${name.toLowerCase()}`)))
     .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** KIT-69: one information line with the codebase map's freshness (`fresh`, `stale` or `missing`) and its root, from
+ * `kit map-codebase --check` run through node + amaro. Informational only: it never adds to the problem count. */
+function mapLine(projectRoot: string): string | undefined {
+  try {
+    const repo = repositoryRoot(projectRoot)
+    const ai = aiPackageDir()
+    if (repo === undefined || ai === undefined) return undefined
+    const folder = codebaseMapsFolder(projectRoot, repo)
+    const mapRoot = folder === undefined ? join(repo, '.codebase-map') : join(folder, basename(mainCheckoutRoot(repo) ?? repo))
+    const script = join(ai, 'codebase-map', 'scripts', 'cli.ts')
+    const amaro = findUpModule(realpathSync(ai), join('amaro', 'dist', 'register-strip.mjs')) ?? findUpModule(realpathSync(repo), join('amaro', 'dist', 'register-strip.mjs'))
+    if (!existsSync(script) || amaro === undefined) return `map   not checked (${mapRoot})`
+    const run = spawnSync('node', ['--import', amaro, '--experimental-strip-types', script, '--repo', repo, '--map-root', mapRoot, '--check'], { cwd: repo, encoding: 'utf8' })
+    const state = /^(fresh|stale|missing)\b/.exec(run.stdout ?? '')?.[1]
+    return state === undefined ? `map   not checked (${mapRoot})` : `map   ${state} (${mapRoot})`
+  } catch {
+    return undefined
+  }
 }
 
 export function doctor(projectRoot: string, log: Log, appFlag?: string, options?: { check?: UrlChecker; env?: Record<string, string | undefined>; seams?: CommandSeams; home?: string }): number {
@@ -279,6 +299,8 @@ export function doctor(projectRoot: string, log: Log, appFlag?: string, options?
     ...(globalFailed ? ['run kit update for the global harness'] : []),
     ...(projectFailed || !globalFailed ? [`run kit init --stack next${app ? ` --app ${app}` : ''} (and --board <Feature Board URL> when aspira.json is the problem)`] : []),
   ]
+  const map = mapLine(projectRoot)
+  if (map !== undefined) log(map)
   log(problems === 0 ? 'healthy' : `${problems} problem(s); ${hints.join('; ')}`)
   return problems === 0 ? 0 : 1
 }

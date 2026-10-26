@@ -124,7 +124,7 @@ describe('global kit', () => {
 
 // ---- The global harness: kit update, the writer, self-healing and kit doctor (KIT-71) ----
 
-const SKILL_NAMES = ['build-feature', 'cleanup', 'code-analyzer', 'groomer', 'implementor', 'next', 'planner', 'pr-reviewer', 'spec-writer', 'upgrade', 'visual-verify', 'worktree']
+const SKILL_NAMES = ['build-feature', 'cleanup', 'code-analyzer', 'groomer', 'implementor', 'map-codebase', 'next', 'planner', 'pr-reviewer', 'spec-writer', 'upgrade', 'visual-verify', 'worktree']
 const HOOK_NAMES = ['session-start.sh', 'deny-tier3.sh', 'audit-log.sh']
 const KIT_PACKAGE_DIR = dirname(dirname(CLI))
 const hookCmd = (name: string): string => `sh ~/.claude/hooks/aspira/${name}`
@@ -195,7 +195,7 @@ function gitProject(): string {
 }
 
 describe('kit update', () => {
-  it('T1: installs the latest kit globally with pnpm, then writes the twelve skills and three hooks to ~/.claude', () => {
+  it('T1: installs the latest kit globally with pnpm, then writes the thirteen skills and three hooks to ~/.claude', () => {
     const home = homeWithCache(null)
     const stub = stubBin()
     const result = kit(['update'], { home, env: stub.env })
@@ -242,7 +242,7 @@ describe('kit upgrade', () => {
 })
 
 describe('the global harness writer', () => {
-  it('T4: writes the twelve skills as regular folders, retires aspira-spec-reviewer and keeps the engineer\'s own skills and symlink targets', () => {
+  it('T4: writes the thirteen skills as regular folders, retires aspira-spec-reviewer and keeps the engineer\'s own skills and symlink targets', () => {
     const home = homeWithCache(null)
     const skills = skillsDir(home)
     mkdirSync(join(skills, 'aspira-spec-reviewer'), { recursive: true })
@@ -348,6 +348,49 @@ describe('the global harness writer', () => {
   })
 })
 
+describe('the codebase map and the global ignore', () => {
+  /** A committed git repository with a project .gitignore, so `kit map-codebase` has a commit to map. */
+  function mappedRepo(): string {
+    const root = temp('map-repo')
+    execFileSync('git', ['init', '-q', root])
+    writeFileSync(join(root, '.gitignore'), 'node_modules/\n')
+    writeFileSync(join(root, 'index.ts'), 'export const one = 1\n')
+    execFileSync('git', ['add', '-A'], { cwd: root })
+    execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: root })
+    return root
+  }
+  const gitStatus = (root: string, home: string): string =>
+    execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: root, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, GIT_CONFIG_NOSYSTEM: '1', XDG_CONFIG_HOME: '' } })
+
+  it('T30: kit update puts .codebase-map/map/ in the global ignore, so a built map is not in git status and the project .gitignore is untouched', () => {
+    const home = homeWithCache(null)
+    const repo = mappedRepo()
+    const projectIgnore = readFileSync(join(repo, '.gitignore'))
+    expect(kit(['update'], { home, cwd: repo, env: stubBin().env }).code).toBe(0)
+    expect(readFileSync(defaultIgnore(home), 'utf8').split('\n').map((line) => line.trim())).toContain('.codebase-map/map/')
+    const built = kit(['map-codebase'], { home, cwd: repo })
+    expect(built.code, built.stderr).toBe(0)
+    expect(existsSync(join(repo, '.codebase-map', 'map', 'manifest.json'))).toBe(true)
+    expect(gitStatus(repo, home)).not.toContain('.codebase-map/map/')
+    expect(readFileSync(join(repo, '.gitignore')).equals(projectIgnore)).toBe(true)
+  })
+
+  it('T31: --check says fresh after a build both when the global ignore lacks .codebase-map/map/ and after kit update', () => {
+    const home = homeWithCache(null)
+    mkdirSync(dirname(defaultIgnore(home)), { recursive: true })
+    writeFileSync(defaultIgnore(home), '.work/\n')
+    const repo = mappedRepo()
+    for (const step of ['before kit update', 'after kit update']) {
+      if (step === 'after kit update') expect(kit(['update'], { home, cwd: repo, env: stubBin().env }).code).toBe(0)
+      const built = kit(['map-codebase'], { home, cwd: repo })
+      expect(built.code, `${step}: ${built.stderr}`).toBe(0)
+      const check = kit(['map-codebase', '--check'], { home, cwd: repo })
+      expect(check.code, `${step}: ${check.stdout}${check.stderr}`).toBe(0)
+      expect(check.stdout, step).toMatch(/fresh/i)
+    }
+  })
+})
+
 describe('self-healing', () => {
   const versionOf = (home: string, name: string): string => readFileSync(join(skillsDir(home), `aspira-${name}`, '.kit-version'), 'utf8').trim()
 
@@ -373,7 +416,7 @@ describe('self-healing', () => {
     const noAspira = harnessHome()
     writeFileSync(defaultIgnore(noAspira), '.work/\n.aspira/\n.worktrees/\n')
     kit(['package-dir'], { home: noAspira })
-    expect(readFileSync(defaultIgnore(noAspira), 'utf8').split('\n').map((line) => line.trim())).toEqual(['.work/', '.aspira/', '.worktrees/', 'aspira.json', ''])
+    expect(readFileSync(defaultIgnore(noAspira), 'utf8').split('\n').map((line) => line.trim())).toEqual(['.work/', '.aspira/', '.worktrees/', 'aspira.json', '.codebase-map/map/', '.codebase-map/notes-step/', ''])
 
     const retired = harnessHome()
     mkdirSync(join(skillsDir(retired), 'aspira-spec-reviewer'))
@@ -479,7 +522,7 @@ describe('global-only resolution', () => {
     for (const output of [doctor.stdout + doctor.stderr, next.stdout + next.stderr]) expect(output).not.toContain(copy)
     expect(doctor.stdout).not.toContain('0.1.0')
     const skillLines = doctor.stdout.split('\n').filter((line) => line.includes('~/.claude/skills/aspira-'))
-    expect(skillLines.length).toBe(12)
+    expect(skillLines.length).toBe(13)
     expect(skillLines.every((line) => line.startsWith('ok'))).toBe(true)
   })
 })

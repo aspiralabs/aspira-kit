@@ -275,6 +275,9 @@ importers:
       eve:
         specifier: ^0.63.0
         version: 0.63.0(ai@7.0.107(zod@4.5.4))
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
       undici:
         specifier: ^7.29.1
         version: 7.29.1
@@ -291,9 +294,6 @@ importers:
       eslint:
         specifier: ^9.39.0
         version: 9.39.5(jiti@2.7.0)(supports-color@7.2.0)
-      typescript:
-        specifier: ^5.9.0
-        version: 5.9.3
       vitest:
         specifier: ^3.2.4
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.6)(jiti@2.7.0)(jsdom@26.1.0(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)

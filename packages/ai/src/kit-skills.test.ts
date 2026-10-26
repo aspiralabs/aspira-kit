@@ -1,4 +1,4 @@
-// The four kit-owned skill launchers (/aspira-next, /aspira-cleanup, /aspira-worktree, /aspira-upgrade), copied under a
+// The five kit-owned skill launchers (/aspira-next, /aspira-cleanup, /aspira-worktree, /aspira-upgrade, /aspira-map-codebase), copied under a
 // temporary HOME's .claude/skills (where the global harness puts them) and run with bash from inside a
 // project. The kit binary they call is the process boundary: a fake `kit` on PATH (the global one) that
 // records its arguments, prints fixed lines and exits with the code FAKE_KIT_EXIT names. A second fake in
@@ -27,7 +27,7 @@ function fakeKit(calls: string): string {
 }
 
 /**
- * A temp HOME holding the four kit launchers under .claude/skills, a project with aspira.json (and the
+ * A temp HOME holding the five kit launchers under .claude/skills, a project with aspira.json (and the
  * app folder it names, when `app` is set) as the working directory, a recording `kit` on PATH and a
  * second recording `kit` in the owning folder's node_modules/.bin.
  */
@@ -41,7 +41,7 @@ function project(app?: string): Project {
   mkdirSync(home, { recursive: true })
   mkdirSync(bin, { recursive: true })
   mkdirSync(root, { recursive: true })
-  for (const name of ['next', 'cleanup', 'worktree', 'upgrade']) {
+  for (const name of ['next', 'cleanup', 'worktree', 'upgrade', 'map-codebase']) {
     const target = join(home, '.claude', 'skills', `aspira-${name}`)
     cpSync(join(SKILLS, `aspira-${name}`), target, { recursive: true })
     chmodSync(join(target, 'scripts', `${name}.sh`), 0o755)
@@ -157,5 +157,27 @@ describe('the /aspira-upgrade launcher', () => {
     expect(refused.status).toBe(1)
     expect(refused.stderr).toContain('aspira-upgrade')
     expect(recorded(outside.calls)).toEqual([])
+  })
+})
+
+describe('the /aspira-map-codebase launcher', () => {
+  it('T32 runs in a git repository with no aspira.json, hands its arguments to kit map-codebase and exits with its code; without kit it says so', () => {
+    const made = project()
+    rmSync(join(made.root, 'aspira.json'))
+    expect(spawnSync('git', ['init', '-q', made.root]).status).toBe(0)
+    const listing = launch(made, 'map-codebase', ['notes', '--x'], 0)
+    expect(listing.status).toBe(0)
+    const failed = launch(made, 'map-codebase', [], 3)
+    expect(failed.status).toBe(3)
+    expect(recorded(made.calls)).toEqual(['map-codebase notes --x', 'map-codebase'])
+    expect(recorded(made.projectCalls)).toEqual([])
+
+    // No kit anywhere on PATH: an empty folder is the whole PATH.
+    const empty = join(dirname(made.root), 'empty-bin')
+    mkdirSync(empty, { recursive: true })
+    const script = join(made.home, '.claude', 'skills', 'aspira-map-codebase', 'scripts', 'map-codebase.sh')
+    const bare = spawnSync('/bin/bash', [script, 'notes'], { cwd: made.root, encoding: 'utf8', env: { HOME: made.home, USERPROFILE: made.home, PATH: empty } })
+    expect(bare.status).not.toBe(0)
+    expect(bare.stderr).toMatch(/cannot find kit/i)
   })
 })

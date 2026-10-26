@@ -7,6 +7,7 @@
 import { existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import { readJson, writeJson, type Log } from './fs.js'
+import { z } from 'zod'
 import { git } from './git.js'
 
 export const ASPIRA_FILE = 'aspira.json'
@@ -26,6 +27,8 @@ export type AspiraConfig = {
   webhooks?: WebhookConfig[]
   tunnel?: { zone: string }
   dev?: { command?: string; cwd?: string; url?: string; urlEnvVars?: string[] }
+  /** KIT-69: a folder, relative to this aspira.json, that holds each repo's codebase map and notes (`<folder>/<repo>/map|notes`). Read only by `kit map-codebase`; `checkAspira` ignores it. */
+  codebaseMaps?: string
 }
 
 /** aspira.json's Notion keys that `kit doctor` resolves by id: the Feature Board (a database or,
@@ -89,6 +92,49 @@ export function resolveProjectRoot(cwd: string): string {
     }
     if (dirname(dir) === dir) return start
   }
+}
+
+/**
+ * The directory of the nearest aspira.json at or above `cwd`, crossing the git root (a client harness folder
+ * sits above its repos). Only `kit map-codebase` calls it (KIT-69); `resolveProjectRoot` keeps its own walk.
+ */
+export function nearestAspira(cwd: string): string | undefined {
+  for (let dir = resolve(cwd); ; dir = dirname(dir)) {
+    if (existsSync(join(dir, ASPIRA_FILE))) return dir
+    if (dirname(dir) === dir) return undefined
+  }
+}
+
+const CodebaseMapsKey = z.object({ codebaseMaps: z.string().min(1).optional() })
+
+/**
+ * The map root folder for the repo at `repo`, read from the `codebaseMaps` key of the nearest aspira.json and
+ * resolved against that file's folder; undefined when there is no file or no key (the in-repo layout). Only that
+ * key is validated: a client-root config's other fields are not this command's business. Throws an Error naming
+ * the file and the key when the file is not JSON, the value is not a string, is absolute, leaves the aspira.json
+ * folder, or lies inside the repo (a map written into a client repo is what the harness layout exists to avoid).
+ */
+export function codebaseMapsFolder(cwd: string, repo: string): string | undefined {
+  const dir = nearestAspira(cwd)
+  if (dir === undefined) return undefined
+  const file = join(dir, ASPIRA_FILE)
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    throw new Error(`${file} is not valid JSON`)
+  }
+  const parsed = CodebaseMapsKey.safeParse(typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw : {})
+  if (!parsed.success) throw new Error(`${file} "codebaseMaps" must be a folder path, relative to ${ASPIRA_FILE}`)
+  const value = parsed.data.codebaseMaps
+  if (value === undefined) return undefined
+  if (isAbsolute(value)) throw new Error(`${file} "codebaseMaps" must be relative to ${ASPIRA_FILE}, not absolute`)
+  const folder = resolve(dir, value)
+  const out = relative(dir, folder)
+  if (out === '..' || out.startsWith(`..${sep}`)) throw new Error(`${file} "codebaseMaps" must stay inside the folder of ${ASPIRA_FILE}`)
+  const inRepo = relative(resolve(repo), folder)
+  if (inRepo === '' || (!inRepo.startsWith('..') && !isAbsolute(inRepo))) throw new Error(`${file} "codebaseMaps" points inside the repository ${repo}; point it outside so nothing is written into the repository`)
+  return folder
 }
 
 /** Whether git tracks the project root's aspira.json; false outside a git repository. */
