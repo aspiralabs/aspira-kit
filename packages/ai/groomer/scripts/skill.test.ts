@@ -79,7 +79,7 @@ describe('status and wait', () => {
   it('print the run status, the Grooming Decisions page, the open questions and the two local files from the groom record', async () => {
     const { dir, env } = await sandbox('groomer-status-')
     const { run, output } = await finishedRun(dir, { status: 'needs-author', open: 3, page: { url: 'https://notion.so/gd' } })
-    const { stdout } = await exec('bash', [launcher, 'status', run], { env })
+    const { stdout } = await exec('bash', [launcher, 'status', run], { cwd: join(dir, 'repo'), env })
     const shown = ['Status: needs-author', 'Grooming Decisions: https://notion.so/gd', 'Open questions: 3', `Decisions: ${output}/trace/decisions.md`, `Run analysis: ${output}/run-analysis.md`]
     expect(shown.filter((line) => !lines(stdout).includes(line))).toEqual([])
   })
@@ -87,7 +87,7 @@ describe('status and wait', () => {
   it('say the record is not written yet, without page lines, while the groom record is missing', async () => {
     const { dir, env } = await sandbox('groomer-status-missing-')
     const { run } = await finishedRun(dir, null)
-    const { stdout } = await exec('bash', [launcher, 'status', run], { env })
+    const { stdout } = await exec('bash', [launcher, 'status', run], { cwd: join(dir, 'repo'), env })
     expect({
       status: lines(stdout).includes('Status: not yet written (run in progress or stopped before its first round)'),
       pageLines: lines(stdout).filter((line) => line.startsWith('Grooming Decisions:') || line.startsWith('Open questions:')),
@@ -97,17 +97,17 @@ describe('status and wait', () => {
   it('say the page is not created yet when the record has no page URL', async () => {
     const { dir, env } = await sandbox('groomer-status-nourl-')
     const { run } = await finishedRun(dir, { status: 'needs-author', open: 3, page: {} })
-    const { stdout } = await exec('bash', [launcher, 'status', run], { env })
+    const { stdout } = await exec('bash', [launcher, 'status', run], { cwd: join(dir, 'repo'), env })
     expect(lines(stdout)).toContain('Grooming Decisions: not created yet')
   })
 
   it('wait takes 1 to 60 seconds, and watch is the same command', async () => {
     const { dir, env } = await sandbox('groomer-wait-')
     const { run } = await finishedRun(dir, { status: 'needs-author', open: 3, page: { url: 'https://notion.so/gd' } })
-    const zero = await failure(exec('bash', [launcher, 'wait', run, '--max', '0'], { env }))
-    const sixtyOne = await failure(exec('bash', [launcher, 'wait', run, '--max', '61'], { env }))
-    const waited = await exec('bash', [launcher, 'wait', run, '--max', '5'], { env })
-    const watched = await exec('bash', [launcher, 'watch', run, '--max', '5'], { env })
+    const zero = await failure(exec('bash', [launcher, 'wait', run, '--max', '0'], { cwd: join(dir, 'repo'), env }))
+    const sixtyOne = await failure(exec('bash', [launcher, 'wait', run, '--max', '61'], { cwd: join(dir, 'repo'), env }))
+    const waited = await exec('bash', [launcher, 'wait', run, '--max', '5'], { cwd: join(dir, 'repo'), env })
+    const watched = await exec('bash', [launcher, 'watch', run, '--max', '5'], { cwd: join(dir, 'repo'), env })
     expect({ zero: zero.code !== 0, sixtyOne: sixtyOne.code !== 0, waited: lines(waited.stdout).includes('Status: needs-author'), watched: lines(watched.stdout).includes('Status: needs-author') }).toEqual({ zero: true, sixtyOne: true, waited: true, watched: true })
   })
 })
@@ -116,7 +116,7 @@ describe('the launcher under a temp HOME', () => {
   it('T59 prints the same status for a finished run and never creates a .claude folder in HOME', async () => {
     const { dir, env, home } = await sandbox('groomer-home-')
     const { run, output } = await finishedRun(dir, { status: 'needs-author', open: 3, page: { url: 'https://notion.so/gd' } })
-    const { stdout } = await exec('bash', [launcher, 'status', run], { env })
+    const { stdout } = await exec('bash', [launcher, 'status', run], { cwd: join(dir, 'repo'), env })
     const shown = ['Status: needs-author', 'Grooming Decisions: https://notion.so/gd', 'Open questions: 3', `Decisions: ${output}/trace/decisions.md`, `Run analysis: ${output}/run-analysis.md`]
     expect(shown.filter((line) => !lines(stdout).includes(line))).toEqual([])
     expect(await readdir(home)).toEqual([])
