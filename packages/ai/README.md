@@ -254,6 +254,8 @@ Optional `aspira.json` keys give every ticket worktree its own state, so two tic
 | `tunnel` (`zone`) | Creates the named Cloudflare tunnel `wt-<name>` at `<name>-branch.<zone>` (ingress for `/api/webhooks/*` only), with `~/.cloudflared/cert.pem` and `CLOUDFLARE_API_TOKEN` (DNS Edit, Zone Read) |
 | `webhooks` (`provider: "stripe"`, `path`, `events`, `connect`, `secretEnvVar`, `connectSecretEnvVar`) | Creates a Stripe endpoint at the tunnel host with the Stripe CLI and the app's own `STRIPE_SECRET_KEY` (an `sk_live_` key is refused; `stripe switch` is never used), tagged `aspira_worktree=<name>`, and writes its signing secret. A Stripe account holds 16 endpoints, so they are deleted at merge |
 
+Defaults: `dev.urlEnvVars` is `BETTER_AUTH_URL` and `NEXT_PUBLIC_APP_URL`; `secretEnvVar` is `STRIPE_WEBHOOK_SECRET` and `connectSecretEnvVar` is `STRIPE_CONNECT_WEBHOOK_SECRET`. A `database.envVars` entry is a name (the pooled URL) or `{ "name": "DIRECT_URL", "pooled": false }` (the direct URL). Every isolated worktree also gets `ASPIRA_WORKTREE=<name>`: a webhook handler should skip external side effects (emails, payouts) when it is set, because every worktree branch holds dev's customers. `kit db migrate` refuses a checkout without it.
+
 The results go to the app's `.env.development.local` (git-ignored; `kit init` adds the line). Setup and teardown run one at a time under a lock in the main checkout's `.work/`, create only what is missing, and stop at the first failed step, naming it; a rerun resumes. build-feature tears the isolation down once after the merge, and a failed teardown adds a line to the run's end message that names `kit cleanup`.
 
 ## Working on the CLI

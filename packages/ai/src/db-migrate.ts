@@ -5,9 +5,9 @@
 // and never resets; a prisma refusal is prisma's own message and exit 1.
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { basename, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { appRoot, readApp, readAspira } from './aspira.js'
-import { defaultSeams, worktreeName, type NeonSeam } from './isolation.js'
+import { defaultSeams, type NeonSeam } from './isolation.js'
 
 export type DbMigrateOptions = {
   projectRoot: string
@@ -65,8 +65,11 @@ export async function dbMigrate(options: DbMigrateOptions): Promise<number> {
     options.warn(`no branch URL: ${join(appDir, ENV_FILE)} lacks ${missing.join(', ')}; run kit worktree <ticket> to give this worktree its own database branch`)
     return 1
   }
-  const folder = basename(resolve(options.projectRoot))
-  const name = values['ASPIRA_WORKTREE'] ?? worktreeName(folder.slice(folder.indexOf('-') + 1))
+  const name = values['ASPIRA_WORKTREE']
+  if (name === undefined || name === '') {
+    options.warn(`${join(appDir, ENV_FILE)} has no ASPIRA_WORKTREE: this checkout was not isolated by the kit; run kit worktree <ticket> to give it its own database branch`)
+    return 1
+  }
   const env = options.env ?? process.env
   const neon = options.neon ?? defaultSeams(env).neon
   let branches

@@ -79,12 +79,12 @@ export const WORKTREES_ENTRY = ['.worktrees/', '# per-ticket git worktrees (kit 
 /** The ignore line for local secrets, written to the project's .gitignore unless git already ignores every linked .env.local. */
 export const ENV_LOCAL_ENTRY = ['.env.local', '# local secrets such as NOTION_TOKEN; kit worktree links them into each ticket worktree'] as const
 
-/** The ignore line for the per-worktree env file kit worktree writes, added when aspira.json isolates (database, webhooks or a placeholder dev.url). */
+/** The ignore line for the per-worktree env file kit worktree writes, added when aspira.json isolates (database, tunnel, webhooks or a placeholder dev.url). */
 export const ENV_DEVELOPMENT_ENTRY = ['.env.development.local', '# per-worktree database URL, port and webhook secrets that kit worktree writes'] as const
 
-/** Whether aspira.json asks for isolation: a database, webhooks, or a dev.url with a {name} or {port} placeholder. */
+/** Whether aspira.json asks for isolation: a database, a tunnel, webhooks, or a dev.url with a {name} or {port} placeholder. */
 export const isolates = (config: Partial<AspiraConfig> | undefined): boolean =>
-  config?.database !== undefined || (config?.webhooks?.length ?? 0) > 0 || /\{(name|port)\}/.test(config?.dev?.url ?? '')
+  config?.database !== undefined || config?.tunnel !== undefined || (config?.webhooks?.length ?? 0) > 0 || /\{(name|port)\}/.test(config?.dev?.url ?? '')
 
 /** Whether git ignores the app's .env.development.local (the root's when there is no app), asked of git at the project root. */
 export const envDevelopmentIgnored = (projectRoot: string, app: string | undefined): boolean => isGitIgnored(projectRoot, app ? `${app}/.env.development.local` : '.env.development.local')

@@ -81,7 +81,7 @@ function fixture(opts: { schema?: string; envFile?: string | null; prisma?: stri
   git(main, 'commit', '-q', '-m', 'initial')
   const worktree = join(main, '.worktrees', 'FEATURE-SCOOP-7')
   git(main, 'worktree', 'add', '-q', '-b', 'feat/scoop-7', worktree)
-  const envFile = opts.envFile === undefined ? `DATABASE_URL=${POOLED}\nDIRECT_URL=${DIRECT}\nPORT=3001\n` : opts.envFile
+  const envFile = opts.envFile === undefined ? `DATABASE_URL=${POOLED}\nDIRECT_URL=${DIRECT}\nPORT=3001\nASPIRA_WORKTREE=scoop-7\n` : opts.envFile
   if (envFile !== null) writeFileSync(join(worktree, '.env.development.local'), envFile)
 
   const records = temp('records')
@@ -160,6 +160,14 @@ describe('kit db migrate', () => {
     const result = await kit(f, await neonMock(['main', 'dev', BRANCH]), MIGRATE)
     expect(result.code).toBe(1)
     expect(result.out).toMatch(/branch/i)
+    expect(prismaCalls(f)).toEqual([])
+  })
+
+  it('T30: exits 1 and never invokes prisma when the env file lacks the ASPIRA_WORKTREE marker, even if a branch of the folder name exists', async () => {
+    const f = fixture({ envFile: `DATABASE_URL=${POOLED}\nDIRECT_URL=${DIRECT}\nPORT=3001\n` })
+    const result = await kit(f, await neonMock(['main', 'dev', BRANCH]), MIGRATE)
+    expect(result.code).toBe(1)
+    expect(result.out).toContain('ASPIRA_WORKTREE')
     expect(prismaCalls(f)).toEqual([])
   })
 

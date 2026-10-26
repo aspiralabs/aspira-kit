@@ -125,6 +125,15 @@ describe('kit doctor with isolation keys in aspira.json (T28, F1 F6 F27)', () =>
     expect(code).toBe(0)
   })
 
+  it('T28 a tunnel-only project counts the ignore line and warns about the Cloudflare token and cloudflared', () => {
+    const root = project({ tunnel: { zone: 'example.com' } }, IGNORE)
+    const { code, lines } = run(root, { env: bareEnv() })
+    expect(mentions(lines, /CLOUDFLARE_API_TOKEN/).length).toBeGreaterThan(0)
+    expect(mentions(lines, /cloudflared/).length).toBeGreaterThan(0)
+    expect(lines.filter(isFail).filter((line) => /\.env\.development\.local/.test(line))).toHaveLength(1)
+    expect(code).toBe(1)
+  })
+
   it('T28 checks only what the keys ask for: a database entry alone warns about NEON_API_KEY and nothing about Cloudflare or Stripe', () => {
     const root = project({ database: ISOLATION_CONFIG.database }, [...IGNORE, '.env.development.local'])
     const { code, lines } = run(root, { env: bareEnv() })

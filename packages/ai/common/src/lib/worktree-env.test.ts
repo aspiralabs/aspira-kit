@@ -48,6 +48,11 @@ describe('worktree identity (T3, F10, F13)', () => {
   })
 })
 
+const POOLED_AUTH = JSON.stringify({
+  app: 'web',
+  database: { provider: 'neon', projectId: 'p', parentBranch: 'dev', envVars: ['DATABASE_URL', { name: 'DIRECT_URL', pooled: false }] },
+})
+
 describe('worktree database variables (T3, F10)', () => {
   it('returns the database.envVars values from the app env file', async () => {
     const root = await checkout(join(await main(), '.worktrees', 'FEATURE-SCOOP-7'), 'PORT=3003\nDATABASE_URL=postgres://branch\nOTHER=x\n')
@@ -57,5 +62,22 @@ describe('worktree database variables (T3, F10)', () => {
   it('returns no variables for a checkout without an env file', async () => {
     const root = await checkout(await main())
     expect(await worktreeDatabaseEnv(root)).toEqual({})
+  })
+
+  it('reads both URLs when database.envVars mixes a name and a { name, pooled } entry', async () => {
+    const root = join(await main(), '.worktrees', 'FEATURE-SCOOP-7')
+    await mkdir(join(root, 'web'), { recursive: true })
+    await writeFile(join(root, 'aspira.json'), POOLED_AUTH)
+    await writeFile(join(root, 'web', '.env.development.local'), 'PORT=3003\nDATABASE_URL=postgres://pooled\nDIRECT_URL=postgres://direct\n')
+    expect(await worktreeIdentity(root)).toEqual({ name: 'scoop-7', port: 3003 })
+    expect(await worktreeDatabaseEnv(root)).toEqual({ DATABASE_URL: 'postgres://pooled', DIRECT_URL: 'postgres://direct' })
+  })
+
+  it('refuses, rather than falling back to the shared database, when a worktree aspira.json cannot be read', async () => {
+    const root = join(await main(), '.worktrees', 'FEATURE-SCOOP-7')
+    await mkdir(join(root, 'web'), { recursive: true })
+    await writeFile(join(root, 'aspira.json'), '{ not json')
+    await writeFile(join(root, 'web', '.env.development.local'), 'PORT=3003\n')
+    await expect(worktreeDatabaseEnv(root)).rejects.toThrow(/aspira\.json/)
   })
 })
