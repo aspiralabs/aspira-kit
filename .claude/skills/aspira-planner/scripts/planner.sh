@@ -17,6 +17,14 @@ installed_in() {
   if is_agent "$dir"; then (cd "$dir" && pwd -P); return; fi
   return 1
 }
+# The agent folder of the global @aspiralabs/ai (pnpm add -g), from the kit on PATH, which prints its own directory.
+global_install() {
+  local pkg
+  command -v kit >/dev/null 2>&1 || return 1
+  pkg=$(kit package-dir 2>/dev/null) && [ -n "$pkg" ] || return 1
+  if is_agent "$pkg/$NAME"; then (cd "$pkg/$NAME" && pwd -P); return; fi
+  return 1
+}
 # The project the agent serves, when it is not the one the agent is installed in: the nearest
 # package.json above the working directory, else the git root, else the working directory.
 project_root() {
@@ -47,9 +55,10 @@ configured_app() {
 # Which planner runs, in this order: PLANNER_AGENT_DIR (kit development only; the report says so),
 # the planner folder of @aspiralabs/ai installed under the project (the app named in the root's aspira.json, then
 # walking up from the working directory, then from this script's location), then this script's own package. $ASPIRA_KIT is never consulted.
-# Sets AGENT, AGENT_SOURCE (env | installed | package), AGENT_VERSION and PROJECT.
+# then the global @aspiralabs/ai (the usual case: kit init no longer installs it in the project).
+# Sets AGENT, AGENT_SOURCE (env | installed | package | global), AGENT_VERSION and PROJECT.
 resolve_agent() {
-  local here dir app_dir own skill_kit_version ai_version
+  local here dir app_dir own skill_kit_version ai_version ai_where
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   AGENT="" AGENT_SOURCE="" PROJECT=""
   for dir in "${PLANNER_AGENT_DIR:-}" "${SPEC_TO_PLAN_AGENT_DIR:-}"; do
@@ -78,7 +87,8 @@ resolve_agent() {
     done
   fi
   if [ -z "$AGENT" ] && is_agent "$here/../../.."; then AGENT=$(cd "$here/../../.." && pwd -P); AGENT_SOURCE=package; fi
-  [ -n "$AGENT" ] || die "cannot find $NAME: install @aspiralabs/ai in the project and run kit init, or set PLANNER_AGENT_DIR for kit development"
+  if [ -z "$AGENT" ] && AGENT=$(global_install); then AGENT_SOURCE=global; fi
+  [ -n "$AGENT" ] || die "cannot find $NAME: install @aspiralabs/ai globally (pnpm add -g @aspiralabs/ai) and run kit init, or set PLANNER_AGENT_DIR for kit development"
   [ -n "$PROJECT" ] || PROJECT=$(project_root)
   AGENT_VERSION=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$AGENT/../package.json" | head -n 1)
   case $AGENT_SOURCE:$AGENT in
@@ -92,10 +102,12 @@ resolve_agent() {
   # warns, since kit development deliberately runs ahead of (or without) an installed pin (F8).
   if [ -f "$here/../.kit-version" ]; then
     skill_kit_version=$(tr -d '[:space:]' < "$here/../.kit-version")
-    ai_version=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$PROJECT/node_modules/@aspiralabs/ai/package.json" 2>/dev/null | head -n 1)
+    ai_version=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$PROJECT/node_modules/@aspiralabs/ai/package.json" 2>/dev/null | head -n 1 || true)
+    ai_where="$PROJECT has $ai_version installed"
+    if [ "$AGENT_SOURCE" = global ]; then ai_version=$AGENT_VERSION; ai_where="the global @aspiralabs/ai is $ai_version"; fi
     if [ -n "$ai_version" ] && [ "$skill_kit_version" != "$ai_version" ]; then
-      if [ "$AGENT_SOURCE" = installed ]; then
-        die "blocked: this skill is pinned to @aspiralabs/ai $skill_kit_version but $PROJECT has $ai_version installed; run kit init to update the skill"
+      if [ "$AGENT_SOURCE" = installed ] || [ "$AGENT_SOURCE" = global ]; then
+        die "blocked: this skill is pinned to @aspiralabs/ai $skill_kit_version but $ai_where; run kit init to update the skill"
       else
         echo "$NAME: mismatch: this skill is pinned to @aspiralabs/ai $skill_kit_version but $PROJECT has $ai_version installed; continuing from $AGENT_SOURCE" >&2
       fi
