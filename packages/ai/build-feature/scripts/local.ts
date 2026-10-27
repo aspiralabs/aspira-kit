@@ -1,5 +1,5 @@
 // The build-feature driver, as `build-feature.sh local` runs it:
-//   local.ts <ID> [--cloud] [--repo <dir>] [--run <runId>] [--force-run] [--finish]
+//   local.ts <ID> [--cloud] [--repo <dir>] [--run <runId>] [--force-run] [--finish] [--no-ticket] [--no-comment]
 // By default every step runs its skill in this session; with --cloud every step runs its skill's
 // cloud agent, started and waited on (F2, Q10 revised; KIT-51). --local is accepted and means the default.
 // Prints exactly one stage as JSON on stdout and exits 0, except the `end` stage, which exits by
@@ -22,6 +22,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       'force-run': { type: 'boolean', default: false },
       finish: { type: 'boolean', default: false },
       autonomous: { type: 'boolean', default: false },
+      'no-ticket': { type: 'boolean', default: false },
+      'no-comment': { type: 'boolean', default: false },
     },
   })
   const [id] = positionals
@@ -36,6 +38,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     finish: values.finish,
     mode: values.cloud ? 'cloud' : 'local',
     autonomous: values.autonomous,
+    ...(values['no-ticket'] ? { noTicket: true } : {}),
     now,
     env: process.env,
   })

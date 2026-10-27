@@ -22,7 +22,7 @@ import { gatePhase, gateStage } from '#build-feature/gate.ts'
 import { stepCommand } from '#build-feature/route.ts'
 import type { Failure, Pending, RunState } from '#build-feature/run-state.ts'
 import { readStepUsage } from '#build-feature/step-results.ts'
-import { isExcludedPath, pushGuarded, rewritePrBody } from '#build-feature/step8.ts'
+import { baseBranchOf, featureBranch, isExcludedPath, pullRequestOf, pushGuarded, rewritePrBody } from '#build-feature/step8.ts'
 import { GH_ARGS, GIT_ARGS, parseStatus, shown, system, type System, type SystemOptions } from '#build-feature/system.ts'
 
 /** Reviews per ticket, across runs, before the run stops with findings left. */
@@ -143,13 +143,17 @@ async function recordReviews(context: PhaseContext, state: RunState, sys: System
 
 /** The pr-reviewer step: the Playbook's command, with --since the copy of the last fixed review. */
 function reviewStep(context: PhaseContext, state: RunState, since: number | null): PhaseResult {
-  const base = stepCommand(IN_REVIEW, { id: context.id, app: context.aspira.app ?? '.', mode: context.mode }).command
+  const first = stepCommand(IN_REVIEW, { id: context.id, app: context.aspira.app ?? '.', mode: context.mode }).command
+  // pullRequest false (KIT-68, F8): there is no PR, so the reviewer reads the ticket branch against the repos base branch.
+  const base = pullRequestOf(context.aspira) ? first : `${first} --branch ${featureBranch(context.id, context.card.title, context.card.type)} --base ${baseBranchOf(context.aspira)}`
   return { kind: 'step', state, step: 'pr-reviewer', command: since === null ? base : `${base} --since ${reviewCopy(context, since)}` }
 }
 
 /** Rewrite the PR body once for review n at the end of the loop. */
 async function finalBody(context: PhaseContext, state: RunState, n: number, sys: System): Promise<{ ok: true; state: RunState } | { ok: false; message: string; failure: Failure }> {
   if (recordOf(state).finalBody === n) return { ok: true, state }
+  // pullRequest false: no PR body to rewrite (KIT-68, F7).
+  if (!pullRequestOf(context.aspira)) return { ok: true, state: withRecord(state, { finalBody: n }) }
   const rewritten = await rewritePrBody(context, state, sys)
   if (!rewritten.ok) return rewritten
   return { ok: true, state: withRecord(rewritten.value, { finalBody: n }) }
@@ -226,7 +230,8 @@ function askStage(state: RunState): PhaseResult {
 
 /** What the loop does next: run a review, mark the PR ready, print the fix, or stop at the cap. */
 export async function reviewStage(context: PhaseContext, state: RunState, sys: System = system): Promise<PhaseResult> {
-  if (context.card.status !== IN_REVIEW) return { kind: 'done', state }
+  // statusFlow false: the card's Status carries nothing, so the review runs whatever it says (KIT-68, F6).
+  if (context.aspira.statusFlow !== false && context.card.status !== IN_REVIEW) return { kind: 'done', state }
   const recorded = await recordReviews(context, withPr(context, state), sys)
   if (!recorded.ok) return recorded.result
   const current = recorded.state
@@ -235,6 +240,8 @@ export async function reviewStage(context: PhaseContext, state: RunState, sys: S
   const record = recordOf(current)
   if (left(last) === 0) {
     if (record.ready === last.n) return { kind: 'done', state: current }
+    // pullRequest false: nothing to mark ready; the review is recorded as the last and the run is done (KIT-68, F7).
+    if (!pullRequestOf(context.aspira)) return { kind: 'done', state: withRecord(current, { ready: last.n }) }
     const url = current.step8.prUrl
     if (url === null) return stopWith(current, 'the run has no PR to mark ready', { action: 'gh pr ready', message: 'the run has no PR to mark ready' })
     const ready = await sys.ghPrReady(optionsOf(context), url)
@@ -303,9 +310,11 @@ async function fixAccept(context: PhaseContext, state: RunState, pending: Pendin
   const pushed = await pushGuarded(context, next, sys)
   if (!pushed.ok) return stopWith(next, pushed.message, pushed.failure)
   next = pushed.value
-  const rewritten = await rewritePrBody(context, next, sys)
-  if (!rewritten.ok) return stopWith(next, rewritten.message, rewritten.failure)
-  next = rewritten.value
+  if (pullRequestOf(context.aspira)) {
+    const rewritten = await rewritePrBody(context, next, sys)
+    if (!rewritten.ok) return stopWith(next, rewritten.message, rewritten.failure)
+    next = rewritten.value
+  }
   await cp(join(context.folder, 'pr-review'), reviewCopy(context, n), { recursive: true, force: true })
   next = withRecord(next, { fixed: [...recordOf(next).fixed, n] })
   return next.queue.length > 0 ? askStage(next) : { kind: 'done', state: next }

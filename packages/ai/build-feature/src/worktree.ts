@@ -173,7 +173,7 @@ export async function isolateIn(input: { place: Place; id: string; worktree: str
 }
 
 /** Make the ticket's worktree (or reuse it), exclude .worktrees/, and run the install and build in a new one, in the project's `app` directory from aspira.json when it names one (KIT-21). */
-export async function prepareWorktree(input: { place: Place; id: string; title: string; type: TicketType; cardType: string; env: NodeJS.ProcessEnv; app?: string; skipIsolation?: boolean }, sys: System = system): Promise<Prepared> {
+export async function prepareWorktree(input: { place: Place; id: string; title: string; type: TicketType; cardType: string; env: NodeJS.ProcessEnv; app?: string; base?: string; skipIsolation?: boolean }, sys: System = system): Promise<Prepared> {
   const { place, id, title, type, env } = input
   const path = worktreePath(type, id)
   const worktree = join(place.main, path)
@@ -193,13 +193,14 @@ export async function prepareWorktree(input: { place: Place; id: string; title: 
     }
     return { ok: true, worktree, branch, created: false, ran: [] }
   }
-  const fetched = await sys.gitFetchMain(options)
-  if (fetched.code !== 0) return fail(shown('git', GIT_ARGS.fetchMain), fetched, `the run could not fetch origin/main to start ${path} from it`)
+  const base = input.base ?? 'main'
+  const fetched = await sys.gitFetchMain(options, base)
+  if (fetched.code !== 0) return fail(shown('git', base === 'main' ? GIT_ARGS.fetchMain : GIT_ARGS.fetchBase(base)), fetched, `the run could not fetch origin/${base} to start ${path} from it`)
   const exists = (await sys.gitBranchExists(options, branch)).code === 0
-  const added = await sys.gitWorktreeAdd(options, path, branch, !exists)
+  const added = await sys.gitWorktreeAdd(options, path, branch, !exists, base)
   if (added.code !== 0) {
     const why = exists ? `the worktree ${path} could not be added on the existing branch ${branch} (when it is checked out in ${relative(place.main, place.top) || 'the main checkout'}, switch that checkout to main first)` : `the worktree ${path} could not be added`
-    return fail(shown('git', GIT_ARGS.worktreeAdd(path, branch, !exists)), added, why)
+    return fail(shown('git', GIT_ARGS.worktreeAdd(path, branch, !exists, base)), added, why)
   }
   await excludeWorktrees(place)
   // The main checkout's .env.local files, linked in (the root's, then the app's), as kit worktree does (KIT-49):

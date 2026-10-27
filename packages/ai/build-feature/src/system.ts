@@ -52,9 +52,11 @@ export const GIT_ARGS = {
   toplevel: ['rev-parse', '--show-toplevel'],
   commonDir: ['rev-parse', '--path-format=absolute', '--git-common-dir'],
   fetchMain: ['fetch', 'origin', 'main'],
+  /** A repos entry's base branch (KIT-68, F14): fetched like main. */
+  fetchBase: (base: string) => ['fetch', 'origin', base],
   branchExists: (branch: string) => ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`],
   /** GIT-002: a new branch from origin/main, or (when the branch already exists) that branch. */
-  worktreeAdd: (path: string, branch: string, create: boolean) => (create ? ['worktree', 'add', '-b', branch, path, 'origin/main'] : ['worktree', 'add', path, branch]),
+  worktreeAdd: (path: string, branch: string, create: boolean, base = 'main') => (create ? ['worktree', 'add', '-b', branch, path, `origin/${base}`] : ['worktree', 'add', path, branch]),
   checkIgnore: (path: string) => ['check-ignore', '-q', '--no-index', path],
   /** A file as it is at `rev` (path from the repository root). */
   show: (rev: string, path: string) => ['show', `${rev}:${path}`],
@@ -100,13 +102,14 @@ export const gitToplevel = (options: SystemOptions) => run('git', GIT_ARGS.tople
 /** The main repository's .git directory, absolute, from the checkout or any of its worktrees. */
 export const gitCommonDir = (options: SystemOptions) => run('git', GIT_ARGS.commonDir, options)
 /** `git fetch origin main`, so a new worktree starts from the current origin/main. */
-export const gitFetchMain = (options: SystemOptions) => run('git', GIT_ARGS.fetchMain, options)
+export const gitFetchMain = (options: SystemOptions, base = 'main') => run('git', base === 'main' ? GIT_ARGS.fetchMain : GIT_ARGS.fetchBase(base), options)
 /** Exit 0 when the local branch exists. */
 export const gitBranchExists = (options: SystemOptions, branch: string) => run('git', GIT_ARGS.branchExists(branch), options)
 /** `git worktree add` (GIT-002). The run never removes a worktree. */
-export function gitWorktreeAdd(options: SystemOptions, path: string, branch: string, create: boolean): Promise<CommandResult> {
+export function gitWorktreeAdd(options: SystemOptions, path: string, branch: string, create: boolean, base = 'main'): Promise<CommandResult> {
   assertPlainBranch(branch)
-  return run('git', GIT_ARGS.worktreeAdd(path, branch, create), options)
+  assertPlainBranch(base)
+  return run('git', GIT_ARGS.worktreeAdd(path, branch, create, base), options)
 }
 /** Exit 0 when `path` is gitignored (by the files, not the index). */
 export const gitCheckIgnore = (options: SystemOptions, path: string) => run('git', GIT_ARGS.checkIgnore(path), options)

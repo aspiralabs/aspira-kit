@@ -22,6 +22,7 @@ import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { renderGroomPage } from '@aspiralabs/ai/common/lib/decisions'
 import { rebuildGroomRecord, type GroomDecision, type GroomRecord } from '@aspiralabs/ai/common/lib/groom-record'
+import { commandApp } from './step-results.ts'
 import { BOARD, DRIVER, ID, NOW, PACKAGE, SLUG, STEP_SKILLS, TICKET_URL, TITLE, decisionsMarkdown, writeStepExport, type Result, type Stage, type StepReportOptions } from './driver.test-helper.ts'
 
 const exec = promisify(execFile)
@@ -117,6 +118,8 @@ export async function clientProject(settings: Settings) {
     'README.md': '# api\n',
     'src/app.ts': 'export const app = 1\n',
     'service/package.json': JSON.stringify({ name: 'service', private: true, scripts: { 'api-check': 'echo ok' } }),
+    // A lock file makes the install the fake pnpm on PATH (no npm there).
+    'service/pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
     '.gitignore': 'node_modules/\n',
   })
 
@@ -292,7 +295,7 @@ export async function clientProject(settings: Settings) {
         await mkdir(join(folder, 'groom/trace'), { recursive: true })
         await writeFile(join(folder, 'groom/trace/groom.json'), JSON.stringify({ ...record, page: { url: 'https://app.notion.com/p/grooming-decisions' } }, null, 2))
         await writeFile(join(folder, 'groom/trace/decisions.md'), decisionsMarkdown([]))
-      } else await writeStepExport(folder, repo, step, status, options)
+      } else await writeStepExport(folder, repo, step, status, step === 'code-analyzer' && options.app === undefined ? { ...options, app: commandApp(String(stage.command)) } : options)
       if (step === 'implementor') {
         await mkdir(join(repo, 'src'), { recursive: true })
         await writeFile(join(repo, 'src/feature.ts'), 'export const feature = 1\n')

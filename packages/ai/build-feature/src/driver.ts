@@ -69,7 +69,7 @@ import { reviewPhase } from '#build-feature/review-loop.ts'
 import { readRunState, stateDirOf, writeRunState, type Card, type Failure, type Pending, type PhaseRecord, type RunState, type Usage } from '#build-feature/run-state.ts'
 import { analyzedApps, analyzerReady, commandApp, readImplementorApps, readImplementorStatus, readSpecCoverage, readStepResult, readStepUsage, stepReportSchema, stepResultTable } from '#build-feature/step-results.ts'
 import { RELEASE_SKIPPED, releaseRowPhase, step10Phase } from '#build-feature/step10.ts'
-import { step8Phase } from '#build-feature/step8.ts'
+import { baseBranchOf, step8Phase } from '#build-feature/step8.ts'
 import { renderBuildSummary } from '#build-feature/summary.ts'
 import { shown, system } from '#build-feature/system.ts'
 import { runSpans } from '#build-feature/telemetry.ts'
@@ -592,7 +592,9 @@ async function requestResolve(ctx: Ctx, state: RunState, purpose: ResolvePurpose
     return afterResolution(ctx, state, resolution, purpose)
   }
   const move = purpose.purpose === 'premove' ? purpose.move : undefined
-  return pend(ctx, state, 'resolve', (output) => resolveStage({ id: ctx.input.id, board, output, ...(move === undefined ? {} : { move }) }), { data: { ...purpose } })
+  // Started inside one repo of a client harness: the stage names the repo the run works in (KIT-68, F13).
+  const inRepo = clientRootOf(ctx.input.repo) !== undefined && clientRootStart(ctx.input.repo) === null
+  return pend(ctx, state, 'resolve', (output) => ({ ...resolveStage({ id: ctx.input.id, board, output, ...(move === undefined ? {} : { move }) }), ...(inRepo ? { repo: ctx.input.repo } : {}) }), { data: { ...purpose } })
 }
 
 async function afterResolution(ctx: Ctx, state: RunState, resolution: Resolution, purpose: ResolvePurpose): Promise<Out> {
@@ -690,7 +692,7 @@ function clientRootStart(repo: string): string | null {
 
 async function moveIntoWorktree(ctx: Ctx, state: RunState, place: Place, type: NonNullable<ReturnType<typeof ticketTypeOf>>, cardType: string): Promise<Out> {
   const card = state.card!
-  const prepared = await prepareWorktree({ place, id: ctx.input.id, title: card.title, type, cardType, env: ctx.input.env, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }), ...(mergeRecordOf(state) === null ? {} : { skipIsolation: true }) })
+  const prepared = await prepareWorktree({ place, id: ctx.input.id, title: card.title, type, cardType, env: ctx.input.env, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }), ...(ctx.aspira?.baseBranch === undefined ? {} : { base: baseBranchOf(ctx.aspira) }), ...(mergeRecordOf(state) === null ? {} : { skipIsolation: true }) })
   if (!prepared.ok) return stop(ctx, state, prepared.message, { stopped: true, reason: { kind: 'worktree-command' }, failure: { action: 'worktree', command: prepared.command, exitCode: prepared.exitCode, output: prepared.output, message: prepared.message } })
   const { worktree, branch } = prepared
   // A client layout keeps the ticket folder and the run state at the client root, outside every repo: nothing is carried (KIT-68).

@@ -4,6 +4,7 @@
 // git history keeps the whole tree in scope, and says so.
 
 import { relative, resolve } from 'node:path'
+import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
 import type { Diagnostic } from './diagnostics.ts'
 import type { Executor } from './executor.ts'
 
@@ -27,19 +28,31 @@ const prefixOf = (gitRoot: string, root: string): string => {
   return rel === '' || rel.startsWith('..') ? '' : rel.replaceAll('\\', '/')
 }
 
+/** The base branch of the repos entry the analyzed directory belongs to (aspira.json `baseBranch`, KIT-68 A11); `main` anywhere else. */
+function baseBranchOf(executor: Executor): string {
+  if (executor.kind !== 'host') return 'main'
+  try {
+    const base = readEffectiveAspira(executor.root).config.baseBranch
+    return typeof base === 'string' && base !== '' ? base : 'main'
+  } catch {
+    return 'main'
+  }
+}
+
 /**
  * The branch's changed files under the analyzed directory: the diff against the merge base with
- * `origin/main` (or `main`), plus every tracked or untracked change in the working tree, minus
+ * `origin/<base>` (or `<base>`; `main` unless the repos entry names another), plus every tracked or untracked change in the working tree, minus
  * deletions. Null, with the reason, when there is no base to diff against.
  */
 export async function changedScope(executor: Executor, gitRoot: string): Promise<{ scope: Scope | null; note: string | null }> {
   const git = (command: string) => executor.run(command, { timeoutMs: 60_000 })
   let base: string | null = null
-  for (const candidate of ['origin/main', 'main']) {
+  const baseBranch = baseBranchOf(executor)
+  for (const candidate of [`origin/${baseBranch}`, baseBranch]) {
     const found = await git(`git rev-parse --verify -q ${candidate}`)
     if (found.exitCode === 0) { base = candidate; break }
   }
-  if (base === null) return { scope: null, note: 'Scope: the whole tree; no main branch to diff the ticket branch against (origin/main or main)' }
+  if (base === null) return { scope: null, note: `Scope: the whole tree; no main branch to diff the ticket branch against (origin/${baseBranch} or ${baseBranch})` }
   const mergeBase = await git(`git merge-base ${base} HEAD`)
   if (mergeBase.exitCode !== 0) return { scope: null, note: `Scope: the whole tree; git merge-base ${base} HEAD failed: ${(mergeBase.stderr || mergeBase.stdout).trim().slice(-200)}` }
   const diff = await git(`git diff --name-only --diff-filter=ACMR ${mergeBase.stdout.trim()} HEAD`)

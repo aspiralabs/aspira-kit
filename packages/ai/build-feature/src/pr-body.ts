@@ -33,6 +33,8 @@ export type RenderPrBodyInput = {
   folder?: string
   /** The app directory (aspira.json `app`), to scope redaction; also the one app whose `.static-analysis/rounds.json` is read when `apps` is not given. */
   app?: string
+  /** The repos entry's base branch (aspira.json `baseBranch`); default main. */
+  base?: string
   /** The app directories the code-analyzer ran on (KIT-39), each with its own `.static-analysis/rounds.json`. Default: `app` alone. */
   apps?: string[]
 }
@@ -41,8 +43,8 @@ const SAME_SESSION_NOTICE = "This build's steps and its reviews all ran in the s
 const CLOUD_NOTICE = "This build's steps and its reviews each ran as that step's own agent run (cloud mode), not in one session."
 
 /** `git diff --name-only` against the base branch; `[]` on any failure (no commits yet, no base branch, a bare repository), never thrown. */
-async function changedFiles(repo: string): Promise<string[]> {
-  const base = await exec('git', ['merge-base', BASE_BRANCH, 'HEAD'], { cwd: repo })
+async function changedFiles(repo: string, baseBranch: string): Promise<string[]> {
+  const base = await exec('git', ['merge-base', baseBranch, 'HEAD'], { cwd: repo })
     .then((result) => result.stdout.trim())
     .catch(() => null)
   if (base === null) return []
@@ -69,9 +71,9 @@ async function analyzerOf(repo: string, app: string | undefined): Promise<{ app:
 
 /** The PR body for this run state: Summary, Evidence and Merge Danger (from `folder`'s implementation.md and the branch diff, when `folder` is given), then the decisions taken for you after Ready: Plan, the run-mode notice, and a link to the Build Summary. */
 export async function renderPrBody(input: RenderPrBodyInput): Promise<string> {
-  const { ticket, state, repo, folder, app, apps } = input
+  const { ticket, state, repo, folder, app, apps, base = BASE_BRANCH } = input
   const implementationMd = folder === undefined ? '' : await readFile(join(folder, 'plan.review/implementation.md'), 'utf8').catch(() => '')
-  const [changed, ...results] = await Promise.all([changedFiles(repo), ...(apps ?? [app]).map((dir) => analyzerOf(repo, dir))])
+  const [changed, ...results] = await Promise.all([changedFiles(repo, base), ...(apps ?? [app]).map((dir) => analyzerOf(repo, dir))])
   const analyzers = results.flat()
   const taken = orderedTaken(state.takenKeys).map((entry) => ({ key: entry.key, decision: { question: entry.decision.question, answer: entry.decision.answer, recommended: entry.decision.recommended } }))
   const notice = (state.runs.at(-1)?.mode ?? 'local') === 'local' ? SAME_SESSION_NOTICE : CLOUD_NOTICE

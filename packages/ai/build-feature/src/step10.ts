@@ -28,7 +28,7 @@ import { WHAT_IT_FIXED_MISSING, whatItFixed } from '@aspiralabs/ai/common/lib/pr
 import { slug } from '@aspiralabs/ai/common/lib/ticket'
 import type { Phase, PhaseContext, PhaseResult } from '#build-feature/driver.ts'
 import type { Pending, RunState } from '#build-feature/run-state.ts'
-import { BASE_BRANCH, isExcludedPath, pushGuarded } from '#build-feature/step8.ts'
+import { baseBranchOf, isExcludedPath, pushGuarded } from '#build-feature/step8.ts'
 import { GIT_ARGS, parseStatus, shown, system, type CommandResult, type System, type SystemOptions } from '#build-feature/system.ts'
 
 /** The Status Steps 9 and 10 run in. */
@@ -70,8 +70,8 @@ const stopped = (state: RunState, message: string, action: string, command?: str
 const changesetConfigSchema = z.looseObject({ fixed: z.array(z.array(z.string())).default([]) })
 
 /** The files changed on the branch since it left the base branch (origin's base when it is known). */
-async function branchFiles(options: SystemOptions): Promise<string[]> {
-  for (const base of [`origin/${BASE_BRANCH}`, BASE_BRANCH]) {
+async function branchFiles(options: SystemOptions, baseBranch: string): Promise<string[]> {
+  for (const base of [`origin/${baseBranch}`, baseBranch]) {
     const known = await gitRead(['rev-parse', '--verify', '--quiet', base], options)
     if (known.code !== 0) continue
     const diff = await gitRead(['diff', '--name-only', `${base}...HEAD`], options)
@@ -167,7 +167,7 @@ async function step10Accept(context: PhaseContext, state: RunState, pending: Pen
   const parsed = step10Answer.safeParse(answer)
   if (!parsed.success) return stopped(state, `the Step 10 answer at ${pending.output} is not what the stage asked for: ${parsed.error.issues.map((issue) => `${issue.path.join('.') || 'answer'}: ${issue.message}`).join('; ')}`, 'step10')
   const options = optionsOf(context)
-  const packages = await changedFixedPackages(context.repo, await branchFiles(options))
+  const packages = await changedFixedPackages(context.repo, await branchFiles(options, baseBranchOf(context.aspira)))
   const changeset = packages.length === 0 ? null : changesetPath(context.id, context.card.title)
   if (changeset !== null) {
     await mkdir(dirname(join(context.repo, changeset)), { recursive: true })
