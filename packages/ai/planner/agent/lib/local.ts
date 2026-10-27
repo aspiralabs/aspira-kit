@@ -8,6 +8,8 @@
 // agent changes them. Once both phases are done, the plan is assessed and exported by the same
 // code the agent uses.
 
+import { extendFilesFor } from '@aspiralabs/ai/common/lib/aspira-config'
+import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { RESEARCH_RULE, sessionResearchTools } from '@aspiralabs/ai/common/lib/research-rule'
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
@@ -112,6 +114,9 @@ export function renderRouter(instructions: string, script: string): string {
   ].join('\n')
 }
 
+/** The client's extend files for a stage, each under a heading naming it; nothing when the stage lists none (KIT-68 F12). */
+const extendLines = (from: string, stage: string): string[] => extendFilesFor(from, stage).flatMap((file) => [`## Client instructions: ${file}`, '', readFileSync(file, 'utf8').trim(), ''])
+
 /** The file a subagent reads: the agent's system prompt and phase prompt verbatim, the tool mapping and the output contract. */
 export function renderTaskPrompt(args: { id: PhaseId; system: string; prompt: string; output: string; reads: string | null; repo: string; knowledge: string[]; schema: z.ZodType }): string {
   const mechanics = args.id.startsWith('explore-')
@@ -142,6 +147,7 @@ export function renderTaskPrompt(args: { id: PhaseId; system: string; prompt: st
     '## System', '', args.system, '',
     '## Task', '', args.prompt, '',
     '## Output schema', '', '```json', JSON.stringify(z.toJSONSchema(args.schema, { io: 'input' }), null, 2), '```', '',
+    ...extendLines(args.repo, 'planner'),
   ].join('\n')
 }
 

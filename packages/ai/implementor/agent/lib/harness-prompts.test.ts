@@ -174,6 +174,6 @@ describe('F11: extend.implementor appends the named file to the orchestrator and
     const made = await fixture({ repos: { web: { path: 'repo' } }, extend: { groomer: ['extend/g.md'] } }, 'root')
     await write(join(made.dir, 'extend/g.md'), 'Groomer notes.\n')
     const written = await prompts(made)
-    expect(written['wave-1-A']).toBe(await readFile(new URL('./__goldens__/wave-1-A-none.md', import.meta.url), 'utf8'))
+    expect(written['wave-1-A']).toBe(await readFile(new URL('./__goldens__/wave-1-A-none.txt', import.meta.url), 'utf8'))
   })
 })

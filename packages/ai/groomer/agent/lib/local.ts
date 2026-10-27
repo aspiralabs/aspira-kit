@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs'
+import { extendFilesFor } from '@aspiralabs/ai/common/lib/aspira-config'
+import { existsSync, readFileSync } from 'node:fs'
 import { RESEARCH_RULE, sessionResearchTools } from '@aspiralabs/ai/common/lib/research-rule'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
@@ -231,6 +232,9 @@ const knowledgeNote = (knowledge: Pick<Knowledge, 'source' | 'path' | 'requiredF
     ? `Engineering guidelines: read ${knowledge.requiredFile} in full first. The topic pages it routes to are files in ${knowledge.path}, indexed by ${join(knowledge.path, 'INDEX.md')}. Do not edit them.`
     : `Engineering guidelines: read ${knowledge.requiredFile} in full first. Do not edit it.`
 
+/** The client's extend files for a stage, each under a heading naming it; nothing when the stage lists none (KIT-68 F12). */
+const extendLines = (from: string, stage: string): string[] => extendFilesFor(from, stage).flatMap((file) => [`## Client instructions: ${file}`, '', readFileSync(file, 'utf8').trim(), ''])
+
 /** The round task's prompt file: the instructions are the authority, the files are the input, the schema is the output contract. */
 export function renderRoundPrompt(args: { n: number; output: string; agentDir: string; repo: string; paths: Paths; knowledge: Knowledge; record: GroomRecord; titleOnly: boolean }): string {
   const { n, output, record, paths } = args
@@ -257,6 +261,7 @@ export function renderRoundPrompt(args: { n: number; output: string; agentDir: s
     JSON.stringify(z.toJSONSchema(roundSchema, { io: 'input' }), null, 2),
     '```',
     '',
+    ...extendLines(args.repo, 'groomer'),
   ].join('\n')
 }
 
@@ -274,6 +279,7 @@ export function renderSummaryPrompt(args: { agentDir: string; paths: Paths; reco
     `- ${RESEARCH_RULE} ${sessionResearchTools(args.repo)}`,
     `- Write it to \`${args.paths.summary}\` and nothing else. Then reply with one line: \`done\`, or what stopped you.`,
     '',
+    ...extendLines(args.repo, 'groomer'),
   ].join('\n')
 }
 

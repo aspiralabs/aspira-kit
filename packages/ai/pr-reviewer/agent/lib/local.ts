@@ -5,6 +5,8 @@
 // to a file. The session runs those as subagents and calls again. Once every stage is done
 // the review is exported in the agent's layout and, for a GitHub PR, posted.
 
+import { extendFilesFor } from '@aspiralabs/ai/common/lib/aspira-config'
+import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { RESEARCH_RULE, sessionResearchTools } from '@aspiralabs/ai/common/lib/research-rule'
 import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
@@ -239,6 +241,9 @@ export const agentSources = (agentDir: string) => ({
   seat: (who: Reviewer) => join(agentDir, 'agent', 'subagents', who, 'persona.md'),
 })
 
+/** The client's extend files for a stage, each under a heading naming it; nothing when the stage lists none (KIT-68 F12). */
+const extendLines = (from: string, stage: string): string[] => extendFilesFor(from, stage).flatMap((file) => [`## Client instructions: ${file}`, '', readFileSync(file, 'utf8').trim(), ''])
+
 /**
  * The file a subagent reads. Everything the seat is told comes from the agent: the shared prefix
  * and the turn are review.ts's, the persona is the seat's persona.md, all verbatim, and the
@@ -275,6 +280,7 @@ export function renderTaskPrompt(task: PlanTask, output: string, persona: { path
     JSON.stringify(OUTPUT_SCHEMAS[task.kind], null, 2),
     '```',
     '',
+    ...extendLines(pr.repoPath ?? process.cwd(), 'pr-reviewer'),
   ].join('\n')
 }
 
