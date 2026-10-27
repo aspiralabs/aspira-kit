@@ -1,5 +1,12 @@
 # @aspiralabs/kit
 
+## 0.20.0
+
+### Minor Changes
+
+- 2215366: Client harness: aspira.json keys (repos, workRoot, statusFlow, pullRequest, guidelines, extend) let a client project run the agents (KIT-68)
+- 3c40a5e: The in-session spec writer, planner and pr-reviewer use the codebase map when aspira.json sets `useCodebaseMap: true` (off by default), and the pr-reviewer flags a changed file outside the spec's Blast radius as a low finding (KIT-70)
+
 ## 0.19.0
 
 ### Minor Changes
