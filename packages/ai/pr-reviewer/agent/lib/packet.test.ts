@@ -260,7 +260,8 @@ describe('T23: the brief in the packet', () => {
     expect(buildPacket({ ...input(), brief: BRIEF }).text).toBe(packet.text)
     const pr: PrContext = { label: 'o/n#1', repoPath: '/workspace/repo', packet: packet.text }
     expect(sharedPrefix(pr).startsWith(packet.text)).toBe(true)
-    for (const turn of [...SEATS.map((seat) => openingPrompt(seat, pr)), verifyPrompt(1, pr)]) expect(turn.startsWith(packet.text)).toBe(true)
+    // the packet is in the shared prefix, which the turns' own prompts follow; they never repeat it
+    for (const turn of [...SEATS.map((seat) => openingPrompt(seat, pr)), verifyPrompt(1, pr)]) expect(turn).not.toContain(BRIEF)
   })
 })
 

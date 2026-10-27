@@ -747,7 +747,9 @@ const SLOW = 240_000
 const NOTE_TEXT = 'NOTE-TEXT-MARKER the importers are fragile'
 const BLAST_ENTRY = /^### \[BLAST1\.1\] Blast radius/gm
 
-const mapOn = (dir: string, key: boolean | undefined = true) => (key === undefined ? Promise.resolve() : writeFile(join(dir, 'aspira.json'), JSON.stringify({ useCodebaseMap: key })))
+// no second argument: key on; an explicit undefined: no aspira.json at all
+const mapOn = (dir: string, ...rest: [key?: boolean]): Promise<void> =>
+  rest.length > 0 && rest[0] === undefined ? Promise.resolve() : writeFile(join(dir, 'aspira.json'), JSON.stringify({ useCodebaseMap: rest[0] ?? true }))
 const readPacket = (workDir: string) => readFile(join(workDir, 'packet.md'), 'utf8')
 const beforeRunNotes = (findings: string) => (findings.includes('## Run notes') ? findings.slice(0, findings.indexOf('## Run notes')) : findings)
 const runNotes = (findings: string) => (findings.includes('## Run notes') ? findings.slice(findings.indexOf('## Run notes')) : '')

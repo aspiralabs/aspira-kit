@@ -68,6 +68,8 @@ try {
       const outputDir = before.kind === 'ticket' ? outputFor(before.folder) : values.output
       const result = await runLocal({
         source,
+        sessionRepo: values.repo,
+        ...(before.kind === 'ticket' ? { ticketDir: before.folder } : {}),
         ...(before.kind === 'none' && values.branch !== undefined ? { branch: values.branch } : {}),
         ...(before.kind === 'none' && values.base !== undefined ? { base: values.base } : {}),
         ...(rounds === undefined ? {} : { maxRounds: Number(rounds) }),

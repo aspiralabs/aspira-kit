@@ -3,12 +3,14 @@ import { basename, resolve } from 'node:path'
 import { defineTool } from 'eve/tools'
 import { z } from 'zod'
 import { REVIEW_DIR, REVIEW_SUBDIR, ignoreRule, needsIgnoreRule, optionalPath, patchStats, ticketFolder } from '../lib/pr.ts'
-import { sortFindingsMarkdown } from '../lib/findings.ts'
+import { appendRunNotes, sortFindingsMarkdown } from '../lib/findings.ts'
 import { FILES, roundFilesInOrder, slugify } from '../lib/review.ts'
 import { TARGET_FILE, stampReviewed, targetFileSchema } from '../lib/target.ts'
 import { MODELS } from '../lib/models.ts'
 import { USAGE_LEDGER, parseLedger, renderCostMarkdown, summarizeUsage } from '../lib/usage.ts'
 
+
+const CLOUD_RUN_NOTES = ['Codebase map: not used (cloud run)', 'Blast radius check skipped: the spec is not available in a cloud clone']
 
 // Sandboxes are per session and disposable. This copies the review's markdown out to
 // the host so the person keeps it: the fix list, the summary, the transcript, what was
@@ -70,7 +72,8 @@ export default defineTool({
       // and the fix list is in severity order with its totals equal to its entries, whatever Nova wrote.
       // Written back to the sandbox too, so comment-on-pr posts the stamped, sorted text.
       const stamp = target !== null && (path === FILES.findings || path === FILES.review)
-      const content = stamp ? stampReviewed(path === FILES.findings ? sortFindingsMarkdown(raw) : raw, target) : raw
+      // A cloud run reads no map and has no spec in its clone: the comment says so in the same Run notes as a local run.
+      const content = stamp ? stampReviewed(path === FILES.findings ? sortFindingsMarkdown(appendRunNotes(raw, CLOUD_RUN_NOTES)) : raw, target) : raw
       if (stamp && content !== raw) await sandbox.writeTextFile({ path, content })
       if (path === FILES.findings) findings = content
       if (path === FILES.review) review = content
