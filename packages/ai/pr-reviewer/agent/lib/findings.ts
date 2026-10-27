@@ -89,3 +89,23 @@ export function renderFindingsList(findings: string): string {
   for (const finding of summaries) lines.push(`- **${severityHeading(finding.severity)}** · ${finding.whatThisMeans ?? finding.title} _(${finding.id}${finding.whatThisMeans === null ? '' : `: ${finding.title}`}; evidence in findings.md)_`)
   return lines.join('\n')
 }
+
+const RUN_NOTES = /^## Run notes\s*$/
+
+/** Lines under `## Run notes`, created after the other sections when absent. Never counted as findings. */
+export function appendRunNotes(findings: string, lines: string[]): string {
+  if (lines.length === 0 || countsFromFindings(findings) === null) return findings
+  const all = findings.split('\n')
+  const start = all.findIndex((line) => RUN_NOTES.test(line))
+  const bullets = (present: string[]) => lines.filter((line) => !present.includes(line.trim())).map((line) => `- ${line}`)
+  if (start < 0) {
+    while (all.at(-1)?.trim() === '') all.pop()
+    return [...all, '', '## Run notes', '', ...bullets([]), ''].join('\n')
+  }
+  let end = all.findIndex((line, index) => index > start && SECTION.test(line))
+  if (end < 0) end = all.length
+  const present = all.slice(start + 1, end).map((line) => line.replace(/^- /, '').trim())
+  let bodyEnd = end
+  while (bodyEnd > start + 1 && all[bodyEnd - 1]?.trim() === '') bodyEnd -= 1
+  return [...all.slice(0, bodyEnd), ...bullets(present), ...(end < all.length ? [''] : []), ...all.slice(end)].join('\n')
+}

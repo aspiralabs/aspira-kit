@@ -13,6 +13,7 @@ import { RESEARCH_RULE, sessionResearchTools } from '@aspiralabs/ai/common/lib/r
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { mapBriefForRun } from '@aspiralabs/ai/common/lib/codebase-map-run'
 import { writeArtifacts } from '@aspiralabs/ai/common/lib/artifacts'
 import type { DecisionRecord } from '@aspiralabs/ai/common/lib/decisions'
 import type { SessionModel } from '@aspiralabs/ai/common/lib/session-model'
@@ -191,7 +192,14 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   const prompts = await loadPrompts(packageDir)
   // The run packet (KIT-48): what build-feature already gathered, in front of the spec and the source packet.
   const packet = input.packetPath === undefined ? '' : await readFile(resolve(input.packetPath), 'utf8')
-  const context = `${packet ? `RUN PACKET (data):\n${packet}\n\n` : ''}${planContext(prepared)}`
+  // KIT-70: the codebase brief, when the project opted in: after the run packet, outside the fingerprint, saved once per run.
+  await mkdir(join(work, 'outputs'), { recursive: true })
+  const map = await mapBriefForRun({
+    repo: input.repoPath, workDir: work, text: await readFile(resolve(input.specPath), 'utf8'),
+    instruction: "Put this brief's impact files in the plan's file lists, or add a note saying why not, and state how many were left out.",
+  })
+  const mapText = map.used ? `Codebase brief (data):\n${map.text}\n\n` : ''
+  const context = `${packet ? `RUN PACKET (data):\n${packet}\n\n` : ''}${mapText}${planContext(prepared)}`
   // The spec reviewer's own facts, reused in the session's research prompt when they still describe this spec and commit (F33-F35).
   const facts = await reviewFacts({ folder: ticketFolderFor(input.specPath), repoPath: input.repoPath, repo: { commit: prepared.repo.commit, dirty: prepared.repo.dirty } })
   // The run packet is rewritten before every step print (KIT-48), so the fingerprint a resumed call checks leaves it out.
@@ -261,7 +269,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   if (researched.task !== undefined) return { ...base, stage: 'research', tasks: [researched.task] }
   const research: Research | null = researched.value === undefined ? null : withExplorations(researched.value, explorations)
   // Planning and repair get the packet's index instead of the packet: research's facts and touches carry it.
-  const planningContext = `${packet ? `RUN PACKET (data):\n${packet}\n\n` : ''}${planContext(prepared, 'index')}`
+  const planningContext = `${packet ? `RUN PACKET (data):\n${packet}\n\n` : ''}${mapText}${planContext(prepared, 'index')}`
   let plan: Plan | null = null
   if (research !== null) {
     // The agent hands planning the guideline pages research read; here research reads the
@@ -283,7 +291,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       plan = merged
     }
   }
-  return exportPlan({ input, prepared, prompts, knowledge, state, calls, research, plan, work, facts })
+  return exportPlan({ input, prepared, prompts, knowledge, state, calls, research, plan, work, facts, mapReport: map.report })
 }
 
 /** Why a correction pass's patch cannot be merged into the plan (a task left with no changes, a broken reference), or undefined. */
@@ -305,8 +313,8 @@ async function withoutWorkDir(prepared: PreparedPlan, repoPath: string, work: st
   for (const path of [...prepared.repo.tracked]) if (path.startsWith(prefix)) prepared.repo.tracked.delete(path)
 }
 
-async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; prompts: AgentPrompts; knowledge: KnowledgeRecord; state: State; calls: Call[]; research: Research | null; plan: Plan | null; work: string; facts: ReviewFactsResult }): Promise<LocalDone> {
-  const { input, prepared, prompts, knowledge, state, calls, research, plan, work, facts } = args
+async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; prompts: AgentPrompts; knowledge: KnowledgeRecord; state: State; calls: Call[]; research: Research | null; plan: Plan | null; work: string; facts: ReviewFactsResult; mapReport: string }): Promise<LocalDone> {
+  const { input, prepared, prompts, knowledge, state, calls, research, plan, work, facts, mapReport } = args
   // The UI catalog check sees every phase's reads (KIT-34): research's, and planning's when it made them.
   const reads = (await Promise.all(['research', 'planning'].map(async (phase) => {
     const text = await readFile(join(work, 'outputs', `${phase}.reads.json`), 'utf8').catch(() => '[]')
@@ -328,6 +336,7 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
     'Mode: **--local**. The model work ran as subagents of a Claude Code session, on that session\'s model and usage, so no cost or token counts are reported here.', '',
     `Wall time from the first local model stage (${state.startedAt}) to export: **${(totalMs / 1000).toFixed(1)}s**. It includes any time the session spent between stages; knowledge loading before that is excluded.`, '',
     '| Phase | Result |', '| --- | --- |', ...phaseRows, '',
+    mapReport, '',
   ].join('\n')
   const knowledgeContents = knowledge.source === 'notion'
     ? (await fingerprintKnowledge(await knowledgeFiles(knowledge.dir))).contents

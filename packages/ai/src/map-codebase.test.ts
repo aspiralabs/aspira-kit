@@ -1,13 +1,15 @@
 // KIT-69 (T24-T29): `kit map-codebase` run from the built dist/cli.js as a child process on a temp HOME, as
 // cli.test.ts runs the other commands. The fixtures are small git repositories; the aspira.json walk-up
 // crosses the git root into a client folder, and `kit doctor` prints one information line about the map.
+// KIT-70 (T1-T3): the useCodebaseMap reader, the exported map-root rule and the captured build agents call in-process.
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
-import { checkAspira, readAspira, resolveProjectRoot } from './aspira.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { checkAspira, readAspira, resolveProjectRoot, useCodebaseMap } from './aspira.js'
+import { buildMapCaptured, mapRootFor } from './map-codebase.js'
 import { writeGlobalHarness } from './skills.js'
 
 const CLI = fileURLToPath(new URL('../dist/cli.js', import.meta.url))
@@ -163,5 +165,86 @@ describe('today\'s aspira.json readers (F7)', () => {
       outcomes.push({ state, code: doctor.code, line: lines[0] ?? '' })
     }
     expect(new Set(outcomes.map((outcome) => outcome.code)).size, JSON.stringify(outcomes)).toBe(1)
+  })
+})
+
+describe('KIT-70 exports for the agents (F2, F4)', () => {
+  const appRoot = (config: Record<string, unknown>): string => {
+    const root = gitRepo(temp('app'))
+    writeFileSync(join(root, 'aspira.json'), JSON.stringify(config))
+    return root
+  }
+  const clientWith = (config: string): string => {
+    const client = temp('client')
+    writeFileSync(join(client, 'aspira.json'), config)
+    return client
+  }
+
+  it('T1: useCodebaseMap walks to the nearest aspira.json across the git root, and is false with no file or with false', () => {
+    const on = clientWith(JSON.stringify({ useCodebaseMap: true }))
+    const repo = gitRepo(join(on, 'team', 'app'))
+    expect(useCodebaseMap(repo)).toBe(true)
+    expect(useCodebaseMap(join(repo, 'src'))).toBe(true)
+
+    const noFile = gitRepo(temp('no-file'))
+    expect(useCodebaseMap(noFile)).toBe(false)
+
+    const off = clientWith(JSON.stringify({ useCodebaseMap: false }))
+    expect(useCodebaseMap(gitRepo(join(off, 'team', 'app')))).toBe(false)
+  })
+
+  it('T2: a useCodebaseMap that is not a boolean throws naming the file and the key, and checkAspira still accepts a file that has the key', () => {
+    const bad = clientWith(JSON.stringify({ useCodebaseMap: 'yes' }))
+    const repo = gitRepo(join(bad, 'app'))
+    expect(() => useCodebaseMap(repo)).toThrow(Error)
+    expect(() => useCodebaseMap(repo)).toThrow(join(bad, 'aspira.json'))
+    expect(() => useCodebaseMap(repo)).toThrow('useCodebaseMap')
+
+    const good = appRoot({ board: BOARD, useCodebaseMap: true })
+    expect(checkAspira(good)).toEqual({ ok: true })
+  })
+
+  it('T3: mapRootFor returns the root kit map-codebase writes, the captured build writes the map and notes there, and nothing reaches stdout', () => {
+    const plain = gitRepo(temp('plain'))
+    expect(mapRootFor(plain, plain)).toBe(join(plain, '.codebase-map'))
+
+    const client = clientWith(JSON.stringify({ codebaseMaps: '.maps' }))
+    const repo = gitRepo(join(client, 'loantrack-web'))
+    const linked = join(client, 'loantrack-web-feature')
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'feature', linked], { cwd: repo })
+    const root = join(client, '.maps', 'loantrack-web')
+    expect(mapRootFor(repo, repo)).toBe(root)
+    expect(mapRootFor(linked, linked)).toBe(root)
+
+    const written: string[] = []
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      written.push(String(chunk))
+      return true
+    }) as typeof process.stdout.write)
+    let built: { code: number; stderr: string }
+    try {
+      built = buildMapCaptured(repo, root)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(built.code, built.stderr).toBe(0)
+    expect(written.join('')).not.toContain(root)
+    expect(existsSync(join(root, 'map', 'manifest.json'))).toBe(true)
+    expect(existsSync(join(root, 'notes'))).toBe(true)
+
+    // the same root as the command: it finds the map fresh and rebuilds into the same folder
+    const viaCommand = kit(['map-codebase'], { home: home(), cwd: repo })
+    expect(viaCommand.code, viaCommand.output).toBe(0)
+    expect(readdirSync(join(client, '.maps'))).toEqual(['loantrack-web'])
+  })
+
+  it('NOVA1.2: a build that runs past its timeout is stopped and reported as a failed build, not waited on', () => {
+    const repo = gitRepo(temp('slow'))
+    const root = join(repo, '.codebase-map')
+    const started = Date.now()
+    const built = buildMapCaptured(repo, root, 1)
+    expect(built).toEqual({ code: 1, stderr: 'build timed out after 0.001s' })
+    expect(Date.now() - started).toBeLessThan(30_000)
+    expect(existsSync(join(root, 'map', 'manifest.json'))).toBe(false)
   })
 })

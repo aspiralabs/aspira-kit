@@ -1,4 +1,6 @@
 import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -161,5 +163,91 @@ describe('engineering guidelines in --local', () => {
     const other = join(dir, 'other.md')
     await writeFile(other, 'REV-001 Something else')
     await expect(runLocal({ ...rest, guidelinesPath: other })).rejects.toThrow('--guidelines')
+  })
+})
+
+// KIT-70 (T15): the opt-in key off and on, against a small committed git repository.
+describe('the codebase map in --local (KIT-70)', () => {
+  async function mapSetup(key: boolean | null) {
+    const { dir, input } = await setup()
+    await mkdir(join(dir, 'src'), { recursive: true })
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.0', private: true }))
+    await writeFile(join(dir, 'src', 'items.ts'), "import { b } from './b'\nexport const items = b + 1\n")
+    await writeFile(join(dir, 'src', 'b.ts'), 'export const b = 1\n')
+    if (key !== null) await writeFile(join(dir, 'aspira.json'), JSON.stringify({ useCodebaseMap: key }))
+    execFileSync('git', ['init', '-q', dir])
+    execFileSync('git', ['add', 'package.json', 'src', ...(key === null ? [] : ['aspira.json'])], { cwd: dir })
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init'], { cwd: dir })
+    return { dir, input }
+  }
+  const explored = { facts: ['src/items.ts:2: items are computed from b'], constraints: [], questions: [], uiEvidence: [], gaps: [] }
+
+  /** Runs every stage with fixed outputs; returns each stage's prompts by phase and the final report. */
+  async function runThrough(input: Parameters<typeof runLocal>[0], dir: string) {
+    const prompts: Record<string, string> = {}
+    for (let guard = 0; guard < 12; guard++) {
+      const step = await runLocal(input)
+      if (!step.pending) return { prompts, step }
+      for (const task of step.tasks) {
+        prompts[task.phase] = await readFile(task.prompt, 'utf8')
+        const phase = task.phase
+        const value = phase === 'explore' ? explored
+          : phase === 'draft' ? { spec: draft, assumptions: [] }
+            : phase === 'synthesis' ? { edits: [], dispositions: [] }
+              : review()
+        await writeFile(task.output, JSON.stringify(value))
+      }
+    }
+    throw new Error(`no end for ${dir}`)
+  }
+
+  it('with the key off: no map folder, the prompts of the unchanged path, and the report says the opt-in is off', async () => {
+    const off = await mapSetup(false)
+    const absent = await mapSetup(null)
+    const a = await runThrough(off.input, off.dir)
+    const b = await runThrough(absent.input, absent.dir)
+    const strip = (text: string, dir: string) => text.replaceAll(dir, '<repo>')
+    for (const phase of Object.keys(b.prompts)) expect(strip(a.prompts[phase]!, off.dir), phase).toBe(strip(b.prompts[phase]!, absent.dir))
+    expect(Object.values(a.prompts).join('\n')).not.toContain('CODEBASE MAP BRIEF')
+    expect(existsSync(join(off.dir, '.codebase-map'))).toBe(false)
+    expect(await readFile(join(off.dir, 'spec.reviewed/run-analysis.md'), 'utf8')).toContain('Codebase map: not used (opt-in off)')
+    expect(JSON.parse(await readFile(join(off.dir, 'spec.reviewed/trace/review.json'), 'utf8'))).toMatchObject({ codebaseMap: expect.stringContaining('not used (opt-in off)') })
+  })
+
+  it('with the key on: the brief is saved once in the .local folder, reused on every resumed call, and the reports carry the map line', async () => {
+    const { dir, input } = await mapSetup(true)
+    const first = await pending(input)
+    expect(first.stage).toBe('explore')
+    await writeFile(first.tasks[0]!.output, JSON.stringify(explored))
+    const drafting = await pending(input)
+    const work = join(dir, 'spec.reviewed.local')
+    const draftText = await readFile(drafting.tasks[0]!.prompt, 'utf8')
+    expect(draftText).toContain('Orientation only: this brief is a map')
+    expect(draftText).toContain('src/items.ts')
+    const savedFiles = (await readdir(work, { recursive: true })).filter((name) => /brief|map/i.test(name) && !name.startsWith('prompts'))
+    expect(savedFiles.length).toBeGreaterThan(0)
+    const saved = await Promise.all(savedFiles.map((name) => readFile(join(work, name), 'utf8').catch(() => '')))
+    expect(saved.join('\n')).toContain('Orientation only: this brief is a map')
+    // The map moves on (a tracked file changes) and the run resumes: the saved brief is reused, with no fingerprint refusal.
+    await writeFile(join(dir, 'src', 'b.ts'), 'export const b = 2\n')
+    await writeFile(drafting.tasks[0]!.output, JSON.stringify({ spec: draft, assumptions: [] }))
+    const research = await pending(input)
+    expect(await readFile(research.tasks[0]!.prompt, 'utf8')).toContain('Orientation only: this brief is a map')
+    expect(await readFile(research.tasks[0]!.prompt, 'utf8')).toContain(draftText.match(/Impact[^\n]*/)?.[0] ?? 'src/items.ts')
+    await writeFile(research.tasks[0]!.output, JSON.stringify(review()))
+    const specialists = await pending(input)
+    for (const task of specialists.tasks) {
+      expect(await readFile(task.prompt, 'utf8'), task.phase).toContain('Orientation only: this brief is a map')
+      await writeFile(task.output, JSON.stringify(review()))
+    }
+    const synthesis = await pending(input)
+    await writeFile(synthesis.tasks[0]!.output, JSON.stringify({ edits: [], dispositions: [] }))
+    const done = await runLocal(input)
+    expect(done.pending).toBe(false)
+    const analysis = await readFile(join(dir, 'spec.reviewed/run-analysis.md'), 'utf8')
+    expect(analysis).toMatch(/Codebase map: used/)
+    const report = JSON.parse(await readFile(join(dir, 'spec.reviewed/trace/review.json'), 'utf8'))
+    expect(report.codebaseMap).toMatch(/^Codebase map: used/)
+    await expect(stat(work)).rejects.toThrow()
   })
 })

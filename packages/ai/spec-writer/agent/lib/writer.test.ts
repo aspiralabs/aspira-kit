@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SETTLED_DECISIONS_RULE } from '@aspiralabs/ai/common/lib/decisions'
 import type { Call } from '@aspiralabs/ai/spec-reviewer/lib/pipeline'
+import today from '../../fixtures/writer.prompts.json' with { type: 'json' }
 import { draftPrompt, explorePrompt, ideaDecisions, writePipeline, writerSystemPrompt } from './writer.ts'
 
 const draft = '# Save items\n## Intent\nLet people save items.\n## Acceptance criteria\n### Features\n- [ ] F1: A saved item appears in the list.\n'
@@ -160,5 +161,68 @@ describe('a write-mode retry keeps every answer the author ticked (SCOOP-8)', ()
     const result = await writePipeline(input, call)
     expect(prompts.draft).not.toContain('AUTHOR ANSWERS')
     expect(result.draft?.spec).toBe(draft)
+  })
+})
+
+// KIT-70 (T13, T14): the codebase map brief reaches the draft and the review only through the seam;
+// without it every prompt is today's, apart from the one Blast radius format sentence.
+const BRIEF = 'CODEBASE MAP BRIEF (data)\nOrientation only: this brief is a map, not the code. Verify it with source reads before relying on it.\nImpact: src/items.ts'
+
+/** The prompts of a write or review run with the default stub (the shape fixtures/writer.prompts.json was captured from). */
+async function promptsOf(extra: Record<string, unknown>): Promise<Record<string, string>> {
+  const prompts: Record<string, string> = {}
+  const call: Call = async ({ phase, prompt }) => {
+    prompts[phase] = prompt
+    if (phase === 'explore') return { ...exploration, questions: [] }
+    if (phase === 'draft') return { spec: draft, assumptions: [] }
+    if (phase === 'synthesis') return { edits: [], dispositions: [] }
+    return { facts: [], findings: [], checks: [{ rule: 'REV-001', evidence: 'spec: Save items' }], uiEvidence: [], gaps: [] }
+  }
+  await writePipeline({ ...input, ...extra }, call)
+  return prompts
+}
+
+describe('the codebase map seam (KIT-70)', () => {
+  it('T13: with no seam every prompt is today\'s, apart from the one Blast radius format sentence in the draft instructions', async () => {
+    const write = await promptsOf({})
+    const { draft: drafted, ...rest } = write
+    const { draft: was, ...restWas } = today.write
+    expect(rest).toEqual(restWas)
+    // Review mode (an existing spec) is untouched: it has no draft instructions.
+    expect(await promptsOf({ spec: draft })).toEqual(today.review)
+    // The draft prompt differs by one sentence: it asks for kept paths in full and an Excluded: sub-list.
+    expect(drafted!.split('Excluded:').length - 1).toBe(1)
+    const sentence = drafted!.split(/(?<=\.) /).find((part) => part.includes('Excluded:'))!
+    expect(drafted!.replace(` ${sentence}`, '')).toBe(was)
+  })
+
+  it('T14: a seam that returns a brief puts it, with its orientation line, in the draft and every review phase prompt, once, after explore', async () => {
+    const seen: unknown[] = []
+    const order: string[] = []
+    const prompts: Record<string, string> = {}
+    const call: Call = async ({ phase, prompt }) => {
+      order.push(phase)
+      prompts[phase] = prompt
+      if (phase === 'explore') return exploration
+      if (phase === 'draft') return { spec: draft, assumptions: [] }
+      if (phase === 'synthesis') return { edits: [], dispositions: [] }
+      return review()
+    }
+    const mapBrief = vi.fn(async (explored: unknown) => { seen.push(explored); order.push('seam'); return BRIEF })
+    await writePipeline({ ...input, mapBrief }, call)
+    expect(mapBrief).toHaveBeenCalledTimes(1)
+    expect(seen).toEqual([exploration])
+    expect(order.slice(0, 3)).toEqual(['explore', 'seam', 'draft'])
+    for (const phase of ['draft', 'research', 'security', 'architecture', 'data', 'behavior', 'ui', 'acceptance', 'synthesis']) {
+      expect(prompts[phase], phase).toContain(BRIEF)
+      expect(prompts[phase], phase).toContain('Orientation only: this brief is a map')
+    }
+    expect(prompts.explore).not.toContain('CODEBASE MAP BRIEF')
+    expect(prompts.draft).toContain('Excluded:')
+    expect(prompts.draft).toMatch(/repo-relative/)
+    // An empty brief (not used) leaves the prompts as they were without a seam.
+    const none = stub()
+    await writePipeline({ ...input, mapBrief: async () => '' }, none.call)
+    expect(none.prompts.draft).not.toContain('CODEBASE MAP BRIEF')
   })
 })

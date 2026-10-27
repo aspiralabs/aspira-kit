@@ -1,4 +1,5 @@
 import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
@@ -62,4 +63,18 @@ it('writes the draft and the reviewed spec beside the idea without altering it, 
   const rerun = await runWrite({ ideaPath, guidelinesPath, repoPath: dir, uiRequired: false })
   expect(await readdir(join(rerun.dir, 'trace/history'))).toHaveLength(1)
   await expect(runWrite({ ideaPath, guidelinesPath, repoPath: dir, outputDir: dir })).rejects.toThrow('must not contain')
+})
+
+it('T16: a cloud run with useCodebaseMap on reports the map not used (cloud run) and reads no map', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec-writer-cloud-map-'))
+  const ideaPath = join(dir, 'idea.md')
+  const guidelinesPath = join(dir, 'rules.md')
+  await writeFile(ideaPath, 'Let people save items.')
+  await writeFile(guidelinesPath, 'REV-001 Check the spec')
+  await writeFile(join(dir, 'aspira.json'), JSON.stringify({ useCodebaseMap: true }))
+  const result = await runWrite({ ideaPath, guidelinesPath, repoPath: dir, uiRequired: false })
+  expect(await readFile(join(result.dir, 'run-analysis.md'), 'utf8')).toContain('Codebase map: not used (cloud run)')
+  expect(await readFile(join(result.dir, 'trace/review.json'), 'utf8')).toContain('Codebase map: not used (cloud run)')
+  expect(await readFile(join(result.dir, 'trace/calls.json'), 'utf8')).not.toContain('CODEBASE MAP BRIEF')
+  expect(existsSync(join(dir, '.codebase-map'))).toBe(false)
 })

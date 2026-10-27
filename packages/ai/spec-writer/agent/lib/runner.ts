@@ -131,6 +131,9 @@ export function writerModels(env: NodeJS.ProcessEnv = process.env) {
 /** Tool rounds the draft gets before it must submit (KIT-54). */
 export const DRAFT_MAX_STEPS = 6
 
+/** KIT-70: a cloud run never reads the codebase map. */
+const CLOUD_MAP_LINE = 'Codebase map: not used (cloud run)'
+
 export async function runWrite(input: RunInput, options: { signal?: AbortSignal; progress?: (phase: string) => void } = {}) {
   const started = Date.now()
   const preparation = options.signal ?? new AbortController().signal
@@ -179,8 +182,8 @@ export async function runWrite(input: RunInput, options: { signal?: AbortSignal;
       const exportMs = Date.now() - exportStarted
       const analysis = runAnalysis(session.ledger, result.phases, { prepareMs, reviewMs: result.writeMs, exportMs, totalMs, status: result.status })
       reportedCostUsd = analysis.reportedCostUsd
-      const report = { ...result, review: result.review && { ...result.review, candidate: undefined }, spec: undefined, input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, specSha256: specSha256(files), models, reportedCostUsd, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, exportMs, totalMs, dir }
-      return { 'run-analysis.md': analysis.markdown, 'trace/review.json': JSON.stringify(report, null, 2) }
+      const report = { ...result, review: result.review && { ...result.review, candidate: undefined }, spec: undefined, input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, specSha256: specSha256(files), codebaseMap: CLOUD_MAP_LINE, models, reportedCostUsd, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, exportMs, totalMs, dir }
+      return { 'run-analysis.md': `${analysis.markdown}\n${CLOUD_MAP_LINE}\n`, 'trace/review.json': JSON.stringify(report, null, 2) }
     })
     return summary(result, dir, { prepareMs, reportedCostUsd, totalMs })
   } finally { await mcp.close() }

@@ -43,6 +43,8 @@ The engineering guidelines are mandatory, the default mode included: no seat run
 
 `local` replays the agent's pipeline with this session as the model. It makes no model calls itself. It stands in for the agent's tools: it loads the PR, checks the guidelines, builds the packet, runs the round loop, exports and comments. It prints the next stage, with each turn's prompt assembled at that moment from the agent's own files, and you run those turns as subagents. You are the orchestrator here: read the file named in `orchestrator` in full before the first stage. It is the authority for what you do and how you report. Run the turns as listed and do not edit the prompt files. Every task a stage prints names its `model`, and its `effort` when aspira.json `models` sets one for `<step>.<phase>`: launch that task's subagent on that model, passing that reasoning effort to the Agent tool when the task has one.
 
+With aspira.json `"useCodebaseMap": true` (off when absent) the shared packet also carries the brief for the diff, built from a missing or stale map at the start of the run when the review tree is a clean checkout of the PR head. A changed file outside the Blast radius the ticket's spec declared becomes one low finding that never blocks the merge, and `findings.md` ends with a `## Run notes` section saying whether the map and the Blast radius check were used or why not. With no spec the Blast radius check is skipped and says so.
+
 ```bash
 <skill-dir>/scripts/pr-reviewer.sh local [<ticket> | <github-pr | repo-path> --no-ticket] [--force-pull] [--repo DIR] [--branch B] [--base main] [--max-rounds N] [--max-cost USD] [--since DIR] [--no-comment] [--output DIR] [--knowledge DIR] [--finish] [--verify] [--parent-run RUN:NONCE] [--attach JSON]
 ```
