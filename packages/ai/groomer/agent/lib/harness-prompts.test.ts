@@ -83,7 +83,7 @@ async function fixture(config: Record<string, unknown> | null, at: 'repo' | 'roo
   return { root, repo, round, summary }
 }
 
-const golden = (name: string) => `./__goldens__/${name}.txt`
+const golden = (name: string) => `../../__goldens__/${name}.txt`
 
 describe('F1: the default path prompts are byte-identical for the three configs (goldens recorded at 7797a62)', () => {
   it.each(Object.keys(CONFIGS))('renders the round and summary prompts under the %s config', async (name) => {
@@ -125,7 +125,7 @@ describe('F12: extend.groomer appends the named files to the round and summary p
 
   it('leaves the prompts as the default golden when extend names only other stages', async () => {
     const { round, summary } = await client({ extend: { planner: ['extend/style.md'] } })
-    const dir = new URL('./__goldens__/', import.meta.url)
+    const dir = new URL('../../__goldens__/', import.meta.url)
     expect(round(1)).toBe(await readFile(new URL('round-1-none.txt', dir), 'utf8'))
     expect(summary()).toBe(await readFile(new URL('summary-none.txt', dir), 'utf8'))
   })
@@ -141,7 +141,7 @@ describe('F15: statusFlow false offers the follow-up choices', () => {
   })
 
   it('renders the T1 goldens under the three default configs and under statusFlow true', async () => {
-    const dir = new URL('./__goldens__/', import.meta.url)
+    const dir = new URL('../../__goldens__/', import.meta.url)
     for (const name of Object.keys(CONFIGS)) {
       const { round, summary } = await fixture(CONFIGS[name]!)
       expect(round(1)).toBe(await readFile(new URL(`round-1-${name}.txt`, dir), 'utf8'))

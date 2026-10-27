@@ -147,7 +147,7 @@ async function prompts(made: Awaited<ReturnType<typeof fixture>>): Promise<Recor
   return out
 }
 
-const golden = (name: string) => `./__goldens__/${name}.txt`
+const golden = (name: string) => `../../__goldens__/${name}.txt`
 
 describe('F1: the orchestrator and worker prompt files are byte-identical for the three configs (goldens recorded at 7797a62)', () => {
   it.each(Object.keys(CONFIGS))('writes the prompt files under the %s config', async (name) => {
@@ -174,6 +174,6 @@ describe('F11: extend.implementor appends the named file to the orchestrator and
     const made = await fixture({ repos: { web: { path: 'repo' } }, extend: { groomer: ['extend/g.md'] } }, 'root')
     await write(join(made.dir, 'extend/g.md'), 'Groomer notes.\n')
     const written = await prompts(made)
-    expect(written['wave-1-A']).toBe(await readFile(new URL('./__goldens__/wave-1-A-none.txt', import.meta.url), 'utf8'))
+    expect(written['wave-1-A']).toBe(await readFile(new URL('../../__goldens__/wave-1-A-none.txt', import.meta.url), 'utf8'))
   })
 })
