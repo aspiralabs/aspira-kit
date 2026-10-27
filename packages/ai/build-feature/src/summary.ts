@@ -10,6 +10,7 @@
 // fences and Mermaid blocks.
 
 import { compareIds } from '@aspiralabs/ai/common/lib/decisions'
+import type { GroomRecord } from '@aspiralabs/ai/common/lib/groom-record'
 import { redact, tail } from '@aspiralabs/ai/common/lib/redact'
 import { allowedPath } from '@aspiralabs/ai/common/lib/repository'
 import { SEVERITIES } from '@aspiralabs/ai/common/lib/severity'
@@ -36,6 +37,8 @@ export type RenderBuildSummaryInput = {
   changedFiles?: readonly string[]
   /** When the summary is rendered (the summary stage's time), the end of the Run telemetry table; absent, the run's end or its last step's. */
   now?: string
+  /** The folder's groom record, read by the driver; its build-may-go-on follow-ups (KIT-68) are listed under the decisions. */
+  groom?: GroomRecord
 }
 
 const NONE = ['None yet.']
@@ -152,7 +155,7 @@ async function statusLines(input: RenderBuildSummaryInput, resume: string): Prom
 // what was asked in chat.
 // ---------------------------------------------------------------------------------------------
 
-async function decisionLines(state: SummaryRunState, repo: string, app: string | undefined): Promise<string[]> {
+async function decisionLines(state: SummaryRunState, repo: string, app: string | undefined, groom?: GroomRecord): Promise<string[]> {
   const taken = orderedTaken(state.takenKeys)
   const lines: string[] = []
   for (const entry of taken) {
@@ -167,6 +170,11 @@ async function decisionLines(state: SummaryRunState, repo: string, app: string |
       const answer = asked.answer === null ? '(no answer)' : await redact(asked.answer, repo, { app })
       lines.push(`- ${asked.step}: ${question} Answer: ${answer}`)
     }
+  }
+  const goingOn = (groom?.decisions ?? []).filter((decision) => decision.decidedBy === 'follow-up' && decision.followUp === 'may-go-on')
+  if (goingOn.length > 0) {
+    lines.push('', '### Follow-ups', '')
+    for (const decision of goingOn) lines.push(`- ${decision.id}: ${await redact(decision.question, repo, { app })} Follow-up: build may go on.`)
   }
   return lines.length === 0 ? NONE : lines
 }
@@ -348,14 +356,14 @@ function timelineLines(steps: readonly StepRecord[]): string[] {
 
 /** The Build Summary for this run state, cumulative over every run of the ticket (A16). Pure: no writes, no Notion calls. */
 export async function renderBuildSummary(input: RenderBuildSummaryInput): Promise<string> {
-  const { ticket, state, repo, app, plan, changedFiles, now } = input
+  const { ticket, state, repo, app, plan, changedFiles, now, groom } = input
   const mode = state.runs.at(-1)?.mode ?? 'local'
   const resume = RESUME(ticket.id, mode)
   const title = await redact(ticket.title, repo, { app })
   const header = `# Build Summary: ${ticket.id}${title === '' ? '' : ` ${title}`}`
   const sections = [
     section('Status', await statusLines(input, resume)),
-    section('Decisions taken for you', await decisionLines(state, repo, app)),
+    section('Decisions taken for you', await decisionLines(state, repo, app, groom)),
     section('Tests written', testsWrittenLines(plan, changedFiles)),
     section('Deviations and assumptions', deviationLines(state)),
     section('Cost and time', costLines(state.steps)),

@@ -21,7 +21,7 @@ export type GroomRunStatus = RunStatus
 export const GROOM_BRANCHES = ['problem', 'who', 'done', 'intent', 'f-list', 'tests', 'constraints', 'out-of-scope', 'blast-radius', ...LENSES] as const
 
 /** Prefixes a quoted line may not start with: each is a line the page parser reads. */
-const GROOM_LINE_PREFIXES = ['#', '- [', 'Run:', 'Decided by', 'Taken by the agent', 'Confirmed', 'Confirm was', 'Branch:', 'Fact:', 'Two ticks', 'Two new ticks', 'Why it is yours']
+const GROOM_LINE_PREFIXES = ['#', '- [', 'Run:', 'Decided by', 'Taken by the agent', 'Confirmed', 'Confirm was', 'Branch:', 'Fact:', 'Follow-up:', 'Two ticks', 'Two new ticks', 'Why it is yours']
 
 const singleLine = z
   .string()
@@ -50,8 +50,7 @@ export type Fact = z.infer<typeof factSchema>
 /** A sentence without its closing full stop: the Decisions line adds its own after the answer and the reasoning. */
 export const withoutFullStop = (text: string): string => text.trim().replace(/\.$/, '')
 
-export const groomDecisionSchema = z
-  .object({
+const groomDecisionFields = z.object({
     id: z.string().regex(/^Q\d+(\.\d+)?$/, 'groomer ids are Q<n> or Q<n>.<m>'),
     question: singleLine,
     options: z.array(singleLine).min(1),
@@ -68,8 +67,10 @@ export const groomDecisionSchema = z
     tickedBy: z.union([z.object({ kind: z.literal('notion'), id: z.string() }), z.object({ kind: z.literal('session') })]).optional(),
     prerequisites: z.array(z.string()).optional(),
     flag: z.enum(['twoTicks', 'twoNewTicks']).optional(),
-  })
-  .superRefine((decision, ctx) => {
+})
+
+type DecisionFields = z.infer<typeof groomDecisionFields>
+const checkDecision = (decision: DecisionFields | (Omit<DecisionFields, 'decidedBy'> & { decidedBy: string }), ctx: z.RefinementCtx): void => {
     if (!decision.options.includes(decision.recommended)) ctx.addIssue({ code: 'custom', path: ['recommended'], message: 'recommended must be one of the options' })
     if (decision.decidedBy === 'open' && decision.options.length < 2) ctx.addIssue({ code: 'custom', path: ['options'], message: 'an open question needs at least two options' })
     const normalized = decision.options.map(normalizeQuestion)
@@ -78,13 +79,21 @@ export const groomDecisionSchema = z
     for (const option of decision.options) {
       if (option.endsWith('.') || option.includes('(revised') || option.includes('. Why:')) ctx.addIssue({ code: 'custom', path: ['options'], message: `option "${option}" would make the Decided line ambiguous` })
     }
-  })
-export type GroomDecision = z.infer<typeof groomDecisionSchema>
+}
+
+/** What a round may ask: open, author or agent decisions only (the round model's JSON schema stays as it was). */
+export const groomDecisionSchema = groomDecisionFields.superRefine(checkDecision)
+
+/** A decision as groom.json records it: also 'follow-up' (statusFlow false), a question left for later that blocks the build or lets it go on. Not the Q<n>.<m> follow-up question. */
+const recordDecisionSchema = groomDecisionFields
+  .extend({ decidedBy: z.enum(['open', 'author', 'agent', 'follow-up']), followUp: z.enum(['blocks', 'may-go-on']).optional() })
+  .superRefine(checkDecision)
+export type GroomDecision = z.infer<typeof recordDecisionSchema>
 
 const branchSchema = z.object({ id: z.string().min(1), state: z.enum(['open', 'visited', 'closed']), reason: z.string().optional() })
 
 const groomRecordShape = z.object({
-  decisions: z.array(groomDecisionSchema).refine((decisions) => new Set(decisions.map((decision) => decision.id)).size === decisions.length, 'each question id appears once'),
+  decisions: z.array(recordDecisionSchema).refine((decisions) => new Set(decisions.map((decision) => decision.id)).size === decisions.length, 'each question id appears once'),
   branches: z.array(branchSchema),
   round: z.number().int().nonnegative(),
   startedAt: z.string(),
@@ -160,7 +169,8 @@ export function rebuildGroomRecord(pageMarkdown: string): { record: GroomRecord;
       whyYours: block.whyYours ?? '',
       branch: block.branch ?? 'problem',
       facts: block.facts,
-      decidedBy: block.decided !== undefined ? 'author' : block.taken !== undefined ? 'agent' : 'open',
+      decidedBy: block.decided !== undefined ? 'author' : block.followUp !== undefined ? 'follow-up' : block.taken !== undefined ? 'agent' : 'open',
+      ...(block.decided === undefined && block.followUp !== undefined ? { followUp: block.followUp } : {}),
       answer: block.decided !== undefined ? (answerIndex === -1 ? block.decided.answer : options[answerIndex]!) : block.taken !== undefined ? recommended : null,
       ...(block.decided?.revisedAt !== undefined ? { revisedAt: block.decided.revisedAt } : {}),
     }
@@ -225,9 +235,26 @@ export function validateIdeaSummary(summary: string, record: GroomRecord): IdeaS
   if (lines[1] !== '### Decisions') return refuse(`unexpected block after the marker: ${lines[1] ?? '(nothing)'}`)
   const terms = lines.indexOf('### Terms')
   if (terms === -1) return refuse('the summary has no ### Terms heading')
-  const decisionLines = lines.slice(2, terms)
-  // A Confirm confirms every decided question: the author's answers and the ones taken as recommended (KIT-25). Only an open one is not a decision.
-  const confirmed = new Map(record.decisions.filter((decision) => decision.decidedBy !== 'open').map((decision) => [decision.id, decision]))
+  const followUpsAt = lines.indexOf('### Follow-ups')
+  if (followUpsAt > terms) return refuse('### Follow-ups must come before ### Terms')
+  const decisionLines = lines.slice(2, followUpsAt === -1 ? terms : followUpsAt)
+  // A Confirm confirms every decided question: the author's answers and the ones taken as recommended (KIT-25). An open one is not a decision, nor is a follow-up (KIT-68).
+  const confirmed = new Map(record.decisions.filter((decision) => decision.decidedBy !== 'open' && decision.decidedBy !== 'follow-up').map((decision) => [decision.id, decision]))
+  const followUps = new Map(record.decisions.filter((decision) => decision.decidedBy === 'follow-up').map((decision) => [decision.id, decision]))
+  const followUpLines = followUpsAt === -1 ? [] : lines.slice(followUpsAt + 1, terms)
+  if (followUps.size > 0 && followUpsAt === -1) return refuse(`the summary has no ### Follow-ups heading for ${[...followUps.keys()].join(', ')}`)
+  if (followUps.size === 0 && followUpsAt !== -1) return refuse('the summary has a ### Follow-ups heading but groom.json records no follow-up')
+  const listedFollowUps = new Set<string>()
+  for (const line of followUpLines) {
+    const found = line.match(/^- \*\*(Q\d+(?:\.\d+)*) — (.+?)\*\* Follow-up: (blocks the build|build may go on)\.$/)
+    const follow = found === null ? undefined : followUps.get(found[1]!)
+    if (found === null || follow === undefined) return refuse(`unexpected block in Follow-ups: ${line}`)
+    if (listedFollowUps.has(found[1]!)) return refuse(`${found[1]} is listed twice`)
+    if (found[3] !== (follow.followUp === 'blocks' ? 'blocks the build' : 'build may go on')) return refuse(`${found[1]}: the follow-up kind differs from the recorded one`)
+    listedFollowUps.add(found[1]!)
+  }
+  const missingFollowUps = [...followUps.keys()].filter((id) => !listedFollowUps.has(id))
+  if (missingFollowUps.length > 0) return refuse(`follow-ups missing from the summary: ${missingFollowUps.join(', ')}`)
   const listed = new Set<string>()
   for (const line of decisionLines) {
     const parsed = parseDecisionsList(line)

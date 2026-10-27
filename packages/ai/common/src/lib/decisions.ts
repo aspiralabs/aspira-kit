@@ -34,6 +34,9 @@ export type DecidedBy = 'open' | 'author' | 'agent'
 /** A decision as review.json records it. */
 export type DecisionRecord = Decision & { id: string; decidedBy: DecidedBy; answer: string | null }
 
+/** A decision as the groomer records it: also 'follow-up' (statusFlow false, KIT-68), neither open nor decided. */
+export type GroomedRecord = Omit<DecisionRecord, 'decidedBy'> & { decidedBy: DecidedBy | 'follow-up' }
+
 /** The recommended option first, then the rest in the order given. */
 export const orderedOptions = (decision: Decision): string[] => [decision.recommended, ...decision.options.filter((option) => option !== decision.recommended)]
 
@@ -49,7 +52,7 @@ export const SETTLED_DECISIONS_RULE =
   "The items under the spec's ## Decisions section were decided by the author: treat each as settled input, and never re-raise one as an assumption, a question, a finding or a decision. The one exception: an item that contradicts a MUST rule in the required guidelines, or the rule to reuse @aspiralabs/ui components, is still a finding, citing the rule's ID and the item's ID; a settled decision never waives a mandatory rule."
 
 /** The checkbox form of one decision: the author ticks an option in the file. */
-export function renderDecision(decision: DecisionRecord): string {
+export function renderDecision(decision: GroomedRecord): string {
   const ticked = decision.decidedBy === 'open' ? null : (decision.answer ?? decision.recommended)
   const taken = decision.decidedBy === 'agent' ? 'recommended, taken by the agent' : 'recommended'
   const lines = [`## ${decision.id} — ${decision.question}`, '']
@@ -64,7 +67,7 @@ export function renderDecision(decision: DecisionRecord): string {
 }
 
 /** The decisions file: a header with the counts, then one checkbox block per decision. */
-export function renderDecisions(decisions: readonly DecisionRecord[], options: { title?: string; status?: string; intro?: string } = {}): string {
+export function renderDecisions(decisions: readonly GroomedRecord[], options: { title?: string; status?: string; intro?: string } = {}): string {
   const open = decisions.filter((decision) => decision.decidedBy === 'open').length
   const lines = [`# ${options.title ?? 'Decisions'}`, '']
   if (options.status !== undefined) lines.push(`Status: ${options.status}`, '')
@@ -112,7 +115,7 @@ export function parseTickedDecisions(markdown: string): Answer[] {
  * on the recommended option stays the agent's; ticking a different option overrides it to the
  * author's (F19). An author decision is never moved.
  */
-export function applyAnswers<T extends DecisionRecord>(decisions: readonly T[], answers: readonly Answer[]): T[] {
+export function applyAnswers<T extends GroomedRecord>(decisions: readonly T[], answers: readonly Answer[]): T[] {
   const byQuestion = new Map(answers.map((answer) => [normalizeQuestion(answer.question), answer]))
   return decisions.map((decision) => {
     const found = byQuestion.get(normalizeQuestion(decision.question))
@@ -153,6 +156,7 @@ export const GROOM_LINE_PATTERNS = {
   fact: /^Fact: (.+?):(\d+)(?: — `([^`]*)`)?$/,
   twoTicks: /^Two ticks on \d{4}-\d{2}-\d{2}; tick one to answer$/,
   twoNewTicks: /^Two new ticks on \d{4}-\d{2}-\d{2}; tick one to revise$/,
+  followUp: /^Follow-up: (blocks the build|build may go on)$/,
   decided: /^Decided by the author: (.+?)(?: \(revised (\d{4}-\d{2}-\d{2})\))?\.$/,
   taken: /^Taken by the agent to keep going: (.+?)\. Tick another option to reverse it\.$/,
   todo: /^- \[([ xX])\] (.*)$/,
@@ -179,6 +183,10 @@ export function compareIds(a: string, b: string): number {
 /** The option of a decision a text names, compared as questions are: by words, not punctuation. */
 const optionIndex = (options: readonly string[], text: string): number => options.findIndex((option) => normalizeQuestion(option) === normalizeQuestion(text))
 
+/** The two extra choices a groomer round offers under `statusFlow: false` (KIT-68), as the chat answer names them. */
+export const FOLLOW_UP_CHOICES = ['needs follow-up, blocks the build', 'needs follow-up, build may go on'] as const
+const FOLLOW_UP_ANSWERS: Record<string, 'blocks' | 'may-go-on'> = { [normalizeQuestion(FOLLOW_UP_CHOICES[0])]: 'blocks', [normalizeQuestion(FOLLOW_UP_CHOICES[1])]: 'may-go-on' }
+
 /**
  * Ticks read from the page, applied by id (never by wording) to open questions only. A question
  * with two or more ticks stays open and is flagged so the page asks for one tick.
@@ -194,11 +202,16 @@ export function applyAnswersById<T extends GroomDecision>(decisions: readonly T[
       const index = optionIndex(decision.options, answer)
       return { ...rest, decidedBy: 'author' as const, answer: index === -1 ? answer : decision.options[index]! } as T
     }
-    if (decision.decidedBy !== 'open') return decision
+    if (decision.decidedBy !== 'open' && decision.decidedBy !== 'follow-up') return decision
     if (twoTicks.includes(decision.id)) return { ...decision, flag: 'twoTicks' as const }
     const answer = byId.get(decision.id)
     if (answer === undefined) return decision
-    const { flag: _flag, ...rest } = decision
+    const followUp = FOLLOW_UP_ANSWERS[normalizeQuestion(answer)]
+    if (followUp !== undefined) {
+      const { flag: _flag, ...kept } = decision
+      return { ...kept, decidedBy: 'follow-up' as const, followUp, answer: null } as T
+    }
+    const { flag: _flag, followUp: _followUp, ...rest } = decision
     const index = optionIndex(decision.options, answer)
     return { ...rest, decidedBy: 'author' as const, answer: index === -1 ? answer : decision.options[index]! } as T
   })
@@ -272,6 +285,7 @@ export function renderGroomPage(record: GroomRecord, options: GroomRenderOptions
           ? optionIndex(decision.options, decision.recommended)
           : -1
     if (decision.decidedBy === 'author' && decision.answer !== null) blocks.push(`Decided by the author: ${decision.answer}${decision.revisedAt === undefined ? '' : ` (revised ${decision.revisedAt})`}.`)
+    if (decision.decidedBy === 'follow-up') blocks.push(`Follow-up: ${decision.followUp === 'blocks' ? 'blocks the build' : 'build may go on'}`)
     if (decision.decidedBy === 'agent') blocks.push(`Taken by the agent to keep going: ${decision.recommended}. Tick another option to reverse it.`)
     blocks.push(decision.options.map((option, index) => `- [${index === ticked ? 'x' : ' '}] ${option}${option === decision.recommended ? ` _(recommended: ${decision.reasoning})_` : ''}`).join('\n'))
     blocks.push(`Why it is yours to decide: ${decision.whyYours}`)
@@ -304,6 +318,8 @@ export type GroomPageBlock = {
   decided?: { answer: string; revisedAt?: string }
   /** The recommended option, when the agent took it to keep going. */
   taken?: string
+  /** Set when the question was left as a follow-up: it blocks the build, or the build may go on. */
+  followUp?: 'blocks' | 'may-go-on'
   todos: GroomToDo[]
   whyYours?: string
 }
@@ -386,12 +402,14 @@ export function readGroomPage(markdown: string, knownIds?: readonly string[]): G
       const fact = line.match(P.fact)
       const decided = line.match(P.decided)
       const taken = line.match(P.taken)
+      const followUp = line.match(P.followUp)
       const why = line.match(P.why)
       if (todo !== null) block.todos.push({ checked: todo[1] !== ' ', text: todo[2]!, line, at })
       else if (branch !== null && block.branch === undefined) block.branch = branch[1]!
       else if (fact !== null) block.facts.push({ path: fact[1]!, line: Number(fact[2]), ...(fact[3] !== undefined ? { quote: fact[3] } : {}) })
       else if (P.twoTicks.test(line) || P.twoNewTicks.test(line)) continue
       else if (decided !== null && block.decided === undefined) block.decided = { answer: decided[1]!, ...(decided[2] !== undefined ? { revisedAt: decided[2] } : {}) }
+      else if (followUp !== null && block.followUp === undefined) block.followUp = followUp[1] === 'blocks the build' ? 'blocks' : 'may-go-on'
       else if (taken !== null && block.taken === undefined) block.taken = taken[1]!.trim()
       else if (why !== null && block.whyYours === undefined) block.whyYours = why[1]!
       else read.carried.push({ under: block.id, text: line, at })
@@ -445,7 +463,7 @@ export function parseGroomPage(markdown: string, knownIds: readonly string[]): G
 /** The open questions, Confirm and Stop, read from a page without groom.json. */
 export function groomPageState(markdown: string): { open: number; confirmTicked: boolean; stopTicked: boolean; ids: string[] } {
   const read = readGroomPage(markdown)
-  const ids = read.questions.filter((block) => block.decided === undefined).map((block) => block.id).sort(compareIds)
+  const ids = read.questions.filter((block) => block.decided === undefined && block.followUp === undefined).map((block) => block.id).sort(compareIds)
   return { open: ids.length, confirmTicked: (read.confirm ?? []).some((todo) => todo.checked), stopTicked: (read.stop ?? []).some((todo) => todo.checked), ids }
 }
 
