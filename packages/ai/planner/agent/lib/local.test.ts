@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process'
-import { access, cp, mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
+import { access, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { ORIENTATION } from '@aspiralabs/ai/codebase-map'
 import { DEFAULT_REQUIRED, MAX_DEPTH, MAX_PAGES } from '@aspiralabs/ai/common/lib/knowledge'
 import { expect, it } from 'vitest'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
@@ -272,3 +273,73 @@ it('runs one explorer per area in parallel before research, folds their touches 
   if (done.pending) throw new Error('expected export')
   expect(done.status).toBe('ready')
 })
+
+const SLOW = 180_000
+
+/** A fixture whose reviewed spec names src/lib.ts, a tracked file that src/items.ts imports; the map folder stays out of the diff. */
+async function mapFixture() {
+  const f = await fixture()
+  await writeFile(join(f.repo, 'src/lib.ts'), 'export const shared = 1\n')
+  await writeFile(join(f.repo, 'src/items.ts'), "import { shared } from './lib.ts'\nexport function save() { return shared }\n")
+  await writeFile(join(f.repo, '.git', 'info', 'exclude'), '.codebase-map/\n')
+  await exec('git', ['-C', f.repo, 'add', '.'])
+  await exec('git', ['-C', f.repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'lib'])
+  await writeFile(f.specPath, `${spec}\nThe change touches \`src/lib.ts\`.\n`)
+  const snapshot = join(f.dir, 'REQUIRED.md')
+  await writeSnapshot(snapshot)
+  const packetPath = join(f.dir, 'packet.md')
+  await writeFile(packetPath, 'PACKET BODY\n')
+  return { ...f, snapshot, packetPath, aspira: join(f.dir, 'aspira.json') }
+}
+
+const evidence = { facts: [], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] }
+
+it('T17: with useCodebaseMap false or absent the research and planning prompts are the unchanged ones', async () => {
+  const f = await mapFixture()
+  const second = join(f.dir, 'out2', 'plan.review')
+  const prompts = async (outputDir: string, work: string) => {
+    const args = { specPath: f.specPath, repoPath: f.repo, outputDir, guidelinesPath: f.snapshot, packetPath: f.packetPath }
+    const research = pending(await runLocal(args, { env: {} }))
+    const researchPrompt = await readFile(research.tasks[0]!.prompt, 'utf8')
+    await writeFile(research.tasks[0]!.output, JSON.stringify(evidence))
+    const planning = pending(await runLocal(args, { env: {} }))
+    const planningPrompt = await readFile(planning.tasks[0]!.prompt, 'utf8')
+    return [researchPrompt, planningPrompt].map((text) => text.split(work).join('WORK'))
+  }
+  const absent = await prompts(f.outputDir, f.work)
+  await writeFile(f.aspira, JSON.stringify({ useCodebaseMap: false }))
+  const off = await prompts(second, `${second}.local`)
+  expect(off).toEqual(absent)
+  for (const text of off) {
+    expect(text).not.toContain(ORIENTATION)
+    expect(text).not.toContain('Codebase brief')
+  }
+  await expect(access(join(f.repo, '.codebase-map'))).rejects.toThrow()
+}, SLOW)
+
+it('T18: with useCodebaseMap on, research and planning carry the brief after the run packet, saved once and reused, and run-analysis.md names the map', async () => {
+  const f = await mapFixture()
+  await writeFile(f.aspira, JSON.stringify({ useCodebaseMap: true }))
+  const args = { specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir, guidelinesPath: f.snapshot, packetPath: f.packetPath }
+  const research = pending(await runLocal(args, { env: {} }))
+  const researchPrompt = await readFile(research.tasks[0]!.prompt, 'utf8')
+  const start = researchPrompt.indexOf('Codebase brief')
+  expect(start).toBeGreaterThan(researchPrompt.indexOf('RUN PACKET'))
+  const brief = researchPrompt.slice(start)
+  expect(brief).toContain(ORIENTATION)
+  expect(brief).toMatch(/Impact[^\n]*\n\s+src\/items\.ts/)
+  // Saved once: with the map gone, the next call still carries the same brief.
+  await rm(join(f.repo, '.codebase-map'), { recursive: true, force: true })
+  await writeFile(research.tasks[0]!.output, JSON.stringify(evidence))
+  const planning = pending(await runLocal(args, { env: {} }))
+  const planningPrompt = await readFile(planning.tasks[0]!.prompt, 'utf8')
+  const briefLine = brief.split('\n').slice(0, 2).join('\n')
+  expect(planningPrompt.indexOf(briefLine)).toBeGreaterThan(planningPrompt.indexOf('RUN PACKET'))
+  expect(planningPrompt).toMatch(/impact files/i)
+  await writeFile(planning.tasks[0]!.output, JSON.stringify(validPlan()))
+  const done = await runLocal(args, { env: {} })
+  if (done.pending) throw new Error('expected export')
+  const analysis = await readFile(join(done.dir, 'run-analysis.md'), 'utf8')
+  expect(analysis).toMatch(/Codebase map: used/)
+  expect(analysis).toMatch(/dropped/i)
+}, SLOW)

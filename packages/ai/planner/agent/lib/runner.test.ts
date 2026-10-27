@@ -283,3 +283,12 @@ it('runs one explorer per area before research, folds their findings in, and giv
     planningSawTouch: planning.includes('"path":"src/items.ts"'),
   }).toEqual({ status: 'ready', explorers: 2, researchSawFindings: true, planningIndexOnly: true, planningSawTouch: true })
 })
+
+it('T19: a cloud run with useCodebaseMap on reports the map not used, cloud run, and builds no map', async () => {
+  const args = await input()
+  await writeFile(join(args.repoPath, 'aspira.json'), JSON.stringify({ useCodebaseMap: true }))
+  const result = await runPlan(args)
+  expect(result.status).toBe('ready')
+  expect(await readFile(join(result.dir, 'run-analysis.md'), 'utf8')).toContain('Codebase map: not used (cloud run)')
+  expect(await readdir(args.repoPath)).not.toContain('.codebase-map')
+})

@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,6 +8,7 @@ import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { writeKnowledgeFolder, type WalkResult } from '@aspiralabs/ai/common/lib/knowledge-walk'
 import { REVIEW_COMMENT_MARKER } from './github-comment.ts'
+import { buildPacket } from './packet.ts'
 import { KnowledgeBlocked, KnowledgeRequired, knowledgeConfig, planStep, runLocal, workDirFor, type LocalDeps, type LocalInput, type LocalResult, type LocalTask, type PendingPlan } from './local.ts'
 import {
   SEATS,
@@ -320,7 +323,8 @@ describe('runLocal, local repository', () => {
     expect((await readdir(dir)).sort()).toEqual(['changed_files.txt', 'conversation.md', 'cost.md', 'findings.md', 'pr.md', 'pr.patch', 'review.md', 'trace'])
     // Round one with no dispute and no new finding ends the review in one round: seats + Quinn + the two writers and two checks.
     const reviewed = `Reviewed: base \`${done.target.baseSha}\` → head \`${done.target.headSha}\``
-    expect(await readFile(join(dir, 'findings.md'), 'utf8')).toBe(FINDINGS_MD.replace('# Findings: test\n\n', `# Findings: test\n\n${reviewed}\n\n`))
+    // Every run's report also carries its Run notes (KIT-70 F15): the stamped fix list is the start of the file, unchanged.
+    expect((await readFile(join(dir, 'findings.md'), 'utf8')).startsWith(FINDINGS_MD.replace('# Findings: test\n\n', `# Findings: test\n\n${reviewed}\n\n`))).toBe(true)
     expect(await readFile(join(dir, 'review.md'), 'utf8')).toContain(`# Review: test\n\n${reviewed}\n\n## What`)
     expect(await readFile(join(dir, 'pr.md'), 'utf8')).toContain(`- ${reviewed}`)
     expect(await readFile(join(dir, 'conversation.md'), 'utf8')).toMatch(/^# Review: .* @ feat\/x vs main\n\n## Round 1 — ava/)
@@ -372,7 +376,7 @@ describe('runLocal, local repository', () => {
     // and the export stamps the shas under the title of both; review.md leads with the run status (F4).
     const stamp = `Reviewed: base \`${done.target.baseSha}\` → head \`${done.target.headSha}\``
     expect(await readFile(join(done.dir, 'review.md'), 'utf8')).toBe(`ready\n\n${CHECKED_REVIEW_MD.replace('# Review: test\n\n', `# Review: test\n\n${stamp}\n\n`)}`)
-    expect(await readFile(join(done.dir, 'findings.md'), 'utf8')).toBe(FINDINGS_MD.replace('# Findings: test\n\n', `# Findings: test\n\n${stamp}\n\n`))
+    expect((await readFile(join(done.dir, 'findings.md'), 'utf8')).startsWith(FINDINGS_MD.replace('# Findings: test\n\n', `# Findings: test\n\n${stamp}\n\n`))).toBe(true)
     const trace = JSON.parse(await readFile(join(done.dir, 'trace', 'calls.json'), 'utf8'))
     expect(trace.calls.find((c: { id: string }) => c.id === 'check-review').output).not.toHaveProperty('document')
   })
@@ -727,4 +731,221 @@ describe('runLocal, one cached prefix', () => {
     }
     expect(Buffer.byteLength(common, 'utf8')).toBeGreaterThanOrEqual(shared)
   })
+})
+
+// ---------------------------------------------------------------------------------------------
+// KIT-70: the codebase map brief in the shared packet, the Blast radius check, and the Run notes.
+//
+// The contract these suites pin, where the plan leaves a name open:
+//   opt-in        `useCodebaseMap` in the nearest aspira.json above the reviewed repository (here: the folder above it).
+//   LocalInput    sessionRepo: the session's own checkout (--repo), the only tree a GitHub review may brief from, and
+//                 only when its HEAD is the PR head and it is clean; ticketDir: the ticket's working folder (before.folder).
+//   packet        a `## Codebase map brief` section carrying the helper's text, with the orientation and advisory lines.
+//   findings.md   `## Run notes` after the severity sections: `Codebase map: used` or `Codebase map: not used (<reason>)`,
+//                 `Blast radius check skipped: <why> (looked in <folder>)`; the finding is `### [BLAST1.1] Blast radius ...` under `## Low`.
+const SLOW = 240_000
+const NOTE_TEXT = 'NOTE-TEXT-MARKER the importers are fragile'
+const BLAST_ENTRY = /^### \[BLAST1\.1\] Blast radius/gm
+
+const mapOn = (dir: string, key: boolean | undefined = true) => (key === undefined ? Promise.resolve() : writeFile(join(dir, 'aspira.json'), JSON.stringify({ useCodebaseMap: key })))
+const readPacket = (workDir: string) => readFile(join(workDir, 'packet.md'), 'utf8')
+const beforeRunNotes = (findings: string) => (findings.includes('## Run notes') ? findings.slice(0, findings.indexOf('## Run notes')) : findings)
+const runNotes = (findings: string) => (findings.includes('## Run notes') ? findings.slice(findings.indexOf('## Run notes')) : '')
+
+// Like githubFixture, for a session checkout that is a clean checkout of the PR head: .work/ and the map are ignored.
+async function githubMapFixture() {
+  const { dir, repo, git } = await gitRepo()
+  await writeFile(join(repo, '.gitignore'), '.work/\n.codebase-map/map/\n')
+  await git('add', '.gitignore')
+  await git('commit', '-qm', 'chore: ignore work')
+  const head = await git('rev-parse', 'feat/x')
+  const base = await git('rev-parse', 'main')
+  await git('update-ref', 'refs/pull/7/head', head)
+  const diff = await git('diff', '--no-color', 'main...feat/x')
+  const github = fakeGithub({ head, base, diff: `${diff}\n` })
+  const deps: LocalDeps = { fetch: github.request, cloneUrl: () => `file://${repo}`, githubToken: async () => 'tok', packageDir: dir }
+  await seedKnowledge(join(dir, 'reviews', `${new Date().toISOString().slice(0, 10)}-feat-x.local`, 'knowledge'))
+  await mapOn(dir)
+  return { dir, repo, git, deps, head }
+}
+
+describe('T24: the brief in the packet, by review tree', () => {
+  it('a live local branch carries the brief for the changed files, built in the repository under review', async () => {
+    const { dir, repo } = await gitRepo()
+    await mapOn(dir)
+    const first = pending(await runLocal({ source: repo }))
+    const packet = await readPacket(first.workDir)
+    expect(packet).toContain('## Codebase map brief')
+    expect(packet).toContain('Orientation only: this brief is a map, not the code.')
+    expect(packet).toMatch(/advisory/i)
+    expect(packet).toContain('a.ts')
+    expect(packet).toContain('b.ts')
+    // Every seat reads it in the shared prefix, and the map was built in repoDir, not in the work folder.
+    expect(await readFile(first.tasks[0]!.prompt, 'utf8')).toContain('Orientation only: this brief is a map, not the code.')
+    expect(existsSync(join(repo, '.codebase-map', 'map', 'manifest.json'))).toBe(true)
+    expect(existsSync(join(first.workDir, 'repo'))).toBe(false)
+    const done = finished(await complete({ source: repo }))
+    expect(runNotes(await readFile(join(done.dir, 'findings.md'), 'utf8'))).toContain('Codebase map: used')
+  }, SLOW)
+
+  it('a branch that is not checked out is read from its commit: no map, and the report says why', async () => {
+    const { dir, repo, git } = await gitRepo()
+    await mapOn(dir)
+    await git('checkout', '-q', 'main')
+    const first = pending(await runLocal({ source: repo, branch: 'feat/x', base: 'main' }))
+    expect(await readPacket(first.workDir)).not.toContain('Codebase map')
+    expect(existsSync(join(repo, '.codebase-map'))).toBe(false)
+    expect(existsSync(join(first.workDir, 'repo', '.codebase-map'))).toBe(false)
+    const done = finished(await complete({ source: repo, branch: 'feat/x', base: 'main' }))
+    expect(runNotes(await readFile(join(done.dir, 'findings.md'), 'utf8'))).toContain('Codebase map: not used (review tree is not a checkout)')
+  }, SLOW)
+
+  it('a GitHub review briefs from the session checkout only when it is clean at the PR head', async () => {
+    const { repo, git, deps } = await githubMapFixture()
+    const used = pending(await runLocal({ source: 'acme/app#7', sessionRepo: repo }, deps))
+    expect(await readPacket(used.workDir)).toContain('## Codebase map brief')
+    const usedDone = finished(await complete({ source: 'acme/app#7', sessionRepo: repo, noComment: true }, deps))
+    expect(runNotes(await readFile(join(usedDone.dir, 'findings.md'), 'utf8'))).toContain('Codebase map: used')
+
+    // The session checkout moves off the PR head: the map describes some other tree, so it is not used.
+    await git('commit', '-q', '--allow-empty', '-m', 'chore: off head')
+    await seedKnowledge(join(deps.packageDir!, 'reviews', `${new Date().toISOString().slice(0, 10)}-feat-x.local`, 'knowledge'))
+    const off = pending(await runLocal({ source: 'acme/app#7', sessionRepo: repo }, deps))
+    expect(await readPacket(off.workDir)).not.toContain('Codebase map')
+    const offDone = finished(await complete({ source: 'acme/app#7', sessionRepo: repo, noComment: true }, deps))
+    expect(runNotes(await readFile(join(offDone.dir, 'findings.md'), 'utf8'))).toMatch(/Codebase map: not used \(review tree is not a checkout/)
+  }, SLOW)
+
+  it('a GitHub review with no session checkout does not use a map', async () => {
+    const { deps } = await githubMapFixture()
+    const first = pending(await runLocal({ source: 'acme/app#7' }, deps))
+    expect(await readPacket(first.workDir)).not.toContain('Codebase map')
+    const done = finished(await complete({ source: 'acme/app#7', noComment: true }, deps))
+    expect(runNotes(await readFile(join(done.dir, 'findings.md'), 'utf8'))).toMatch(/Codebase map: not used \(review tree is not a checkout/)
+  }, SLOW)
+
+  it('shows a note stored in a notes file the PR changes as id and path only', async () => {
+    const { dir, repo, git } = await gitRepo()
+    await mapOn(dir)
+    const hash = createHash('sha256').update('export const a = 2\n').digest('hex')
+    await mkdir(join(repo, '.codebase-map', 'notes'), { recursive: true })
+    await writeFile(join(repo, '.codebase-map', 'notes', 'changed-note.json'), JSON.stringify({ id: 'changed-note', status: 'accepted', text: NOTE_TEXT, evidence: [{ path: 'a.ts', hash }] }))
+    await git('add', '-f', '.codebase-map/notes/changed-note.json')
+    await git('commit', '-qm', 'docs: add a note')
+    const first = pending(await runLocal({ source: repo }))
+    const packet = await readPacket(first.workDir)
+    expect(packet).toContain('## Codebase map brief')
+    expect(packet).toMatch(/changed-note[^\n]*a\.ts/)
+    expect(packet).not.toContain(NOTE_TEXT)
+    expect(await readFile(first.tasks[0]!.prompt, 'utf8')).not.toContain(NOTE_TEXT)
+  }, SLOW)
+
+  it('with the key off or absent the packet is the packet of before, and no map is built', async () => {
+    for (const key of [false, undefined] as const) {
+      const { dir, repo } = await gitRepo()
+      await mapOn(dir, key)
+      const first = pending(await runLocal({ source: repo }))
+      const packet = await readPacket(first.workDir)
+      const label = packet.match(/^# Review packet: (.*)$/m)![1]!
+      const changed = (await readFile(join(first.workDir, 'changed_files.txt'), 'utf8')).split('\n').filter((line) => line !== '')
+      const today = buildPacket({ label, description: await readFile(join(first.workDir, 'pr.md'), 'utf8'), patch: await readFile(join(first.workDir, 'pr.patch'), 'utf8'), changed, required: REQUIRED_MD, previousFindings: null })
+      expect(packet).toBe(today.text)
+      expect(existsSync(join(repo, '.codebase-map'))).toBe(false)
+      const done = finished(await complete({ source: repo }))
+      expect(runNotes(await readFile(join(done.dir, 'findings.md'), 'utf8'))).toContain('Codebase map: not used (opt-in off)')
+    }
+  }, SLOW)
+})
+
+describe('T25: the Blast radius check and the Run notes', () => {
+  const SPEC = '# Spec\n\n## Blast radius\n\n- `a.ts` (the changed file)\n'
+  const PREVIOUS_BLAST = '\n## Low\n\n### [BLAST1.1] Blast radius: 9 changed files outside the spec\n- **Location:** `spec.md`\n- **Evidence:** `old-outside.ts`\n'
+
+  async function completeSeeded(input: LocalInput, deps: LocalDeps, findings: string) {
+    for (let step = 0; step < 40; step += 1) {
+      const result = await runLocal(input, deps)
+      if (!result.pending) return result
+      for (const task of result.tasks) {
+        await answer(task, result.workDir)
+        if (task.id === 'findings') await writeFile(join(result.workDir, 'findings.md'), findings)
+      }
+    }
+    throw new Error('the review never finished')
+  }
+
+  it('writes one low Blast radius finding from the ticket folder\'s reviewed spec even when --output moves the review, and replaces it on a re-review', async () => {
+    const { dir, repo, git } = await gitRepo()
+    const ticketDir = join(repo, '.work', 'kit-9')
+    await mkdir(join(ticketDir, 'spec.reviewed'), { recursive: true })
+    await writeFile(join(ticketDir, 'spec.reviewed', 'spec.reviewed.md'), SPEC)
+    await writeFile(join(ticketDir, 'spec.md'), '# Spec\n\n## Blast radius\n\n- `nothing.ts`\n')
+    const output = join(dir, 'elsewhere')
+    // --output moves the review and its work folder; the guidelines are read from the new work folder.
+    const knowledge = join(workDirFor(output), 'knowledge')
+    await seedKnowledge(knowledge)
+    const input: LocalInput = { source: repo, output, ticketDir }
+
+    const done = finished(await complete(input))
+    const findings = await readFile(join(done.dir, 'findings.md'), 'utf8')
+    expect(done.dir).toBe(output)
+    expect(findings.match(BLAST_ENTRY)).toHaveLength(1)
+    const low = findings.slice(findings.indexOf('## Low'))
+    expect(low).toContain('b.ts')
+    expect(low).toContain('spec.reviewed.md')
+    expect(findings).toContain('Totals: 0 critical · 1 high · 0 medium · 1 low · 0 info')
+    expect(done).toMatchObject({ verdict: 'block', counts: { high: 1, low: 1 } })
+    expect(beforeRunNotes(findings)).not.toMatch(/Blast radius check skipped/)
+
+    // The author pushes a fix touching b.ts; Nova's new list still carries a stale Blast radius entry.
+    await writeFile(join(repo, 'b.ts'), 'export const b = 2\n')
+    await git('commit', '-qam', 'fix: b')
+    await seedKnowledge(knowledge)
+    const again = finished(await completeSeeded({ ...input, since: done.dir }, {}, FINDINGS_MD + PREVIOUS_BLAST))
+    const rereview = await readFile(join(again.dir, 'findings.md'), 'utf8')
+    expect(rereview.match(BLAST_ENTRY)).toHaveLength(1)
+    expect(rereview).not.toContain('old-outside.ts')
+    expect(rereview).toContain('b.ts')
+  }, SLOW)
+
+  it('with every changed file inside the spec writes no finding', async () => {
+    const { repo } = await gitRepo()
+    const ticketDir = join(repo, '.work', 'kit-9')
+    await mkdir(ticketDir, { recursive: true })
+    await writeFile(join(ticketDir, 'spec.md'), '# Spec\n\n## Blast radius\n\n- `a.ts`, then `b.ts`\n')
+    const done = finished(await complete({ source: repo, ticketDir }))
+    const findings = await readFile(join(done.dir, 'findings.md'), 'utf8')
+    expect(findings).not.toMatch(BLAST_ENTRY)
+    expect(done.counts).toEqual(counts(1))
+  }, SLOW)
+
+  it('says the check was skipped, why, and which folder it looked in, when the ticket folder holds no spec', async () => {
+    const { repo } = await gitRepo()
+    const ticketDir = join(repo, '.work', 'kit-9')
+    await mkdir(ticketDir, { recursive: true })
+    const done = finished(await complete({ source: repo, ticketDir }))
+    const findings = await readFile(join(done.dir, 'findings.md'), 'utf8')
+    expect(findings).not.toMatch(BLAST_ENTRY)
+    expect(runNotes(findings)).toMatch(/Blast radius check skipped/)
+    expect(runNotes(findings)).toContain(ticketDir)
+    expect(beforeRunNotes(findings)).not.toMatch(/Codebase map|Blast radius check/)
+    expect(done.counts).toEqual(counts(1))
+  }, SLOW)
+
+  it('looks in .work/<ticketFolder(branch)> for a --no-ticket local run, and says so when there is no spec', async () => {
+    const { repo } = await gitRepo()
+    const done = finished(await complete({ source: repo }))
+    const notes = runNotes(await readFile(join(done.dir, 'findings.md'), 'utf8'))
+    expect(notes).toMatch(/Blast radius check skipped/)
+    expect(notes).toContain(join('.work', 'x'))
+  }, SLOW)
+
+  it('skips the check for a --no-ticket GitHub review, naming the missing ticket folder', async () => {
+    const { deps } = await githubFixture()
+    const done = finished(await complete({ source: 'acme/app#7', noComment: true }, deps))
+    const findings = await readFile(join(done.dir, 'findings.md'), 'utf8')
+    expect(findings).not.toMatch(BLAST_ENTRY)
+    expect(runNotes(findings)).toMatch(/Blast radius check skipped/)
+    expect(runNotes(findings)).toMatch(/no ticket folder/i)
+    expect(beforeRunNotes(findings)).not.toMatch(/Codebase map|Blast radius check/)
+  }, SLOW)
 })

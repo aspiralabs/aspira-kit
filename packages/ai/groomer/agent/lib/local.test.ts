@@ -342,3 +342,24 @@ describe('the one consolidated round (KIT-48)', () => {
     expect(task.model).toBe('opus')
   })
 })
+
+describe('the codebase map opt-in (KIT-70, F17)', () => {
+  /** What a first call writes and returns, with the temp paths and times blanked so two workspaces compare. */
+  async function firstCall(config: Record<string, unknown>) {
+    const { repo, folder, input } = await workspace()
+    await writeText(join(repo, 'aspira.json'), JSON.stringify(config))
+    const step = await runLocal(input, deps)
+    const files = (await filesUnder(join(folder, 'groom.local'))).filter((file) => !file.startsWith('knowledge')).sort()
+    const texts = await Promise.all(files.map((file) => readFile(join(folder, 'groom.local', file), 'utf8')))
+    const blank = (text: string) => text.split(folder).join('<folder>').split(repo).join('<repo>').replace(/\d{4}-\d\d-\d\dT[\d:.]+Z/g, '<time>')
+    return { repo, observed: blank(JSON.stringify({ step, files, texts })) }
+  }
+
+  it('T27: with useCodebaseMap true the groomer writes the same prompts as with the key absent and creates no .codebase-map', async () => {
+    const on = await firstCall({ useCodebaseMap: true })
+    const absent = await firstCall({})
+    expect(on.observed).toBe(absent.observed)
+    expect(JSON.parse(on.observed).files.length).toBeGreaterThan(0)
+    for (const { repo } of [on, absent]) expect((await filesUnder(repo)).filter((file) => file.includes('.codebase-map'))).toEqual([])
+  })
+})
