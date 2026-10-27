@@ -21,7 +21,7 @@ import {
   resolveRequired,
   type LoadedPage,
 } from '@aspiralabs/ai/common/lib/knowledge'
-import { parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
+import { folderRootOf, parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
 import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
 import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
@@ -191,7 +191,7 @@ export async function loadKnowledge(dir: string, config: KnowledgeConfig, source
 export async function verifyGuidelines(file: string, config: Pick<KnowledgeConfig, 'page'>): Promise<void> {
   const path = resolve(file)
   const header = parseProvenance((await readOptional(path)) ?? '')
-  const expectedRootId = (config.page === null ? undefined : pageIdFrom(config.page)) ?? header?.rootId ?? ''
+  const expectedRootId = folderRootOf(header) ?? (config.page === null ? undefined : pageIdFrom(config.page)) ?? header?.rootId ?? ''
   const verified = await verifySnapshot(path, { expectedRootId })
   if (!verified.ok) throw new KnowledgePrerequisiteError(`--guidelines ${path} is refused: ${verified.reason} ${verified.hint}`)
 }

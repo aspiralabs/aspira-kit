@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 import { INDEX_FILE, KNOWLEDGE_ENV, KNOWLEDGE_PATH, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED_FILE, pageIdFrom, parseRequired } from '@aspiralabs/ai/common/lib/knowledge'
 import { sessionModel, type SessionModel } from '@aspiralabs/ai/common/lib/session-model'
 import { taskModel, type Effort } from '@aspiralabs/ai/common/lib/model-config'
-import { parseProvenance, verifyKnowledgeDir } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
+import { folderRootOf, parseProvenance, verifyKnowledgeDir } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
 import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
 import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
@@ -418,8 +418,9 @@ async function headerRootId(path: string): Promise<string> {
 
 /** The root a verify call is held to: the agent's configured KNOWLEDGE_PAGE when there is one, else the file's own header (a no-op root check; the integrity/location/trace checks still apply). */
 async function expectedRootFor(config: KnowledgeConfig, requiredPath: string): Promise<string> {
+  const folder = folderRootOf(parseProvenance(await readFile(requiredPath, 'utf8').catch(() => '')))
   const configured = config.root === null ? undefined : pageIdFrom(config.root)
-  return configured ?? (await headerRootId(requiredPath))
+  return folder ?? configured ?? (await headerRootId(requiredPath))
 }
 
 /** Every file under the folder, by path relative to it, sorted. */
@@ -484,7 +485,7 @@ async function checkKnowledge(dir: string, agentDir: string, env: Record<string,
   if ((required ?? '').trim() === '') problems.push(`${requiredName} is missing or empty.`)
   else {
     const headings = new Set((required ?? '').split('\n').flatMap((line) => (line.startsWith('# ') ? [line.slice(2).trim().toLowerCase()] : [])))
-    const absent = config.required.filter((title) => !headings.has(title.trim().toLowerCase()))
+    const absent = (folderRootOf(parseProvenance(required ?? '')) === undefined ? config.required : []).filter((title) => !headings.has(title.trim().toLowerCase()))
     if (absent.length > 0) problems.push(`${requiredName} has no \`# <title>\` section for ${absent.join(', ')}.`)
   }
   if (problems.length > 0) throw refuse(problems.join(' '))

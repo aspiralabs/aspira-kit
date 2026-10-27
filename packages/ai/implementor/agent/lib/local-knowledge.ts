@@ -20,7 +20,7 @@ import {
   resolveRequired,
   type LoadedPage,
 } from '@aspiralabs/ai/common/lib/knowledge'
-import { parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
+import { folderRootOf, parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
 import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
 import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
@@ -246,7 +246,7 @@ export const hasProvenance = (text: string): boolean => parseProvenance(text) !=
 export async function verifyGuidelines(file: string, config: Pick<KnowledgeConfig, 'indexPage'>): Promise<void> {
   const path = resolve(file)
   const header = parseProvenance(await readFile(path, 'utf8').catch(() => ''))
-  const expectedRootId = (config.indexPage === null ? undefined : pageIdFrom(config.indexPage)) ?? header?.rootId ?? ''
+  const expectedRootId = folderRootOf(header) ?? (config.indexPage === null ? undefined : pageIdFrom(config.indexPage)) ?? header?.rootId ?? ''
   const verified = await verifySnapshot(path, { expectedRootId })
   if (!verified.ok) throw new KnowledgePrerequisiteError(`--guidelines ${path} is refused: ${verified.reason} ${verified.hint}`)
 }

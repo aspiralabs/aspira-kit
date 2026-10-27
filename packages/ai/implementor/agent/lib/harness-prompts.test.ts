@@ -147,7 +147,7 @@ async function prompts(made: Awaited<ReturnType<typeof fixture>>): Promise<Recor
   return out
 }
 
-const golden = (name: string) => `./__goldens__/${name}.md`
+const golden = (name: string) => `./__goldens__/${name}.txt`
 
 describe('F1: the orchestrator and worker prompt files are byte-identical for the three configs (goldens recorded at 7797a62)', () => {
   it.each(Object.keys(CONFIGS))('writes the prompt files under the %s config', async (name) => {

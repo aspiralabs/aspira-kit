@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
+import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
 import { agentVersion, recordAgentVersion } from '@aspiralabs/ai/common/lib/agent-version'
 import { exitCodeFor } from '@aspiralabs/ai/common/lib/run-status'
 import { TicketArgumentError } from '@aspiralabs/ai/common/lib/ticket'
@@ -62,14 +63,17 @@ try {
     if (before.kind === 'stage') {
       console.log(JSON.stringify({ ...before.stage, agent }, null, 2))
     } else {
-      // With a ticket the source is its PR property; the gate already refused when it was unset.
-      const source = before.kind === 'none' ? before.path : before.ticket.pr
+      // With a ticket the source is its PR property; the gate already refused when it was unset. With pullRequest false
+      // there is no PR: the ticket's worktree branch is reviewed against the repos entry's base as a local source, and the ticket stays so PR Review is still pushed.
+      const noPr = before.kind === 'ticket' && !readEffectiveAspira(values.repo).config.pullRequest
+      const source = before.kind === 'none' ? before.path : noPr ? values.repo : before.ticket.pr
       if (source === undefined || source === '') throw new FlowRefused(`${before.kind === 'ticket' ? before.ticket.id : 'the ticket'} has no PR property set; the implementor sets it when it opens the PR`)
+      const local = before.kind === 'none' || noPr
       const outputDir = before.kind === 'ticket' ? outputFor(before.folder) : values.output
       const result = await runLocal({
         source,
-        ...(before.kind === 'none' && values.branch !== undefined ? { branch: values.branch } : {}),
-        ...(before.kind === 'none' && values.base !== undefined ? { base: values.base } : {}),
+        ...(local && values.branch !== undefined ? { branch: values.branch } : {}),
+        ...(local && values.base !== undefined ? { base: values.base } : {}),
         ...(rounds === undefined ? {} : { maxRounds: Number(rounds) }),
         ...(outputDir === undefined ? {} : { output: outputDir }),
         ...(values.knowledge === undefined ? {} : { knowledge: values.knowledge }),

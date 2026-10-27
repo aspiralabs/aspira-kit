@@ -8,11 +8,12 @@
 // is in the repository). Without a Notion token or an index page nothing is built and every step
 // loads its own guidelines as before.
 
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { z } from 'zod'
 import { KNOWLEDGE_ENV, parseRequired, REQUIRED_ENV } from '@aspiralabs/ai/common/lib/knowledge'
-import { compareSnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
+import { guidelinesFolder } from '@aspiralabs/ai/common/lib/aspira-config'
+import { compareGuidelines, compareSnapshot, writeGuidelinesFolder } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
 import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
 import type { StepName } from '#build-feature/route.ts'
@@ -52,6 +53,8 @@ export type EnsureResult = { state: RunState; knowledge: SharedKnowledge | null;
  * build one (no token, no index page, Notion unreachable); the step then loads its own.
  */
 export async function ensureKnowledge(state: RunState, input: EnsureInput): Promise<EnsureResult> {
+  const guidelines = guidelinesFolder(input.repo)
+  if (guidelines !== undefined) return ensureFromFolder(state, input, guidelines)
   const token = (await notionToken({ env: input.env, ...tokenRoots(input.repo, input.repo, input.app === undefined || input.app === '.' ? undefined : resolve(input.repo, input.app)) }))?.token
   const page = input.env[KNOWLEDGE_ENV.page]?.trim() || input.page?.trim()
   if (token === undefined || token === '' || page === undefined || page === '') return { state, knowledge: null, note: null }
@@ -73,6 +76,29 @@ export async function ensureKnowledge(state: RunState, input: EnsureInput): Prom
     await writeKnowledgeFolder(dir, walk, { ticketFolder: input.folder })
     const rebuilds = existing !== null && record !== null ? record.rebuilds + 1 : 0
     return { state: withRecord(state, { dir, builtAt: input.now, verifiedAt: input.now, pages: walk.pages.length, rebuilds }), knowledge: { dir, requiredFile }, note: null }
+  } catch (error) {
+    return { state, knowledge: null, note: `Engineering guidelines could not be built once for the run (${error instanceof Error ? error.message : String(error)}); the step loads its own.` }
+  }
+}
+
+/** `guidelines` in the client's aspira.json: the folder of markdown is the only source, so no token, no index page and no Notion call; the folder's files are compared with the snapshot before each step. */
+async function ensureFromFolder(state: RunState, input: EnsureInput, guidelines: string): Promise<EnsureResult> {
+  const dir = join(input.folder, 'knowledge')
+  const requiredFile = join(dir, 'REQUIRED.md')
+  const existing = await readFile(requiredFile, 'utf8').catch(() => null)
+  const record = knowledgeRecordOf(state)
+  if (existing !== null && record !== null && record.dir === dir) {
+    const compared = await compareGuidelines(existing)
+    if (compared.comparable && compared.changed.length === 0) {
+      return { state: withRecord(state, { ...record, verifiedAt: input.now }), knowledge: { dir, requiredFile }, note: null }
+    }
+    if (!compared.comparable) return { state, knowledge: null, note: `Engineering guidelines: ${compared.reason} The step loads its own.` }
+  }
+  try {
+    await writeGuidelinesFolder(guidelines, dir, { ticketFolder: input.folder })
+    const pages = (await readdir(dir)).filter((name) => name.endsWith('.md')).length
+    const rebuilds = existing !== null && record !== null ? record.rebuilds + 1 : 0
+    return { state: withRecord(state, { dir, builtAt: input.now, verifiedAt: input.now, pages, rebuilds }), knowledge: { dir, requiredFile }, note: null }
   } catch (error) {
     return { state, knowledge: null, note: `Engineering guidelines could not be built once for the run (${error instanceof Error ? error.message : String(error)}); the step loads its own.` }
   }

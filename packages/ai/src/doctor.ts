@@ -3,11 +3,11 @@
 // package.json (`--app`, or `app` in aspira.json; the root itself for a single-app project); the
 // Claude-facing items (AGENTS.md, .mcp.json, .claude/, .gitignore, aspira.json) live at the root.
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
-import { basename, delimiter, dirname, join } from 'node:path'
-import { appRoot, aspiraTracked, codebaseMapsFolder, checkAspira, type AspiraConfig, isWorkspaceRoot, notionTargets, notionTokenCandidates, notionTokenSource, readAspira, readApp, type NotionTarget } from './aspira.js'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { basename, delimiter, dirname, join, resolve } from 'node:path'
+import { appRoot, aspiraTracked, codebaseMapsFolder, checkAspira, readEffectiveAspira, type AspiraConfig, isWorkspaceRoot, notionTargets, notionTokenCandidates, notionTokenSource, readAspira, readApp, type NotionTarget } from './aspira.js'
 import { readJson, type Log } from './fs.js'
-import { isGitIgnored, mainCheckoutRoot, repositoryRoot } from './git.js'
+import { git, isGitIgnored, mainCheckoutRoot, repositoryRoot } from './git.js'
 import type { CommandSeams } from './isolation.js'
 import { AI_PACKAGE, aiPackageDir, aiVersion, harnessItems } from './skills.js'
 import { harnessLeftovers } from './stacks/next.js'
@@ -160,10 +160,60 @@ function mapLine(projectRoot: string): string | undefined {
   }
 }
 
+/** Whether any file under `dir` holds the rule id `REV-001`. */
+function mentionsRule(dir: string, rule: string): boolean {
+  return readdirSync(dir, { withFileTypes: true }).some((entry) => {
+    const path = join(dir, entry.name)
+    return entry.isDirectory() ? mentionsRule(path, rule) : entry.isFile() && readFileSync(path, 'utf8').includes(rule)
+  })
+}
+
+/** KIT-68: `kit doctor` at a client root (an aspira.json with `repos` in this folder). Checks the client keys, the guidelines
+ * folder, the extend files and the Aspira files inside each mapped repo; board, Notion and @aspiralabs package checks do not apply. */
+function doctorClient(projectRoot: string, file: string, log: Log, home: string | undefined): number {
+  let problems = 0
+  const report = (ok: boolean, label: string): void => {
+    if (!ok) problems += 1
+    log(`${ok ? 'ok  ' : 'FAIL'} ${label}`)
+  }
+  log(`client ${projectRoot}`)
+  const status = checkAspira(projectRoot)
+  report(status.ok, status.ok ? 'aspira.json client keys are valid' : status.reason ?? 'aspira.json')
+  const { config } = readEffectiveAspira(projectRoot)
+  if (config.guidelines !== undefined) {
+    const folder = resolve(projectRoot, config.guidelines)
+    if (existsSync(folder) && statSync(folder).isDirectory()) report(mentionsRule(folder, 'REV-001'), `guidelines ${folder} ${mentionsRule(folder, 'REV-001') ? 'holds REV-001' : 'has no REV-001 rule'}`)
+  }
+  for (const [stage, files] of Object.entries(config.extend ?? {})) {
+    for (const rel of files) report(existsSync(resolve(projectRoot, rel)), `extend ${stage} lists ${rel}${existsSync(resolve(projectRoot, rel)) ? '' : ', which does not exist'}`)
+  }
+  for (const [key, entry] of Object.entries(config.repos ?? {})) {
+    const repoDir = resolve(projectRoot, String(entry?.path ?? ''))
+    if (!existsSync(repoDir)) continue
+    for (const name of ['aspira.json', '.work']) {
+      const shown = join(String(entry.path), name)
+      if (git(repoDir, ['ls-files', '--', name]).stdout.trim() !== '') report(false, `${shown} is tracked by git in repo ${key}; run kit upgrade there`)
+      else if (existsSync(join(repoDir, name)) && !isGitIgnored(repoDir, name)) report(false, `${shown} is not git-ignored in repo ${key}`)
+    }
+  }
+  const harness = harnessItems({ home })
+  for (const item of harness) report(item.ok, item.ok ? item.label : item.reason ?? item.label)
+  log(problems === 0 ? 'healthy' : `${problems} problem(s)${harness.some((item) => !item.ok) ? '; run kit update for the global harness' : ''}`)
+  return problems === 0 ? 0 : 1
+}
+
 export function doctor(projectRoot: string, log: Log, appFlag?: string, options?: { check?: UrlChecker; env?: Record<string, string | undefined>; seams?: CommandSeams; home?: string }): number {
+  const clientFile = join(projectRoot, 'aspira.json')
+  if (existsSync(clientFile) && readJson<{ repos?: unknown }>(clientFile)?.repos !== undefined) return doctorClient(projectRoot, clientFile, log, options?.home)
   const app = appFlag ?? readApp(projectRoot)
   const appDir = appRoot(projectRoot, app)
   const pkg = readJson<Pkg>(join(appDir, 'package.json'))
+  try {
+    const ignored = readEffectiveAspira(projectRoot).ignored
+    if (ignored !== undefined) log(`warn ignored aspira.json ${ignored}: its repos do not map this repository`)
+  } catch {
+    // an unreadable parent file is reported by the checks that read it
+  }
   if (!pkg) {
     log(app ? `no package.json in ${app}` : 'no package.json here (in a repository whose app lives in a subdirectory, pass --app <dir>)')
     return 1

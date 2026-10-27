@@ -66,6 +66,7 @@ export async function resolveLocalBranch(path: string, branch: string | undefine
       throw new Error(`No such branch in ${dir}: ${headRef}.`)
     },
   )
+  if (base !== undefined && (await firstResolvable(dir, [base])) === null) throw new Error(`The base ${base} does not exist in ${dir}, so ${headRef} cannot be reviewed against it.`)
   const baseRef = base ?? (await firstResolvable(dir, LOCAL_BASE_FALLBACKS.filter((ref) => ref !== headRef)))
   if (baseRef === null) throw new Error(`No base branch found in ${dir} (tried ${LOCAL_BASE_FALLBACKS.join(', ')}). Pass --base.`)
   if (baseRef === headRef) throw new Error(`Base and branch are both ${headRef} in ${dir}. Name a different base.`)
@@ -75,7 +76,10 @@ export async function resolveLocalBranch(path: string, branch: string | undefine
       throw new Error(`\`git merge-base ${baseRef} ${headRef}\` failed in ${dir}. Do they share history?`)
     },
   )
-  return { dir, repoDir, headRef, headSha, baseRef, mergeBase, live: branch === undefined || headRef === checkedOut }
+  const live = branch === undefined || headRef === checkedOut
+  // An explicit base with a committed branch that adds nothing beyond it has nothing to review (a live branch may still hold uncommitted edits).
+  if (base !== undefined && !live && mergeBase === headSha) throw new Error(`${headRef} has no commits beyond ${baseRef} in ${dir}: nothing to review.`)
+  return { dir, repoDir, headRef, headSha, baseRef, mergeBase, live }
 }
 
 /**

@@ -61,7 +61,7 @@ async function fixture(config: Record<string, unknown> | null, at: 'repo' | 'roo
   return { root, render }
 }
 
-const golden = (name: string) => `./__goldens__/${name}.md`
+const golden = (name: string) => `./__goldens__/${name}.txt`
 
 describe('F1: every phase prompt is byte-identical for the three configs (goldens recorded at 7797a62)', () => {
   it.each(Object.keys(CONFIGS))('renders every phase in write and review mode under the %s config', async (name) => {
@@ -90,6 +90,6 @@ describe('F12: extend[spec-writer] appends the named file to the write and revie
     const { root, render } = await fixture({ repos: { web: { path: 'repo' } }, extend: { planner: ['extend/plan.md'] } }, 'root')
     await write(join(root, 'extend/plan.md'), 'Plan notes.\n')
     const dir = new URL('./__goldens__/', import.meta.url)
-    expect(render('draft', 'write')).toBe(await readFile(new URL('write-draft-none.md', dir), 'utf8'))
+    expect(render('draft', 'write')).toBe(await readFile(new URL('write-draft-none.txt', dir), 'utf8'))
   })
 })

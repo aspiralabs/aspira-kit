@@ -65,7 +65,7 @@ async function fixture(config: Record<string, unknown> | null) {
   return { root, render }
 }
 
-const golden = (name: string) => `./__goldens__/${name}.md`
+const golden = (name: string) => `./__goldens__/${name}.txt`
 
 describe('F1: the model-fix prompts are byte-identical for the three configs (goldens recorded at 7797a62)', () => {
   it.each(Object.keys(CONFIGS))('renders fixPrompt and systemPrompt under the %s config', async (name) => {

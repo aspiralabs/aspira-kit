@@ -271,6 +271,14 @@ export function checkAspira(projectRoot: string): { ok: boolean; reason?: string
   } catch {
     return { ok: false, reason: `${ASPIRA_FILE} is not valid JSON` }
   }
+  if (config?.repos !== undefined) {
+    try {
+      validateClientKeys(path)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+    }
+  }
   if (!isNotionUrl(config?.board)) return { ok: false, reason: `${ASPIRA_FILE} has no "board" Notion URL; run kit init --board <Feature Board URL>` }
   if (config?.releases !== undefined && !isNotionUrl(config.releases)) return { ok: false, reason: `${ASPIRA_FILE} "releases" is not a Notion URL` }
   if (config?.knowledge !== undefined && !isNotionUrl(config.knowledge)) return { ok: false, reason: `${ASPIRA_FILE} "knowledge" is not a Notion URL` }
