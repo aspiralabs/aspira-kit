@@ -38,17 +38,18 @@
 
 import { randomUUID } from 'node:crypto'
 import { RESEARCH_RULE } from '@aspiralabs/ai/common/lib/research-rule'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync } from 'node:fs'
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, join, relative } from 'node:path'
+import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 import { z } from 'zod'
 import { nextAction, writeProgressNote, type NextAction } from '@aspiralabs/ai/common/lib/progress-note'
 import { readRunStatus } from '@aspiralabs/ai/common/lib/run-status'
 import { devServerSchema } from '@aspiralabs/ai/common/lib/visual-verify'
 import { encodeTrace, listsTelemetry, readAttached, recordAttached, releaseRunId, reserveRunId, telemetryFile, telemetryNotice, writeTelemetry, type WriteResult } from '@aspiralabs/ai/common/lib/telemetry'
 import { readUsageSource, type PhaseUsage } from '@aspiralabs/ai/common/lib/telemetry-sources'
-import { workRootFor } from '@aspiralabs/ai/common/lib/aspira-config'
+import { clientRootOf, readEffectiveAspira, repoForAreas, validateClientKeys, workRootFor } from '@aspiralabs/ai/common/lib/aspira-config'
+import { rebuildGroomRecord, readGroomRecord, writeGroomRecord } from '@aspiralabs/ai/common/lib/groom-record'
 import { slug } from '@aspiralabs/ai/common/lib/ticket'
 import { MODELS as REVIEWER_MODELS } from '@aspiralabs/ai/pr-reviewer/models'
 import { acceptApproval, approvalFor, invocationApproval, recordApproval } from '#build-feature/approval.ts'
@@ -59,11 +60,11 @@ import { visualVerifyPhase } from '#build-feature/visual-verify.ts'
 import { ensureKnowledge, knowledgeFlag } from '#build-feature/knowledge.ts'
 import { effortFor, modelFor, parseModels, subagentModels, type Role } from '#build-feature/models.ts'
 import { PACKET_STEPS, writeRunPacket } from '#build-feature/packet-file.ts'
-import { BACKWARD_MOVES_SKILL_MAY_MAKE, decideOverrides, findOverrides, overridesStage, recordOverrides } from '#build-feature/overrides.ts'
+import { BACKWARD_MOVES_SKILL_MAY_MAKE, DECISION_OWNERS, decideOverrides, findOverrides, overridesStage, recordOverrides } from '#build-feature/overrides.ts'
 import { renderPrBody } from '#build-feature/pr-body.ts'
 import { acceptResolution, cardDifferences, resolveStage, resolveWithToken, type Resolution } from '#build-feature/resolve.ts'
 import { mergePhase, mergeRecordOf, teardownNote } from '#build-feature/merge.ts'
-import { assertNever, launcherFor, MERGE_MOVE, READY_MOVES, RESUME, routeStatus, STEP8_MOVE, STEPS, type EndRoute, type Mode, type PhaseName, type StepName } from '#build-feature/route.ts'
+import { assertNever, launcherFor, MERGE_MOVE, READY_MOVES, RESUME, routeRunState, routeStatus, STEP8_MOVE, STEPS, type EndRoute, type Mode, type PhaseName, type Route, type StepName } from '#build-feature/route.ts'
 import { reviewPhase } from '#build-feature/review-loop.ts'
 import { readRunState, stateDirOf, writeRunState, type Card, type Failure, type Pending, type PhaseRecord, type RunState, type Usage } from '#build-feature/run-state.ts'
 import { analyzedApps, analyzerReady, commandApp, readImplementorApps, readImplementorStatus, readSpecCoverage, readStepResult, readStepUsage, stepReportSchema, stepResultTable } from '#build-feature/step-results.ts'
@@ -98,11 +99,13 @@ export type DriverInput = {
   mode: Mode
   /** --autonomous (KIT-24): no human gate. Not with --cloud; a continuing call keeps what its run started with. */
   autonomous: boolean
+  /** --no-ticket: a run on a repo with no card. A client root has no repo to name for it, so it refuses (KIT-68, F13). */
+  noTicket?: boolean
   now: string
   env: NodeJS.ProcessEnv
 }
 
-const aspiraSchema = z.looseObject({ board: z.string().optional(), repository: z.string().optional(), app: z.string().optional(), releases: z.string().optional(), knowledge: z.string().optional(), models: z.unknown().optional(), gates: z.array(z.object({ cwd: z.string().optional(), command: z.string().min(1) })).optional(), dev: devServerSchema.optional() })
+const aspiraSchema = z.looseObject({ board: z.string().optional(), repository: z.string().optional(), app: z.string().optional(), releases: z.string().optional(), knowledge: z.string().optional(), models: z.unknown().optional(), gates: z.array(z.object({ cwd: z.string().optional(), command: z.string().min(1) })).optional(), dev: devServerSchema.optional(), statusFlow: z.boolean().optional(), pullRequest: z.boolean().optional(), guidelines: z.string().optional(), workRoot: z.string().optional(), extend: z.record(z.string(), z.array(z.string())).optional(), repos: z.record(z.string(), z.looseObject({ path: z.string() })).optional() })
 export type Aspira = z.infer<typeof aspiraSchema>
 
 /** What every handler works from. */
@@ -250,16 +253,21 @@ async function workFolder(repo: string, id: string): Promise<string> {
 }
 
 async function readAspira(repo: string): Promise<{ ok: true; aspira: Aspira } | { ok: false; message: string }> {
-  const file = join(repo, 'aspira.json')
-  const raw = await readFile(file, 'utf8').catch(() => null)
-  if (raw === null) return { ok: false, message: `no aspira.json in ${repo}: the run cannot find the Feature Board. Run kit init --board <Feature Board URL> to name the board.` }
-  let json: unknown
+  let effective: ReturnType<typeof readEffectiveAspira>
   try {
-    json = JSON.parse(raw)
-  } catch {
-    return { ok: false, message: `${file} is not valid JSON, so the run cannot find the Feature Board` }
+    effective = readEffectiveAspira(repo)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { ok: false, message: message.endsWith('is not valid JSON') ? `${message}, so the run cannot find the Feature Board` : message }
   }
-  const parsed = aspiraSchema.safeParse(json)
+  const file = effective.file
+  if (file === undefined) return { ok: false, message: `no aspira.json in ${repo}: the run cannot find the Feature Board. Run kit init --board <Feature Board URL> to name the board.` }
+  try {
+    validateClientKeys(file)
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) }
+  }
+  const parsed = aspiraSchema.safeParse(effective.config)
   if (!parsed.success) return { ok: false, message: `${file} is not what kit init writes: ${parsed.error.issues.map((issue) => issue.message).join('; ')}` }
   if (parsed.data.board === undefined || parsed.data.board === '') return { ok: false, message: `${file} has no board: the run cannot resolve the card. Run kit init --board <Feature Board URL>.` }
   try {
@@ -466,6 +474,7 @@ async function stop(ctx: Ctx, state: RunState, message: string, options: { stopp
     'summary',
     () => ({
       path: summaryPath(ctx),
+      message,
       rules: join(ctx.dir, 'board-rules.md'),
       notion: [{ op: 'read', target: 'board-rules' }],
       instructions: `Fetch the Feature Board rules page (read-only) and write it as markdown to the "rules" path, then write {"nonce"} to the output file.`,
@@ -610,10 +619,22 @@ async function afterResolution(ctx: Ctx, state: RunState, resolution: Resolution
 }
 
 /** After the start resolution: the overrides pull, then the route. */
-function afterStart(ctx: Ctx, state: RunState): Promise<Out> | Out {
-  const stage = overridesStage(state, join(ctx.dir, 'pulled', ctx.runId))
-  if (stage === null) return route(ctx, state)
-  return pend(ctx, state, 'overrides', () => stage, { data: { pages: stage.pages } })
+async function afterStart(ctx: Ctx, state: RunState): Promise<Out> {
+  const pulled = join(ctx.dir, 'pulled', ctx.runId)
+  const taken = overridesStage(state, pulled)
+  // statusFlow false: a groom record that still holds a blocking follow-up is read again from its page, since the author resolves it there (KIT-68, F16).
+  const blocking = ctx.aspira?.statusFlow === false && (await readGroomRecord(ctx.folder).catch(() => undefined))?.decisions.some((decision) => decision.decidedBy === 'follow-up' && decision.followUp === 'blocks') === true
+  if (!blocking) {
+    if (taken === null) return route(ctx, state)
+    return pend(ctx, state, 'overrides', () => taken, { data: { pages: taken.pages } })
+  }
+  const pages = { ...((taken?.pages ?? {}) as Record<string, string>), groomer: join(pulled, 'groomer.md') }
+  const stage = {
+    pages,
+    notion: Object.keys(pages).map((step) => ({ op: 'read', target: 'child-page', page: DECISION_OWNERS[step]!.page })),
+    instructions: 'For each step in "pages", fetch the ticket\'s child page named as listed (read-only) and write its decisions, as markdown with the checkboxes as they are ticked now, to the path given. Then write {"nonce"} to the output file.',
+  }
+  return pend(ctx, state, 'overrides', () => stage, { data: { pages } })
 }
 
 const withRun = (state: RunState, runId: string, patch: Partial<RunState['runs'][number]>): RunState => ({ ...state, runs: state.runs.map((run) => (run.runId === runId ? { ...run, ...patch } : run)) })
@@ -623,7 +644,22 @@ const withRun = (state: RunState, runId: string, patch: Partial<RunState['runs']
  * goes on. Anywhere else, the worktree is made (or reused), the ticket folder and the run state are
  * carried into it, and a worktree stage tells the session to continue from there.
  */
-async function worktreeGate(ctx: Ctx, state: RunState): Promise<Out> {
+async function worktreeGate(ctx: Ctx, started: RunState): Promise<Out> {
+  let state = started
+  const root = clientRootStart(ctx.input.repo)
+  if (root !== null) {
+    // A client root holds no code: the card's Area tags name the one repo the run works in (KIT-68, F13).
+    let repo: string
+    try {
+      repo = repoForAreas(root, state.card!.area ?? [])
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return stop(ctx, state, message, { stopped: true, reason: { kind: 'worktree-prerequisite' }, failure: { action: 'worktree', message } })
+    }
+    const read = await readAspira(repo)
+    state = { ...state, approvals: state.approvals.map((approval) => (approval.runId === ctx.runId ? { ...approval, repo } : approval)) }
+    ctx = { ...ctx, input: { ...ctx.input, repo }, aspira: read.ok ? read.aspira : ctx.aspira }
+  }
   const card = state.card!
   const type = ticketTypeOf(card.type)
   if (type === null) {
@@ -645,19 +681,30 @@ async function worktreeGate(ctx: Ctx, state: RunState): Promise<Out> {
   return moveIntoWorktree(ctx, state, place, type, card.type!)
 }
 
+/** The aspira.json when `repo` is the client root itself (a harness with `repos`, started where no repo is chosen yet), else null. */
+function clientRootStart(repo: string): string | null {
+  const effective = readEffectiveAspira(repo)
+  if (effective.file === undefined || effective.root === undefined || effective.config.repos === undefined) return null
+  return realpathSync(effective.root) === realpathSync(repo) ? effective.file : null
+}
+
 async function moveIntoWorktree(ctx: Ctx, state: RunState, place: Place, type: NonNullable<ReturnType<typeof ticketTypeOf>>, cardType: string): Promise<Out> {
   const card = state.card!
   const prepared = await prepareWorktree({ place, id: ctx.input.id, title: card.title, type, cardType, env: ctx.input.env, ...(ctx.aspira?.app === undefined ? {} : { app: ctx.aspira.app }), ...(mergeRecordOf(state) === null ? {} : { skipIsolation: true }) })
   if (!prepared.ok) return stop(ctx, state, prepared.message, { stopped: true, reason: { kind: 'worktree-command' }, failure: { action: 'worktree', command: prepared.command, exitCode: prepared.exitCode, output: prepared.output, message: prepared.message } })
   const { worktree, branch } = prepared
-  const folder = await carryTicketFolder(ctx.folder, worktree)
-  // The run id's .pending marker went with the ticket folder: the run writes its one telemetry file there at its end, nothing here (KIT-19).
-  await releaseRunId(ctx.folder, ctx.runId)
+  // A client layout keeps the ticket folder and the run state at the client root, outside every repo: nothing is carried (KIT-68).
+  const client = clientRootOf(ctx.input.repo) !== undefined
+  const folder = client ? ctx.folder : await carryTicketFolder(ctx.folder, worktree)
   const inWorktree: Ctx = { ...ctx, input: { ...ctx.input, repo: worktree }, folder, dir: stateDirOf(folder) }
-  // The run state left behind says where the run went; the lock moves with it.
-  const left: RunState = { ...withRun(state, ctx.runId, { ended: 'moved', endedAt: ctx.input.now, worktree }), inProgress: state.inProgress?.runId === ctx.runId ? null : state.inProgress, pending: null }
-  await writeRunState(ctx.folder, left)
-  await writeActive(ctx.folder, left, ctx.runId, ctx.input.now)
+  if (!client) {
+    // The run id's .pending marker went with the ticket folder: the run writes its one telemetry file there at its end, nothing here (KIT-19).
+    await releaseRunId(ctx.folder, ctx.runId)
+    // The run state left behind says where the run went; the lock moves with it.
+    const left: RunState = { ...withRun(state, ctx.runId, { ended: 'moved', endedAt: ctx.input.now, worktree }), inProgress: state.inProgress?.runId === ctx.runId ? null : state.inProgress, pending: null }
+    await writeRunState(ctx.folder, left)
+    await writeActive(ctx.folder, left, ctx.runId, ctx.input.now)
+  }
   const moved = withRun(state, ctx.runId, { worktree })
   const out = pend(
     inWorktree,
@@ -665,6 +712,7 @@ async function moveIntoWorktree(ctx: Ctx, state: RunState, place: Place, type: N
     'worktree',
     (output) => ({
       worktree,
+      ...(client ? { repo: ctx.input.repo } : {}),
       branch,
       created: prepared.created,
       ran: prepared.ran,
@@ -677,7 +725,8 @@ async function moveIntoWorktree(ctx: Ctx, state: RunState, place: Place, type: N
 
 /** A new invocation, or a call, outside the ticket's existing worktree: continue there (nothing is recorded here). */
 async function redirectStage(input: DriverInput, place: Place, worktree: string, folder: string): Promise<Stage> {
-  await carryTicketFolder(folder, worktree)
+  // A client layout keeps the ticket folder at the client root: nothing is carried into a repo (KIT-68).
+  if (clientRootOf(place.main) === undefined) await carryTicketFolder(folder, worktree)
   // aspira.json is git-ignored (KIT-71): a worktree that lacks it gets the main checkout's before the run continues there.
   linkAspira(place.main, worktree)
   // A rerun from the main checkout completes missing isolation before it sends the session on (KIT-67 F1); a merged ticket's is never rebuilt.
@@ -793,7 +842,16 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
     autonomous: ctx.autonomous,
     merged: mergeRecordOf(state) !== null,
   }
-  const next = routeStatus(card.status, facts)
+  // statusFlow false (KIT-68, F6): the card's Status carries nothing, so the working folder's files pick the stage.
+  let next: Route
+  if (ctx.aspira?.statusFlow === false) {
+    const routed = await routeRunState(ctx.folder, { id: ctx.input.id, app: facts.app, mode: ctx.mode, autonomous: ctx.autonomous })
+    if (routed.needsAuthor !== undefined) {
+      const message = `${ctx.input.id}: grooming is confirmed, but ${routed.needsAuthor.length === 1 ? 'a follow-up blocks' : 'follow-ups block'} the build. Resolve ${routed.needsAuthor.length === 1 ? 'it' : 'them'} on the Grooming Decisions page, then run again: ${routed.needsAuthor.map((item) => `${item.id}: ${item.question}`).join('; ')}`
+      return stop(ctx, state, message, { stopped: true, reason: { kind: 'human-gate' }, failure: { action: 'groomer', message } })
+    }
+    next = routed.route
+  } else next = routeStatus(card.status, facts)
   switch (next.kind) {
     case 'step':
       return printStep(ctx, state, next.step, next.command)
@@ -920,7 +978,8 @@ async function printStep(ctx: Ctx, started: RunState, step: StepName, routed: st
       // aspira.json `models` may set the step subagent's reasoning effort; absent, the Agent tool's default.
       ...(effort === undefined ? {} : { effort }),
       prompt: join(promptDir, `${step}-${ctx.runId}.md`),
-      notion: [{ op: 'read', target: 'ticket' }, ...STEP_NOTION[step]],
+      // statusFlow false: the step moves no card and sets no Dev, so the ticket is read and never written (KIT-68).
+      notion: [{ op: 'read', target: 'ticket' }, ...STEP_NOTION[step].filter((action) => !(ctx.aspira?.statusFlow === false && action.op === 'write' && action.target === 'ticket'))],
       report: { output, fields: ['nonce', 'step', 'status', 'resultLine', 'usage'] },
     }),
     { data: { step, command, launcher }, nonce },
@@ -1016,6 +1075,13 @@ async function withCloudUsage(ctx: Ctx, step: StepName, usage: Usage, interval: 
   }
 }
 
+/** A follow-up the groom record holds (KIT-68) is a question left for the author on the page, not one the decision rule failed: no ask for it. */
+async function withoutFollowUps<T extends { id?: string }>(asks: readonly T[], folder: string): Promise<T[]> {
+  const record = await readGroomRecord(folder).catch(() => undefined)
+  const followUps = new Set((record?.decisions ?? []).filter((decision) => decision.decidedBy === 'follow-up').map((decision) => decision.id))
+  return asks.filter((ask) => ask.id === undefined || !followUps.has(ask.id))
+}
+
 async function acceptStep(ctx: Ctx, state: RunState, pending: Pending, answer: unknown): Promise<Out> {
   const step = String(pending.data?.step) as StepName
   const command = String(pending.data?.command)
@@ -1050,7 +1116,7 @@ async function acceptStep(ctx: Ctx, state: RunState, pending: Pending, answer: u
   if (result.verdict === 'continue' && isDecisionStep(step)) {
     const collected = await collectTakenDecisions(step, { folder: ctx.folder, runId: ctx.runId })
     if (!collected.ok) return stop(ctx, next, collected.message, { stopped: true, reason: { kind: 'unexpected-error' }, failure: { action: step, command, message: collected.message } })
-    next = { ...addTaken(next, collected.taken), queue: [...next.queue, ...collected.asks] }
+    next = { ...addTaken(next, collected.taken), queue: [...next.queue, ...(step === 'groomer' ? await withoutFollowUps(collected.asks, ctx.folder) : collected.asks)] }
   }
   let after = result.verdict === 'stop' ? result.message : null
   if (after !== null && result.status === 'needs-author' && isDecisionStep(step)) {
@@ -1121,8 +1187,19 @@ async function acceptMove(ctx: Ctx, state: RunState, pending: Pending, answer: u
   return requestResolve(ctx, moved, { purpose: 'route' })
 }
 
+/** Rebuild groom.json from the pulled Grooming Decisions page when the page still holds a confirmed grooming; the record's page link is kept. */
+async function refreshGroomRecord(folder: string, file: string): Promise<void> {
+  const markdown = await readFile(file, 'utf8').catch(() => null)
+  const before = await readGroomRecord(folder).catch(() => undefined)
+  if (markdown === null || before === undefined) return
+  const { record } = rebuildGroomRecord(markdown)
+  if (record.decisions.length === 0 || record.status !== 'ready') return
+  await writeGroomRecord(folder, { ...record, page: before.page })
+}
+
 async function acceptOverrides(ctx: Ctx, state: RunState, pending: Pending): Promise<Out> {
   const pages = (pending.data?.pages ?? {}) as Record<string, string>
+  if (ctx.aspira?.statusFlow === false && pages.groomer !== undefined) await refreshGroomRecord(ctx.folder, pages.groomer)
   const overrides = await findOverrides(state, pages, ctx.runId)
   const recorded = recordOverrides(state, overrides)
   const card = recorded.card!
@@ -1147,7 +1224,7 @@ async function acceptOverrides(ctx: Ctx, state: RunState, pending: Pending): Pro
 async function settleFolder(ctx: Ctx, title: string): Promise<Ctx> {
   const lower = ctx.input.id.toLowerCase()
   if (basename(ctx.folder) !== lower || title.trim() === '') return ctx
-  const target = join(ctx.input.repo, '.work', `${lower}-${slug(title)}`)
+  const target = join(workRootFor(ctx.input.repo) ?? join(ctx.input.repo, '.work'), `${lower}-${slug(title)}`)
   if (existsSync(target)) return ctx
   await rename(ctx.folder, target)
   return { ...ctx, folder: target, dir: stateDirOf(target) }
@@ -1236,6 +1313,37 @@ async function refuseSecondReport(state: RunState, runId: string): Promise<void>
   throw new Refusal(`a second report for the ${again.step} step of ${runId} was refused: the run already recorded its result (${again.status}), and a step has one result.`)
 }
 
+/**
+ * Refused before any record when the aspira.json is a client harness (it has `repos`): its keys must be usable
+ * (pullRequest false needs statusFlow false), client runs are in session only, and --no-ticket needs a repo
+ * to run on, which a client root does not name (KIT-68, F7, F13, F20).
+ */
+function clientStartChecks(input: DriverInput): void {
+  let effective: ReturnType<typeof readEffectiveAspira>
+  try {
+    effective = readEffectiveAspira(input.repo)
+  } catch {
+    return
+  }
+  if (effective.file === undefined) return
+  // The run makes its own working folders, so a workRoot that is not there yet is made (inside the harness folder only) before the keys are checked.
+  const workRoot = effective.config.workRoot
+  if (typeof workRoot === 'string' && workRoot !== '' && effective.root !== undefined) {
+    const target = resolve(effective.root, workRoot)
+    if (!isAbsolute(workRoot) && !relative(effective.root, target).startsWith('..')) mkdirSync(target, { recursive: true })
+  }
+  try {
+    validateClientKeys(effective.file)
+  } catch (error) {
+    throw new Refusal(error instanceof Error ? error.message : String(error))
+  }
+  if (effective.config.repos === undefined) return
+  for (const [flag, given] of [['--cloud', input.mode === 'cloud'], ['--autonomous', input.autonomous]] as const) {
+    if (given) throw new Refusal(`${flag} does not apply to a client harness (${effective.file} has repos): client runs are in session only; run ${RESUME(input.id)} without it`)
+  }
+  if (input.noTicket === true && clientRootStart(input.repo) !== null) throw new Refusal(`--no-ticket needs a repo to run on, and ${effective.file} maps several: start from inside one of ${Object.keys(effective.config.repos).join(', ')}`)
+}
+
 /** One call of the driver: read the state, take the pending answer, and return the next stage. */
 export async function nextStage(input: DriverInput): Promise<Stage> {
   const initialFolder = await workFolder(input.repo, input.id)
@@ -1252,6 +1360,7 @@ export async function nextStage(input: DriverInput): Promise<Stage> {
 
   if (input.run === undefined && !input.finish) {
     // --autonomous rides on the default mode: the cloud step agents take neither --take-recommended nor --autonomous (KIT-24).
+    clientStartChecks(input)
     if (input.autonomous && input.mode !== 'local') throw new Refusal(`--autonomous does not apply with --cloud; run it in this session: ${RESUME(input.id, 'local', true)}`)
     refuseInProgress(input, state)
     // Every skill the driver runs (the steps and KIT-58's visual-verify) is refused at the start, before any stage or record.

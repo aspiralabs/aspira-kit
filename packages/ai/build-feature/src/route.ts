@@ -5,7 +5,13 @@
 // the driver reads: whether a review covers the current spec.md, what the implementor's last
 // result was, and whether the analyzer finished clean.
 
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { readGroomRecord } from '@aspiralabs/ai/common/lib/groom-record'
+import { readRunStatus } from '@aspiralabs/ai/common/lib/run-status'
 import { commandFor, nextStep } from '@aspiralabs/ai/playbook'
+import { emptyRunState, readRunState, type RunState } from '#build-feature/run-state.ts'
+import { analyzedApps, analyzerReady, readImplementorApps } from '#build-feature/step-results.ts'
 
 /** The steps, in Playbook order. */
 export const STEPS = ['groomer', 'spec-writer', 'planner', 'implementor', 'code-analyzer', 'pr-reviewer'] as const
@@ -203,4 +209,60 @@ export function routeStatus(status: string, facts: RouteFacts): Route {
     default:
       return { kind: 'end', reason: 'unknown', message: `unknown Status "${status}" for ${facts.id}: the run has no route for it` }
   }
+}
+
+/** The stages a run with `statusFlow: false` walks, in order (KIT-68, F6). */
+export type RunStage = 'groom' | 'spec' | 'plan' | 'implement' | 'review' | 'finished'
+
+export type RunStateRoute = {
+  stage: RunStage
+  route: Route
+  /** The spec rerun's input files, relative to the folder: the reviewed spec, then spec.md. */
+  input?: string[]
+  /** Blocking follow-ups of a confirmed grooming: the run ends needs-author listing them. */
+  needsAuthor?: { id: string; question: string }[]
+}
+
+const SPEC_REVIEWED = 'spec.reviewed/spec.reviewed.md'
+const PLAN_FILE = 'plan.review/trace/plan.json'
+
+/**
+ * With `statusFlow: false` the card's Status carries nothing, so the next stage comes from the files in the ticket
+ * folder: a stage is done when its own output says so, and the first stage not done is next. An upstream output
+ * edited later never moves the route back. Each step stage uses the Playbook row of the Status it maps to; the
+ * implement and review walks join in one sequence that has no Step 8 push or PR, no release row and no merge.
+ */
+export async function routeRunState(folder: string, facts: Pick<RouteFacts, 'id' | 'app' | 'mode' | 'autonomous'>): Promise<RunStateRoute> {
+  const state: RunState = await readRunState(folder).catch(() => emptyRunState())
+  const has = (file: string): boolean => existsSync(join(folder, file))
+  const lastReady = (step: StepName): boolean | null => {
+    const last = state.steps.findLast((candidate) => candidate.step === step)
+    return last === undefined ? null : readRunStatus(last.status)?.status === 'ready'
+  }
+  const reviewed = (state.phases.review as { ready?: unknown } | undefined)?.ready
+  if (typeof reviewed === 'number') {
+    return { stage: 'finished', route: { kind: 'end', reason: 'finished', message: `${facts.id}: the review left nothing medium or above; the work is on its ticket branch` } }
+  }
+  if (lastReady('implementor') === true) {
+    const apps = await readImplementorApps(folder)
+    const full: RouteFacts = { ...facts, specCovered: true, implementor: 'ready', analyzerReady: analyzerReady(state), apps, analyzed: analyzedApps(state, apps) }
+    return {
+      stage: 'review',
+      route: {
+        kind: 'sequence',
+        items: [{ kind: 'phase', phase: 'visual-verify' }, { kind: 'phase', phase: 'gate' }, ...analyzerSteps(full), { kind: 'phase', phase: 'review' }],
+        then: { kind: 'end', reason: 'finished', message: `${facts.id}: the review left nothing medium or above; the work is on its ticket branch` },
+      },
+    }
+  }
+  if (has(PLAN_FILE) && lastReady('planner') !== false) return { stage: 'implement', route: stepCommand('Ready: Plan', facts) }
+  const specStopped = lastReady('spec-writer') === false
+  if (has(SPEC_REVIEWED) && !specStopped) return { stage: 'plan', route: stepCommand('Ready: Spec', facts) }
+  const record = await readGroomRecord(folder).catch(() => undefined)
+  const groomed = record !== undefined && readRunStatus(record.status)?.status === 'ready'
+  if (!groomed) return { stage: 'groom', route: stepCommand('Idea', facts) }
+  const blocking = record.decisions.filter((decision) => decision.decidedBy === 'follow-up' && decision.followUp === 'blocks').map((decision) => ({ id: decision.id, question: decision.question }))
+  if (blocking.length > 0) return { stage: 'groom', route: stepCommand('Idea', facts), needsAuthor: blocking }
+  if (has(SPEC_REVIEWED) && specStopped) return { stage: 'spec', route: stepCommand('In Review: Spec', facts), input: [SPEC_REVIEWED, 'spec.md'] }
+  return { stage: 'spec', route: stepCommand('Ready: Idea', facts) }
 }
