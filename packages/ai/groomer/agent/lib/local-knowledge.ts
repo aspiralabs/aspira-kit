@@ -16,7 +16,7 @@ import { basename, join, resolve } from 'node:path'
 import { parseEnv } from 'node:util'
 import { INDEX_FILE, KNOWLEDGE_ENV, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED_FILE, pageIdFrom, parseRequired } from '@aspiralabs/ai/common/lib/knowledge'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
-import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
 import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 
 /** The knowledge walk's own fetch and API base, for tests only; a real run hits Notion's API with the global fetch. */
@@ -99,8 +99,8 @@ export async function knowledgeConfig(agentDir: string, env: Env, projectRoot?: 
   for (const key of [KNOWLEDGE_ENV.page, REQUIRED_ENV]) if (env[key] !== undefined) merged[key] = env[key]
   const root = merged[KNOWLEDGE_ENV.page]?.trim()
   const fromEnv = env[KNOWLEDGE_ENV.token]?.trim()
-  const token = projectRoot === undefined ? (fromEnv ? fromEnv : undefined) : (await notionToken({ env, projectRoot }))?.token.trim()
-  const tokenFrom = projectRoot === undefined ? 'the environment' : `the environment or ${join(projectRoot, '.env.local')}`
+  const token = projectRoot === undefined ? (fromEnv ? fromEnv : undefined) : (await notionToken({ env, ...tokenRoots(projectRoot, projectRoot) }))?.token.trim()
+  const tokenFrom = projectRoot === undefined ? 'the environment' : `the environment or ${join(tokenRoots(projectRoot, projectRoot).projectRoot, '.env.local')}`
   return { root: root ? root : null, required: parseRequired(merged[REQUIRED_ENV]), maxDepth: MAX_DEPTH, maxPages: MAX_PAGES, token: token ? token : undefined, tokenFrom }
 }
 

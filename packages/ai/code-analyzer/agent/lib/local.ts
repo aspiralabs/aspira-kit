@@ -16,7 +16,7 @@ import type { SessionModel } from '@aspiralabs/ai/common/lib/session-model'
 import { taskModel, type Effort } from '@aspiralabs/ai/common/lib/model-config'
 import { parseProvenance, verifyKnowledgeDir, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
-import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
 import { REASON_CODES, readRunStatus, type ReasonCode } from '@aspiralabs/ai/common/lib/run-status'
 import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 import { z } from 'zod'
@@ -100,7 +100,7 @@ async function resolveFreshKnowledge(input: LocalInput, config: KnowledgeConfig,
   const dir = join(work, 'knowledge')
   const already = (await readFile(join(dir, 'REQUIRED.md'), 'utf8').catch(() => null)) !== null
   if (already) return checkKnowledgeDir(dir, config, hint)
-  const resolved = await notionToken({ env: deps.env ?? process.env, projectRoot: project.root, appDir: project.app })
+  const resolved = await notionToken({ env: deps.env ?? process.env, ...tokenRoots(project.root, project.root, project.app) })
   if (resolved?.token === undefined || config.page === null) {
     const where = [
       resolved?.token === undefined && `${KNOWLEDGE_ENV.token} is not set in the environment, ${join(project.app, '.env.local')} or ${join(project.root, '.env.local')}`,

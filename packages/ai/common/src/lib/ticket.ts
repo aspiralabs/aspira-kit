@@ -169,7 +169,7 @@ export type GateCheck =
   | { ok: false; message: string }
 
 /** The gate: may this skill run on a ticket in this Status, and does it make a start move. */
-export function checkGate(skill: Skill, ticket: Pick<Ticket, 'id' | 'title' | 'status' | 'pr' | 'type'> & { duplicatePages?: DuplicatePages }): GateCheck {
+export function checkGate(skill: Skill, ticket: Pick<Ticket, 'id' | 'title' | 'status' | 'pr' | 'type'> & { duplicatePages?: DuplicatePages }, options: { statusFlow?: boolean; pullRequest?: boolean } = {}): GateCheck {
   const gate = GATES[skill]
   const name = `${ticket.id} ${ticket.title}`.trim()
   if (gate.types !== undefined) {
@@ -182,9 +182,11 @@ export function checkGate(skill: Skill, ticket: Pick<Ticket, 'id' | 'title' | 's
     const duplicate = ticket.duplicatePages?.find((entry) => entry.title === pull.title)
     if (duplicate !== undefined) return { ok: false, message: DUPLICATE_PAGES_MESSAGE(ticket.id, pull.title, duplicate.pages.map((page) => page.url)) }
   }
+  // statusFlow false (KIT-68): the card's Status is not read and no start move is made.
+  if (options.statusFlow === false) return { ok: true, retry: false, startMove: null }
   if (gate.inProgress !== undefined && ticket.status === gate.inProgress) return { ok: true, retry: true, startMove: null }
   if (gate.accepts.includes(ticket.status)) {
-    if (gate.requires === 'PR' && !ticket.pr) {
+    if (gate.requires === 'PR' && options.pullRequest !== false && !ticket.pr) {
       return { ok: false, message: `${name} is "${ticket.status}" but its PR property is not set; ${skill} needs the PR. Set it (the implementor does, when it opens the PR). No model call was made.` }
     }
     const moves = gate.inProgress !== undefined && (gate.startFrom === undefined || gate.startFrom.includes(ticket.status))

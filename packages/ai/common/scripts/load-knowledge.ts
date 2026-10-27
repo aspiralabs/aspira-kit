@@ -10,7 +10,7 @@ import { parseArgs } from 'node:util'
 import { resolve } from 'node:path'
 import { KNOWLEDGE_ENV, REQUIRED_ENV, parseRequired } from '../src/lib/knowledge.ts'
 import { loadKnowledgeCommand } from '../src/lib/knowledge-walk.ts'
-import { notionToken } from '../src/lib/notion-token.ts'
+import { notionToken, tokenRoots } from '../src/lib/notion-token.ts'
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const { values } = parseArgs({ args: argv, options: { out: { type: 'string' }, page: { type: 'string' }, required: { type: 'string' } }, strict: false, allowPositionals: true })
@@ -21,7 +21,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 1
   }
 
-  const resolvedToken = await notionToken({ env: process.env, projectRoot: process.cwd() })
+  const resolvedToken = await notionToken({ env: process.env, ...tokenRoots(process.cwd(), process.cwd()) })
   if (resolvedToken === null) {
     console.error(`No ${KNOWLEDGE_ENV.token} found: set it in the environment, the project's .env.local, or pass --env-file.`)
     return 1

@@ -76,6 +76,12 @@ export class FlowRefused extends Error {
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
+/** The statusFlow/pullRequest keys of the aspira.json that applies to `from` (KIT-68); both true when none says otherwise. */
+function statusFlowOf(from: string): { statusFlow: boolean; pullRequest: boolean } {
+  const { statusFlow, pullRequest } = readEffectiveAspira(from).config
+  return { statusFlow, pullRequest }
+}
+
 /** aspira.json, or null when the project has no board. Throws when the file is not what kit init writes. */
 export async function readAspira(repo: string): Promise<AspiraConfig | null> {
   const { file, config } = readEffectiveAspira(repo)
@@ -213,7 +219,7 @@ export async function startFlow(options: FlowOptions): Promise<FlowStart> {
   const dev = options.dev ?? env[DEV_ENV] ?? DEFAULT_DEV
   if (options.argument.kind === 'path') throw new Error('startFlow needs a ticket; --no-ticket runs make no board actions')
   const ticket = await client.resolveTicket(options.argument.ref)
-  const gate = checkGate(options.skill, ticket)
+  const gate = checkGate(options.skill, ticket, statusFlowOf(options.repo))
   if (!gate.ok) throw new FlowRefused(gate.message)
   const folder = options.argument.folder ?? join(workDirFor(options.repo), workFolderName(ticket))
   const previous = previousPagesOf(await readTicketMd(folder))
@@ -651,7 +657,7 @@ async function finishGroom(options: FinishOptions, client: Board, ticket: Ticket
       check(`already in ${gate.success}; no move`)
       return working
     }
-    const move = endMove(options.skill, final, current, false)
+    const move = statusFlowOf(options.folder).statusFlow === false ? null : endMove(options.skill, final, current, false)
     if (move === null) return wrong(current)
     try {
       const moved = await client.moveTicket(ticket.url, move.from, move.to)
@@ -760,7 +766,7 @@ export async function finishFlow(options: FinishOptions): Promise<FlowFinish> {
       trace.actions.push(entry('set', `PR = ${options.prUrl}`, status, status, false, message(error)))
     }
   }
-  const move = pushFailures.length > 0 ? null : endMove(options.skill, runStatus, status, prOpened)
+  const move = pushFailures.length > 0 || statusFlowOf(options.folder).statusFlow === false ? null : endMove(options.skill, runStatus, status, prOpened)
   if (move !== null) {
     try {
       const moved = await client.moveTicket(ticket.url, move.from, move.to)
@@ -1037,7 +1043,7 @@ export async function localBoardStep(options: LocalBoardOptions): Promise<{ stag
       return { stage: stageOf(state.folder, [resolveAction(ref, options.board, options.repo, state.folder)], null, 'Perform each action with the Notion MCP, then call local again. The driver reads ticket.md and refuses when it does not show what the gate needs.') }
     }
     state.folder = folder
-    const gate = checkGate(options.skill, ticket)
+    const gate = checkGate(options.skill, ticket, statusFlowOf(options.repo))
     if (!gate.ok) throw new FlowRefused(gate.message)
     state.phase = 'sync'
     state.statusBefore = ticket.status
@@ -1050,7 +1056,7 @@ export async function localBoardStep(options: LocalBoardOptions): Promise<{ stag
   const folder = state.folder!
   const ticket = await readTicketMd(folder)
   if (ticket === null) throw new FlowRefused(`${join(folder, TICKET_FILE)} is missing or not a ticket file; delete ${options.stateDir} and start over`)
-  const gate = checkGate(options.skill, ticket)
+  const gate = checkGate(options.skill, ticket, statusFlowOf(options.repo))
   if (!gate.ok) throw new FlowRefused(gate.message)
   const plan = await pullPlan(options.skill, ticket, folder, state.previous, options.force === true)
   // The groomer's overwrite pull (Grooming Decisions) is asked again at the start of every round after
@@ -1233,7 +1239,7 @@ export async function localBoardEnd(options: LocalBoardEndOptions): Promise<Loca
   // A planned push whose file never materialized means the run's output is not actually ready to
   // land on the card: the status is incomplete from here on, and no move action follows (F6, F53).
   if (missing) runStatus = 'incomplete'
-  const move = missing ? null : endMove(options.skill, runStatus, ticket.status, false)
+  const move = missing || statusFlowOf(options.folder).statusFlow === false ? null : endMove(options.skill, runStatus, ticket.status, false)
   if (move !== null) actions.push({ action: 'move', page: ticket.url, from: move.from, to: move.to, then: `set Status to "${move.to}" in ${join(options.folder, TICKET_FILE)}` })
   actions.push(...telemetryActions(options, ticket, trace))
   const expected = move?.to ?? ticket.status
@@ -1296,7 +1302,7 @@ async function localGroomEnd(options: LocalBoardEndOptions): Promise<LocalBoardE
       file: summaryFile,
       then: 'write the file into the card body under ## Idea, replacing a previous summary found by its opening paragraph; delete no block the groomer did not write',
     })
-    move = endMove(options.skill, final, ticket.status, false)
+    move = statusFlowOf(options.folder).statusFlow === false ? null : endMove(options.skill, final, ticket.status, false)
     if (move !== null) actions.push({ action: 'move', page: ticket.url, from: move.from, to: move.to, then: `set Status to "${move.to}" in ${ticketFile}` })
   }
   actions.push(...telemetryActions(options, ticket, trace))

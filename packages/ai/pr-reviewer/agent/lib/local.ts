@@ -15,7 +15,7 @@ import { sessionModel, type SessionModel } from '@aspiralabs/ai/common/lib/sessi
 import { taskModel, type Effort } from '@aspiralabs/ai/common/lib/model-config'
 import { parseProvenance, verifyKnowledgeDir } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
-import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
 import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 import { z } from 'zod'
 import { maxSeatCalls } from './call-cap.ts'
@@ -465,10 +465,10 @@ async function checkKnowledge(dir: string, agentDir: string, env: Record<string,
     })
 
   if (!opts.given && (await readFile(requiredPath, 'utf8').catch(() => null)) === null) {
-    const token = (await notionToken({ env, projectRoot: opts.project }))?.token
+    const token = (await notionToken({ env, ...tokenRoots(opts.project, opts.project) }))?.token
     if (token === undefined || config.root === null) {
       const where = [
-        token === undefined && `${KNOWLEDGE_ENV.token} is not set in the environment or ${join(opts.project, '.env.local')}`,
+        token === undefined && `${KNOWLEDGE_ENV.token} is not set in the environment or ${join(tokenRoots(opts.project, opts.project).projectRoot, '.env.local')}`,
         config.root === null && `${KNOWLEDGE_ENV.page} is not set in the agent's env (${ENV_FILES.join(', ')})`,
       ].filter(Boolean).join('; ')
       throw new KnowledgeBlocked(`The engineering guidelines are required and none were given: ${where}. Set them, or pass --knowledge DIR (a load-knowledge folder).`)

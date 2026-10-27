@@ -22,7 +22,7 @@ import {
 } from '@aspiralabs/ai/common/lib/knowledge'
 import { parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
-import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
 import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 
 /** The pages the agent's configuration names: the index page (or null when unset) and the required entries. */
@@ -229,8 +229,9 @@ export async function knowledgeToken(repo: string, env: Record<string, string | 
     }
   })()
   const app = typeof aspira?.app === 'string' && aspira.app !== '.' && aspira.app !== '' ? resolve(root, aspira.app) : undefined
-  const found = await notionToken({ env, projectRoot: root, ...(app === undefined ? {} : { appDir: app }) })
-  return { ...(found === null ? {} : { token: found.token }), files: [...(app === undefined ? [] : [join(app, '.env.local')]), join(root, '.env.local')] }
+  const roots = tokenRoots(root, root, app)
+  const found = await notionToken({ env, ...roots })
+  return { ...(found === null ? {} : { token: found.token }), files: [...(roots.appDir === undefined ? [] : [join(roots.appDir, '.env.local')]), join(roots.projectRoot, '.env.local')] }
 }
 
 /** True when REQUIRED.md is the one load-knowledge wrote (it carries the provenance header): the walk's own file, kept as written. */

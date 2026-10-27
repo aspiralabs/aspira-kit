@@ -16,7 +16,7 @@ import { INDEX_FILE, KNOWLEDGE_ENV, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED
 import { parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
 import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
-import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
 import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 
 /** Environment variables as the agent sees them. */
@@ -100,8 +100,9 @@ export async function knowledgeSource(repo: string, env: Env): Promise<Omit<Know
     }
   })()
   const app = typeof aspira?.app === 'string' && aspira.app !== '.' && aspira.app !== '' ? resolve(root, aspira.app) : undefined
-  const found = await notionToken({ env, projectRoot: root, ...(app === undefined ? {} : { appDir: app }) })
-  return { ...(found === null ? {} : { token: found.token }), tokenFiles: [...(app === undefined ? [] : [join(app, '.env.local')]), join(root, '.env.local')] }
+  const roots = tokenRoots(root, root, app)
+  const found = await notionToken({ env, ...roots })
+  return { ...(found === null ? {} : { token: found.token }), tokenFiles: [...(roots.appDir === undefined ? [] : [join(roots.appDir, '.env.local')]), join(roots.projectRoot, '.env.local')] }
 }
 
 /** The agent's knowledge configuration: its env files, then the given environment, highest priority last. */

@@ -14,7 +14,7 @@ import { z } from 'zod'
 import { KNOWLEDGE_ENV, parseRequired, REQUIRED_ENV } from '@aspiralabs/ai/common/lib/knowledge'
 import { compareSnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
-import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
 import type { StepName } from '#build-feature/route.ts'
 import type { RunState } from '#build-feature/run-state.ts'
 
@@ -52,7 +52,7 @@ export type EnsureResult = { state: RunState; knowledge: SharedKnowledge | null;
  * build one (no token, no index page, Notion unreachable); the step then loads its own.
  */
 export async function ensureKnowledge(state: RunState, input: EnsureInput): Promise<EnsureResult> {
-  const token = (await notionToken({ env: input.env, projectRoot: input.repo, ...(input.app === undefined || input.app === '.' ? {} : { appDir: resolve(input.repo, input.app) }) }))?.token
+  const token = (await notionToken({ env: input.env, ...tokenRoots(input.repo, input.repo, input.app === undefined || input.app === '.' ? undefined : resolve(input.repo, input.app)) }))?.token
   const page = input.env[KNOWLEDGE_ENV.page]?.trim() || input.page?.trim()
   if (token === undefined || token === '' || page === undefined || page === '') return { state, knowledge: null, note: null }
   const required = parseRequired(input.env[REQUIRED_ENV])

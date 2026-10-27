@@ -23,6 +23,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, normalize } from 'node:path'
 import { z } from 'zod'
+import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
 import { WHAT_IT_FIXED_MISSING, whatItFixed } from '@aspiralabs/ai/common/lib/pr-body'
 import { slug } from '@aspiralabs/ai/common/lib/ticket'
 import type { Phase, PhaseContext, PhaseResult } from '#build-feature/driver.ts'
@@ -258,6 +259,8 @@ function draftStage(context: PhaseContext, state: RunState, releases: string, er
 /** The release-row stage after the review loop, or nothing when it is written or aspira.json names no releases. */
 export async function releaseRowStage(context: PhaseContext, state: RunState): Promise<PhaseResult> {
   if (context.card.status !== IN_REVIEW) return { kind: 'done', state }
+  // statusFlow false (KIT-68): the client's board has no release flow, so no release row.
+  if (readEffectiveAspira(context.repo).config.statusFlow === false) return { kind: 'done', state }
   const releases = context.aspira.releases
   if (releases === undefined || releases.trim() === '') return { kind: 'done', state, note: RELEASE_SKIPPED }
   if (state.step10.releaseRow !== null) return { kind: 'done', state }

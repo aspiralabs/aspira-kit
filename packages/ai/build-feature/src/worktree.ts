@@ -12,7 +12,7 @@ import { existsSync, lstatSync, symlinkSync } from 'node:fs'
 import { appendFile, cp, readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import { z } from 'zod'
-import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
+import { clientRootOf, readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
 import { tail } from '@aspiralabs/ai/common/lib/redact'
 import { TICKET_TYPES, ticketBranch, ticketTypeOf, type TicketType } from '@aspiralabs/ai/common/lib/ticket-branch'
 import { stateDirOf } from '#build-feature/run-state.ts'
@@ -106,6 +106,8 @@ export type Prepared = { ok: true; worktree: string; branch: string; created: bo
 /** Link `<from>/<dir>/.env.local` to the same place under `to` for each dir; a missing source or an occupied target is skipped. Returns one line per link made. */
 export function linkEnvLocal(from: string, to: string, dirs: readonly string[]): string[] {
   const made: string[] = []
+  // In a client layout the launchers read the client root's .env.local; the repo's is not linked for the kit's use (KIT-68).
+  if (clientRootOf(from) !== undefined) return made
   for (const dir of dirs) {
     const source = join(from, dir, '.env.local')
     const target = join(to, dir, '.env.local')
