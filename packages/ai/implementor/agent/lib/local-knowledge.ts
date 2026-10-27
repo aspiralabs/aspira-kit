@@ -21,6 +21,7 @@ import {
   type LoadedPage,
 } from '@aspiralabs/ai/common/lib/knowledge'
 import { parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
+import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
 import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
 import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 
@@ -220,7 +221,13 @@ export const LOAD_KNOWLEDGE = 'load-knowledge --out <dir> (packages/ai/common/sc
  */
 export async function knowledgeToken(repo: string, env: Record<string, string | undefined>): Promise<{ token?: string; files: string[] }> {
   const root = resolve(repo)
-  const aspira = await readFile(join(root, 'aspira.json'), 'utf8').then((text) => JSON.parse(text) as { app?: unknown }, () => null)
+  const aspira = (() => {
+    try {
+      return readEffectiveAspira(root).config as { app?: unknown }
+    } catch {
+      return null
+    }
+  })()
   const app = typeof aspira?.app === 'string' && aspira.app !== '.' && aspira.app !== '' ? resolve(root, aspira.app) : undefined
   const found = await notionToken({ env, projectRoot: root, ...(app === undefined ? {} : { appDir: app }) })
   return { ...(found === null ? {} : { token: found.token }), files: [...(app === undefined ? [] : [join(app, '.env.local')]), join(root, '.env.local')] }

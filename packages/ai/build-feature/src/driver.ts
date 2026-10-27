@@ -48,6 +48,7 @@ import { readRunStatus } from '@aspiralabs/ai/common/lib/run-status'
 import { devServerSchema } from '@aspiralabs/ai/common/lib/visual-verify'
 import { encodeTrace, listsTelemetry, readAttached, recordAttached, releaseRunId, reserveRunId, telemetryFile, telemetryNotice, writeTelemetry, type WriteResult } from '@aspiralabs/ai/common/lib/telemetry'
 import { readUsageSource, type PhaseUsage } from '@aspiralabs/ai/common/lib/telemetry-sources'
+import { workRootFor } from '@aspiralabs/ai/common/lib/aspira-config'
 import { slug } from '@aspiralabs/ai/common/lib/ticket'
 import { MODELS as REVIEWER_MODELS } from '@aspiralabs/ai/pr-reviewer/models'
 import { acceptApproval, approvalFor, invocationApproval, recordApproval } from '#build-feature/approval.ts'
@@ -238,7 +239,7 @@ function pend(ctx: Ctx, state: RunState, kind: StageKind, body: (output: string)
 
 /** The ticket's working folder: `.work/<id>-<slug>/` (or `.work/<id>/` until the card's title is known). */
 async function workFolder(repo: string, id: string): Promise<string> {
-  const work = join(repo, '.work')
+  const work = workRootFor(repo) ?? join(repo, '.work')
   const lower = id.toLowerCase()
   const entries = existsSync(work) ? await readdir(work, { withFileTypes: true }) : []
   const candidates = entries

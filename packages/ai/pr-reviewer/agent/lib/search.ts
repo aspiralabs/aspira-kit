@@ -1,5 +1,8 @@
 // The search tool's command and its output cap, pure so they are tested without a sandbox.
 
+import { basename } from 'node:path'
+import { workRootFor } from '@aspiralabs/ai/common/lib/aspira-config'
+
 /** Matches are cut past this many characters: a seat that needs more should narrow the pattern. */
 export const MAX_SEARCH_CHARS = 20_000
 /** Lines of context either side of a match. */
@@ -17,7 +20,9 @@ function shellQuote(s: string): string {
  */
 export function searchCommand(pattern: string, globs: string[] | undefined, root: string): string {
   const includes = (globs ?? []).filter((glob) => glob.trim() !== '').map((glob) => `--include=${shellQuote(glob.trim())}`)
-  const excludes = EXCLUDED_DIRS.map((dir) => `--exclude-dir=${dir}`)
+  // A work folder relocated by the client file's workRoot is never searched either (KIT-68); the default list is unchanged.
+  const relocated = workRootFor(root)
+  const excludes = (relocated === undefined ? EXCLUDED_DIRS : [...EXCLUDED_DIRS, basename(relocated)]).map((dir) => `--exclude-dir=${dir}`)
   return `cd ${shellQuote(root)} && grep -rnI -E -C ${SEARCH_CONTEXT_LINES} ${[...excludes, ...includes].join(' ')} -e ${shellQuote(pattern)} . ; test $? -le 1`
 }
 

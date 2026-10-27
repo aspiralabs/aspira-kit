@@ -1,6 +1,8 @@
 // Pure helpers for load-pr: source parsing, the commands that produce a diff, and
 // the markdown the seats read. No eve or node imports.
 
+import { resolve } from 'node:path'
+import { workRootFor } from '@aspiralabs/ai/common/lib/aspira-config'
 import { REPO_PATH, FILES } from './review.ts'
 import { reviewedLine, type ReviewTarget } from './target.ts'
 
@@ -188,6 +190,8 @@ export function optionalPath(value: string | null | undefined): string | undefin
  * working folder every Aspira project has; `kit init` ignores it.
  */
 export const REVIEW_DIR = '.work'
+/** The folder holding a repo's per-ticket folders: the client file's `workRoot` when one applies (KIT-68), else <repo>/.work. */
+export const reviewRootFor = (repo: string): string => workRootFor(repo) ?? resolve(repo, REVIEW_DIR)
 export const IGNORE_PATTERN = `${REVIEW_DIR}/`
 export const REVIEW_SUBDIR = 'pr-review'
 

@@ -4,8 +4,8 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { appRoot, readApp, readAspira } from './aspira.js'
-import { probePort } from './isolation.js'
+import { appRoot, readEffectiveAspira, type AspiraConfig } from './aspira.js'
+import { probePort, withoutCredentialEnv } from './isolation.js'
 
 export type DevOptions = {
   projectRoot: string
@@ -48,16 +48,18 @@ function stop(child: ChildProcess): void {
 
 export async function dev(options: DevOptions): Promise<number> {
   const root = resolve(options.projectRoot)
-  const config = readAspira(root)
+  // The effective file: in a client repo's worktree the repos entry supplies dev and app (KIT-68).
+  const config = readEffectiveAspira(root).config as Partial<AspiraConfig>
   const command = config?.dev?.command
   if (command === undefined || command.trim() === '') {
     options.warn('aspira.json has no dev.command; set dev.command to the command that starts the dev server')
     return 1
   }
   const cwd = join(root, config?.dev?.cwd ?? '.')
-  const appDir = appRoot(root, options.app ?? readApp(root))
+  const appDir = appRoot(root, options.app ?? (config.app === '' || config.app === '.' ? undefined : config.app))
   const port = portOf(join(appDir, '.env.development.local'))
-  const env = { ...(options.env ?? process.env) } as Record<string, string | undefined>
+  // The repo's commands never inherit the kit's credentials.
+  const env = withoutCredentialEnv({ ...(options.env ?? process.env) } as Record<string, string | undefined>)
   const children: ChildProcess[] = []
 
   if (port === undefined) {

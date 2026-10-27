@@ -23,6 +23,7 @@ import {
 } from '@aspiralabs/ai/common/lib/knowledge'
 import { parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
+import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
 import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
 import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 
@@ -146,7 +147,13 @@ export type KnowledgeSource = { token?: string; tokenFiles: string[]; fetch?: (u
  */
 export async function knowledgeSource(repo: string, env: Record<string, string | undefined>): Promise<Omit<KnowledgeSource, 'fetch' | 'api'>> {
   const root = resolve(repo)
-  const aspira = await readFile(join(root, 'aspira.json'), 'utf8').then((text) => JSON.parse(text) as { app?: unknown }, () => null)
+  const aspira = (() => {
+    try {
+      return readEffectiveAspira(root).config as { app?: unknown }
+    } catch {
+      return null
+    }
+  })()
   const app = typeof aspira?.app === 'string' && aspira.app !== '.' && aspira.app !== '' ? resolve(root, aspira.app) : undefined
   const found = await notionToken({ env, projectRoot: root, ...(app === undefined ? {} : { appDir: app }) })
   return { ...(found === null ? {} : { token: found.token }), tokenFiles: [...(app === undefined ? [] : [join(app, '.env.local')]), join(root, '.env.local')] }

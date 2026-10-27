@@ -4,6 +4,8 @@
 // every rule here is unit tested without a repository or a board. `ticket-flow.ts` does the file
 // system and board work on top of it.
 
+import { join } from 'node:path'
+import { workRootFor } from './aspira-config.ts'
 import { BoardError, parseTicketRef, type Ticket, type TicketPage } from './board.ts'
 import { pageIdFrom } from './knowledge.ts'
 import { RUN_STATUSES, type RunStatus } from './run-status.ts'
@@ -21,6 +23,11 @@ export type Skill = (typeof SKILLS)[number]
 
 /** The folder under the repository root that holds one working folder per ticket. */
 export const WORK_DIR = '.work'
+
+/** The folder holding a repo's working folders: the client file's `workRoot` when one applies (KIT-68), otherwise <repo>/.work. */
+export function workDirFor(repo: string): string {
+  return workRootFor(repo) ?? join(repo, WORK_DIR)
+}
 export const TICKET_FILE = 'ticket.md'
 export const IDEA_FILE = 'idea.md'
 

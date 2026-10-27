@@ -4,7 +4,7 @@
 // reached, the Status recorded in the ticket's working folder stands in and the output says so.
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { appRoot, isNotionUrl, readAspira, readApp } from './aspira.js'
+import { appRoot, isNotionUrl, readEffectiveAspira, workRootFor, type AspiraConfig } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 import { aiPackageDir } from './skills.js'
 import { commandFor, nextStep, PLAYBOOK, type PlaybookRow } from './playbook.js'
@@ -35,7 +35,7 @@ export function readWorkTicket(folder: string): ResolvedTicket | null {
 
 /** Every folder under .work/ with a ticket.md. */
 export function workTickets(projectRoot: string): { folder: string; ticket: ResolvedTicket }[] {
-  const dir = join(projectRoot, '.work')
+  const dir = workRootFor(projectRoot) ?? join(projectRoot, '.work')
   if (!existsSync(dir)) return []
   return readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
@@ -93,7 +93,7 @@ export function noteFolders(projectRoot: string, slug: string): string[] {
         .filter((entry) => entry.isDirectory())
         .map((entry) => join(worktreesDir, entry.name, '.work', slug))
     : []
-  return [join(projectRoot, '.work', slug), ...worktreeFolders]
+  return [join(workRootFor(projectRoot) ?? join(projectRoot, '.work'), slug), ...worktreeFolders]
 }
 
 type NoteCandidate = { folder: string; isWorktree: boolean; note: ProgressNoteInfo }
@@ -162,7 +162,8 @@ function noteMatches(note: ProgressNoteInfo, liveStatus: string, shapes: readonl
 
 /** Print the next step for a ticket. Exit 0 with a step, 1 when the ticket or the board cannot be found, 2 for a bad argument. `app` (--app) overrides the one in aspira.json. */
 export function next(projectRoot: string, ref: string | undefined, log: Log, resolve: Resolver = liveResolver, app?: string): number {
-  const config = readAspira(projectRoot)
+  // Board, app and work folder come from the effective file (KIT-68); routing stays Status-based.
+  const config = readEffectiveAspira(projectRoot).config as Partial<AspiraConfig>
   if (!isNotionUrl(config?.board)) {
     log('no aspira.json with a Feature Board here; run kit init --board <Feature Board URL>')
     return 1
@@ -187,7 +188,7 @@ export function next(projectRoot: string, ref: string | undefined, log: Log, res
     log(`no ticket given and ${folders.length} folders under .work/ hold a ticket.md: ${folders.map((entry) => entry.folder).join(', ')}; name the ticket`)
     return 1
   }
-  const appDir = appRoot(projectRoot, app ?? readApp(projectRoot))
+  const appDir = appRoot(projectRoot, app ?? (config.app === undefined || config.app === '' || config.app === '.' ? undefined : config.app))
   const live = resolve(config.board, wanted, projectRoot, appDir)
   const ticket = live ?? localEntry?.ticket ?? null
   if (ticket === null) {

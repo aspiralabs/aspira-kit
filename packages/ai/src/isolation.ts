@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, wr
 import { connect } from 'node:net'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { appRoot, readAspira } from './aspira.js'
+import { appRoot, readEffectiveAspira, type AspiraConfig } from './aspira.js'
 import type { Log } from './fs.js'
 import { isGitIgnored, listWorktrees } from './git.js'
 
@@ -225,6 +225,16 @@ export function stripeSeam(options: { run: Run }): StripeSeam {
   }
 }
 
+/** The credentials a repo's own commands never inherit. Mirrors CREDENTIALS in common/src/lib/visual-verify.ts: src cannot import common. */
+export const CREDENTIALS = ['NOTION_TOKEN', 'NOTION_API_KEY', 'GITHUB_TOKEN', 'GH_TOKEN', 'AI_GATEWAY_API_KEY', 'NPM_TOKEN', 'NODE_AUTH_TOKEN'] as const
+
+/** `env` without the credentials; everything else passes through. */
+export function withoutCredentialEnv<T extends string | undefined>(env: Readonly<Record<string, T>>): Record<string, T> {
+  const kept: Record<string, T> = {}
+  for (const [name, value] of Object.entries(env)) if (!(CREDENTIALS as readonly string[]).includes(name)) kept[name] = value
+  return kept
+}
+
 /** A real process as a Run. */
 export function processRunner(command: string): Run {
   return (args, env) =>
@@ -237,7 +247,7 @@ export function processRunner(command: string): Run {
         settled = true
         resolve(result)
       }
-      const child = spawn(command, [...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawn(command, [...args], { env: { ...withoutCredentialEnv(process.env as Record<string, string | undefined>), ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
       child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString('utf8')))
       child.stderr.on('data', (chunk: Buffer) => (err += chunk.toString('utf8')))
       child.on('error', (error) => finish({ status: -1, stdout: out, stderr: error.message }))
@@ -288,7 +298,7 @@ export function seamsFromCommand(seams: CommandSeams, env: Readonly<Record<strin
   const runner =
     (run: SyncRunner): Run =>
     (args, extra) => {
-      const result = run([...args], { env: { ...env, ...extra } })
+      const result = run([...args], { env: { ...withoutCredentialEnv(env), ...extra } })
       return Promise.resolve({ status: result.status ?? -1, stdout: result.stdout, stderr: result.stderr })
     }
   return {
@@ -381,9 +391,10 @@ const reasonOf = (error: unknown): string => (error instanceof Error ? error.mes
 const PLACEHOLDER = /\{(name|port)\}/
 
 function plan(options: Pick<IsolateOptions, 'worktree' | 'ticket'>): Plan {
-  let config: ReturnType<typeof readAspira>
+  let config: Partial<AspiraConfig> | undefined
   try {
-    config = readAspira(options.worktree)
+    // The effective file: a client worktree has none of its own, so the repos entry applies (KIT-68).
+    config = readEffectiveAspira(options.worktree).config as Partial<AspiraConfig>
   } catch (error) {
     throw new StepError('config', `aspira.json cannot be read: ${reasonOf(error)}`)
   }

@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { z } from 'zod'
+import { readEffectiveAspira } from './aspira-config.ts'
 import { BoardError, board as makeBoard, type Board, type BoardWithPageMarkdown, type Ticket, type TicketPage } from './board.ts'
 import {
   GROOM_LINE_PATTERNS,
@@ -37,7 +38,7 @@ import {
   IDEA_FILE,
   TICKET_FILE,
   TICKET_PAGES,
-  WORK_DIR,
+  workDirFor,
   checkGate,
   endMove,
   parseTicketMd,
@@ -77,16 +78,16 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 
 /** aspira.json, or null when the project has no board. Throws when the file is not what kit init writes. */
 export async function readAspira(repo: string): Promise<AspiraConfig | null> {
-  const file = join(repo, ASPIRA_FILE)
-  if (!existsSync(file)) return null
-  const parsed = JSON.parse(await readFile(file, 'utf8')) as Partial<AspiraConfig>
+  const { file, config } = readEffectiveAspira(repo)
+  if (file === undefined) return null
+  const parsed = config as Partial<AspiraConfig>
   if (typeof parsed.board !== 'string' || parsed.board === '') throw new FlowRefused(`${file} has no "board"; run kit init --board <Feature Board URL>`)
   return { board: parsed.board, ...(typeof parsed.releases === 'string' ? { releases: parsed.releases } : {}) }
 }
 
 /** Every folder under .work/ that holds a ticket.md, with the ticket it names. */
 export async function findWorkFolders(repo: string): Promise<WorkFolder[]> {
-  const dir = join(repo, WORK_DIR)
+  const dir = workDirFor(repo)
   if (!existsSync(dir)) return []
   const out: WorkFolder[] = []
   for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -214,7 +215,7 @@ export async function startFlow(options: FlowOptions): Promise<FlowStart> {
   const ticket = await client.resolveTicket(options.argument.ref)
   const gate = checkGate(options.skill, ticket)
   if (!gate.ok) throw new FlowRefused(gate.message)
-  const folder = options.argument.folder ?? join(options.repo, WORK_DIR, workFolderName(ticket))
+  const folder = options.argument.folder ?? join(workDirFor(options.repo), workFolderName(ticket))
   const previous = previousPagesOf(await readTicketMd(folder))
   const now = new Date().toISOString()
   const current = record(ticket, now)
@@ -983,8 +984,8 @@ const resolveAction = (ref: string, boardUrl: string, repo: string, folder: stri
   action: 'resolve',
   ticket: ref,
   board: boardUrl,
-  write: folder === null ? `${join(repo, WORK_DIR)}/<id in lower case>-<title as a slug>/${TICKET_FILE}` : join(folder, TICKET_FILE),
-  folder: folder ?? `${join(repo, WORK_DIR)}/<id in lower case>-<title as a slug>`,
+  write: folder === null ? `${workDirFor(repo)}/<id in lower case>-<title as a slug>/${TICKET_FILE}` : join(folder, TICKET_FILE),
+  folder: folder ?? `${workDirFor(repo)}/<id in lower case>-<title as a slug>`,
   format: ticketMdFormat(),
   note: note ?? `Resolve the ticket on the Feature Board with the Notion MCP (notion-fetch, read-only): by its ID property for an ID, by the page for a URL. Write ticket.md at "write" in exactly the "format" layout, with every property as the board shows it, the child pages with their last-edited times, and the Idea as plain markdown. The folder is .work/<id>-<slug>: the ID in lower case, then the title in lower case with runs of other characters as single dashes (nom-4-explore-pagination). The Idea is the ticket page body from the "## Idea" heading to the next heading of level 2 or shallower, keeping its "###" subsections, or the whole body when it has no Idea heading. The Pages table lists every child page, one row each, even when two share a title.`,
 })

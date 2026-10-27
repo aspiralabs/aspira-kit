@@ -12,6 +12,7 @@ import { existsSync, lstatSync, symlinkSync } from 'node:fs'
 import { appendFile, cp, readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import { z } from 'zod'
+import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
 import { tail } from '@aspiralabs/ai/common/lib/redact'
 import { TICKET_TYPES, ticketBranch, ticketTypeOf, type TicketType } from '@aspiralabs/ai/common/lib/ticket-branch'
 import { stateDirOf } from '#build-feature/run-state.ts'
@@ -119,7 +120,8 @@ export function linkEnvLocal(from: string, to: string, dirs: readonly string[]):
 export function linkAspira(from: string, to: string): string[] {
   const source = join(from, 'aspira.json')
   const target = join(to, 'aspira.json')
-  if (!existsSync(source)) return []
+  // Only a file inside the repo is linked; a client aspira.json above it stays where it is and is read from there (KIT-68).
+  if (!existsSync(source) || readEffectiveAspira(from).file !== source) return []
   try { lstatSync(target); return [] } catch { /* nothing at the target: link it */ }
   try { symlinkSync(source, target); return [`ln -s ${source} ${target}`] } catch { return [] }
 }
@@ -139,11 +141,11 @@ const resourceKeys = z.looseObject({
  * (a placeholder dev url alone is `kit worktree`'s) and a worktree that has them all are not pending.
  */
 export async function isolationPending(worktree: string): Promise<boolean> {
-  const raw = await readFile(join(worktree, 'aspira.json'), 'utf8').catch(() => null)
-  if (raw === null) return false
   let config: z.infer<typeof resourceKeys>
   try {
-    config = resourceKeys.parse(JSON.parse(raw))
+    const effective = readEffectiveAspira(worktree)
+    if (effective.file === undefined) return false
+    config = resourceKeys.parse(effective.config)
   } catch {
     return false
   }
