@@ -1,5 +1,9 @@
 // KIT-48: a ticket run fixes only the files the ticket branch changed; diagnostics in untouched
 // files are reported as pre-existing and never fixed or counted against readiness.
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Analyzer } from './analyzers.ts'
 import type { Executor, RunResult } from './executor.ts'
@@ -41,6 +45,15 @@ describe('changedScope', () => {
     const { scope, note } = await changedScope(executor, '/repo')
     expect(scope).toBeNull()
     expect(note).toContain('no main branch')
+  })
+  it('AVA1.1 never puts a baseBranch that is not a plain branch name into a command; it diffs against main', async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), 'scope-base-')))
+    execFileSync('git', ['init', '-q', repo])
+    writeFileSync(join(repo, 'aspira.json'), JSON.stringify({ baseBranch: 'main;id' }))
+    const { executor, commands } = scripted({ errors: [] })
+    const { scope } = await changedScope({ ...executor, root: repo }, repo)
+    expect(commands.filter((c) => c.includes(';id'))).toEqual([])
+    expect(scope?.base).toBe('origin/main')
   })
 })
 

@@ -480,6 +480,15 @@ function confineTree(c: Confine, target: string): void {
 }
 
 /** Refuse a client aspira.json whose keys are unusable, naming the file and the key. A file without client keys passes. */
+/** The stages that read `extend` files: the agent folder names each passes to extendFilesFor. */
+export const EXTEND_STAGES = ['groomer', 'spec-writer', 'planner', 'implementor', 'pr-reviewer'] as const
+
+/** A baseBranch reaches git and a shell: only a plain branch name passes. */
+function checkBaseBranch(file: string, key: string, value: unknown): void {
+  if (value === undefined) return
+  if (typeof value !== 'string' || !/^[A-Za-z0-9._/-]+$/.test(value) || value.startsWith('-') || value.includes('..')) throw new Error(`${file} "${key}" must be a plain branch name (letters, digits, . _ / -, not starting with - and without ..)`)
+}
+
 export function validateClientKeys(file: string): void {
   const raw = readConfigFile(file)
   const root = dirname(file)
@@ -494,17 +503,20 @@ export function validateClientKeys(file: string): void {
       const other = seen.get(lower)
       if (other !== undefined) throw new Error(`${file} "repos" keys "${other}" and "${key}" differ only in case`)
       seen.set(lower, key)
+      checkBaseBranch(file, `repos.${key}.baseBranch`, entry?.baseBranch)
       const target = confine({ file, key: 'repos', root, repoDirs: [] }, entry?.path, { outsideRepos: false, mustExist: false })
       repoDirs.push(real(target))
     }
   }
+  checkBaseBranch(file, 'baseBranch', raw.baseBranch)
   const c = (key: string): Confine => ({ file, key, root, repoDirs })
   if (raw.guidelines !== undefined) confineTree(c('guidelines'), confine(c('guidelines'), raw.guidelines, { outsideRepos: true, mustExist: true }))
   if (raw.workRoot !== undefined) confine(c('workRoot'), raw.workRoot, { outsideRepos: true, mustExist: true })
   if (raw.extend !== undefined) {
     const extend = raw.extend
     if (typeof extend !== 'object' || extend === null || Array.isArray(extend)) throw new Error(`${file} "extend" must be an object of stage → files`)
-    for (const files of Object.values(extend)) {
+    for (const [stage, files] of Object.entries(extend)) {
+      if (!(EXTEND_STAGES as readonly string[]).includes(stage)) throw new Error(`${file} "extend" stage "${stage}" is not one of ${EXTEND_STAGES.join(', ')}`)
       if (!Array.isArray(files)) throw new Error(`${file} "extend" stages must list files`)
       for (const f of files) confine(c('extend'), f, { outsideRepos: true, mustExist: false })
     }

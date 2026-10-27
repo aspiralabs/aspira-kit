@@ -115,4 +115,16 @@ describe('routeRunState', () => {
     const after = await routeRunState(dir, facts)
     expect([before.stage, after.stage, after.route]).toEqual(['implement', 'implement', before.route])
   })
+
+  it('REBA1.2 reruns the planner when the planner step stopped, even with plan.json present', async () => {
+    const dir = await withState(await folder({ [GROOM]: groom('ready'), [SPEC]: '# Spec reviewed\n', 'spec.md': '# Spec\n', [PLAN]: '{}' }), { steps: [step('planner', 'needs-author')] })
+    const routed = await routeRunState(dir, facts)
+    expect([routed.stage, routed.route]).toEqual(['plan', stepCommand('Ready: Spec', facts)])
+  })
+
+  it('REBA1.2 reruns the implementor when its latest attempt stopped after an earlier ready one', async () => {
+    const dir = await withState(await folder({ [GROOM]: groom('ready'), [SPEC]: '# Spec reviewed\n', 'spec.md': '# Spec\n', [PLAN]: '{}' }), { steps: [step('implementor', 'ready'), step('implementor', 'needs-author')] })
+    const routed = await routeRunState(dir, facts)
+    expect([routed.stage, routed.route]).toEqual(['implement', stepCommand('Ready: Plan', facts)])
+  })
 })

@@ -158,3 +158,22 @@ describe('repos by Area tag', () => {
     expect(refusal(() => validateClientKeys(comma.file))).toContain('a,b')
   })
 })
+
+describe('client key values (review 1)', () => {
+  it('AVA1.1 refuses a baseBranch that is not a plain branch name, top level or per repo', () => {
+    for (const base of ['-x', 'main;id', 'a..b']) {
+      const top = client({ repos: { web: { path: 'web' } }, baseBranch: base })
+      expect(refusal(() => validateClientKeys(top.file))).toContain('baseBranch')
+      const perRepo = client({ repos: { web: { path: 'web', baseBranch: base } } })
+      expect(refusal(() => validateClientKeys(perRepo.file))).toContain('baseBranch')
+    }
+    const ok = client({ repos: { web: { path: 'web', baseBranch: 'release/2.0' } } })
+    expect(refusal(() => validateClientKeys(ok.file))).toBe('no refusal')
+  })
+
+  it('DEX1.1 refuses an extend stage that no agent reads, naming the stage', () => {
+    const { file } = client({ repos: { web: { path: 'web' } }, extend: { spec: [] } })
+    const message = refusal(() => validateClientKeys(file))
+    expect([message.includes('"spec"'), message.includes('spec-writer')]).toEqual([true, true])
+  })
+})

@@ -28,12 +28,13 @@ const prefixOf = (gitRoot: string, root: string): string => {
   return rel === '' || rel.startsWith('..') ? '' : rel.replaceAll('\\', '/')
 }
 
-/** The base branch of the repos entry the analyzed directory belongs to (aspira.json `baseBranch`, KIT-68 A11); `main` anywhere else. */
+/** The base branch of the repos entry the analyzed directory belongs to (aspira.json `baseBranch`, KIT-68 A11); `main` anywhere else, or when it is not a plain branch name. */
 function baseBranchOf(executor: Executor): string {
   if (executor.kind !== 'host') return 'main'
   try {
     const base = readEffectiveAspira(executor.root).config.baseBranch
-    return typeof base === 'string' && base !== '' ? base : 'main'
+    // The name reaches `bash -c`: anything but a plain branch name falls back to main (review AVA1.1).
+    return typeof base === 'string' && /^[A-Za-z0-9._/-]+$/.test(base) && !base.startsWith('-') && !base.includes('..') ? base : 'main'
   } catch {
     return 'main'
   }

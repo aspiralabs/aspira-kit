@@ -194,6 +194,8 @@ export async function prepareWorktree(input: { place: Place; id: string; title: 
     return { ok: true, worktree, branch, created: false, ran: [] }
   }
   const base = input.base ?? 'main'
+  // Checked before the fetch, not only in gitWorktreeAdd: a base starting with - would reach git fetch as an option (review AVA1.1).
+  if (!/^[A-Za-z0-9._/-]+$/.test(base) || base.startsWith('-') || base.includes('..')) return { ok: false, message: `"${base}" is not a base branch the run starts from`, command: 'git fetch', exitCode: 1, output: '' }
   const fetched = await sys.gitFetchMain(options, base)
   if (fetched.code !== 0) return fail(shown('git', base === 'main' ? GIT_ARGS.fetchMain : GIT_ARGS.fetchBase(base)), fetched, `the run could not fetch origin/${base} to start ${path} from it`)
   const exists = (await sys.gitBranchExists(options, branch)).code === 0

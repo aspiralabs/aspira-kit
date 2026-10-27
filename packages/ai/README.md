@@ -261,7 +261,7 @@ A client project runs the agents from a client root: a folder above the client's
 | `pullRequest` | `false` pushes no branch and opens no PR; the run ends after the review-fix loop and the review runs on the local ticket branch. |
 | `guidelines` | A folder of markdown files, every one required and joined in file-name order, that replaces the Notion engineering guidelines; it must carry the Review Verification rules (REV-001). |
 | `workRoot` | Where `.work/` lives, relative to the file. |
-| `extend` | Per stage, extra instruction files appended to that stage's prompts. |
+| `extend` | Per stage, extra instruction files appended to that stage's prompts. The stages are `groomer`, `spec-writer`, `planner`, `implementor` and `pr-reviewer`; any other stage name is refused. |
 
 Every path key must stay inside the folder of `aspira.json`, and `guidelines`, `workRoot` and `extend` may not point inside a client repository. A client run reads `NOTION_TOKEN` and the other launcher keys from the process environment, then the client root's `.env.local`, never a repository's. `/aspira-build-feature` follows the harness and refuses `--cloud` and `--autonomous`; the groomer offers "needs follow-up" answers that either block the build or let it go on. `kit doctor` at a client root checks these keys and files and fails when an Aspira file inside a mapped repository is tracked or not ignored, and skips the package checks.
 
