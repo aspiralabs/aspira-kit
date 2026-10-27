@@ -111,7 +111,7 @@ it('launches the agent on a GitHub repository with the same prompt the remote la
   const run = started.stdout.match(/^run: (.+)$/m)![1]!
   // What status and wait report, and the export records: the agent package, version, where it ran from.
   expect(JSON.parse(await readFile(join(run, 'agent.json'), 'utf8'))).toEqual({ name: 'implementor', version: expect.stringMatching(/^\d+\.\d+\.\d+/), path: root, source: 'global', installed: false })
-  const waited = (await exec('bash', [launcher, 'wait', run, '--max', '5'], { env })).stdout
+  const waited = (await exec('bash', [launcher, 'wait', run, '--max', '5'], { cwd: dir, env })).stdout
   expect(waited).toContain('finished')
   expect(waited).toContain('agent: implementor@')
   await exec('bash', [launcher, 'start', 'specs/x.md', '--no-ticket', '--repo', 'https://github.com/aspiralabs/nomnomzz', '--pr'], { cwd: dir, env })

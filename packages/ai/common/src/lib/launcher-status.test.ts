@@ -47,6 +47,8 @@ const LAUNCHERS: Launcher[] = [
  * also creates, so a run record can be written at the launcher's own recordPath inside it. */
 async function makeRun(): Promise<{ run: string; output: string }> {
   const run = await mkdtemp(join(tmpdir(), 'launcher-status-run-'))
+  // The launcher looks for the project from its working directory, so the run folder carries its own aspira.json.
+  await writeFile(join(run, 'aspira.json'), '{}')
   const output = await mkdtemp(join(tmpdir(), 'launcher-status-output-'))
   await writeFile(join(run, 'started'), `${Math.floor(Date.now() / 1000) - 5}\n`)
   await writeFile(join(run, 'output'), `${output}\n`)
@@ -64,7 +66,7 @@ function runSub(scriptPath: string, sub: string, args: string[], envVar: string,
   delete env.NOTION_TOKEN
   delete env.NOTION_API_KEY
   delete env.AI_GATEWAY_API_KEY
-  const result = spawnSync('bash', [scriptPath, sub, ...args], { env, encoding: 'utf8', timeout: 15_000 })
+  const result = spawnSync('bash', [scriptPath, sub, ...args], { cwd: args[0], env, encoding: 'utf8', timeout: 15_000 })
   return { stdout: `${result.stdout ?? ''}${result.stderr ?? ''}`, status: result.status }
 }
 
