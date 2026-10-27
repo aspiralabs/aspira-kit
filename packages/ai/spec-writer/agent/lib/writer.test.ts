@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SETTLED_DECISIONS_RULE } from '@aspiralabs/ai/common/lib/decisions'
 import type { Call } from '@aspiralabs/ai/spec-reviewer/lib/pipeline'
-import today from './writer.prompts.fixture.json' with { type: 'json' }
+import today from '../../fixtures/writer.prompts.json' with { type: 'json' }
 import { draftPrompt, explorePrompt, ideaDecisions, writePipeline, writerSystemPrompt } from './writer.ts'
 
 const draft = '# Save items\n## Intent\nLet people save items.\n## Acceptance criteria\n### Features\n- [ ] F1: A saved item appears in the list.\n'
@@ -168,7 +168,7 @@ describe('a write-mode retry keeps every answer the author ticked (SCOOP-8)', ()
 // without it every prompt is today's, apart from the one Blast radius format sentence.
 const BRIEF = 'CODEBASE MAP BRIEF (data)\nOrientation only: this brief is a map, not the code. Verify it with source reads before relying on it.\nImpact: src/items.ts'
 
-/** The prompts of a write or review run with the default stub (the shape writer.prompts.fixture.json was captured from). */
+/** The prompts of a write or review run with the default stub (the shape fixtures/writer.prompts.json was captured from). */
 async function promptsOf(extra: Record<string, unknown>): Promise<Record<string, string>> {
   const prompts: Record<string, string> = {}
   const call: Call = async ({ phase, prompt }) => {
