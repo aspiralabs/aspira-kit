@@ -5,6 +5,8 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { codebaseMapsFolder } from './aspira.js'
+
+export { useCodebaseMap } from './aspira.js'
 import { mainCheckoutRoot, repositoryRoot } from './git.js'
 import { aiPackageDir } from './skills.js'
 
@@ -64,6 +66,25 @@ export function runMapScript(repo: string, mapRoot: string, args: readonly strin
   return run.status ?? 1
 }
 
+/** The map root for `repo` as `kit map-codebase` computes it: the aspira.json `codebaseMaps` folder plus the main checkout's name, else <repo>/.codebase-map. Throws on an invalid `codebaseMaps` value. */
+export function mapRootFor(cwd: string, repo: string): string {
+  const folder = codebaseMapsFolder(cwd, repo)
+  return folder === undefined ? join(repo, '.codebase-map') : join(folder, basename(mainCheckoutRoot(repo) ?? repo))
+}
+
+/** KIT-70: builds the map for `repo` into `mapRoot` like `kit map-codebase`, with stdout and stderr captured so an agent run's own output stays clean. */
+export function buildMapCaptured(repo: string, mapRoot: string): { code: number; stderr: string } {
+  const ai = aiPackageDir()
+  if (ai === undefined) return { code: 1, stderr: '@aspiralabs/ai is not installed; cannot run the codebase map' }
+  const script = join(ai, 'codebase-map', 'scripts', 'cli.ts')
+  if (!existsSync(script)) return { code: 1, stderr: `${script} is missing` }
+  const amaro = findUpModule(realpathSync(ai), AMARO) ?? findUpModule(realpathSync(repo), AMARO)
+  if (amaro === undefined) return { code: 1, stderr: 'amaro (the TypeScript loader the agents ship with) is not installed' }
+  mkdirSync(join(mapRoot, 'notes'), { recursive: true })
+  const run = spawnSync('node', ['--import', amaro, '--experimental-strip-types', script, '--repo', repo, '--map-root', mapRoot], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  return { code: run.status ?? 1, stderr: run.stderr ?? '' }
+}
+
 /** `kit map-codebase [args]` from `cwd`. Outside a git repository nothing is written. */
 export function mapCodebase(cwd: string, args: readonly string[], log: (line: string) => void): number {
   const repo = repositoryRoot(cwd)
@@ -77,14 +98,13 @@ export function mapCodebase(cwd: string, args: readonly string[], log: (line: st
     }
     return 1
   }
-  let folder: string | undefined
+  let mapRoot: string
   try {
-    folder = codebaseMapsFolder(cwd, repo)
+    mapRoot = mapRootFor(cwd, repo)
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err))
     return 1
   }
-  const mapRoot = folder === undefined ? join(repo, '.codebase-map') : join(folder, basename(mainCheckoutRoot(repo) ?? repo))
   void log
   // a build keeps the notes beside the map; the scripts only create the map
   if (args.length === 0) mkdirSync(join(mapRoot, 'notes'), { recursive: true })
