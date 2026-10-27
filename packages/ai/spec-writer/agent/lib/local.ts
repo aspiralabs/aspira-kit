@@ -1,3 +1,5 @@
+import { extendFilesFor } from '@aspiralabs/ai/common/lib/aspira-config'
+import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { sessionResearchTools } from '@aspiralabs/ai/common/lib/research-rule'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -96,6 +98,9 @@ export const snapshotNote = (file: string) => `Engineering guidelines: the REQUI
 /** Tool phases with a knowledge folder read the topic pages from it: the files stand in for the agent's read-only guideline tools. */
 export const folderNote = (dir: string) => `Engineering guidelines: the REQUIRED GUIDELINES in the task are ${join(dir, 'REQUIRED.md')}. The topic pages they route to are files in ${dir}, indexed by ${join(dir, 'INDEX.md')}, one file per page; they stand in for the agent's read-only guideline tools (list_guidelines, read_guideline). Open the pages that apply with Read. Do not edit them.`
 
+/** The client's extend files for a stage, each under a heading naming it; nothing when the stage lists none (KIT-68 F12). */
+const extendLines = (from: string, stage: string): string[] => extendFilesFor(from, stage).flatMap((file) => [`## Client instructions: ${file}`, '', readFileSync(file, 'utf8').trim(), ''])
+
 /** The file a phase subagent reads: the agent's system prompt and task prompt verbatim, then the output contract. */
 export function renderPhasePrompt(phase: string, prompt: string, output: string, repo: string, knowledge?: Pick<Knowledge, 'source' | 'path'>, mode: 'write' | 'review' = 'write'): string {
   const role = mode === 'review' ? 'the spec review of the answered spec (the one spec step, rerun from In Review: Spec)' : stageOf(phase) < 2 ? 'the spec writer' : 'the spec review that the spec writer runs on its draft'
@@ -110,6 +115,7 @@ export function renderPhasePrompt(phase: string, prompt: string, output: string,
     '## System', '', systemFor(phase), '',
     '## Task', '', prompt, '',
     '## Output schema', '', '```json', JSON.stringify(z.toJSONSchema(schemaFor(phase), { io: 'input' }), null, 2), '```', '',
+    ...extendLines(repo, 'spec-writer'),
   ].join('\n')
 }
 

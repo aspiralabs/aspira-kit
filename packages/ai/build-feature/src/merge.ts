@@ -13,6 +13,7 @@ import { z } from 'zod'
 import type { Phase, PhaseContext, PhaseResult } from '#build-feature/driver.ts'
 import { MERGE_MOVE } from '#build-feature/route.ts'
 import type { Pending, RunState } from '#build-feature/run-state.ts'
+import { pullRequestOf } from '#build-feature/step8.ts'
 import { GH_ARGS, shown, system, type System } from '#build-feature/system.ts'
 import { locate } from '#build-feature/worktree.ts'
 
@@ -89,6 +90,8 @@ function afterMerge(context: PhaseContext, state: RunState, record: MergeRecord)
 /** The merge stage, or what follows it when the PR is already merged. */
 export async function mergeStage(context: PhaseContext, state: RunState, sys: System = system): Promise<PhaseResult> {
   if (context.card.status !== IN_REVIEW) return { kind: 'done', state }
+  // pullRequest false (KIT-68, F7): there is no PR to merge; the run-state route never reaches this.
+  if (!pullRequestOf(context.aspira)) return { kind: 'done', state }
   const merged = mergeRecordOf(state)
   if (merged !== null) {
     const torn = await tearDown(context, state, merged, sys)

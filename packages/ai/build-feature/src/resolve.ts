@@ -19,7 +19,7 @@ const nonce = z.string().min(1)
 export const resolutionSchema = z.union([
   z.object({ nonce, error: z.string().min(1) }),
   z.object({ nonce, found: z.literal(false), id: z.string().optional() }),
-  z.object({ nonce, found: z.literal(true), id: z.string().min(1), title: z.string(), url: z.string(), status: z.string().min(1), pr: z.string().nullable(), dev: z.string().nullable(), type: z.string().nullable().optional() }),
+  z.object({ nonce, found: z.literal(true), id: z.string().min(1), title: z.string(), url: z.string(), status: z.string().min(1), pr: z.string().nullable(), dev: z.string().nullable(), type: z.string().nullable().optional(), area: z.array(z.string()).optional() }),
 ])
 
 export type ResolveStageInput = { id: string; board: string; output: string; move?: { from: string; to: string } }
@@ -32,7 +32,7 @@ export function resolveStage(input: ResolveStageInput): Record<string, unknown> 
     board,
     ...(move === undefined ? {} : { move }),
     notion: [{ op: 'read', target: 'ticket' }],
-    instructions: `Read ${id} on the Feature Board ${board} with the Notion MCP (notion-fetch, read-only): its Status, PR, Dev and Type properties as the board shows them now, never from ticket.md. Write {"nonce", "found": true, "id", "title", "url", "status", "pr", "dev", "type"} (pr, dev and type null when empty) to ${output}; {"nonce", "found": false, "id"} when the board has no such ticket; {"nonce", "error"} when the board cannot be read.`,
+    instructions: `Read ${id} on the Feature Board ${board} with the Notion MCP (notion-fetch, read-only): its Status, PR, Dev, Type and Area properties as the board shows them now, never from ticket.md. Write {"nonce", "found": true, "id", "title", "url", "status", "pr", "dev", "type", "area"} (pr, dev and type null when empty; area the list of the Area tags, [] when none) to ${output}; {"nonce", "found": false, "id"} when the board has no such ticket; {"nonce", "error"} when the board cannot be read.`,
   }
 }
 
@@ -48,7 +48,8 @@ export function acceptResolution(answer: unknown, pendingNonce: string, context:
   if (!value.found) return { kind: 'stop', message: `ticket ${context.id} not found on the board ${context.board}`, notFound: true }
   const { id, title, url, status, pr, dev } = value
   const type = value.type === undefined || value.type === null || value.type.trim() === '' ? null : value.type.trim()
-  return { kind: 'card', card: { id, title, url, status, pr: pr === '' ? null : pr, dev: dev === '' ? null : dev, type } }
+  const area = (value.area ?? []).map((tag) => tag.trim()).filter((tag) => tag !== '')
+  return { kind: 'card', card: { id, title, url, status, pr: pr === '' ? null : pr, dev: dev === '' ? null : dev, type, area } }
 }
 
 /** What differs between the card the run expects and the card it read; empty when they agree. */
@@ -68,7 +69,7 @@ function resolveScript(): string {
 
 /** Resolve the card with NOTION_TOKEN through agent-common's script (no session stage). */
 export async function resolveWithToken(context: { id: string; board: string; repo: string; env: NodeJS.ProcessEnv }): Promise<Resolution> {
-  const outcome = await exec(process.execPath, [...process.execArgv, resolveScript(), context.id, '--board', context.board], { cwd: context.repo, env: context.env }).then(
+  const outcome = await exec(process.execPath, [...process.execArgv, resolveScript(), context.id, '--board', context.board, '--area'], { cwd: context.repo, env: context.env }).then(
     ({ stdout }) => ({ ok: true as const, stdout }),
     (error: { stderr?: string; message?: string }) => ({ ok: false as const, stderr: error.stderr ?? error.message ?? 'resolve-ticket failed' }),
   )
@@ -84,5 +85,5 @@ export async function resolveWithToken(context: { id: string; board: string; rep
       .filter((match): match is RegExpExecArray => match !== null)
       .map((match) => [match[1]!, match[2]!]),
   )
-  return acceptResolution({ nonce: 'token', found: true, id: fields.id ?? context.id, title: fields.title ?? '', url: fields.url ?? '', status: fields.status ?? '', pr: fields.pr || null, dev: fields.dev || null, type: fields.type || null }, 'token', context)
+  return acceptResolution({ nonce: 'token', found: true, id: fields.id ?? context.id, title: fields.title ?? '', url: fields.url ?? '', status: fields.status ?? '', pr: fields.pr || null, dev: fields.dev || null, type: fields.type || null, area: (fields.area ?? '').split(',').map((tag) => tag.trim()).filter((tag) => tag !== '') }, 'token', context)
 }

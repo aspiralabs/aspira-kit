@@ -79,8 +79,8 @@ export const usageSchema = z
   .nullable()
 export type Usage = z.infer<typeof usageSchema>
 
-/** `type`: the card's Type (Feature, Bug, Chore), which names the worktree and the branch prefix (F50). */
-export const cardSchema = z.object({ id: text, title: z.string(), url: z.string(), status: text, pr: z.string().nullable(), dev: z.string().nullable(), type: z.string().nullable().default(null) })
+/** `type`: the card's Type (Feature, Bug, Chore), which names the worktree and the branch prefix (F50). `area`: the card's Area tags, which a client run maps to one repo (KIT-68); a state.json written before it has none, read as no tags. */
+export const cardSchema = z.object({ id: text, title: z.string(), url: z.string(), status: text, pr: z.string().nullable(), dev: z.string().nullable(), type: z.string().nullable().default(null), area: z.array(z.string()).optional() })
 export type Card = z.infer<typeof cardSchema>
 
 const runSchema = z.object({
@@ -107,7 +107,8 @@ const runSchema = z.object({
 export type RunRecord = z.infer<typeof runSchema>
 
 // `notionUserId` is only on records a session wrote before the driver recorded the invocation itself (KIT-20).
-const approvalSchema = z.object({ runId: text, notionUserId: text.optional(), name: text, at: text, command: text })
+/** `repo`: the repo a client run's card maps to, named once its Area tags are read (KIT-68). */
+const approvalSchema = z.object({ runId: text, notionUserId: text.optional(), name: text, at: text, command: text, repo: text.optional() })
 export type Approval = z.infer<typeof approvalSchema>
 
 const moveSchema = z.object({ from: text, to: text, at: text, runId: text })

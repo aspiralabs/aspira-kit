@@ -4,6 +4,8 @@
 // every rule here is unit tested without a repository or a board. `ticket-flow.ts` does the file
 // system and board work on top of it.
 
+import { join } from 'node:path'
+import { workRootFor } from './aspira-config.ts'
 import { BoardError, parseTicketRef, type Ticket, type TicketPage } from './board.ts'
 import { pageIdFrom } from './knowledge.ts'
 import { RUN_STATUSES, type RunStatus } from './run-status.ts'
@@ -21,6 +23,11 @@ export type Skill = (typeof SKILLS)[number]
 
 /** The folder under the repository root that holds one working folder per ticket. */
 export const WORK_DIR = '.work'
+
+/** The folder holding a repo's working folders: the client file's `workRoot` when one applies (KIT-68), otherwise <repo>/.work. */
+export function workDirFor(repo: string): string {
+  return workRootFor(repo) ?? join(repo, WORK_DIR)
+}
 export const TICKET_FILE = 'ticket.md'
 export const IDEA_FILE = 'idea.md'
 
@@ -162,7 +169,7 @@ export type GateCheck =
   | { ok: false; message: string }
 
 /** The gate: may this skill run on a ticket in this Status, and does it make a start move. */
-export function checkGate(skill: Skill, ticket: Pick<Ticket, 'id' | 'title' | 'status' | 'pr' | 'type'> & { duplicatePages?: DuplicatePages }): GateCheck {
+export function checkGate(skill: Skill, ticket: Pick<Ticket, 'id' | 'title' | 'status' | 'pr' | 'type'> & { duplicatePages?: DuplicatePages }, options: { statusFlow?: boolean; pullRequest?: boolean } = {}): GateCheck {
   const gate = GATES[skill]
   const name = `${ticket.id} ${ticket.title}`.trim()
   if (gate.types !== undefined) {
@@ -175,9 +182,11 @@ export function checkGate(skill: Skill, ticket: Pick<Ticket, 'id' | 'title' | 's
     const duplicate = ticket.duplicatePages?.find((entry) => entry.title === pull.title)
     if (duplicate !== undefined) return { ok: false, message: DUPLICATE_PAGES_MESSAGE(ticket.id, pull.title, duplicate.pages.map((page) => page.url)) }
   }
+  // statusFlow false (KIT-68): the card's Status is not read and no start move is made.
+  if (options.statusFlow === false) return { ok: true, retry: false, startMove: null }
   if (gate.inProgress !== undefined && ticket.status === gate.inProgress) return { ok: true, retry: true, startMove: null }
   if (gate.accepts.includes(ticket.status)) {
-    if (gate.requires === 'PR' && !ticket.pr) {
+    if (gate.requires === 'PR' && options.pullRequest !== false && !ticket.pr) {
       return { ok: false, message: `${name} is "${ticket.status}" but its PR property is not set; ${skill} needs the PR. Set it (the implementor does, when it opens the PR). No model call was made.` }
     }
     const moves = gate.inProgress !== undefined && (gate.startFrom === undefined || gate.startFrom.includes(ticket.status))

@@ -5,6 +5,7 @@
 import { readFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { z } from 'zod'
+import { readEffectiveAspira } from './aspira-config.ts'
 
 const ENV_FILE = '.env.development.local'
 const envVar = z.union([z.string(), z.looseObject({ name: z.string() })])
@@ -16,9 +17,10 @@ const missing = (error: unknown): boolean => (error as NodeJS.ErrnoException).co
 async function appEnv(root: string): Promise<{ values: Record<string, string>; envVars: string[] } | undefined> {
   let parsed: z.infer<typeof config>
   try {
-    parsed = config.parse(JSON.parse(await readFile(join(root, 'aspira.json'), 'utf8')))
+    const effective = readEffectiveAspira(root)
+    if (effective.file === undefined) return undefined
+    parsed = config.parse(effective.config)
   } catch (error) {
-    if (missing(error)) return undefined
     throw new Error(`aspira.json in ${root} cannot be read (${error instanceof Error ? error.message : String(error)}); refusing to run against the shared database`)
   }
   let text: string

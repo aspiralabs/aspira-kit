@@ -13,9 +13,10 @@ import { readFile, readdir } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseEnv } from 'node:util'
 import { INDEX_FILE, KNOWLEDGE_ENV, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED_FILE, pageIdFrom, parseRequired } from '@aspiralabs/ai/common/lib/knowledge'
-import { parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
+import { folderRootOf, parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
-import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
+import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
 import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 
 /** Environment variables as the agent sees them. */
@@ -91,10 +92,17 @@ export type KnowledgeSource = { token?: string; tokenFiles: string[]; fetch?: (u
  */
 export async function knowledgeSource(repo: string, env: Env): Promise<Omit<KnowledgeSource, 'fetch' | 'api'>> {
   const root = resolve(repo)
-  const aspira = await readFile(join(root, 'aspira.json'), 'utf8').then((text) => JSON.parse(text) as { app?: unknown }, () => null)
+  const aspira = (() => {
+    try {
+      return readEffectiveAspira(root).config as { app?: unknown }
+    } catch {
+      return null
+    }
+  })()
   const app = typeof aspira?.app === 'string' && aspira.app !== '.' && aspira.app !== '' ? resolve(root, aspira.app) : undefined
-  const found = await notionToken({ env, projectRoot: root, ...(app === undefined ? {} : { appDir: app }) })
-  return { ...(found === null ? {} : { token: found.token }), tokenFiles: [...(app === undefined ? [] : [join(app, '.env.local')]), join(root, '.env.local')] }
+  const roots = tokenRoots(root, root, app)
+  const found = await notionToken({ env, ...roots })
+  return { ...(found === null ? {} : { token: found.token }), tokenFiles: [...(roots.appDir === undefined ? [] : [join(roots.appDir, '.env.local')]), join(roots.projectRoot, '.env.local')] }
 }
 
 /** The agent's knowledge configuration: its env files, then the given environment, highest priority last. */
@@ -165,7 +173,7 @@ export async function loadKnowledge(dir: string, config: KnowledgeConfig, source
 export async function snapshotKnowledge(file: string, config: Pick<KnowledgeConfig, 'root'> = { root: null }): Promise<Knowledge> {
   const path = resolve(file)
   const header = parseProvenance(await readFile(path, 'utf8').catch(() => ''))
-  const expectedRootId = (config.root === null ? undefined : pageIdFrom(config.root)) ?? header?.rootId ?? ''
+  const expectedRootId = folderRootOf(header) ?? (config.root === null ? undefined : pageIdFrom(config.root)) ?? header?.rootId ?? ''
   const verified = await verifySnapshot(path, { expectedRootId })
   if (!verified.ok) throw new KnowledgePrerequisiteError(`--guidelines ${path} is refused: ${verified.reason} ${verified.hint}`)
   const { files, digest } = await fingerprint(dirname(path), [basename(path)])

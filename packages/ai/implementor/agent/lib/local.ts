@@ -7,10 +7,11 @@
 // loads, agent/skills/aspira-implementor/SKILL.md) and its instructions (agent/instructions.md).
 // Nothing in this file restates their rules.
 
+import { extendFilesFor } from '@aspiralabs/ai/common/lib/aspira-config'
 import { execFile } from 'node:child_process'
 import { RESEARCH_RULE, sessionResearchTools } from '@aspiralabs/ai/common/lib/research-rule'
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -358,6 +359,9 @@ async function knowledgeSection(dir: string): Promise<string> {
   ].join('\n')
 }
 
+/** The client's extend files for a stage, each under a heading naming it; nothing when the stage lists none (KIT-68 F12). */
+const extendLines = (from: string, stage: string): string[] => extendFilesFor(from, stage).flatMap((file) => [`## Client instructions: ${file}`, '', readFileSync(file, 'utf8').trim(), ''])
+
 type OrchestratorStage = { id: string; stage: Stage; sections: (number | string)[]; does: string; input?: string; wave?: number }
 
 function orchestratorPrompt(args: { task: OrchestratorStage; output: string; schema: SchemaName; files: AgentFiles; facts: unknown; knowledge: string; repo: string; knowledgeDir: string }): string {
@@ -394,10 +398,11 @@ function orchestratorPrompt(args: { task: OrchestratorStage; output: string; sch
     '',
     schemaText(args.schema),
     '',
+    ...extendLines(args.repo, 'implementor'),
   ].join('\n')
 }
 
-function workerPrompt(args: { id: string; output: string; files: AgentFiles; values: string }): string {
+function workerPrompt(args: { id: string; output: string; files: AgentFiles; values: string; repo: string }): string {
   return [
     `# Aspira implementor: ${args.id} (--local worker)`,
     '',
@@ -417,6 +422,7 @@ function workerPrompt(args: { id: string; output: string; files: AgentFiles; val
     '',
     schemaText('WORKER_REPORT'),
     '',
+    ...extendLines(args.repo, 'implementor'),
   ].join('\n')
 }
 
@@ -722,7 +728,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
         ...lane.writeScope.map((path) => `  - ${path}`),
       ].join('\n')
       const prompt = promptFile(id)
-      await writeFile(prompt, workerPrompt({ id, output, files, values }))
+      await writeFile(prompt, workerPrompt({ id, output, files, values, repo: source.repo }))
       pendingTasks.push({ id, agent: 'worker', prompt, output, schema: 'WORKER_REPORT', ...taskModel('implementor.worker', 'sonnet' as SessionModel, source.repo), ...('error' in result && result.error !== undefined ? { error: result.error, retry: result.retry } : {}) })
     }
     if (missing.length > 0) return exportRun('incomplete')

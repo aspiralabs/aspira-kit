@@ -271,3 +271,16 @@ describe('KIT-67 T33: the run isolates the ticket\'s worktree', () => {
     expect({ halted, rerun: rerun.stage?.stage, adds: await addsOf(h), ...(await settled(h, world)) }).toEqual({ halted: { end: 'end', stopped: true, named: true, steps: 0, kept: true }, rerun: 'worktree', adds: 1, ...ISOLATED, urls: ISOLATED_URLS })
   }, SLOW)
 })
+
+describe('review AVA1.1: the base branch is checked before git sees it', () => {
+  it('refuses a base that is not a plain branch name before fetching it', async () => {
+    const { mkdtemp } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { prepareWorktree, TICKET_TYPES } = await import('./worktree.ts')
+    const main = await mkdtemp(join(tmpdir(), 'wt-base-'))
+    const fetched: string[] = []
+    const sys = { gitFetchMain: async (_options: unknown, base: string) => { fetched.push(base); return { code: 0, stdout: '', stderr: '' } } } as unknown as Parameters<typeof prepareWorktree>[1]
+    const outcome = await prepareWorktree({ place: { top: main, main, commonDir: join(main, '.git') }, id: 'KIT-1', title: 'x', type: TICKET_TYPES.Feature, cardType: 'Feature', env: {}, base: '--upload-pack=x', skipIsolation: true }, sys).catch((error: Error) => ({ ok: false as const, message: error.message }))
+    expect([outcome.ok, fetched]).toEqual([false, []])
+  })
+})

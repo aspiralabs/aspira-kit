@@ -113,8 +113,22 @@ node_args() {
   else case $AGENT in */node_modules/*) die "amaro is not installed beside $AGENT; reinstall @aspiralabs/ai" ;; esac
   fi
   NODE_ARGS+=(--experimental-strip-types)
-  local file
-  for file in "$PROJECT/.env.local" "$AGENT/.env.local" "$AGENT/.env.development.local"; do [ ! -f "$file" ] || NODE_ARGS+=("--env-file=$file"); done
+  local file env_root=$PROJECT croot
+  # Inside a client layout the client root's .env.local replaces the repo's, for every key (KIT-68).
+  if croot=$(client_root); then env_root=$croot; fi
+  for file in "$env_root/.env.local" "$AGENT/.env.local" "$AGENT/.env.development.local"; do [ ! -f "$file" ] || NODE_ARGS+=("--env-file=$file"); done
+}
+# The client root: the folder of the nearest aspira.json at or above the project when that file has `repos`.
+client_root() {
+  local dir=$PROJECT
+  while :; do
+    if [ -f "$dir/aspira.json" ]; then
+      grep -q '"repos"' "$dir/aspira.json" || return 1
+      printf '%s\n' "$dir"; return 0
+    fi
+    [ "$dir" != / ] || return 1
+    dir=$(dirname "$dir")
+  done
 }
 usage() { die "usage: visual-verify.sh local <ID> --status \"<the card's Status>\" [--cloud] | report <ID>. local prints what to check; report writes report.md from the answer the session wrote."; }
 cmd_run() {

@@ -21,7 +21,7 @@ import { REFUSED_EXIT, USAGE_EXIT, exitCodeFor, readRunStatus, type ReasonCode, 
 import { isCommittable, isSecretsFile } from './step-commands.ts'
 import { checkParentRun, encodeTrace, parentRunSchema, releaseRunId, reserveRunId, telemetryFile, writeTelemetry, type Gap, type SpanInput, type SpanUsage } from './telemetry.ts'
 import { HAND_USAGE_SOURCE, readSessionUsage, readUsageSource, subagentSpans, type Interval } from './telemetry-sources.ts'
-import { TICKET_FILE, TicketArgumentError, WORK_DIR, ticketArgument, type BoardTrace, type Skill, type TicketArgument, type TicketRecord } from './ticket.ts'
+import { TICKET_FILE, TicketArgumentError, WORK_DIR, workDirFor, ticketArgument, type BoardTrace, type Skill, type TicketArgument, type TicketRecord } from './ticket.ts'
 import {
   FlowRefused,
   findWorkFolders,
@@ -140,7 +140,7 @@ async function note(context: DriverContext, folder: string | null, build: () => 
  * into that folder, not a second one, for `--parent-run` to find the run.
  */
 export async function buildFeatureFolder(repo: string, ref: string): Promise<string | null> {
-  const work = join(repo, WORK_DIR)
+  const work = workDirFor(repo)
   if (!existsSync(work)) return null
   const lower = ref.trim().toLowerCase()
   const entries = (await readdir(work, { withFileTypes: true })).filter((entry) => entry.isDirectory() && (entry.name === lower || entry.name.startsWith(`${lower}-`))).sort((a, b) => a.name.localeCompare(b.name))
@@ -160,7 +160,7 @@ export async function beforeRun(context: DriverContext, args: DriverTicketArgs):
   const config = (await readAspira(context.repo))!
   const folder = argument.folder ?? null
   // Until the folder exists the state lives under .work/.local; once the resolve step created the folder it moves in.
-  const shared = join(context.repo, WORK_DIR, '.local', context.skill)
+  const shared = join(workDirFor(context.repo), '.local', context.skill)
   const stateDir = folder === null ? shared : boardStateDir(folder, context.skill)
   if (folder !== null && !existsSync(join(stateDir, 'board.json')) && existsSync(join(shared, 'board.json'))) {
     await mkdir(stateDir, { recursive: true })

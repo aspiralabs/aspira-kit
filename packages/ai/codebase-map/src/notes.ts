@@ -11,6 +11,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, normalize, sep } from 'node:path'
 import { z } from 'zod'
+import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
 import { envValues, redactSecrets } from '@aspiralabs/ai/common/lib/redact'
 import { hashFile } from './scan.ts'
 
@@ -73,7 +74,7 @@ export async function readNotes(notesDir: string): Promise<NotesRead> {
 
 const appOf = async (repo: string): Promise<string | undefined> => {
   try {
-    const app = (JSON.parse(await readFile(join(repo, 'aspira.json'), 'utf8')) as { app?: unknown }).app
+    const app = readEffectiveAspira(repo).config.app
     return typeof app === 'string' && insideRepo(app) ? app : undefined
   } catch {
     return undefined

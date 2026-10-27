@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { z } from 'zod'
+import { readEffectiveAspira, workRootFor } from '@aspiralabs/ai/common/lib/aspira-config'
 import { touchesUi } from '@aspiralabs/ai/common/lib/plan'
 import { worktreeIdentity } from '@aspiralabs/ai/common/lib/worktree-env'
 import { credentialNames, devServerSchema, hasDevPlaceholder, localDevUrl, planChangesSchema, resolveDevUrl, startsWithKitDev, visualVerifyAnswerSchema, visualVerifyReport, withoutCredentials, type SkipReason, type VisualVerifyResult } from '@aspiralabs/ai/common/lib/visual-verify'
@@ -25,12 +26,22 @@ const fail = (text: string) => process.stderr.write(`visual-verify: ${text}\n`)
 
 /** The ticket's working folder: the first `.work/<id>-*` directory, else `.work/<id>`. */
 async function folderOf(repo: string, id: string): Promise<string | null> {
-  const work = join(repo, '.work')
+  const work = workRootFor(repo) ?? join(repo, '.work')
   if (!existsSync(work)) return null
   const lower = id.toLowerCase()
   const entries = (await readdir(work, { withFileTypes: true })).filter((entry) => entry.isDirectory() && (entry.name === lower || entry.name.startsWith(`${lower}-`))).sort((a, b) => a.name.localeCompare(b.name))
   const first = entries[0]
   return first === undefined ? null : join(work, first.name)
+}
+
+/** The aspira.json that applies to the repo (a client file's repos entry included), or undefined when none does. */
+function effectiveConfig(repo: string): unknown {
+  try {
+    const { file, config } = readEffectiveAspira(repo)
+    return file === undefined ? undefined : config
+  } catch {
+    return undefined
+  }
 }
 
 async function readJson(file: string): Promise<unknown> {
@@ -61,7 +72,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     fail(`there is no working folder .work/${rawId.toLowerCase()}-* in ${repo}; run the ticket's steps first`)
     return 1
   }
-  const config = configSchema.safeParse(await readJson(join(repo, 'aspira.json')))
+  const config = configSchema.safeParse(effectiveConfig(repo))
   const out = join(folder, 'visual-verify')
   const options = { app: config.success ? config.data.app : undefined }
   if (command === 'report') return report(repo, out, options)

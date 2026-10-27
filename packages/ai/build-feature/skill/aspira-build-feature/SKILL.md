@@ -12,6 +12,8 @@ This is the one `/aspira-*` skill that orchestrates other skills instead of laun
 
 Two modes, chosen by the invocation and kept for the whole run: by default every step runs its own skill in a subagent of this session; with `--cloud` every step runs its own skill with `--cloud`, which starts that step's cloud agent and waits on it until it ends. `--local` is still accepted and means the default. Either way this session steps the driver; build-feature itself has no `start`, `status` or `wait`. `--autonomous` skips the human gates: the groomer step runs with `--autonomous` (every open question taken as its recommended option, the exit-criterion ones included, and the run confirms itself once every branch is visited), and an `ask` whose quoted decision carries a recommended option is answered with it and recorded under asked. In either mode, once the gate passed and the last review left nothing medium or above, the run merges the PR itself and moves the card to Ready: Implementation. `--autonomous` with `--cloud` is refused.
 
+**Client harness** (an `aspira.json` with `repos`, KIT-68): start at the client root or inside one of its repos; at the root the card's Area tags pick the repo. With `statusFlow: false` the run moves no Status, sets no Dev and writes no release row, and with `pullRequest: false` it pushes no branch and opens no PR. The ticket folder and run state live at the client root, so a stopped run resumes by running the same command again. `--cloud` and `--autonomous` are refused (client runs are in session only); `--no-comment` is accepted.
+
 ```bash
 <skill-dir>/scripts/build-feature.sh local <ticket ID | Notion URL> [--cloud] [--autonomous] [--run RUNID] [--force-run]
 ```

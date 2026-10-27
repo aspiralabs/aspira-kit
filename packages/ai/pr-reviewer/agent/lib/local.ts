@@ -5,6 +5,7 @@
 // to a file. The session runs those as subagents and calls again. Once every stage is done
 // the review is exported in the agent's layout and, for a GitHub PR, posted.
 
+import { extendFilesFor } from '@aspiralabs/ai/common/lib/aspira-config'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -17,9 +18,9 @@ import { fileURLToPath } from 'node:url'
 import { INDEX_FILE, KNOWLEDGE_ENV, KNOWLEDGE_PATH, MAX_DEPTH, MAX_PAGES, REQUIRED_ENV, REQUIRED_FILE, pageIdFrom, parseRequired } from '@aspiralabs/ai/common/lib/knowledge'
 import { sessionModel, type SessionModel } from '@aspiralabs/ai/common/lib/session-model'
 import { taskModel, type Effort } from '@aspiralabs/ai/common/lib/model-config'
-import { parseProvenance, verifyKnowledgeDir } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
+import { folderRootOf, parseProvenance, verifyKnowledgeDir } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
-import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
 import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 import { mapBriefForRun, type HiddenNote, type MapStatus } from '@aspiralabs/ai/common/lib/codebase-map-run'
 import { useCodebaseMap } from '@aspiralabs/ai/map-codebase'
@@ -253,6 +254,9 @@ export const agentSources = (agentDir: string) => ({
   seat: (who: Reviewer) => join(agentDir, 'agent', 'subagents', who, 'persona.md'),
 })
 
+/** The client's extend files for a stage, each under a heading naming it; nothing when the stage lists none (KIT-68 F12). */
+const extendLines = (from: string, stage: string): string[] => extendFilesFor(from, stage).flatMap((file) => [`## Client instructions: ${file}`, '', readFileSync(file, 'utf8').trim(), ''])
+
 /**
  * The file a subagent reads. Everything the seat is told comes from the agent: the shared prefix
  * and the turn are review.ts's, the persona is the seat's persona.md, all verbatim, and the
@@ -289,6 +293,7 @@ export function renderTaskPrompt(task: PlanTask, output: string, persona: { path
     JSON.stringify(OUTPUT_SCHEMAS[task.kind], null, 2),
     '```',
     '',
+    ...extendLines(pr.repoPath ?? process.cwd(), 'pr-reviewer'),
   ].join('\n')
 }
 
@@ -432,8 +437,9 @@ async function headerRootId(path: string): Promise<string> {
 
 /** The root a verify call is held to: the agent's configured KNOWLEDGE_PAGE when there is one, else the file's own header (a no-op root check; the integrity/location/trace checks still apply). */
 async function expectedRootFor(config: KnowledgeConfig, requiredPath: string): Promise<string> {
+  const folder = folderRootOf(parseProvenance(await readFile(requiredPath, 'utf8').catch(() => '')))
   const configured = config.root === null ? undefined : pageIdFrom(config.root)
-  return configured ?? (await headerRootId(requiredPath))
+  return folder ?? configured ?? (await headerRootId(requiredPath))
 }
 
 /** Every file under the folder, by path relative to it, sorted. */
@@ -479,10 +485,10 @@ async function checkKnowledge(dir: string, agentDir: string, env: Record<string,
     })
 
   if (!opts.given && (await readFile(requiredPath, 'utf8').catch(() => null)) === null) {
-    const token = (await notionToken({ env, projectRoot: opts.project }))?.token
+    const token = (await notionToken({ env, ...tokenRoots(opts.project, opts.project) }))?.token
     if (token === undefined || config.root === null) {
       const where = [
-        token === undefined && `${KNOWLEDGE_ENV.token} is not set in the environment or ${join(opts.project, '.env.local')}`,
+        token === undefined && `${KNOWLEDGE_ENV.token} is not set in the environment or ${join(tokenRoots(opts.project, opts.project).projectRoot, '.env.local')}`,
         config.root === null && `${KNOWLEDGE_ENV.page} is not set in the agent's env (${ENV_FILES.join(', ')})`,
       ].filter(Boolean).join('; ')
       throw new KnowledgeBlocked(`The engineering guidelines are required and none were given: ${where}. Set them, or pass --knowledge DIR (a load-knowledge folder).`)
@@ -498,7 +504,7 @@ async function checkKnowledge(dir: string, agentDir: string, env: Record<string,
   if ((required ?? '').trim() === '') problems.push(`${requiredName} is missing or empty.`)
   else {
     const headings = new Set((required ?? '').split('\n').flatMap((line) => (line.startsWith('# ') ? [line.slice(2).trim().toLowerCase()] : [])))
-    const absent = config.required.filter((title) => !headings.has(title.trim().toLowerCase()))
+    const absent = (folderRootOf(parseProvenance(required ?? '')) === undefined ? config.required : []).filter((title) => !headings.has(title.trim().toLowerCase()))
     if (absent.length > 0) problems.push(`${requiredName} has no \`# <title>\` section for ${absent.join(', ')}.`)
   }
   if (problems.length > 0) throw refuse(problems.join(' '))

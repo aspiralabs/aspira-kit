@@ -9,6 +9,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseEnv } from 'node:util'
+import { clientRootOf } from './aspira-config.ts'
 
 export type NotionTokenSource = 'env' | 'app' | 'root'
 export type NotionTokenResult = { token: string; source: NotionTokenSource }
@@ -18,6 +19,16 @@ async function tokenIn(file: string): Promise<string | undefined> {
   if (text === null) return undefined
   const value = parseEnv(text).NOTION_TOKEN
   return value === undefined || value.trim() === '' ? undefined : value
+}
+
+/**
+ * The roots to look the token in for a run in `from` (KIT-68): inside a client layout the client root and no app
+ * (the repo's own .env.local is never read for the kit); elsewhere `projectRoot` and `appDir` as given.
+ */
+export function tokenRoots(from: string, projectRoot: string, appDir?: string): { projectRoot: string; appDir?: string } {
+  const client = clientRootOf(from)
+  if (client !== undefined) return { projectRoot: client }
+  return appDir === undefined ? { projectRoot } : { projectRoot, appDir }
 }
 
 export async function notionToken(input: { env: NodeJS.ProcessEnv | Record<string, string | undefined>; projectRoot: string; appDir?: string }): Promise<NotionTokenResult | null> {

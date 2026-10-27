@@ -114,16 +114,31 @@ node_args() {
   else case $AGENT in */node_modules/*) die "amaro is not installed beside $AGENT; reinstall @aspiralabs/ai" ;; esac
   fi
   NODE_ARGS+=(--experimental-strip-types)
-  local file
-  for file in "$PROJECT/.env.local" "$AGENT/.env.local" "$AGENT/.env.development.local"; do [ ! -f "$file" ] || NODE_ARGS+=("--env-file=$file"); done
+  local file env_root=$PROJECT croot
+  # Inside a client layout the client root's .env.local replaces the repo's, for every key (KIT-68).
+  if croot=$(client_root); then env_root=$croot; fi
+  for file in "$env_root/.env.local" "$AGENT/.env.local" "$AGENT/.env.development.local"; do [ ! -f "$file" ] || NODE_ARGS+=("--env-file=$file"); done
+}
+# The client root: the folder of the nearest aspira.json at or above the project when that file has `repos`.
+client_root() {
+  local dir=$PROJECT
+  while :; do
+    if [ -f "$dir/aspira.json" ]; then
+      grep -q '"repos"' "$dir/aspira.json" || return 1
+      printf '%s\n' "$dir"; return 0
+    fi
+    [ "$dir" != / ] || return 1
+    dir=$(dirname "$dir")
+  done
 }
 usage() { die "usage: build-feature.sh local <ID> [--cloud] [--autonomous] [--run RUNID] [--force-run] [--finish]. By default every step runs its skill in this session; with --cloud every step runs its skill's cloud agent. --autonomous (not with --cloud) skips the human gates: the groomer takes every question as recommended and confirms itself."; }
 cmd_local() {
   [ $# -ge 1 ] || usage
   local id=$1; shift
   local repo
-  repo=$(git -C "$PWD" rev-parse --show-toplevel) || die "run inside a Git repo"
   resolve_agent
+  # A client root is not a git repository: the driver is handed the client root itself (KIT-68).
+  repo=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) || repo=$(client_root) || die "run inside a Git repo"
   node_args
   agent_line >&2
   (cd "$AGENT" && exec node "${NODE_ARGS[@]}" "$AGENT/scripts/local.ts" "$id" --repo "$repo" "$@")

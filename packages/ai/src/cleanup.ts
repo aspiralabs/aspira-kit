@@ -7,7 +7,7 @@
 import { accessSync, constants, existsSync, lstatSync, readdirSync, realpathSync, rmSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
-import { appRoot, isNotionUrl, readApp, readAspira } from './aspira.js'
+import { appRoot, isNotionUrl, readEffectiveAspira, workRootFor, type AspiraConfig } from './aspira.js'
 import { type Log } from './fs.js'
 import { git, listWorktrees, repositoryRoot, type Worktree } from './git.js'
 import { defaultSeams, seamsFromCommand, teardown, type CommandSeams } from './isolation.js'
@@ -85,13 +85,13 @@ export async function cleanup(opts: CleanupOptions): Promise<number> {
   const warn: Log = opts.warn ?? ((line) => process.stderr.write(`${line}\n`))
   const lookup = opts.lookup ?? lookupTicket
   const projectRoot = real(opts.projectRoot)
-  const config = readAspira(projectRoot)
+  const config = readEffectiveAspira(projectRoot).config as Partial<AspiraConfig>
   if (!isNotionUrl(config?.board)) {
     log('no aspira.json with a Feature Board here; run kit init --board <Feature Board URL>')
     return 1
   }
   const board = config.board
-  const appDir = appRoot(projectRoot, opts.app ?? readApp(projectRoot))
+  const appDir = appRoot(projectRoot, opts.app ?? (config.app === undefined || config.app === '' || config.app === '.' ? undefined : config.app))
 
   // Where things are: the git top level holding the project, the main checkout, and the project's path below the top level.
   const top = repositoryRoot(projectRoot)
@@ -149,9 +149,9 @@ export async function cleanup(opts: CleanupOptions): Promise<number> {
 
   const candidates: Candidate[] = []
   if (inGit) {
-    candidates.push(...foldersIn(join(mainRoot, projectRel, '.work')))
+    candidates.push(...foldersIn(workRootFor(projectRoot) ?? join(mainRoot, projectRel, '.work')))
   } else {
-    candidates.push(...foldersIn(join(projectRoot, '.work')))
+    candidates.push(...foldersIn(workRootFor(projectRoot) ?? join(projectRoot, '.work')))
   }
 
   // Ticket worktrees: exactly <main checkout>/.worktrees/<TYPE>-<ID>.

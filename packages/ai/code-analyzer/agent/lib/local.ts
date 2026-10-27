@@ -14,9 +14,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { KNOWLEDGE_ENV, pageIdFrom } from '@aspiralabs/ai/common/lib/knowledge'
 import type { SessionModel } from '@aspiralabs/ai/common/lib/session-model'
 import { taskModel, type Effort } from '@aspiralabs/ai/common/lib/model-config'
-import { parseProvenance, verifyKnowledgeDir, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
+import { folderRootOf, parseProvenance, verifyKnowledgeDir, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
 import { walkKnowledge, writeKnowledgeFolder } from '@aspiralabs/ai/common/lib/knowledge-walk'
-import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
 import { REASON_CODES, readRunStatus, type ReasonCode } from '@aspiralabs/ai/common/lib/run-status'
 import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 import { z } from 'zod'
@@ -65,8 +65,9 @@ async function headerRootId(path: string): Promise<string> {
 
 /** The root a verify call is held to: the agent's configured KNOWLEDGE_PAGE when there is one, else the file's own header (a no-op root check; the integrity/location/trace checks still apply). */
 async function expectedRootFor(config: KnowledgeConfig, requiredPath: string): Promise<string> {
+  const folder = folderRootOf(parseProvenance(await readFile(requiredPath, 'utf8').catch(() => '')))
   const configured = config.page === null ? undefined : pageIdFrom(config.page)
-  return configured ?? (await headerRootId(requiredPath))
+  return folder ?? configured ?? (await headerRootId(requiredPath))
 }
 
 /**
@@ -79,7 +80,10 @@ async function expectedRootFor(config: KnowledgeConfig, requiredPath: string): P
  * The token is the project's (F52): the environment, then the analyzed app's .env.local, then the
  * repository root's; never the agent package's own env files, which only configure the page list.
  */
-async function resolveFreshKnowledge(input: LocalInput, config: KnowledgeConfig, work: string, project: { root: string; app: string }, deps: LocalDeps): Promise<LoadedKnowledge> {
+async function resolveFreshKnowledge(input: LocalInput, configured: KnowledgeConfig, work: string, project: { root: string; app: string }, deps: LocalDeps): Promise<LoadedKnowledge> {
+  const given = input.knowledge !== undefined ? join(resolve(input.knowledge), 'REQUIRED.md') : input.guidelines !== undefined ? resolve(input.guidelines) : undefined
+  const fromFolder = given !== undefined && folderRootOf(parseProvenance(await readFile(given, 'utf8').catch(() => ''))) !== undefined
+  const config: KnowledgeConfig = fromFolder ? { ...configured, required: [] } : configured
   const hint = `delete ${join(work, 'knowledge')} so this run rebuilds it from Notion, or pass --knowledge DIR (a load-knowledge folder) or --guidelines FILE (a REQUIRED.md snapshot).`
   if (input.knowledge !== undefined) {
     const dir = resolve(input.knowledge)
@@ -100,7 +104,7 @@ async function resolveFreshKnowledge(input: LocalInput, config: KnowledgeConfig,
   const dir = join(work, 'knowledge')
   const already = (await readFile(join(dir, 'REQUIRED.md'), 'utf8').catch(() => null)) !== null
   if (already) return checkKnowledgeDir(dir, config, hint)
-  const resolved = await notionToken({ env: deps.env ?? process.env, projectRoot: project.root, appDir: project.app })
+  const resolved = await notionToken({ env: deps.env ?? process.env, ...tokenRoots(project.root, project.root, project.app) })
   if (resolved?.token === undefined || config.page === null) {
     const where = [
       resolved?.token === undefined && `${KNOWLEDGE_ENV.token} is not set in the environment, ${join(project.app, '.env.local')} or ${join(project.root, '.env.local')}`,

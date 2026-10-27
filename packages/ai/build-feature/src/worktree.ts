@@ -12,6 +12,7 @@ import { existsSync, lstatSync, symlinkSync } from 'node:fs'
 import { appendFile, cp, readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import { z } from 'zod'
+import { clientRootOf, readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
 import { tail } from '@aspiralabs/ai/common/lib/redact'
 import { TICKET_TYPES, ticketBranch, ticketTypeOf, type TicketType } from '@aspiralabs/ai/common/lib/ticket-branch'
 import { stateDirOf } from '#build-feature/run-state.ts'
@@ -105,6 +106,8 @@ export type Prepared = { ok: true; worktree: string; branch: string; created: bo
 /** Link `<from>/<dir>/.env.local` to the same place under `to` for each dir; a missing source or an occupied target is skipped. Returns one line per link made. */
 export function linkEnvLocal(from: string, to: string, dirs: readonly string[]): string[] {
   const made: string[] = []
+  // In a client layout the launchers read the client root's .env.local; the repo's is not linked for the kit's use (KIT-68).
+  if (clientRootOf(from) !== undefined) return made
   for (const dir of dirs) {
     const source = join(from, dir, '.env.local')
     const target = join(to, dir, '.env.local')
@@ -119,7 +122,8 @@ export function linkEnvLocal(from: string, to: string, dirs: readonly string[]):
 export function linkAspira(from: string, to: string): string[] {
   const source = join(from, 'aspira.json')
   const target = join(to, 'aspira.json')
-  if (!existsSync(source)) return []
+  // Only a file inside the repo is linked; a client aspira.json above it stays where it is and is read from there (KIT-68).
+  if (!existsSync(source) || readEffectiveAspira(from).file !== source) return []
   try { lstatSync(target); return [] } catch { /* nothing at the target: link it */ }
   try { symlinkSync(source, target); return [`ln -s ${source} ${target}`] } catch { return [] }
 }
@@ -139,11 +143,11 @@ const resourceKeys = z.looseObject({
  * (a placeholder dev url alone is `kit worktree`'s) and a worktree that has them all are not pending.
  */
 export async function isolationPending(worktree: string): Promise<boolean> {
-  const raw = await readFile(join(worktree, 'aspira.json'), 'utf8').catch(() => null)
-  if (raw === null) return false
   let config: z.infer<typeof resourceKeys>
   try {
-    config = resourceKeys.parse(JSON.parse(raw))
+    const effective = readEffectiveAspira(worktree)
+    if (effective.file === undefined) return false
+    config = resourceKeys.parse(effective.config)
   } catch {
     return false
   }
@@ -169,7 +173,7 @@ export async function isolateIn(input: { place: Place; id: string; worktree: str
 }
 
 /** Make the ticket's worktree (or reuse it), exclude .worktrees/, and run the install and build in a new one, in the project's `app` directory from aspira.json when it names one (KIT-21). */
-export async function prepareWorktree(input: { place: Place; id: string; title: string; type: TicketType; cardType: string; env: NodeJS.ProcessEnv; app?: string; skipIsolation?: boolean }, sys: System = system): Promise<Prepared> {
+export async function prepareWorktree(input: { place: Place; id: string; title: string; type: TicketType; cardType: string; env: NodeJS.ProcessEnv; app?: string; base?: string; skipIsolation?: boolean }, sys: System = system): Promise<Prepared> {
   const { place, id, title, type, env } = input
   const path = worktreePath(type, id)
   const worktree = join(place.main, path)
@@ -189,13 +193,16 @@ export async function prepareWorktree(input: { place: Place; id: string; title: 
     }
     return { ok: true, worktree, branch, created: false, ran: [] }
   }
-  const fetched = await sys.gitFetchMain(options)
-  if (fetched.code !== 0) return fail(shown('git', GIT_ARGS.fetchMain), fetched, `the run could not fetch origin/main to start ${path} from it`)
+  const base = input.base ?? 'main'
+  // Checked before the fetch, not only in gitWorktreeAdd: a base starting with - would reach git fetch as an option (review AVA1.1).
+  if (!/^[A-Za-z0-9._/-]+$/.test(base) || base.startsWith('-') || base.includes('..')) return { ok: false, message: `"${base}" is not a base branch the run starts from`, command: 'git fetch', exitCode: 1, output: '' }
+  const fetched = await sys.gitFetchMain(options, base)
+  if (fetched.code !== 0) return fail(shown('git', base === 'main' ? GIT_ARGS.fetchMain : GIT_ARGS.fetchBase(base)), fetched, `the run could not fetch origin/${base} to start ${path} from it`)
   const exists = (await sys.gitBranchExists(options, branch)).code === 0
-  const added = await sys.gitWorktreeAdd(options, path, branch, !exists)
+  const added = await sys.gitWorktreeAdd(options, path, branch, !exists, base)
   if (added.code !== 0) {
     const why = exists ? `the worktree ${path} could not be added on the existing branch ${branch} (when it is checked out in ${relative(place.main, place.top) || 'the main checkout'}, switch that checkout to main first)` : `the worktree ${path} could not be added`
-    return fail(shown('git', GIT_ARGS.worktreeAdd(path, branch, !exists)), added, why)
+    return fail(shown('git', GIT_ARGS.worktreeAdd(path, branch, !exists, base)), added, why)
   }
   await excludeWorktrees(place)
   // The main checkout's .env.local files, linked in (the root's, then the app's), as kit worktree does (KIT-49):

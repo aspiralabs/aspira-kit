@@ -20,8 +20,9 @@ import {
   resolveRequired,
   type LoadedPage,
 } from '@aspiralabs/ai/common/lib/knowledge'
-import { parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
-import { notionToken } from '@aspiralabs/ai/common/lib/notion-token'
+import { folderRootOf, parseProvenance, verifySnapshot } from '@aspiralabs/ai/common/lib/knowledge-snapshot'
+import { readEffectiveAspira } from '@aspiralabs/ai/common/lib/aspira-config'
+import { notionToken, tokenRoots } from '@aspiralabs/ai/common/lib/notion-token'
 import { KnowledgePrerequisiteError } from '@aspiralabs/ai/common/lib/ticket-driver'
 
 /** The pages the agent's configuration names: the index page (or null when unset) and the required entries. */
@@ -220,10 +221,17 @@ export const LOAD_KNOWLEDGE = 'load-knowledge --out <dir> (packages/ai/common/sc
  */
 export async function knowledgeToken(repo: string, env: Record<string, string | undefined>): Promise<{ token?: string; files: string[] }> {
   const root = resolve(repo)
-  const aspira = await readFile(join(root, 'aspira.json'), 'utf8').then((text) => JSON.parse(text) as { app?: unknown }, () => null)
+  const aspira = (() => {
+    try {
+      return readEffectiveAspira(root).config as { app?: unknown }
+    } catch {
+      return null
+    }
+  })()
   const app = typeof aspira?.app === 'string' && aspira.app !== '.' && aspira.app !== '' ? resolve(root, aspira.app) : undefined
-  const found = await notionToken({ env, projectRoot: root, ...(app === undefined ? {} : { appDir: app }) })
-  return { ...(found === null ? {} : { token: found.token }), files: [...(app === undefined ? [] : [join(app, '.env.local')]), join(root, '.env.local')] }
+  const roots = tokenRoots(root, root, app)
+  const found = await notionToken({ env, ...roots })
+  return { ...(found === null ? {} : { token: found.token }), files: [...(roots.appDir === undefined ? [] : [join(roots.appDir, '.env.local')]), join(roots.projectRoot, '.env.local')] }
 }
 
 /** True when REQUIRED.md is the one load-knowledge wrote (it carries the provenance header): the walk's own file, kept as written. */
@@ -238,7 +246,7 @@ export const hasProvenance = (text: string): boolean => parseProvenance(text) !=
 export async function verifyGuidelines(file: string, config: Pick<KnowledgeConfig, 'indexPage'>): Promise<void> {
   const path = resolve(file)
   const header = parseProvenance(await readFile(path, 'utf8').catch(() => ''))
-  const expectedRootId = (config.indexPage === null ? undefined : pageIdFrom(config.indexPage)) ?? header?.rootId ?? ''
+  const expectedRootId = folderRootOf(header) ?? (config.indexPage === null ? undefined : pageIdFrom(config.indexPage)) ?? header?.rootId ?? ''
   const verified = await verifySnapshot(path, { expectedRootId })
   if (!verified.ok) throw new KnowledgePrerequisiteError(`--guidelines ${path} is refused: ${verified.reason} ${verified.hint}`)
 }

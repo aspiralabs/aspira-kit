@@ -39,6 +39,12 @@ import { GH_ARGS, GIT_ARGS, parseStatus, prChecks, shown, system, type CommandRe
 /** The branch every PR targets. */
 export const BASE_BRANCH = 'main'
 
+/** The base branch of the repos entry the run works in (aspira.json `baseBranch`, KIT-68 F14); `main` when none is set. */
+export const baseBranchOf = (aspira: object): string => (() => { const value = (aspira as { baseBranch?: unknown }).baseBranch; return typeof value === 'string' && value.trim() !== '' ? value.trim() : BASE_BRANCH })()
+
+/** Whether the run pushes and opens a pull request; aspira.json `pullRequest: false` (KIT-68 F7) keeps the work in local commits. */
+export const pullRequestOf = (aspira: { pullRequest?: unknown }): boolean => aspira.pullRequest !== false
+
 /** The branch a ticket is built on: <prefix>/<id>-<slug>, the prefix from the card's Type (GIT-001). */
 export const featureBranch = (id: string, title: string, type: string | null): string => ticketBranch(id, title, type)
 
@@ -173,7 +179,8 @@ async function guard(context: PhaseContext, sys: System): Promise<Outcome<string
   const current = await sys.gitCurrentBranch(options)
   if (current.code !== 0) return failed('push', shown('git', GIT_ARGS.currentBranch), current, 'the run could not read the current branch')
   const branch = current.stdout.trim()
-  if (expected === BASE_BRANCH || branch === BASE_BRANCH) return refused('push', `HEAD is on ${branch}, the base branch ${BASE_BRANCH}: the run never pushes the base branch, only ${expected}`)
+  const base = baseBranchOf(context.aspira)
+  if (expected === base || branch === base) return refused('push', `HEAD is on ${branch}, the base branch ${base}: the run never pushes the base branch, only ${expected}`)
   if (branch !== expected) return refused('push', `HEAD is on ${branch}, not ${expected}: the run pushes only from ${expected}`)
   const remote = await sys.gitRemoteUrl(options)
   if (remote.code !== 0) return failed('push', shown('git', GIT_ARGS.remoteUrl), remote, 'the run could not read origin')
@@ -191,6 +198,8 @@ async function guard(context: PhaseContext, sys: System): Promise<Outcome<string
 
 /** Push the ticket branch through the guard; a push that is already up to date is fine, a rejection stops. */
 export async function pushGuarded(context: PhaseContext, state: RunState, sys: System = system): Promise<Outcome<RunState>> {
+  // pullRequest false: the commits stay local; nothing is pushed (KIT-68, F7).
+  if (!pullRequestOf(context.aspira)) return { ok: true, value: state }
   const allowed = await guard(context, sys)
   if (!allowed.ok) return allowed
   const options = optionsOf(context)
@@ -221,7 +230,7 @@ export async function writePrBody(context: PhaseContext, state: RunState): Promi
   await mkdir(context.dir, { recursive: true })
   const app = context.aspira.app
   const apps = analyzerStepApps(state, app ?? '.')
-  await writeFile(file, await renderPrBody({ ticket: { id: context.id, title: context.card.title, url: context.card.url }, state, repo: context.repo, folder: context.folder, apps, ...(app === undefined ? {} : { app }) }))
+  await writeFile(file, await renderPrBody({ ticket: { id: context.id, title: context.card.title, url: context.card.url }, state, repo: context.repo, folder: context.folder, apps, base: baseBranchOf(context.aspira), ...(app === undefined ? {} : { app }) }))
   return file
 }
 
@@ -252,7 +261,7 @@ export async function openOrReusePr(context: PhaseContext, state: RunState, sys:
   }
   const next = await withImplementorDecisions(context, state)
   const bodyFile = await writePrBody(context, next)
-  const input = { base: BASE_BRANCH, head: branch, title: `${context.id}: ${context.card.title}`, bodyFile }
+  const input = { base: baseBranchOf(context.aspira), head: branch, title: `${context.id}: ${context.card.title}`, bodyFile }
   const created = await sys.ghPrCreate(options, input)
   if (created.code !== 0) return failed('gh pr create', shown('gh', GH_ARGS.prCreate(input)), created, 'the draft PR could not be opened')
   const url = created.stdout.trim().split('\n').at(-1)?.trim() ?? ''
@@ -270,6 +279,12 @@ const stopWith = (state: RunState, outcome: { message: string; failure: Failure 
 const moveAfter = (context: PhaseContext, state: RunState, url: string): PhaseResult => ({ kind: 'move', state, from: STEP8_MOVE.from, to: STEP8_MOVE.to, expect: { status: context.card.status, pr: url, dev: context.card.dev } })
 
 async function step8Next(context: PhaseContext, state: RunState, sys: System = system): Promise<PhaseResult> {
+  if (!pullRequestOf(context.aspira)) {
+    // pullRequest false (KIT-68, F7): the analyzer's changes are committed on the ticket branch and that is all: no push, no PR, no PR property, no move.
+    if (recordOf(state).committedFor === analyzerKey(state)) return { kind: 'done', state }
+    const committed = await commitAnalyzerChanges(context, state, sys)
+    return committed.ok ? { kind: 'done', state: committed.value } : stopWith(state, committed)
+  }
   if (context.card.status === STEP8_MOVE.to) {
     // A late analyzer run in In Review (route.ts): commit its fixes and push them to the open PR, no move.
     if (recordOf(state).committedFor === analyzerKey(state)) return { kind: 'done', state }

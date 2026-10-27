@@ -6,7 +6,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { appRoot, readApp, readAspira } from './aspira.js'
+import { appRoot, readEffectiveAspira, type AspiraConfig } from './aspira.js'
 import { defaultSeams, type NeonSeam } from './isolation.js'
 
 export type DbMigrateOptions = {
@@ -71,13 +71,13 @@ function urlHost(value: string): string | undefined {
 }
 
 export async function dbMigrate(options: DbMigrateOptions): Promise<number> {
-  const config = readAspira(options.projectRoot)
+  const config = readEffectiveAspira(options.projectRoot).config as Partial<AspiraConfig>
   const database = config?.database
   if (database === undefined) {
     options.warn('aspira.json has no "database" key; kit db migrate runs against a worktree branch the kit created')
     return 1
   }
-  const app = options.app ?? readApp(options.projectRoot)
+  const app = options.app ?? (config.app === undefined || config.app === '' || config.app === '.' ? undefined : config.app)
   const appDir = appRoot(resolve(options.projectRoot), app)
   const values = parseEnv(join(appDir, ENV_FILE))
   const names = database.envVars.map((entry) => (typeof entry === 'string' ? entry : entry.name))

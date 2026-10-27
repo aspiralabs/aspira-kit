@@ -1,0 +1,96 @@
+[
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "move",
+    "moves": {
+      "from": "Shortlist",
+      "to": "Ready: Idea"
+    }
+  },
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "step",
+    "step": "spec-writer",
+    "command": "/aspira-spec-writer KIT-11 --take-recommended"
+  },
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "move",
+    "moves": {
+      "from": "In Review: Spec",
+      "to": "Ready: Spec"
+    }
+  },
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "step",
+    "step": "planner",
+    "command": "/aspira-planner KIT-11 --take-recommended"
+  },
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "move",
+    "moves": {
+      "from": "In Review: Plan",
+      "to": "Ready: Plan"
+    }
+  },
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "step",
+    "step": "implementor",
+    "command": "/aspira-implementor KIT-11"
+  },
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "step",
+    "step": "code-analyzer",
+    "command": "/aspira-code-analyzer KIT-11 --app ."
+  },
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "set-pr",
+    "pr": "https://github.com/aspiralabs/fixture/pull/7"
+  },
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "move",
+    "moves": {
+      "from": "In Progress: Implementation",
+      "to": "In Review: Implementation"
+    }
+  },
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "step10"
+  }
+]

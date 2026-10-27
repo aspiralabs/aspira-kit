@@ -10,7 +10,7 @@ import { existsSync, lstatSync, realpathSync, symlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
 import { z } from 'zod'
-import { appRoot, ASPIRA_FILE, isNotionUrl, readApp, readAspira } from './aspira.js'
+import { appRoot, ASPIRA_FILE, isNotionUrl, readEffectiveAspira, type AspiraConfig } from './aspira.js'
 import { readJson, type Log } from './fs.js'
 import { defaultSeams, isolate, seamsFromCommand, type CommandSeams } from './isolation.js'
 import { git, listWorktrees, mainCheckoutRoot, repositoryRoot, type Worktree } from './git.js'
@@ -152,6 +152,8 @@ function linkLocal(log: Log, from: string, to: string, dir: string, file: string
 /** Link the main checkout's aspira.json into the worktree's project root when it has none: the file is git-ignored (KIT-71), so a new worktree lacks it. */
 function linkAspira(log: Log, from: string, to: string): void {
   if (existsSync(join(to, ASPIRA_FILE)) || !existsSync(join(from, ASPIRA_FILE))) return
+  // A client file (it has `repos`) is read from where it sits; it is never linked into a repo (KIT-68).
+  if (readEffectiveAspira(from).config.repos !== undefined) return
   linkLocal(log, from, to, '', ASPIRA_FILE)
 }
 
@@ -186,7 +188,7 @@ export async function worktree(options: WorktreeOptions): Promise<number> {
     log(`not a ticket: ${ref} (an ID such as KIT-13, or a Notion page URL)`)
     return 2
   }
-  const config = readAspira(projectRoot)
+  const config = readEffectiveAspira(projectRoot).config as Partial<AspiraConfig>
   if (!isNotionUrl(config?.board)) {
     log('no aspira.json with a Feature Board here; run kit init --board <Feature Board URL>')
     return 1
@@ -196,7 +198,7 @@ export async function worktree(options: WorktreeOptions): Promise<number> {
     say(log, `${ref} is not a DNS label once lower-cased, so it cannot name a tunnel host; use a ticket ID of letters, digits and hyphens`)
     return 1
   }
-  const appOption = options.app ?? readApp(projectRoot)
+  const appOption = options.app ?? (config.app === undefined || config.app === '' || config.app === '.' ? undefined : config.app)
   const app = appOption === undefined || appOption === '.' ? undefined : appOption
 
   // 1. The card, live.
