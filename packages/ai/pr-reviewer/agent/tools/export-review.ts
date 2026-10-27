@@ -8,9 +8,22 @@ import { FILES, roundFilesInOrder, slugify } from '../lib/review.ts'
 import { TARGET_FILE, stampReviewed, targetFileSchema } from '../lib/target.ts'
 import { MODELS } from '../lib/models.ts'
 import { USAGE_LEDGER, parseLedger, renderCostMarkdown, summarizeUsage } from '../lib/usage.ts'
+import { mapBriefForRun } from '@aspiralabs/ai/common/lib/codebase-map-run'
 
-
-const CLOUD_RUN_NOTES = ['Codebase map: not used (cloud run)', 'Blast radius check skipped: the spec is not available in a cloud clone']
+/**
+ * The Run notes of a cloud review: the codebase map line as the KIT-70 helper words it (opt-in off before cloud run;
+ * a cloud run never reads a map, so `workDir` is never touched), and the Blast radius check, which has no spec here.
+ * `repo` is where the opt-in is read from: the reviewed checkout, else the folder the agent runs in.
+ */
+export async function cloudRunNotes(repo: string): Promise<string[]> {
+  let map = 'Codebase map: not used (cloud run)'
+  try {
+    map = (await mapBriefForRun({ repo, workDir: repo, cloud: true })).report
+  } catch {
+    // an unreadable aspira.json must not fail the export of a finished review; the map was not used either way
+  }
+  return [map, 'Blast radius check skipped: the spec is not available in a cloud clone']
+}
 
 // Sandboxes are per session and disposable. This copies the review's markdown out to
 // the host so the person keeps it: the fix list, the summary, the transcript, what was
@@ -73,7 +86,7 @@ export default defineTool({
       // Written back to the sandbox too, so comment-on-pr posts the stamped, sorted text.
       const stamp = target !== null && (path === FILES.findings || path === FILES.review)
       // A cloud run reads no map and has no spec in its clone: the comment says so in the same Run notes as a local run.
-      const content = stamp ? stampReviewed(path === FILES.findings ? sortFindingsMarkdown(appendRunNotes(raw, CLOUD_RUN_NOTES)) : raw, target) : raw
+      const content = stamp ? stampReviewed(path === FILES.findings ? sortFindingsMarkdown(appendRunNotes(raw, await cloudRunNotes(resolve(process.cwd(), repoDir ?? '.')))) : raw, target) : raw
       if (stamp && content !== raw) await sandbox.writeTextFile({ path, content })
       if (path === FILES.findings) findings = content
       if (path === FILES.review) review = content

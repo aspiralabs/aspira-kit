@@ -237,4 +237,14 @@ describe('KIT-70 exports for the agents (F2, F4)', () => {
     expect(viaCommand.code, viaCommand.output).toBe(0)
     expect(readdirSync(join(client, '.maps'))).toEqual(['loantrack-web'])
   })
+
+  it('NOVA1.2: a build that runs past its timeout is stopped and reported as a failed build, not waited on', () => {
+    const repo = gitRepo(temp('slow'))
+    const root = join(repo, '.codebase-map')
+    const started = Date.now()
+    const built = buildMapCaptured(repo, root, 1)
+    expect(built).toEqual({ code: 1, stderr: 'build timed out after 0.001s' })
+    expect(Date.now() - started).toBeLessThan(30_000)
+    expect(existsSync(join(root, 'map', 'manifest.json'))).toBe(false)
+  })
 })

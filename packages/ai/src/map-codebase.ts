@@ -72,8 +72,14 @@ export function mapRootFor(cwd: string, repo: string): string {
   return folder === undefined ? join(repo, '.codebase-map') : join(folder, basename(mainCheckoutRoot(repo) ?? repo))
 }
 
-/** KIT-70: builds the map for `repo` into `mapRoot` like `kit map-codebase`, with stdout and stderr captured so an agent run's own output stays clean. */
-export function buildMapCaptured(repo: string, mapRoot: string): { code: number; stderr: string } {
+/** KIT-70: how long an agent run's map build may take before it is killed and the run goes on without the map. */
+export const BUILD_TIMEOUT_MS = 120_000
+
+/**
+ * KIT-70: builds the map for `repo` into `mapRoot` like `kit map-codebase`, with stdout and stderr captured so an agent
+ * run's own output stays clean. A build still running after `timeoutMs` is killed and reported as a failed build.
+ */
+export function buildMapCaptured(repo: string, mapRoot: string, timeoutMs: number = BUILD_TIMEOUT_MS): { code: number; stderr: string } {
   const ai = aiPackageDir()
   if (ai === undefined) return { code: 1, stderr: '@aspiralabs/ai is not installed; cannot run the codebase map' }
   const script = join(ai, 'codebase-map', 'scripts', 'cli.ts')
@@ -81,7 +87,8 @@ export function buildMapCaptured(repo: string, mapRoot: string): { code: number;
   const amaro = findUpModule(realpathSync(ai), AMARO) ?? findUpModule(realpathSync(repo), AMARO)
   if (amaro === undefined) return { code: 1, stderr: 'amaro (the TypeScript loader the agents ship with) is not installed' }
   mkdirSync(join(mapRoot, 'notes'), { recursive: true })
-  const run = spawnSync('node', ['--import', amaro, '--experimental-strip-types', script, '--repo', repo, '--map-root', mapRoot], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  const run = spawnSync('node', ['--import', amaro, '--experimental-strip-types', script, '--repo', repo, '--map-root', mapRoot], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: timeoutMs, killSignal: 'SIGKILL' })
+  if ((run.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT' || run.signal !== null) return { code: 1, stderr: `build timed out after ${timeoutMs / 1000}s` }
   return { code: run.status ?? 1, stderr: run.stderr ?? '' }
 }
 

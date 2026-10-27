@@ -291,7 +291,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       plan = merged
     }
   }
-  return exportPlan({ input, prepared, prompts, knowledge, state, calls, research, plan, work, facts, mapReport: map.reason === 'opt-in off' ? undefined : map.used && !/dropped|cut /.test(map.report) ? `${map.report}; none dropped or cut` : map.report })
+  return exportPlan({ input, prepared, prompts, knowledge, state, calls, research, plan, work, facts, mapReport: map.report })
 }
 
 /** Why a correction pass's patch cannot be merged into the plan (a task left with no changes, a broken reference), or undefined. */
@@ -313,7 +313,7 @@ async function withoutWorkDir(prepared: PreparedPlan, repoPath: string, work: st
   for (const path of [...prepared.repo.tracked]) if (path.startsWith(prefix)) prepared.repo.tracked.delete(path)
 }
 
-async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; prompts: AgentPrompts; knowledge: KnowledgeRecord; state: State; calls: Call[]; research: Research | null; plan: Plan | null; work: string; facts: ReviewFactsResult; mapReport?: string }): Promise<LocalDone> {
+async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; prompts: AgentPrompts; knowledge: KnowledgeRecord; state: State; calls: Call[]; research: Research | null; plan: Plan | null; work: string; facts: ReviewFactsResult; mapReport: string }): Promise<LocalDone> {
   const { input, prepared, prompts, knowledge, state, calls, research, plan, work, facts, mapReport } = args
   // The UI catalog check sees every phase's reads (KIT-34): research's, and planning's when it made them.
   const reads = (await Promise.all(['research', 'planning'].map(async (phase) => {
@@ -336,7 +336,7 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
     'Mode: **--local**. The model work ran as subagents of a Claude Code session, on that session\'s model and usage, so no cost or token counts are reported here.', '',
     `Wall time from the first local model stage (${state.startedAt}) to export: **${(totalMs / 1000).toFixed(1)}s**. It includes any time the session spent between stages; knowledge loading before that is excluded.`, '',
     '| Phase | Result |', '| --- | --- |', ...phaseRows, '',
-    ...(mapReport === undefined ? [] : [mapReport, '']),
+    mapReport, '',
   ].join('\n')
   const knowledgeContents = knowledge.source === 'notion'
     ? (await fingerprintKnowledge(await knowledgeFiles(knowledge.dir))).contents

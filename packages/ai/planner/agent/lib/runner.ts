@@ -314,9 +314,9 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   // research then gets a smaller turn budget and the facts block in its prompt.
   const facts = await reviewFacts({ folder: ticketFolderFor(input.specPath), repoPath: input.repoPath, repo: { commit: repo.commit, dirty: repo.dirty } })
   const steps = researchSteps(facts.included)
-  // KIT-70: a cloud run never reads the codebase map; with the opt-in on, the report says so.
+  // KIT-70: a cloud run never reads the codebase map; the helper's report line says why (opt-in off before cloud run).
   const map = await mapBriefForRun({ repo: input.repoPath, workDir: dir, cloud: true })
-  const mapReport = map.reason === 'opt-in off' ? undefined : map.report
+  const mapReport = map.report
   try {
     // Explorers read the spec's areas of the repository in parallel first, so research starts from their
     // findings instead of reading everything itself. One that fails leaves its area to research.
@@ -422,7 +422,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         : runStatus === 'needs-author' ? `${openCount} decision${openCount === 1 ? '' : 's'} open: ${join(dir, 'trace', 'decisions.md')}`
           : (problems[0] ?? null)
       const reasonCode = null
-      return { 'run-analysis.md': mapReport === undefined ? analysis.markdown : `${analysis.markdown}\n\n${mapReport}\n`, 'trace/review.json': JSON.stringify({ status: runStatus, reason, reasonCode, problems, openGaps, decisions, input, repoCommit: repo.commit, repoDirty: repo.dirty, ...(mapReport === undefined ? {} : { codebaseMap: mapReport }), reviewFacts: { included: facts.included, reason: facts.reason }, models, phases: trace.phases, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, reviewMs, exportMs, totalMs, reportedCostUsd }, null, 2) }
+      return { 'run-analysis.md': `${analysis.markdown}\n\n${mapReport}\n`, 'trace/review.json': JSON.stringify({ status: runStatus, reason, reasonCode, problems, openGaps, decisions, input, repoCommit: repo.commit, repoDirty: repo.dirty, codebaseMap: mapReport, reviewFacts: { included: facts.included, reason: facts.reason }, models, phases: trace.phases, mcp: mcp.sources, mcpReads: mcp.reads, prepareMs, reviewMs, exportMs, totalMs, reportedCostUsd }, null, 2) }
     })
     return { status, dir, problems, openGaps, decisions, prepareMs, reviewMs, totalMs, reportedCostUsd }
   } finally { await mcp.close() }

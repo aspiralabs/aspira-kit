@@ -284,6 +284,15 @@ it('runs one explorer per area before research, folds their findings in, and giv
   }).toEqual({ status: 'ready', explorers: 2, researchSawFindings: true, planningIndexOnly: true, planningSawTouch: true })
 })
 
+it('NOVA1.1: a cloud run with no opt-in reports the map not used, opt-in off, ahead of cloud run', async () => {
+  const args = await input()
+  const result = await runPlan(args)
+  expect(result.status).toBe('ready')
+  const analysis = await readFile(join(result.dir, 'run-analysis.md'), 'utf8')
+  expect(analysis).toContain('Codebase map: not used (opt-in off)')
+  expect(analysis).not.toContain('cloud run)')
+})
+
 it('T19: a cloud run with useCodebaseMap on reports the map not used, cloud run, and builds no map', async () => {
   const args = await input()
   await writeFile(join(args.repoPath, 'aspira.json'), JSON.stringify({ useCodebaseMap: true }))

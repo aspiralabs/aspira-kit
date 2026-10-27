@@ -317,6 +317,21 @@ it('T17: with useCodebaseMap false or absent the research and planning prompts a
   await expect(access(join(f.repo, '.codebase-map'))).rejects.toThrow()
 }, SLOW)
 
+it('NOVA1.1: with useCodebaseMap false or absent run-analysis.md says the map was not used, opt-in off', async () => {
+  for (const key of [false, undefined] as const) {
+    const f = await mapFixture()
+    if (key !== undefined) await writeFile(f.aspira, JSON.stringify({ useCodebaseMap: key }))
+    const args = { specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir, guidelinesPath: f.snapshot, packetPath: f.packetPath }
+    const research = pending(await runLocal(args, { env: {} }))
+    await writeFile(research.tasks[0]!.output, JSON.stringify(evidence))
+    const planning = pending(await runLocal(args, { env: {} }))
+    await writeFile(planning.tasks[0]!.output, JSON.stringify(validPlan()))
+    const done = await runLocal(args, { env: {} })
+    if (done.pending) throw new Error('expected export')
+    expect(await readFile(join(done.dir, 'run-analysis.md'), 'utf8')).toContain('Codebase map: not used (opt-in off)')
+  }
+}, SLOW)
+
 it('T18: with useCodebaseMap on, research and planning carry the brief after the run packet, saved once and reused, and run-analysis.md names the map', async () => {
   const f = await mapFixture()
   await writeFile(f.aspira, JSON.stringify({ useCodebaseMap: true }))
@@ -337,9 +352,11 @@ it('T18: with useCodebaseMap on, research and planning carry the brief after the
   expect(planningPrompt.indexOf(briefLine)).toBeGreaterThan(planningPrompt.indexOf('RUN PACKET'))
   expect(planningPrompt).toMatch(/impact files/i)
   await writeFile(planning.tasks[0]!.output, JSON.stringify(validPlan()))
+  const saved = JSON.parse(await readFile(join(f.work, 'codebase-map-brief.json'), 'utf8')) as { report: string }
   const done = await runLocal(args, { env: {} })
   if (done.pending) throw new Error('expected export')
   const analysis = await readFile(join(done.dir, 'run-analysis.md'), 'utf8')
   expect(analysis).toMatch(/Codebase map: used/)
-  expect(analysis).toMatch(/dropped/i)
+  // NOVA1.1: the line is the helper's report verbatim, the same words every agent prints.
+  expect(analysis.split('\n')).toContain(saved.report)
 }, SLOW)
