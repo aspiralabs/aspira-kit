@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { readEffectiveAspira as readCommon, validateClientKeys as validateCommon } from '../common/src/lib/aspira-config.ts'
+import { readEffectiveAspira as readCommon, validateClientKeys as validateCommon } from '../common/src/lib/aspira-config.js'
 import { codebaseMapsFolder, readEffectiveAspira, validateClientKeys } from './aspira.js'
 
 const temp = (name: string): string => realpathSync(mkdtempSync(join(tmpdir(), `aspira-client-${name}-`)))

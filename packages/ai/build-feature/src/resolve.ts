@@ -69,7 +69,7 @@ function resolveScript(): string {
 
 /** Resolve the card with NOTION_TOKEN through agent-common's script (no session stage). */
 export async function resolveWithToken(context: { id: string; board: string; repo: string; env: NodeJS.ProcessEnv }): Promise<Resolution> {
-  const outcome = await exec(process.execPath, [...process.execArgv, resolveScript(), context.id, '--board', context.board], { cwd: context.repo, env: context.env }).then(
+  const outcome = await exec(process.execPath, [...process.execArgv, resolveScript(), context.id, '--board', context.board, '--area'], { cwd: context.repo, env: context.env }).then(
     ({ stdout }) => ({ ok: true as const, stdout }),
     (error: { stderr?: string; message?: string }) => ({ ok: false as const, stderr: error.stderr ?? error.message ?? 'resolve-ticket failed' }),
   )

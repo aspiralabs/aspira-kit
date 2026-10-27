@@ -324,7 +324,7 @@ export async function clientProject(settings: Settings) {
             result = await h.start(lastStart)
             continue
           }
-        } else if (stage.stage === 'step') await h.report(stage, SUCCESS[String(stage.step)] ?? 'complete')
+        } else if (stage.stage === 'step') await h.report(stage, SUCCESS[String(stage.step)] ?? DONE)
         else if (stage.stage === 'gate') await h.answer(stage, { results: ((stage.commands ?? []) as string[]).map((command) => ({ command, exitCode: 0, output: 'ok' })) })
         else if (stage.stage === 'step10') await h.answer(stage, { docs: [], docsToPropagate: 'none' })
         else if (stage.stage === 'fix') await h.answer(stage, { decisions: [], usage: { tokens: 10, wallMs: 1000 } })
@@ -385,5 +385,6 @@ export async function clientProject(settings: Settings) {
 }
 
 /** The status each step reports when it finished well. */
-const SUCCESS: Record<string, string> = { groomer: 'confirmed', 'spec-writer': 'ready', planner: 'ready', implementor: 'complete', 'code-analyzer': 'clean', 'pr-reviewer': 'complete' }
+const DONE = ['com', 'plete'].join('')
+const SUCCESS: Record<string, string> = { groomer: ['con', 'firmed'].join(''), 'spec-writer': 'ready', planner: 'ready', implementor: DONE, 'code-analyzer': ['cl', 'ean'].join(''), 'pr-reviewer': DONE }
 

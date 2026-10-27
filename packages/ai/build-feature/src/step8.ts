@@ -40,7 +40,7 @@ import { GH_ARGS, GIT_ARGS, parseStatus, prChecks, shown, system, type CommandRe
 export const BASE_BRANCH = 'main'
 
 /** The base branch of the repos entry the run works in (aspira.json `baseBranch`, KIT-68 F14); `main` when none is set. */
-export const baseBranchOf = (aspira: { baseBranch?: unknown }): string => (typeof aspira.baseBranch === 'string' && aspira.baseBranch.trim() !== '' ? aspira.baseBranch.trim() : BASE_BRANCH)
+export const baseBranchOf = (aspira: object): string => (() => { const value = (aspira as { baseBranch?: unknown }).baseBranch; return typeof value === 'string' && value.trim() !== '' ? value.trim() : BASE_BRANCH })()
 
 /** Whether the run pushes and opens a pull request; aspira.json `pullRequest: false` (KIT-68 F7) keeps the work in local commits. */
 export const pullRequestOf = (aspira: { pullRequest?: unknown }): boolean => aspira.pullRequest !== false
