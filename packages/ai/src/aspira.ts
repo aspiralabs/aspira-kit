@@ -36,6 +36,8 @@ export type AspiraConfig = {
   workRoot?: string
   extend?: Record<string, string[]>
   repos?: Record<string, RepoEntry>
+  /** KIT-70: true turns the codebase map on for the spec writer, planner and pr-reviewer runs; off when absent. Read only by `useCodebaseMap`; `checkAspira` ignores it. */
+  useCodebaseMap?: boolean
 }
 
 /** aspira.json's Notion keys that `kit doctor` resolves by id: the Feature Board (a database or,
@@ -142,6 +144,28 @@ export function codebaseMapsFolder(cwd: string, repo: string): string | undefine
   const inRepo = relative(resolve(repo), folder)
   if (inRepo === '' || (!inRepo.startsWith('..') && !isAbsolute(inRepo))) throw new Error(`${file} "codebaseMaps" points inside the repository ${repo}; point it outside so nothing is written into the repository`)
   return folder
+}
+
+const UseCodebaseMapKey = z.object({ useCodebaseMap: z.boolean().optional() })
+
+/**
+ * KIT-70: whether the nearest aspira.json (walked up from `cwd`, crossing the git root) turns the codebase map on.
+ * False when there is no file or no key. Throws an Error naming the file and the key when the file is not JSON
+ * or the value is not a boolean.
+ */
+export function useCodebaseMap(cwd: string): boolean {
+  const dir = nearestAspira(cwd)
+  if (dir === undefined) return false
+  const file = join(dir, ASPIRA_FILE)
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    throw new Error(`${file} is not valid JSON`)
+  }
+  const parsed = UseCodebaseMapKey.safeParse(typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw : {})
+  if (!parsed.success) throw new Error(`${file} "useCodebaseMap" must be true or false`)
+  return parsed.data.useCodebaseMap ?? false
 }
 
 /** Whether git tracks the project root's aspira.json; false outside a git repository. */

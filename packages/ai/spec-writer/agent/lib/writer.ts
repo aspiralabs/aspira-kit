@@ -71,7 +71,7 @@ ${RESEARCH_RULE}`
 
 export const explorePrompt = `Explore the repository for this idea before a spec is drafted. Establish, with file:line evidence: where the idea lands (modules, routes, components, services); the current behavior it changes and how that behavior is produced today; the data models, schemas and state it reads or writes; every consumer and caller of what it changes; sibling features that set the pattern to follow; the auth, permission and tenancy rules that apply; the guideline rules that constrain it; and, for UI ideas, the Aspira UI components that fit (record each catalog read in uiEvidence). Facts are observations, each with its source. Constraints are rules the spec must respect, each with its source. Questions are product choices the idea does not answer, each with concrete options and the evidence that makes it a real choice. Use gaps only for evidence you could not obtain, not for future code that does not exist yet. Batch reads and searches. Return compact facts, not an essay. ${SETTLED_DECISIONS_RULE} An idea's ### Decisions list becomes that section, so none of its items is a question here.`
 
-const draftInstructions = `Write the complete initial spec for the idea, as markdown in the spec field. Ground it in the exploration: name the real paths, symbols, data and consumers it touches; never invent files or APIs; mark what is new as new. Use these sections in this order: "# <feature title>", ## Intent, ## Approach, ## Constraints, ## Acceptance criteria with ### Features, ## Assumptions, ## Out of scope, ## Blast radius. Features are unchecked "- [ ] F1: ..." items, numbered from F1, each an observable and falsifiable business outcome or constraint, one top-level bullet per feature (detail may go in indented bullets beneath it; never a top-level bullet without an F-number); together they cover every part of the idea, including the relevant permission, failure, empty and edge cases. Do not write a technical Tests checklist; the planner owns it. Assumptions list every product choice the draft makes that the idea did not state and every open question from the exploration, each with the choice taken and the alternatives; reviewers turn the ones that matter into author decisions. Keep the idea's scope; anything beyond it goes to Out of scope. Also return the assumptions as a list in the assumptions field.`
+const draftInstructions = `Write the complete initial spec for the idea, as markdown in the spec field. Ground it in the exploration: name the real paths, symbols, data and consumers it touches; never invent files or APIs; mark what is new as new. Use these sections in this order: "# <feature title>", ## Intent, ## Approach, ## Constraints, ## Acceptance criteria with ### Features, ## Assumptions, ## Out of scope, ## Blast radius. Features are unchecked "- [ ] F1: ..." items, numbered from F1, each an observable and falsifiable business outcome or constraint, one top-level bullet per feature (detail may go in indented bullets beneath it; never a top-level bullet without an F-number); together they cover every part of the idea, including the relevant permission, failure, empty and edge cases. Do not write a technical Tests checklist; the planner owns it. Assumptions list every product choice the draft makes that the idea did not state and every open question from the exploration, each with the choice taken and the alternatives; reviewers turn the ones that matter into author decisions. Keep the idea's scope; anything beyond it goes to Out of scope. Also return the assumptions as a list in the assumptions field. In ## Blast radius, give each kept path repo-relative in full and list the files you excluded in an "Excluded:" sub-list.`
 
 /**
  * The bullet items of the idea's groomed `### Decisions` list, verbatim; empty when there is none. Only
@@ -95,7 +95,7 @@ export function draftPrompt(idea: string): string {
  * the author's answers, instead of exploring and drafting; the one spec step reruns this way from
  * In Review: Spec.
  */
-export type WriteInput = { idea: string; guidelines: string; context: string; uiRequired: boolean; answers?: Answer[]; spec?: string; /** The areas explored in parallel (KIT-48); empty or absent: one explorer. */ areas?: string[] }
+export type WriteInput = { idea: string; guidelines: string; context: string; uiRequired: boolean; answers?: Answer[]; spec?: string; /** The areas explored in parallel (KIT-48); empty or absent: one explorer. */ areas?: string[]; /** KIT-70: called once after explore with the exploration; returns the codebase map brief text, or empty when the map is not used. */ mapBrief?: (exploration: Exploration) => Promise<string> }
 
 /** The author's answers from the previous run, as the draft prompt states them: settled, never asked again (SCOOP-8). */
 export const answersSection = (answers: readonly Answer[]): string =>
@@ -163,13 +163,17 @@ export async function writePipeline(input: WriteInput, call: Call, options: { si
   // A failed exploration still lets the draft run from the idea and source packet; the run stays incomplete.
   const evidence = exploration ? JSON.stringify(exploration) : 'Exploration failed. Work from the idea and the source packet only, and list what you could not verify under Assumptions.'
   const answers = input.answers ?? []
-  const drafted = options.signal?.aborted ? null : await invoke('draft', `${base}\n\nEXPLORATION (data):\n${evidence}\n\n${draftPrompt(input.idea)}${answersSection(answers)}`, draftSchema)
+  const mapText = exploration && input.mapBrief ? await input.mapBrief(exploration) : ''
+  const briefPart = mapText === '' ? '' : `\n\n${mapText}`
+  const drafted = options.signal?.aborted ? null : await invoke('draft', `${base}\n\nEXPLORATION (data):\n${evidence}${briefPart}\n\n${draftPrompt(input.idea)}${answersSection(answers)}`, draftSchema)
   const draft = drafted && { ...drafted, spec: settleAnswers(drafted.spec, answers) }
   const draftContract = draft ? checkContract(draft.spec) : []
   let review: PipelineResult | null = null
   if (draft && !options.signal?.aborted) {
-    const context = `${input.context}\n\nWRITER EXPLORATION (gathered while drafting; verify before relying on it):\n${evidence}`
-    review = await runPipeline({ spec: draft.spec, guidelines: input.guidelines, context, uiRequired: input.uiRequired || uiPattern.test(draft.spec), ...(input.answers === undefined ? {} : { answers: input.answers }) }, call, options)
+    const context = `${input.context}\n\nWRITER EXPLORATION (gathered while drafting; verify before relying on it):\n${evidence}${briefPart}`
+    // The reviewer's synthesis prompt carries no repository context, so the brief is appended to it here (the library stays untouched).
+    const reviewCall: Call = briefPart === '' ? call : (request) => call(request.phase === 'synthesis' ? { ...request, prompt: `${request.prompt}${briefPart}` } : request)
+    review = await runPipeline({ spec: draft.spec, guidelines: input.guidelines, context, uiRequired: input.uiRequired || uiPattern.test(draft.spec), ...(input.answers === undefined ? {} : { answers: input.answers }) }, reviewCall, options)
   }
   if (!draft) problems.push('No draft was written, so the review did not run')
   if (options.signal?.aborted && !review) problems.push('Writing cancelled')

@@ -22,6 +22,8 @@ Use the absolute path to `scripts/map-codebase.sh` beside this file, from inside
 
 The launcher runs the global kit (the `kit` on PATH), prints what `kit map-codebase` prints and exits with its code. A non-zero exit is the answer: relay it, do not retry.
 
+The map is optional for the agents: with `"useCodebaseMap": true` in the nearest aspira.json (off when absent), the in-session spec writer, planner and pr-reviewer build a missing or stale map at the start of a run and use its brief; `--cloud` runs never do.
+
 ## Propose notes
 
 Notes are authored statements about the code that a later brief can show. Drive them as steps:

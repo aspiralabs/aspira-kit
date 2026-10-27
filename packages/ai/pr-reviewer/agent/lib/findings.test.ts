@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { countsFromFindings, findingSummaries, missingWhatThisMeans, renderFindingsList, sortFindingsMarkdown } from './findings.ts'
+import { appendRunNotes, countsFromFindings, findingSummaries, missingWhatThisMeans, renderFindingsList, sortFindingsMarkdown } from './findings.ts'
 
 const entry = (id: string, title: string, meaning?: string) => `### [${id}] ${title}\n${meaning === undefined ? '' : `**What this means:** ${meaning}\n`}- **Location:** \`a.ts:1\`\n- **Evidence:** \`x\`\n`
 
@@ -72,5 +72,48 @@ describe('summaries and the comment list', () => {
     expect(list).toContain('- **Critical** · Anyone could run commands on the server. _(AVA1.1: Unchecked input; evidence in findings.md)_')
     expect(list).toContain('- **Critical** · Secret in log _(AVA1.2; evidence in findings.md)_')
     expect(renderFindingsList('# Findings: clean\n\nTotals: 0 critical · 0 high · 0 medium · 0 low · 0 info\n')).toContain('None.')
+  })
+})
+
+describe('T26: appendRunNotes (the cloud Run notes)', () => {
+  const CLOUD = [
+    '# Findings: o/r#4',
+    '',
+    'Totals: 0 critical · 1 high · 0 medium · 1 low · 0 info',
+    '',
+    '## High',
+    '',
+    entry('AVA1.1', 'Unchecked input', 'Anyone could run commands on the server.'),
+    '## Low',
+    '',
+    entry('DEX1.1', 'Naming', 'The helper is hard to find.'),
+  ].join('\n')
+  const LINES = ['Codebase map: not used (cloud run)', 'Blast radius check skipped: the spec is not available in a cloud clone']
+
+  it('adds the two cloud lines under ## Run notes, after the severity sections, and counts them in no severity', () => {
+    const sorted = sortFindingsMarkdown(appendRunNotes(CLOUD, LINES))
+    const notes = sorted.slice(sorted.indexOf('## Run notes'))
+    expect(sorted).toContain('## Run notes')
+    expect(notes).toContain('Codebase map: not used (cloud run)')
+    expect(notes).toContain('Blast radius check skipped: the spec is not available in a cloud clone')
+    expect(sorted.indexOf('## Run notes')).toBeGreaterThan(sorted.indexOf('### [DEX1.1]'))
+    // Neither line appears above the Run notes heading.
+    expect(sorted.slice(0, sorted.indexOf('## Run notes'))).not.toMatch(/Codebase map|Blast radius check/)
+  })
+
+  it('leaves the Totals and the findings list unchanged', () => {
+    const sorted = sortFindingsMarkdown(appendRunNotes(CLOUD, LINES))
+    expect(sorted).toContain('Totals: 0 critical · 1 high · 0 medium · 1 low · 0 info')
+    expect(countsFromFindings(sorted)).toEqual(countsFromFindings(CLOUD))
+    expect(findingSummaries(sorted).map((finding) => finding.id)).toEqual(['AVA1.1', 'DEX1.1'])
+    expect(renderFindingsList(sorted).split('\n')[0]).toBe('## Findings (2: 0 critical · 1 high · 0 medium · 1 low · 0 info)')
+  })
+
+  it('adds to an existing ## Run notes section rather than a second one', () => {
+    const once = appendRunNotes(CLOUD, [LINES[0]!])
+    const twice = appendRunNotes(once, [LINES[1]!])
+    expect(twice.match(/^## Run notes$/gm)).toHaveLength(1)
+    expect(twice).toContain(LINES[0])
+    expect(twice).toContain(LINES[1])
   })
 })

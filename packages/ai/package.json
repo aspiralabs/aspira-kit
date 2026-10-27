@@ -16,6 +16,10 @@
       "types": "./dist/isolation.d.ts",
       "default": "./dist/isolation.js"
     },
+    "./map-codebase": {
+      "types": "./dist/map-codebase.d.ts",
+      "default": "./dist/map-codebase.js"
+    },
     "./package.json": "./package.json",
     "./codebase-map": "./codebase-map/src/brief.ts",
     "./common/tools/*": "./common/src/tools/*.ts",

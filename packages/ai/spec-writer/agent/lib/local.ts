@@ -14,6 +14,7 @@ import { lenses, reviewSchema, synthesisSchema, systemPrompt as reviewSystemProm
 import { writeArtifacts } from './artifacts.ts'
 import { knowledgeConfig, knowledgeSource, loadKnowledge, snapshotKnowledge, type Env, type Knowledge } from './local-knowledge.ts'
 import { EXPLORE_MAX_STEPS, applySnapshotGaps, prepareWrite, reportDirFor, specSha256, summary, writeContext, writeFiles, type RunInput } from './runner.ts'
+import { mapBriefForRun, type MapStatus } from '@aspiralabs/ai/common/lib/codebase-map-run'
 import { draftSchema, exploreSchema, writePipeline, writerSystemPrompt } from './writer.ts'
 
 // --local: the same pipeline with the Claude Code session as the model, as in spec-reviewer. Each
@@ -191,7 +192,17 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
     throw new Error('pending in the session')
   }
 
-  const result = await writePipeline({ idea, guidelines, context, uiRequired, answers, areas: prepared.areas, ...(spec === undefined ? {} : { spec }) }, call)
+  // KIT-70: the codebase map brief is saved in the work folder by the helper, so a resumed call reuses it; it stays out of the fingerprint.
+  const impactNote = 'The impact files above feed ## Blast radius.'
+  let map: MapStatus | undefined
+  if (mode === 'review') {
+    map = await mapBriefForRun({ repo: repoRoot, workDir: work, text: spec ?? '', instruction: impactNote })
+  }
+  const mapBrief = mode === 'review' ? undefined : async (explored: unknown) => {
+    map = await mapBriefForRun({ repo: repoRoot, workDir: work, text: JSON.stringify(explored), instruction: impactNote })
+    return map.text
+  }
+  const result = await writePipeline({ idea, guidelines, context: map?.text ? `${context}\n\n${map.text}` : context, uiRequired, answers, areas: prepared.areas, ...(mapBrief ? { mapBrief } : {}), ...(spec === undefined ? {} : { spec }) }, call)
   if (tasks.length) {
     // Explore tasks share one order and are pushed as their prompt writes finish, so they tie-break by area (the areas are sorted).
     tasks.sort((a, b) => orderOf(a.phase) - orderOf(b.phase) || a.phase.localeCompare(b.phase))
@@ -199,13 +210,14 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   }
 
   applySnapshotGaps(result, prepared)
+  const mapReport = (map ?? await mapBriefForRun({ repo: repoRoot, workDir: work, targets: [] })).report
   const totalMs = Date.now() - Date.parse(state.startedAt)
   const phaseRows = result.phases.map((phase) => `| ${phase.phase} | ${phase.error ? `failed: ${phase.error.replaceAll('|', '/').slice(0, 200)}` : 'completed'} |`)
   const analysis = [
     '# Run analysis', '', `Status: **${result.status}**`, '',
     'Mode: **--local**. The model work ran as subagents of a Claude Code session, on that session\'s model and usage, so no cost or token counts are reported here.', '',
     `Wall time from the first local preparation (${state.startedAt}) to export: **${(totalMs / 1000).toFixed(1)}s**. It includes any time the session spent between stages.`, '',
-    '| Phase | Result |', '| --- | --- |', ...phaseRows, '',
+    '| Phase | Result |', '| --- | --- |', ...phaseRows, '', mapReport, '',
   ].join('\n')
   // One sentence for a non-ready status: the open decision count and the decisions file for
   // needs-author, the first problem otherwise (F4, F18); reasonCode is always null here, the
@@ -217,7 +229,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   const reasonCode = null
   const files = writeFiles(result, prepared)
   // `mode: 'local'` is the run mode every trace reader expects; the write/review mode is `specMode`.
-  const report = { ...result, review: result.review && { ...result.review, candidate: undefined }, spec: undefined, mode: 'local', specMode: result.mode, input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, specSha256: specSha256(files), models: { all: 'Claude Code session subagents' }, knowledge, startedAt: state.startedAt, totalMs, dir, reason, reasonCode }
+  const report = { ...result, review: result.review && { ...result.review, candidate: undefined }, spec: undefined, mode: 'local', specMode: result.mode, codebaseMap: mapReport, input: { ...input, repoCommit: repo.commit, repoDirty: repo.dirty }, specSha256: specSha256(files), models: { all: 'Claude Code session subagents' }, knowledge, startedAt: state.startedAt, totalMs, dir, reason, reasonCode }
   await writeArtifacts(dir, {
     ...files,
     'trace/calls.json': JSON.stringify({ mode: 'local', system: { writer: writerSystemPrompt, review: reviewSystemPrompt }, knowledge, calls }, null, 2),
