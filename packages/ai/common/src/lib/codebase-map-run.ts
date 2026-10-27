@@ -72,6 +72,18 @@ const lastLine = (text: string): string => {
   return flat(lines[lines.length - 1] ?? 'no error output').slice(0, 300)
 }
 
+/** Whether the map root's build lock names a live process (the build script takes `.build.lock` with its pid). */
+function buildRunning(mapRoot: string): boolean {
+  try {
+    const pid = Number(readFileSync(join(mapRoot, '.build.lock'), 'utf8').trim())
+    if (!Number.isInteger(pid) || pid <= 0) return false
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
 /** Makes sure a fresh map exists: undefined when it does, else the one `build failed: ...` reason. */
 async function ensureMap(repo: string, mapRoot: string, pollMs: number, clock: Clock): Promise<string | undefined> {
   const started = clock.now()
@@ -82,10 +94,13 @@ async function ensureMap(repo: string, mapRoot: string, pollMs: number, clock: C
     lastError = state
     let code = 1
     let stderr = state
-    try {
-      ;({ code, stderr } = buildMapCaptured(repo, mapRoot))
-    } catch (error) {
-      stderr = error instanceof Error ? error.message : String(error)
+    if (buildRunning(mapRoot)) stderr = `a build is running in ${mapRoot}`
+    else {
+      try {
+        ;({ code, stderr } = buildMapCaptured(repo, mapRoot))
+      } catch (error) {
+        stderr = error instanceof Error ? error.message : String(error)
+      }
     }
     if (code === 0) {
       const after = await probe(repo, mapRoot)
