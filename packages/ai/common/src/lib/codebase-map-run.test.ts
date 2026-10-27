@@ -50,7 +50,7 @@ function fixture(opts: { key?: boolean; built?: boolean; deleted?: boolean } = {
   write(repo, 'packages/pkg-a/package.json', JSON.stringify({ name: '@f/pkg-a', private: true }))
   write(repo, 'packages/pkg-a/src/p.ts', 'export const p = 1\n')
   write(repo, 'src/gone.ts', 'export const gone = 1\n')
-  write(repo, 'notes.txt', 'not code\n')
+  write(repo, '.env.sample', 'KEY=\n') // tracked, but a .env* file is never in the map
   git(repo, 'init', '-q')
   git(repo, 'add', '-A')
   git(repo, 'commit', '-q', '-m', 'init')
@@ -184,7 +184,7 @@ describe('mapBriefForRun (F1, F3-F6, F14, F15)', () => {
     expect(failed.text).toBe('')
 
     const refused = fixture({ key: true, built: true })
-    const result = await mapBriefForRun({ repo: refused.repo, workDir: refused.workDir, targets: ['notes.txt'] })
+    const result = await mapBriefForRun({ repo: refused.repo, workDir: refused.workDir, targets: ['.env.sample'] })
     expect(result.used).toBe(false)
     expect(result.reason?.startsWith('brief refused: ')).toBe(true)
     expect(result.reason).toContain('no match')
