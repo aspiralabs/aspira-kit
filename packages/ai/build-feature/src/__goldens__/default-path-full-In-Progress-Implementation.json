@@ -1,0 +1,16 @@
+[
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "step",
+    "step": "implementor",
+    "command": "/aspira-implementor KIT-11"
+  },
+  {
+    "stage": "resolve"
+  },
+  {
+    "stage": "gate"
+  }
+]

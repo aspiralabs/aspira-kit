@@ -1,0 +1,10 @@
+[
+  {
+    "stage": "end",
+    "status": "blocked",
+    "reason": {
+      "kind": "aspira-json"
+    },
+    "message": "no aspira.json in <root>/repo/.worktrees/FEATURE-KIT-11: the run cannot find the Feature Board. Run kit init --board <Feature Board URL> to name the board."
+  }
+]
