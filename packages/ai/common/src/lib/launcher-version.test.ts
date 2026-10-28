@@ -8,7 +8,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { access, chmod, cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..', '..')
@@ -109,6 +109,8 @@ function existsKit(dir: string): boolean {
 function runLauncher(world: World, launcher: Launcher, extraEnv: Record<string, string> = {}, args: string[] = launcher.args, cwd = world.project): { stdout: string; status: number | null } {
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: world.home, USERPROFILE: world.home, PATH: world.path, ...extraEnv }
   for (const key of ['NOTION_TOKEN', 'NOTION_API_KEY', 'AI_GATEWAY_API_KEY']) delete env[key]
+  // pnpm's global bin is found from these when kit is not on PATH (KIT-76): a test sets its own, never the runner's.
+  for (const key of Object.keys(env)) if ((key === 'PNPM_HOME' || key === 'XDG_DATA_HOME' || key.toLowerCase().startsWith('npm_config_')) && !(key in extraEnv)) delete env[key]
   if (!(launcher.envVar in extraEnv)) delete env[launcher.envVar]
   const result = spawnSync('bash', [world.scriptPath, ...args], { cwd, env, encoding: 'utf8', timeout: 15_000 })
   return { stdout: `${result.stdout ?? ''}${result.stderr ?? ''}`, status: result.status }
@@ -170,6 +172,33 @@ describe.each(LAUNCHERS)('$name .kit-version vs. the global kit (T40, T41, F5, F
     expect(result.stdout).toContain('no Aspira project here')
     expect(result.stdout).toContain('run kit init --board <Feature Board URL>')
     expect(await ran(world.agentDir)).toBe(false)
+  })
+
+  it('KIT-76 with no kit on PATH finds the global kit in $PNPM_HOME, then in ~/Library/pnpm', async () => {
+    const world = await makeWorld(launcher, { heal: false, withKit: false, skillVersion: AI_VERSION })
+    root = world.root
+    const kit = `#!/bin/sh\nif [ "$1" = package-dir ]; then echo '${dirname(world.agentDir)}'; fi\n`
+    const pnpmHome = join(world.root, 'pnpm-home')
+    await mkdir(pnpmHome, { recursive: true })
+    await writeFile(join(pnpmHome, 'kit'), kit, { mode: 0o755 })
+    runLauncher(world, launcher, { PNPM_HOME: pnpmHome })
+    expect(await ran(world.agentDir)).toBe(true)
+    await rm(join(world.agentDir, 'ran.marker'))
+    const macBin = join(world.home, 'Library', 'pnpm', 'bin')
+    await mkdir(macBin, { recursive: true })
+    await writeFile(join(macBin, 'kit'), kit, { mode: 0o755 })
+    runLauncher(world, launcher)
+    expect(await ran(world.agentDir)).toBe(true)
+  })
+
+  it('KIT-76 a kit found nowhere names the PATH fix in one line', async () => {
+    const world = await makeWorld(launcher, { heal: false, withKit: false })
+    root = world.root
+    const result = runLauncher(world, launcher, { PNPM_HOME: join(world.root, 'no-pnpm-here') })
+    expect(result.status).not.toBe(0)
+    const line = result.stdout.split('\n').find((text) => text.includes(`cannot find ${launcher.name}`)) ?? ''
+    expect(line).toContain('export PATH="$HOME/Library/pnpm:$PATH"')
+    expect(line).toContain('restart Claude Code')
   })
 
   it('a pin equal to the global kit version runs the global agent', async () => {

@@ -107,6 +107,22 @@ describe('the /aspira-next launcher', () => {
   })
 })
 
+describe('the kit launchers without kit on PATH (KIT-76)', () => {
+  it('find the global kit in $PNPM_HOME, and otherwise name the PATH fix in one line', () => {
+    const made = project()
+    const script = join(made.home, '.claude', 'skills', 'aspira-next', 'scripts', 'next.sh')
+    const env = { HOME: made.home, USERPROFILE: made.home, PATH: '/usr/bin:/bin' }
+    const found = spawnSync('/bin/bash', [script, 'KIT-1'], { cwd: made.root, encoding: 'utf8', env: { ...env, PNPM_HOME: made.bin } })
+    expect(found.status).toBe(0)
+    expect(recorded(made.calls)).toEqual(['next KIT-1'])
+    const missing = spawnSync('/bin/bash', [script, 'KIT-1'], { cwd: made.root, encoding: 'utf8', env })
+    expect(missing.status).not.toBe(0)
+    expect(missing.stderr.trim().split('\n')).toHaveLength(1)
+    expect(missing.stderr).toContain('export PATH="$HOME/Library/pnpm:$PATH"')
+    expect(missing.stderr).toContain('restart Claude Code')
+  })
+})
+
 describe('the /aspira-cleanup launcher', () => {
   it('T58 passes its arguments to kit cleanup verbatim and exits with its code', () => {
     const made = project()

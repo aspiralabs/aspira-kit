@@ -11,12 +11,27 @@ is_agent() {
   [ "$(basename "$1")" = "$NAME" ] && [ -d "$1/skill" ] && { [ -d "$1/agent" ] || [ -d "$1/src" ] || [ -d "$1/scripts" ]; } \
     && grep -qs '"name": "@aspiralabs/ai"' "$1/../package.json"
 }
-# The agent folder of the global @aspiralabs/ai (pnpm add -g), from the kit on PATH, which prints its own directory.
-# `kit package-dir` also rewrites the global skills when they are behind the kit (self-healing).
+# The global kit: on PATH, else in pnpm's global bin, which Claude Code's Bash PATH can lack (KIT-76):
+# $PNPM_HOME, ~/Library/pnpm (macOS), ~/.local/share/pnpm (Linux), each with or without bin/, then `pnpm bin -g`.
+find_kit() {
+  local base dir
+  command -v kit 2>/dev/null && return
+  for base in "${PNPM_HOME:-}" "$HOME/Library/pnpm" "${XDG_DATA_HOME:-$HOME/.local/share}/pnpm" "$(command -v pnpm >/dev/null 2>&1 && pnpm bin -g 2>/dev/null)"; do
+    [ -n "$base" ] || continue
+    for dir in "$base" "$base/bin"; do
+      if [ -x "$dir/kit" ]; then printf '%s\n' "$dir/kit"; return; fi
+    done
+  done
+  return 1
+}
+# The agent folder of the global @aspiralabs/ai (pnpm add -g), from the global kit, which prints its own directory,
+# else from `pnpm root -g`. `kit package-dir` also rewrites the global skills when they are behind the kit (self-healing).
 global_install() {
-  local pkg
-  command -v kit >/dev/null 2>&1 || return 1
-  pkg=$(kit package-dir 2>/dev/null) && [ -n "$pkg" ] || return 1
+  local pkg="" kit root
+  if kit=$(find_kit); then pkg=$("$kit" package-dir 2>/dev/null) || pkg=""
+  elif command -v pnpm >/dev/null 2>&1 && root=$(pnpm root -g 2>/dev/null); then pkg=$root/@aspiralabs/ai
+  fi
+  [ -n "$pkg" ] || return 1
   if is_agent "$pkg/$NAME"; then (cd "$pkg/$NAME" && pwd -P); return; fi
   return 1
 }
@@ -50,7 +65,7 @@ project_root() {
   die "no Aspira project here (no aspira.json at or above $PWD); run kit init --board <Feature Board URL> in the main checkout (aspira.json is git-ignored, so a fresh clone has none)"
 }
 # Which NAME runs, in this order: CODE_ANALYZER_AGENT_DIR or STATIC_ANALYSIS_AGENT_DIR (kit development only; the report says so), then
-# the global @aspiralabs/ai on PATH (`kit package-dir`). A project's own node_modules copy and $ASPIRA_KIT are never consulted.
+# the global @aspiralabs/ai (`kit package-dir`, the kit found by find_kit). A project's own node_modules copy and $ASPIRA_KIT are never consulted.
 # Sets AGENT, AGENT_SOURCE (env | global), AGENT_VERSION and PROJECT.
 resolve_agent() {
   local here dir pinned="" current
@@ -64,7 +79,7 @@ resolve_agent() {
     AGENT=$(cd "$dir" && pwd -P); AGENT_SOURCE=env; break
   done
   if [ -z "$AGENT" ] && AGENT=$(global_install); then AGENT_SOURCE=global; fi
-  [ -n "$AGENT" ] || die "cannot find $NAME: install @aspiralabs/ai globally (pnpm add -g @aspiralabs/ai) and run kit update, or set CODE_ANALYZER_AGENT_DIR for kit development"
+  [ -n "$AGENT" ] || die "cannot find $NAME: install @aspiralabs/ai globally (pnpm add -g @aspiralabs/ai) and run kit update; if it is installed, add pnpm's global bin to PATH (export PATH=\"\$HOME/Library/pnpm:\$PATH\" in your shell profile) and restart Claude Code; or set CODE_ANALYZER_AGENT_DIR for kit development"
   PROJECT=$(project_root)
   AGENT_VERSION=$(sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$AGENT/../package.json" | head -n 1)
   case $AGENT_SOURCE:$AGENT in
