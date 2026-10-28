@@ -176,8 +176,12 @@ it('keeps product decisions explicit and blocks cancelled runs', async () => {
   expect(text).toContain('## D1 — Choose retention duration before implementing deletion?\n\n- [ ] Keep forever _(recommended: nothing else in the app expires)_\n- [ ] Delete after 30 days\n\nWhy it is yours to decide: storage cost is a product choice')
   // The author ticks an option and reruns the planner: the decision is theirs and the plan is ready.
   await writeFile(decisionsFile, text.replace('- [ ] Delete after 30 days', '- [x] Delete after 30 days'))
+  state.prompts.length = 0
   const again = await runPlan(args)
   expect(again.status).toBe('ready')
+  // KIT-89: research and planning were given the author's answer as settled input.
+  const settled = '- D1 — Choose retention duration before implementing deletion?\n  The author\'s answer: Delete after 30 days'
+  expect(state.prompts.filter((prompt) => prompt.includes(settled)).length).toBeGreaterThanOrEqual(2)
   expect(again.decisions).toEqual([{ ...retention, id: 'D1', decidedBy: 'author', answer: 'Delete after 30 days' }])
   const review = JSON.parse(await readFile(join(again.dir, 'trace/review.json'), 'utf8'))
   expect(review.decisions).toEqual([expect.objectContaining({ id: 'D1', decidedBy: 'author', answer: 'Delete after 30 days' })])
