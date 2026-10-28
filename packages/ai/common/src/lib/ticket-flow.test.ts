@@ -181,7 +181,7 @@ describe('startFlow (separate process)', () => {
   it('refuses on the wrong Status before any board write, with the exact message', async () => {
     const client = fakeBoard('In Review: Spec')
     await expect(startFlow({ skill: 'planner', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })).rejects.toThrow(
-      'NOM-4 Explore pagination is "In Review: Spec"; planner needs "Ready: Spec". "Ready: Spec" is set by a human, after approving the spec. No model call was made.',
+      'NOM-4 Explore pagination is "In Review: Spec"; planner needs "Ready: Spec" or "In Review: Plan". "Ready: Spec" is set by a human, after approving the spec. No model call was made.',
     )
     expect(client.calls).toEqual(['resolve NOM-4'])
     expect(existsSync(folderOf())).toBe(false)

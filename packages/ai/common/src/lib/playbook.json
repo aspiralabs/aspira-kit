@@ -61,7 +61,7 @@
       "statuses": [
         "In Review: Plan"
       ],
-      "step": "Read the plan's status and open questions, then move the card to Ready: Plan",
+      "step": "Read the plan's status: on needs-author answer its open decisions and rerun the planner from here; on ready move the card to Ready: Plan",
       "command": null,
       "who": "you"
     },

@@ -48,7 +48,7 @@ describe('the gate table', () => {
   it('names every skill, and the spec rows', () => {
     expect(Object.keys(GATES)).toEqual([...SKILLS])
     expect(GATES['spec-writer']).toMatchObject({ accepts: ['Ready: Idea', 'In Review: Spec'], inProgress: 'In Progress: Spec', success: 'In Review: Spec', startFrom: ['Ready: Idea'] })
-    expect(GATES.planner).toMatchObject({ accepts: ['Ready: Spec'], inProgress: 'In Progress: Plan', success: 'In Review: Plan' })
+    expect(GATES.planner).toMatchObject({ accepts: ['Ready: Spec', 'In Review: Plan'], inProgress: 'In Progress: Plan', success: 'In Review: Plan' })
     expect(GATES.implementor).toMatchObject({ accepts: ['Ready: Plan'], inProgress: 'In Progress: Implementation', success: 'In Review: Implementation' })
     expect(GATES['code-analyzer']).toMatchObject({ accepts: ['In Progress: Implementation', 'In Review: Implementation'], pushes: [] })
     expect(GATES['pr-reviewer']).toMatchObject({ accepts: ['In Review: Implementation'], requires: 'PR' })
@@ -65,12 +65,14 @@ describe('the gate table', () => {
       expect(refused.message).toContain('No model call was made.')
     }
     const planner = checkGate('planner', { ...ticket, status: 'In Review: Spec' })
-    expect(planner).toEqual({ ok: false, message: 'NOM-4 Explore pagination is "In Review: Spec"; planner needs "Ready: Spec". "Ready: Spec" is set by a human, after approving the spec. No model call was made.' })
+    expect(planner).toEqual({ ok: false, message: 'NOM-4 Explore pagination is "In Review: Spec"; planner needs "Ready: Spec" or "In Review: Plan". "Ready: Spec" is set by a human, after approving the spec. No model call was made.' })
   })
 
   it('proceeds on the right Status with the start move, and a retry in its own In Progress status makes none', () => {
     expect(checkGate('planner', { ...ticket, status: 'Ready: Spec' })).toEqual({ ok: true, retry: false, startMove: { from: 'Ready: Spec', to: 'In Progress: Plan' } })
     expect(checkGate('planner', { ...ticket, status: 'In Progress: Plan' })).toEqual({ ok: true, retry: true, startMove: null })
+    // KIT-87: the planner reruns from In Review: Plan on the answered decisions, with no move.
+    expect(checkGate('planner', { ...ticket, status: 'In Review: Plan' })).toEqual({ ok: true, retry: false, startMove: null })
     expect(checkGate('spec-writer', { ...ticket, status: 'Ready: Idea' })).toEqual({ ok: true, retry: false, startMove: { from: 'Ready: Idea', to: 'In Progress: Spec' } })
     expect(checkGate('implementor', { ...ticket, status: 'In Progress: Implementation' })).toEqual({ ok: true, retry: true, startMove: null })
     // The one spec step reruns from In Review: Spec with no move (KIT-48).
@@ -245,7 +247,7 @@ describe('the gate table, groomer row', () => {
     const dropped = SIBLINGS.map((skill) => checkGate(skill, { ...ticket, status: 'Dropped' }))
     expect(dropped).toEqual([
       { ok: false, message: 'NOM-4 Explore pagination is "Dropped"; spec-writer needs "Ready: Idea" or "In Review: Spec". "Ready: Idea" is set by a human, after grooming the idea. No model call was made.' },
-      { ok: false, message: 'NOM-4 Explore pagination is "Dropped"; planner needs "Ready: Spec". "Ready: Spec" is set by a human, after approving the spec. No model call was made.' },
+      { ok: false, message: 'NOM-4 Explore pagination is "Dropped"; planner needs "Ready: Spec" or "In Review: Plan". "Ready: Spec" is set by a human, after approving the spec. No model call was made.' },
       { ok: false, message: 'NOM-4 Explore pagination is "Dropped"; implementor needs "Ready: Plan". "Ready: Plan" is set by a human, after approving the plan. No model call was made.' },
       {
         ok: false,
