@@ -244,6 +244,26 @@ describe('startFlow (separate process)', () => {
     expect(await readFile(spec, 'utf8')).toBe('newer spec')
   })
 
+  it('KIT-72: overwrites a file rewritten with the content of the last pull, newer than its page, without --force-pull; still refuses a real local edit', async () => {
+    const client = fakeBoard('In Review: Spec')
+    const first = await startFlow({ skill: 'spec-writer', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })
+    const spec = join(first.folder, 'spec.md')
+    const reviewed = join(first.folder, 'spec.reviewed/spec.reviewed.md')
+    // Another step rewrites both files with exactly what was pulled; the pages change, older than the rewrite.
+    await writeFile(spec, await readFile(spec, 'utf8'))
+    await writeFile(reviewed, `${await readFile(reviewed, 'utf8')}local edit\n`)
+    for (const [title, file] of [['Spec', spec], ['Spec Reviewed', reviewed]] as const) {
+      client.pages[title]!.page.lastEditedAt = '2026-10-06T01:00:00.000Z'
+      client.pages[title]!.markdown = `new ${title}`
+      await setMtime(file, '2026-10-06T02:00:00.000Z')
+    }
+    await expect(startFlow({ skill: 'spec-writer', repo, argument: { kind: 'ticket', ref: 'NOM-4', folder: first.folder }, board: BOARD, client })).rejects.toThrow(`Not overwriting a local file newer than its page: ${reviewed} (Spec Reviewed). Pass --force-pull`)
+    await writeFile(reviewed, await readFile(reviewed, 'utf8').then((text) => text.replace('local edit\n', '')))
+    await setMtime(reviewed, '2026-10-06T02:00:00.000Z')
+    const second = await startFlow({ skill: 'spec-writer', repo, argument: { kind: 'ticket', ref: 'NOM-4', folder: first.folder }, board: BOARD, client })
+    expect({ pulled: second.pulled, spec: await readFile(spec, 'utf8') }).toEqual({ pulled: [spec, reviewed], spec: 'new Spec' })
+  })
+
   it('the pr-reviewer needs the PR property; the implementor claims from Ready: Plan', async () => {
     const client = fakeBoard('In Review: Implementation', { Spec: SPEC, Plan: '# Plan\n' })
     await expect(startFlow({ skill: 'pr-reviewer', repo, argument: { kind: 'ticket', ref: 'NOM-4' }, board: BOARD, client })).rejects.toThrow('PR property is not set')
@@ -388,6 +408,39 @@ describe('the --local board stage (planner against a stub session)', () => {
       }
     },
   }
+
+  it('KIT-72: a later run pulls over a file the last run pulled and another step rewrote unchanged, and still refuses a real local edit', async () => {
+    const client = fakeBoard('In Progress: Plan')
+    const ctx = { ...context, repo }
+    const run = async () => {
+      const resolve = await beforeRun(ctx, { positional: 'NOM-4' })
+      if (resolve.kind !== 'stage') throw new Error(`expected the resolve, got ${resolve.kind}`)
+      await session.perform(client, resolve.stage.actions)
+    }
+    await run()
+    const sync = await beforeRun(ctx, { positional: 'NOM-4' })
+    if (sync.kind !== 'stage') throw new Error(`expected the pulls, got ${sync.kind}`)
+    await session.perform(client, sync.stage.actions)
+    expect((await beforeRun(ctx, { positional: 'NOM-4' })).kind).toBe('ticket')
+    // Another step rewrites both pulled files (one with a real edit); the pages change, older than the rewrite.
+    await rm(boardStateDir(folderOf(), 'planner'), { recursive: true, force: true })
+    const spec = join(folderOf(), 'spec.md')
+    const reviewed = join(folderOf(), 'spec.reviewed/spec.reviewed.md')
+    const pulled = await readFile(reviewed, 'utf8')
+    await writeFile(spec, await readFile(spec, 'utf8'))
+    await writeFile(reviewed, `${pulled}local edit\n`)
+    for (const [title, file] of [['Spec', spec], ['Spec Reviewed', reviewed]] as const) {
+      client.pages[title]!.page.lastEditedAt = '2030-01-01T00:00:00.000Z'
+      await setMtime(file, '2030-01-02T00:00:00.000Z')
+    }
+    await run()
+    await expect(beforeRun(ctx, { positional: 'NOM-4' })).rejects.toThrow(`Not overwriting a local file newer than its page: ${reviewed} (Spec Reviewed). Pass --force-pull`)
+    await writeFile(reviewed, pulled)
+    await setMtime(reviewed, '2030-01-02T00:00:00.000Z')
+    const again = await beforeRun(ctx, { positional: 'NOM-4' })
+    if (again.kind !== 'stage') throw new Error(`expected the pulls, got ${again.kind}`)
+    expect(again.stage.actions.map((action) => (action.action === 'pull' ? action.file : action.action))).toEqual([spec, reviewed])
+  })
 
   it('lists the resolve, then the pulls and the claim, refuses on the wrong Status, and ends with the push and the move', async () => {
     const client = fakeBoard('Ready: Spec')

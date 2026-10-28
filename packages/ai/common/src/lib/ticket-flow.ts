@@ -5,9 +5,10 @@
 // data for the Claude Code session to perform with the Notion MCP, and verifies ticket.md between
 // steps. Both record every action, with the Status before and after, in the run's trace.
 
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { z } from 'zod'
 import { readEffectiveAspira } from './aspira-config.ts'
 import { BoardError, board as makeBoard, type Board, type BoardWithPageMarkdown, type Ticket, type TicketPage } from './board.ts'
@@ -113,6 +114,26 @@ export async function readTicketMd(folder: string): Promise<TicketRecord | null>
 
 const modifiedAt = async (file: string): Promise<string | undefined> => stat(file).then((s) => s.mtime.toISOString(), () => undefined)
 
+/** The content hash of each file a pull last wrote, by file name, in the working folder (KIT-72). */
+export const PULLED_FILE = '.pulled.json'
+const hashOf = (text: string): string => createHash('sha256').update(text).digest('hex')
+const contentHash = async (file: string): Promise<string | null> => readFile(file, 'utf8').then(hashOf, () => null)
+const pulledHashes = async (folder: string): Promise<Record<string, string>> => {
+  const parsed = z.record(z.string(), z.string()).safeParse(await readFile(join(folder, PULLED_FILE), 'utf8').then((text) => JSON.parse(text) as unknown, () => null))
+  return parsed.success ? parsed.data : {}
+}
+
+/** Record what the pull just wrote into these files, so a later pull can tell a rewrite with the same content from a local edit. */
+export async function recordPulled(folder: string, files: readonly string[]): Promise<void> {
+  if (files.length === 0) return
+  const hashes = await pulledHashes(folder)
+  for (const file of files) {
+    const hash = await contentHash(file)
+    if (hash !== null) hashes[relative(folder, file)] = hash
+  }
+  await writeFile(join(folder, PULLED_FILE), `${JSON.stringify(hashes, null, 2)}\n`)
+}
+
 type PullItem = { title: string; file: string; page: string; decision: 'write' | 'keep' | 'conflict'; reason: string; note?: string }
 
 /** How the --local session copies a page the gate row pulls over the local file: the page parser reads column 0 only. */
@@ -123,15 +144,17 @@ const OVERWRITE_PULL_NOTE =
 export async function pullPlan(skill: Skill, ticket: TicketRecord, folder: string, previous: Record<string, string>, force: boolean): Promise<PullItem[]> {
   const items: PullItem[] = []
   const pages: { title: string; file: string; overwrite?: true; note?: string }[] = [...TICKET_PAGES, ...(GATES[skill].pulls ?? [])]
+  const hashes = await pulledHashes(folder)
   for (const { title, file, overwrite, note } of pages) {
     const page = ticket.pages[title]
     if (page === undefined) continue
     const path = join(folder, file)
     const exists = existsSync(path)
     const recordedAt = previous[title]
-    const decision = pullDecision({ exists, localModifiedAt: await modifiedAt(path), recordedAt, pageEditedAt: page.lastEditedAt, force, overwrite })
+    const unchanged = exists && hashes[file] !== undefined && hashes[file] === (await contentHash(path))
+    const decision = pullDecision({ exists, localModifiedAt: await modifiedAt(path), recordedAt, pageEditedAt: page.lastEditedAt, force, overwrite, unchanged })
     const reason =
-      overwrite === true ? 'pulled over the local copy on every run' : !exists ? 'not in the working folder' : decision === 'keep' ? 'unchanged since the last pull' : recordedAt === undefined ? 'no pull recorded' : `edited on the ticket after the last pull (${recordedAt})`
+      overwrite === true ? 'pulled over the local copy on every run' : !exists ? 'not in the working folder' : decision === 'keep' ? 'unchanged since the last pull' : unchanged ? 'edited on the ticket; the local copy holds only the last pull' : recordedAt === undefined ? 'no pull recorded' : `edited on the ticket after the last pull (${recordedAt})`
     items.push({ title, file: path, page: page.url, decision, reason, ...(overwrite === true ? { note: note ?? OVERWRITE_PULL_NOTE } : {}) })
   }
   return items
@@ -281,6 +304,7 @@ export async function startFlow(options: FlowOptions): Promise<FlowStart> {
       throw error
     }
   }
+  await recordPulled(folder, pulled)
   await writeInto(join(folder, TICKET_FILE), renderTicketMd(current))
   return { ticket: current, folder, trace, pulled, kept }
 }
@@ -1125,6 +1149,7 @@ export async function localBoardStep(options: LocalBoardOptions): Promise<{ stag
   const trace = state.trace!
   if (state.phase === 'sync') {
     for (const item of plan) if (!pending.includes(item)) trace.actions.push(entry('pull', `${item.title} -> ${item.file} (${item.reason}) by the session`, state.statusBefore ?? ticket.status, state.statusBefore ?? ticket.status))
+    await recordPulled(folder, plan.filter((item) => !pending.includes(item)).map((item) => item.file))
     if (groomPull !== undefined && row.record !== undefined && state.startedAt !== undefined) trace.actions.push(entry('mark', `${runMarkerText(state.startedAt, 'local')} -> ${groomPull.title} by the session`, state.statusBefore ?? ticket.status, state.statusBefore ?? ticket.status))
     if (state.statusBefore !== null && ticket.status !== state.statusBefore) {
       if (row.setsDev !== false) trace.actions.push(entry('set', `Dev = ${ticket.dev ?? dev} by the session`, state.statusBefore, state.statusBefore))
