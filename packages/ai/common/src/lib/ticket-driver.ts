@@ -287,7 +287,7 @@ export async function afterRun(context: DriverContext, before: BeforeRun & { kin
   const board = GATES[context.skill].record === undefined ? undefined : aspira?.board
   // With a Notion token the pages are pushed through the API from their files; without one the session pushes them.
   const token = process.env[BOARD_ENV]
-  const push = token === undefined || token === '' || aspira?.board === undefined ? undefined : makeBoard({ board: aspira.board, token }).pushPage
+  const client = token === undefined || token === '' || aspira?.board === undefined ? undefined : makeBoard({ board: aspira.board, token })
   const stateDir = boardStateDir(before.folder, context.skill)
   const runStatus = run.status
   const endedAt = new Date().toISOString()
@@ -317,7 +317,7 @@ export async function afterRun(context: DriverContext, before: BeforeRun & { kin
     ...(run.round === undefined ? {} : { round: run.round }),
     ...(board === undefined ? {} : { board }),
     ...(telemetry === undefined ? {} : { telemetry }),
-    ...(push === undefined ? {} : { push }),
+    ...(client === undefined ? {} : { push: client.pushPage, reader: client }),
   })
   if (GATES[context.skill].record !== undefined && local?.runId !== undefined) await writeLocalRun(stateDir, {})
   await note(context, before.folder, async () => {

@@ -7,11 +7,11 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { z } from 'zod'
 import { readEffectiveAspira } from './aspira-config.ts'
-import { BoardError, board as makeBoard, type Board, type BoardWithPageMarkdown, type Ticket, type TicketPage } from './board.ts'
+import { BOARD_ENV, BoardError, board as makeBoard, type Board, type BoardWithPageMarkdown, type Ticket, type TicketPage } from './board.ts'
 import {
   GROOM_LINE_PATTERNS,
   RECOMMENDED_SUFFIX,
@@ -134,14 +134,34 @@ export async function recordPulled(folder: string, files: readonly string[]): Pr
   await writeFile(join(folder, PULLED_FILE), `${JSON.stringify(hashes, null, 2)}\n`)
 }
 
+/** Where .pulled.json keeps the hash of a page's own content as Notion returns it, as of the last pull or push of that file (KIT-92). */
+const pageKey = (file: string): string => `page:${file}`
+type PageReader = Pick<BoardWithPageMarkdown, 'pageMarkdown'>
+const pageContentHash = async (reader: PageReader, pageId: string): Promise<string | null> => reader.pageMarkdown(pageId).then((page) => (page.truncated ? null : hashOf(page.markdown)), () => null)
+
+/** Record what each page holds now, beside its file's hash, so a later pull can tell a page only saved again (a push, a property change) from one edited since. */
+export async function recordPageHashes(folder: string, reader: PageReader, pages: readonly { file: string; pageId: string }[]): Promise<void> {
+  if (pages.length === 0) return
+  const hashes = await pulledHashes(folder)
+  for (const { file, pageId } of pages) {
+    const hash = await pageContentHash(reader, pageId)
+    if (hash === null) delete hashes[pageKey(relative(folder, file))]
+    else hashes[pageKey(relative(folder, file))] = hash
+  }
+  await writeFile(join(folder, PULLED_FILE), `${JSON.stringify(hashes, null, 2)}\n`)
+}
+
 type PullItem = { title: string; file: string; page: string; decision: 'write' | 'keep' | 'conflict'; reason: string; note?: string }
 
 /** How the --local session copies a page the gate row pulls over the local file: the page parser reads column 0 only. */
 const OVERWRITE_PULL_NOTE =
   'Fetch the child page with the Notion MCP and write it as plain markdown: copy every heading\'s text verbatim, write every to-do block as a column-0 "- [ ]" or "- [x]" line, and every other block as its own paragraph (no Notion escapes). This copy is replaced on every run; never edit it to answer a question.'
 
-/** The pull plan for a ticket against its folder: each page the ticket has, mapped to its file, with the decision (F5). The gate row's own pulls are always written. */
-export async function pullPlan(skill: Skill, ticket: TicketRecord, folder: string, previous: Record<string, string>, force: boolean): Promise<PullItem[]> {
+/**
+ * The pull plan for a ticket against its folder: each page the ticket has, mapped to its file, with the decision (F5). The gate row's own pulls are always written.
+ * With a `reader`, a page whose content still hashes to what .pulled.json recorded at the last pull or push is kept, whatever its last-edited time says (KIT-92).
+ */
+export async function pullPlan(skill: Skill, ticket: TicketRecord, folder: string, previous: Record<string, string>, force: boolean, reader?: PageReader): Promise<PullItem[]> {
   const items: PullItem[] = []
   const pages: { title: string; file: string; overwrite?: true; note?: string }[] = [...TICKET_PAGES, ...(GATES[skill].pulls ?? [])]
   const hashes = await pulledHashes(folder)
@@ -152,9 +172,12 @@ export async function pullPlan(skill: Skill, ticket: TicketRecord, folder: strin
     const exists = existsSync(path)
     const recordedAt = previous[title]
     const unchanged = exists && hashes[file] !== undefined && hashes[file] === (await contentHash(path))
-    const decision = pullDecision({ exists, localModifiedAt: await modifiedAt(path), recordedAt, pageEditedAt: page.lastEditedAt, force, overwrite, unchanged })
+    const byTime = pullDecision({ exists, localModifiedAt: await modifiedAt(path), recordedAt, pageEditedAt: page.lastEditedAt, force, overwrite, unchanged })
+    const recorded = hashes[pageKey(file)]
+    const sameContent = byTime !== 'keep' && exists && overwrite !== true && force !== true && reader !== undefined && recorded !== undefined && recorded === (await pageContentHash(reader, page.id))
+    const decision = sameContent ? 'keep' : byTime
     const reason =
-      overwrite === true ? 'pulled over the local copy on every run' : !exists ? 'not in the working folder' : decision === 'keep' ? 'unchanged since the last pull' : unchanged ? 'edited on the ticket; the local copy holds only the last pull' : recordedAt === undefined ? 'no pull recorded' : `edited on the ticket after the last pull (${recordedAt})`
+      overwrite === true ? 'pulled over the local copy on every run' : !exists ? 'not in the working folder' : sameContent ? 'unchanged on the ticket since the last pull (same content)' : decision === 'keep' ? 'unchanged since the last pull' : unchanged ? 'edited on the ticket; the local copy holds only the last pull' : recordedAt === undefined ? 'no pull recorded' : `edited on the ticket after the last pull (${recordedAt})`
     items.push({ title, file: path, page: page.url, decision, reason, ...(overwrite === true ? { note: note ?? OVERWRITE_PULL_NOTE } : {}) })
   }
   return items
@@ -952,6 +975,21 @@ export type LocalBoardOptions = {
   env?: Record<string, string | undefined>
   /** Runs after the resolve and before the claim (the Dev set and the start move) are printed; a check that refuses throws FlowRefused with its Next action (the implementor's branch gate, F22). */
   beforeClaim?: (ticket: TicketRecord) => void | Promise<void>
+  /** A board client, for tests; default: board.ts on NOTION_TOKEN when it is set, else none (the session's ticket.md is all the driver reads). */
+  client?: BoardWithPageMarkdown
+}
+
+/**
+ * ticket.md with the Status the board shows now, read through the client when there is one (KIT-91):
+ * a card moved by hand since ticket.md was written is gated on where it is, and ticket.md says so.
+ */
+async function withLiveStatus(folder: string, ticket: TicketRecord, client: Board | undefined): Promise<TicketRecord> {
+  if (client === undefined) return ticket
+  const status = await client.resolveTicket(ticket.url).then((live) => live.status, () => undefined)
+  if (status === undefined || status === ticket.status) return ticket
+  const fresh = { ...ticket, status }
+  await writeInto(join(folder, TICKET_FILE), renderTicketMd(fresh))
+  return fresh
 }
 
 /** Where the --local driver keeps its board state for a skill: inside the working folder. */
@@ -1032,6 +1070,8 @@ export async function localBoardStep(options: LocalBoardOptions): Promise<{ stag
   if (options.argument.kind === 'path') throw new Error('localBoardStep needs a ticket; --no-ticket runs make no board actions')
   const env = options.env ?? process.env
   const dev = options.dev ?? env[DEV_ENV] ?? DEFAULT_DEV
+  const token = env[BOARD_ENV]
+  const client = options.client ?? (token === undefined || token === '' ? undefined : makeBoard({ board: options.board, token }))
   const ref = options.argument.ref
   const known = options.argument.folder ?? null
   const row = GATES[options.skill]
@@ -1054,19 +1094,20 @@ export async function localBoardStep(options: LocalBoardOptions): Promise<{ stag
   if (state.phase === 'resolve') {
     // Resolved when the session has written ticket.md since the resolve was asked for.
     const folder = state.folder ?? (await findWorkFolders(options.repo)).find((candidate) => sameRef(candidate, ref))?.folder ?? null
-    const ticket = folder === null ? null : await readTicketMd(folder)
-    if (state.askedAt === null || folder === null || ticket === null || !(await newerThan(join(folder, TICKET_FILE), state.askedAt))) {
+    const written = folder === null ? null : await readTicketMd(folder)
+    if (state.askedAt === null || folder === null || written === null || !(await newerThan(join(folder, TICKET_FILE), state.askedAt))) {
       if (state.askedAt === null) {
         state.askedAt = new Date().toISOString()
         if (state.folder === null && folder !== null) {
           state.folder = folder
-          state.previous = previousPagesOf(ticket)
+          state.previous = previousPagesOf(written)
         }
         await saveState(options.stateDir, state)
       }
       return { stage: stageOf(state.folder, [resolveAction(ref, options.board, options.repo, state.folder)], null, 'Perform each action with the Notion MCP, then call local again. The driver reads ticket.md and refuses when it does not show what the gate needs.') }
     }
     state.folder = folder
+    const ticket = await withLiveStatus(folder, written, client)
     const gate = checkGate(options.skill, ticket, statusFlowOf(options.repo))
     if (!gate.ok) throw new FlowRefused(gate.message)
     state.phase = 'sync'
@@ -1078,11 +1119,17 @@ export async function localBoardStep(options: LocalBoardOptions): Promise<{ stag
   }
 
   const folder = state.folder!
-  const ticket = await readTicketMd(folder)
-  if (ticket === null) throw new FlowRefused(`${join(folder, TICKET_FILE)} is missing or not a ticket file; delete ${options.stateDir} and start over`)
-  const gate = checkGate(options.skill, ticket, statusFlowOf(options.repo))
+  const local = await readTicketMd(folder)
+  if (local === null) throw new FlowRefused(`${join(folder, TICKET_FILE)} is missing or not a ticket file; delete ${options.stateDir} and start over`)
+  let ticket = local
+  let gate = checkGate(options.skill, ticket, statusFlowOf(options.repo))
+  // A Status ticket.md kept from before a hand move on the board is read again before it refuses (KIT-91).
+  if (!gate.ok) {
+    ticket = await withLiveStatus(folder, ticket, client)
+    gate = checkGate(options.skill, ticket, statusFlowOf(options.repo))
+  }
   if (!gate.ok) throw new FlowRefused(gate.message)
-  const plan = await pullPlan(options.skill, ticket, folder, state.previous, options.force === true)
+  const plan = await pullPlan(options.skill, ticket, folder, state.previous, options.force === true, client)
   // The groomer's overwrite pull (Grooming Decisions) is asked again at the start of every round after
   // the first (KIT-23): the round that follows a verified one reads the ticks made on the page since,
   // between rounds or between runs of a paused round, instead of the copy the last round rendered.
@@ -1092,8 +1139,10 @@ export async function localBoardStep(options: LocalBoardOptions): Promise<{ stag
     state.roundPullBefore = {}
     for (const item of plan) {
       if (item.decision !== 'write' || !(row.pulls ?? []).some((pull) => pull.title === item.title)) continue
-      // The copy is pulled once its file changes, whatever the clock says: the last round rendered it moments ago.
-      state.roundPullBefore[item.file] = (await modifiedAt(item.file)) ?? ''
+      // The copy is pulled once its file is back: it is removed here, so a pull whose content matches
+      // the copy the last round rendered (no ticks since) still shows as done, with no marker added by hand.
+      await rm(item.file, { force: true })
+      state.roundPullBefore[item.file] = ''
       state.trace?.actions.push(entry('pull', `${item.title} -> ${item.file} (pulled over the local copy at the start of round ${nextRound}) by the session`, ticket.status, ticket.status))
     }
     await saveState(options.stateDir, state)
@@ -1142,7 +1191,11 @@ export async function localBoardStep(options: LocalBoardOptions): Promise<{ stag
   const actions = [...pulls, ...mark, ...claim]
   const expected = gate.startMove?.to ?? ticket.status
   if (actions.length > 0) {
-    if (state.syncAskedAt === null) state.syncAskedAt = new Date().toISOString()
+    if (state.syncAskedAt === null) {
+      state.syncAskedAt = new Date().toISOString()
+      // The gate row's own pulls replace the copy anyway: removing it now makes a fetch equal to the old copy count as done.
+      for (const item of pending) if (item.decision === 'write' && (row.pulls ?? []).some((pull) => pull.title === item.title)) await rm(item.file, { force: true })
+    }
     await saveState(options.stateDir, state)
     return { stage: stageOf(folder, actions, expected, 'Perform each action with the Notion MCP (notion-fetch for a pull, notion-update-page for a move or a property), update ticket.md as each "then" says, then call local again.') }
   }
@@ -1150,6 +1203,7 @@ export async function localBoardStep(options: LocalBoardOptions): Promise<{ stag
   if (state.phase === 'sync') {
     for (const item of plan) if (!pending.includes(item)) trace.actions.push(entry('pull', `${item.title} -> ${item.file} (${item.reason}) by the session`, state.statusBefore ?? ticket.status, state.statusBefore ?? ticket.status))
     await recordPulled(folder, plan.filter((item) => !pending.includes(item)).map((item) => item.file))
+    if (client !== undefined) await recordPageHashes(folder, client, plan.filter((item) => !(row.pulls ?? []).some((pull) => pull.title === item.title)).map((item) => ({ file: item.file, pageId: ticket.pages[item.title]!.id })))
     if (groomPull !== undefined && row.record !== undefined && state.startedAt !== undefined) trace.actions.push(entry('mark', `${runMarkerText(state.startedAt, 'local')} -> ${groomPull.title} by the session`, state.statusBefore ?? ticket.status, state.statusBefore ?? ticket.status))
     if (state.statusBefore !== null && ticket.status !== state.statusBefore) {
       if (row.setsDev !== false) trace.actions.push(entry('set', `Dev = ${ticket.dev ?? dev} by the session`, state.statusBefore, state.statusBefore))
@@ -1195,6 +1249,8 @@ export type LocalBoardEndOptions = {
    * A push that fails falls back to the session's push action.
    */
   push?: (page: string, title: string, markdown: string) => Promise<{ id: string; url: string; created: boolean; lastEditedAt: string }>
+  /** Reads a page pushed through the API back, so the next run's pull plan knows what it holds (KIT-92). */
+  reader?: PageReader
 }
 
 /** Where the --local session saves the board rules for the attach check: beside the export's board trace. */
@@ -1252,6 +1308,12 @@ export async function localBoardEnd(options: LocalBoardEndOptions): Promise<Loca
         const pushed = await options.push(ticket.url, push.title, await readFile(file, 'utf8'))
         ticket.pages[push.title] = { id: pushed.id, title: push.title, url: pushed.url, lastEditedAt: pushed.lastEditedAt }
         await writeInto(join(options.folder, TICKET_FILE), renderTicketMd(ticket))
+        // The page now holds the file: a later pull of it is a no-op until either side changes.
+        const pulledAs = TICKET_PAGES.find((page) => page.title === push.title)?.file
+        if (options.reader !== undefined && pulledAs !== undefined) {
+          await recordPulled(options.folder, [join(options.folder, pulledAs)])
+          await recordPageHashes(options.folder, options.reader, [{ file: join(options.folder, pulledAs), pageId: pushed.id }])
+        }
         trace.pushed.push({ title: push.title, url: pushed.url })
         trace.actions.push(entry('push', `${push.title} from ${file} (${pushed.created ? 'created' : 'replaced'} through the Notion API)`, ticket.status, ticket.status))
         continue
