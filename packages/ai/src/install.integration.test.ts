@@ -182,8 +182,8 @@ describe('a project on the global install', () => {
     mkdirSync(bare)
     run('git', ['init', '-q', bare], scratch)
     writeAspira({ projectRoot: bare, board: BOARD, dryRun: false, log: () => {} })
-    // No kit on PATH: a machine with one installed would otherwise find it.
-    const noKit = { ...env, PATH: (process.env.PATH ?? '').split(':').filter((dir) => !existsSync(join(dir, 'kit'))).join(':') }
+    // No kit on PATH, nor in pnpm's global bin (KIT-76): a machine with one installed would otherwise find it.
+    const noKit = { ...env, PATH: (process.env.PATH ?? '').split(':').filter((dir) => !existsSync(join(dir, 'kit'))).join(':'), PNPM_HOME: join(scratch, 'no-pnpm') }
     for (const name of ['next', 'cleanup', 'worktree']) {
       const out = spawnSync('bash', [join(globalSkill(name), 'scripts', `${name}.sh`)], { cwd: bare, env: noKit, encoding: 'utf8' })
       const text = `${out.stdout}${out.stderr}`

@@ -3,7 +3,7 @@
 // no or unknown Type, Released or Dropped), fetches origin, then creates or reuses the worktree at
 // `<main checkout root>/.worktrees/<HANDLE>-<ID>` on the ticket's GIT-001 branch, links the main
 // checkout's .env.local files (and its git-ignored aspira.json, when the branch has none) into it, and
-// runs install and build where `kit init` would. Every git command runs as `git -C <main checkout root>`,
+// runs install (then `prisma generate` in a Prisma app) and build where `kit init` would. Every git command runs as `git -C <main checkout root>`,
 // so it behaves the same from inside another worktree.
 import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, realpathSync, symlinkSync } from 'node:fs'
@@ -39,8 +39,9 @@ export type WorktreeOptions = {
 /** A ticket the kit can place: its ID, Type row (handle and branch prefix) and working-folder name. */
 type Placed = { id: string; row: TicketTypeRow; folder: string }
 
-/** The package.json fields this command reads: only whether a build script exists. */
+/** The package.json fields this command reads: whether a build script exists, and whether the app uses Prisma. */
 const PackageScripts = z.object({ scripts: z.record(z.string(), z.unknown()).optional() })
+const PrismaFields = z.object({ dependencies: z.record(z.string(), z.unknown()).optional(), devDependencies: z.record(z.string(), z.unknown()).optional(), prisma: z.object({ schema: z.string().optional() }).optional() })
 
 /** Statuses whose card gets no worktree: the Playbook has no build step left and cleanup would remove it (Q5.7). */
 const FINISHED = ['Released', 'Dropped']
@@ -110,8 +111,20 @@ function hasBuildScript(dir: string): boolean {
   return parsed.success && typeof parsed.data.scripts?.build === 'string'
 }
 
+/**
+ * Whether `dir` has a Prisma schema (prisma/schema.prisma, or package.json "prisma.schema") and depends on prisma or
+ * @prisma/client: its generated client is not in git, so a fresh worktree's check and build fail until `prisma generate` runs (KIT-75).
+ */
+function usesPrisma(dir: string): boolean {
+  const parsed = PrismaFields.safeParse(readJson<unknown>(join(dir, 'package.json')))
+  if (!parsed.success) return false
+  const declared = { ...parsed.data.dependencies, ...parsed.data.devDependencies }
+  if (!('prisma' in declared) && !('@prisma/client' in declared)) return false
+  return existsSync(join(dir, parsed.data.prisma?.schema ?? join('prisma', 'schema.prisma')))
+}
+
 /** Run `<pm> <args>` in `dir`; true when it exits 0, else the failure and its output's tail are logged. */
-function runStep(log: Log, step: 'install' | 'build', dir: string, pm: string, args: readonly string[]): boolean {
+function runStep(log: Log, step: 'install' | 'generate' | 'build', dir: string, pm: string, args: readonly string[]): boolean {
   const command = `${pm} ${args.join(' ')}`
   log(`${step.padEnd(8)} ${dir}: ${command}`)
   const run = spawnSync(pm, args, { cwd: dir, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
@@ -303,6 +316,12 @@ export async function worktree(options: WorktreeOptions): Promise<number> {
   } else {
     const pm = packageManager(workDir)
     if (!runStep(log, 'install', workDir, pm, ['install'])) {
+      say(log, `the worktree stays at ${target} on ${branch}`)
+      return 1
+    }
+    // The generated Prisma client is not in git: generate it in the app, after the worktree's env and install, before the build (KIT-75).
+    const appDir = appRoot(worktreeProject, app)
+    if (usesPrisma(appDir) && !runStep(log, 'generate', appDir, pm, ['exec', 'prisma', 'generate'])) {
       say(log, `the worktree stays at ${target} on ${branch}`)
       return 1
     }

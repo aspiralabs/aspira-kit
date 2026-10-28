@@ -221,9 +221,9 @@ it('T43 runs only the global kit: the package installed under the project is nev
   expect(command(await captured())).toContain(join(override, 'scripts/local.ts'))
   expect(forced.stderr).toContain(`planner: PLANNER_AGENT_DIR is set: running kit source at ${override}, not the installed @aspiralabs/ai`)
   await expect(exec('bash', [launcher, 'local', spec, '--no-ticket'], { cwd: app, env: { ...env, PLANNER_AGENT_DIR: dir } })).rejects.toThrow('PLANNER_AGENT_DIR is not the planner folder of @aspiralabs/ai')
-  // No kit on PATH: a clear error naming kit update, and no $ASPIRA_KIT fallback.
+  // No kit on PATH or in pnpm's global bin (KIT-76): a clear error naming kit update, and no $ASPIRA_KIT fallback.
   const noKit = (process.env.PATH ?? '').split(':').filter((entry) => !existsSync(join(entry, 'kit'))).join(':')
-  await expect(exec('bash', [launcher, 'local', spec, '--no-ticket'], { cwd: app, env: { ...env, ASPIRA_KIT: dirname(dirname(dirname(root))), PATH: noKit } })).rejects.toThrow(/cannot find planner[^\n]*kit update/)
+  await expect(exec('bash', [launcher, 'local', spec, '--no-ticket'], { cwd: app, env: { ...env, ASPIRA_KIT: dirname(dirname(dirname(root))), PATH: noKit, PNPM_HOME: join(dir, 'no-pnpm') } })).rejects.toThrow(/cannot find planner[^\n]*kit update/)
 })
 
 it('keeps SKILL.md to mechanics: it names agent/instructions.md and copies none of its rules', async () => {
