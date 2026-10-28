@@ -27,15 +27,19 @@ const reportedUsageSchema = usageSchema.unwrap().omit({ phases: true, gap: true,
 /** Every number not measured, with the gap that says why. */
 const invalidUsage = (): NonNullable<Usage> => ({ tokens: null, wallMs: null, gap: 'invalid' })
 
+/** A reported object without its null fields: the report shape asks for null where the Agent tool reported nothing, which is the same as leaving the field out. */
+const withoutNulls = (raw: unknown): unknown => (raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? Object.fromEntries(Object.entries(raw).filter(([, value]) => value !== null)) : raw)
+
 /** One reported subagent entry: its numbers, or not measured with gap invalid when it fails the schema. The free-text label is dropped. */
 function readSubagent(raw: unknown): SubagentUsage {
-  const parsed = subagentUsageSchema.omit({ gap: true }).safeParse(raw)
+  const parsed = subagentUsageSchema.omit({ gap: true }).safeParse(withoutNulls(raw))
   return parsed.success ? parsed.data : { gap: 'invalid' }
 }
 
 /**
  * A step or fix report's usage as the run stores it: null when the session reported none; the
- * reported numbers when they validate (each subagent entry checked on its own); otherwise every
+ * reported numbers when they validate (each subagent entry checked on its own, a null field read as
+ * not reported, as the report shape asks); otherwise every
  * number not measured with gap 'invalid'. Never throws and never fails the report (KIT-19 F9, F22).
  */
 export function readStepUsage(raw: unknown): Usage {
@@ -44,7 +48,7 @@ export function readStepUsage(raw: unknown): Usage {
   if (!object.success) return invalidUsage()
   const { subagents, ...rest } = object.data
   if (subagents !== undefined && !Array.isArray(subagents)) return invalidUsage()
-  const parsed = reportedUsageSchema.safeParse(rest)
+  const parsed = reportedUsageSchema.safeParse(withoutNulls(rest))
   if (!parsed.success) return invalidUsage()
   return { ...parsed.data, ...(subagents === undefined ? {} : { subagents: subagents.map(readSubagent) }) }
 }
