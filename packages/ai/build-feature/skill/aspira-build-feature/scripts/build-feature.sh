@@ -146,7 +146,7 @@ client_root() {
     dir=$(dirname "$dir")
   done
 }
-usage() { die "usage: build-feature.sh local <ID> [--cloud] [--autonomous] [--run RUNID] [--force-run] [--finish] [--approve <spec-writer|planner> --reason "<why>"]. By default every step runs its skill in this session; with --cloud every step runs its skill's cloud agent. --autonomous (not with --cloud) skips the human gates: the groomer takes every question as recommended and confirms itself. --approve, typed by the human, accepts that step's output as it is now and goes on past it."; }
+usage() { die "usage: build-feature.sh local <ID> [--cloud] [--autonomous] [--run RUNID] [--force-run] [--finish] [--approve <spec-writer|planner> --reason \"<why>\"]. By default every step runs its skill in this session; with --cloud every step runs its skill's cloud agent. --autonomous (not with --cloud) skips the human gates: the groomer takes every question as recommended and confirms itself. --approve, typed by the human, accepts that step's output as it is now and goes on past it."; }
 cmd_local() {
   [ $# -ge 1 ] || usage
   local id=$1; shift
