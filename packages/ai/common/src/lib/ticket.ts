@@ -330,12 +330,13 @@ export type PullDecision = 'write' | 'keep' | 'conflict'
  * Whether a pulled page replaces the local file (F5). A gate row's `overwrite` pull always writes
  * (the page is the durable copy). A file the folder already has whose page has not changed since
  * the recorded pull is kept. A local file newer than its page is a conflict unless the pull is
- * forced. Everything else is written.
+ * forced or the file still holds exactly what the last pull wrote (`unchanged`, KIT-72: a newer
+ * mtime alone is no local edit). Everything else is written.
  */
-export function pullDecision(args: { exists: boolean; localModifiedAt?: string; recordedAt?: string; pageEditedAt: string; force?: boolean; overwrite?: boolean }): PullDecision {
+export function pullDecision(args: { exists: boolean; localModifiedAt?: string; recordedAt?: string; pageEditedAt: string; force?: boolean; overwrite?: boolean; unchanged?: boolean }): PullDecision {
   if (!args.exists || args.overwrite === true) return 'write'
   if (args.recordedAt !== undefined && args.recordedAt !== '' && Date.parse(args.recordedAt) >= Date.parse(args.pageEditedAt)) return 'keep'
-  if (args.force !== true && args.localModifiedAt !== undefined && Date.parse(args.localModifiedAt) > Date.parse(args.pageEditedAt)) return 'conflict'
+  if (args.force !== true && args.unchanged !== true && args.localModifiedAt !== undefined && Date.parse(args.localModifiedAt) > Date.parse(args.pageEditedAt)) return 'conflict'
   return 'write'
 }
 
