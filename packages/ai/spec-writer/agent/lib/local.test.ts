@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('./repository.ts', () => ({ repository: async () => ({ instructions: '', packet: () => 'source.ts:1: evidence', gaps: [], files: new Map(), commit: 'abc', dirty: false, tools: {} }) }))
 import { KnowledgeBlocked } from './local-knowledge.ts'
 import { runLocal } from './local.ts'
-import { writeSnapshot } from './snapshot.test-helper.ts'
+import { SNAPSHOT_PAGES, writeSnapshot } from './snapshot.test-helper.ts'
 
 const draft = '# Save items\n## Intent\nLet people save items.\n## Acceptance criteria\n### Features\n- [ ] F1: A saved item appears in the list.\n'
 const review = (findings: unknown[] = []) => ({ facts: [], findings, checks: [{ rule: 'REV-001', evidence: 'spec: Save items' }], uiEvidence: [], gaps: [] })
@@ -84,6 +84,28 @@ it('runs explore, draft and the review one stage at a time in the session, then 
   expect(trace.calls).toHaveLength(11)
   expect(JSON.parse(await readFile(join(dir, 'spec.reviewed/trace/review.json'), 'utf8'))).toMatchObject({ mode: 'local', status: 'ready' })
   await expect(stat(join(dir, 'spec.reviewed.local'))).rejects.toThrow()
+})
+
+it('asks a lens for its still-missing rule rows as its own task after the send-back, beside the earlier outputs (KIT-81)', async () => {
+  const { dir, input } = await setup()
+  await writeSnapshot(input.guidelinesPath, [...SNAPSHOT_PAGES, { id: '33333333-3333-3333-3333-333333333333', title: 'Data Rules', url: 'https://www.notion.so/Data-Rules-33333333333333333333333333333333', markdown: 'REV-007 Name every column' }])
+  const explore = await pending(input)
+  await writeFile(explore.tasks[0]!.output, JSON.stringify({ facts: [], constraints: [], questions: [], uiEvidence: [], gaps: [] }))
+  const drafting = await pending(input)
+  await writeFile(drafting.tasks[0]!.output, JSON.stringify({ spec: draft, assumptions: [] }))
+  const research = await pending(input)
+  await writeFile(research.tasks[0]!.output, JSON.stringify(review()))
+  const specialists = await pending(input)
+  for (const task of specialists.tasks) await writeFile(task.output, JSON.stringify(review()))
+  const sentBack = await pending(input)
+  expect(sentBack.tasks.map((t) => t.output)).toEqual([join(dir, 'spec.reviewed.local/outputs/data.sent-back.json')])
+  await writeFile(sentBack.tasks[0]!.output, JSON.stringify(review()))
+  const asked = await pending(input)
+  expect(asked.tasks.map((t) => t.output)).toEqual([join(dir, 'spec.reviewed.local/outputs/data.missing-rules.json')])
+  expect(await readFile(asked.tasks[0]!.prompt, 'utf8')).toContain('YOUR OUTPUT HAS NO CHECKS ROW FOR: REV-007.')
+  await writeFile(asked.tasks[0]!.output, JSON.stringify({ ...review(), checks: [{ rule: 'REV-007', evidence: 'Not applicable: the spec adds no column.' }] }))
+  const synthesis = await pending(input)
+  expect(synthesis.stage).toBe('reconciliation')
 })
 
 it('exports an incomplete report with --finish and refuses to resume after the idea changes', async () => {

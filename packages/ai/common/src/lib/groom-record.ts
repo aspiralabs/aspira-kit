@@ -34,11 +34,13 @@ const singleLine = z
 export const factSchema = z.object({
   path: z.string().min(1).refine(allowedPath, 'not a path the repository tools read'),
   line: z.number().int().positive(),
+  // The page shows the quote in backticks on one line: a quote that spans lines or holds backticks
+  // is normalized (backticks dropped, whitespace collapsed) rather than sent back for a rewrite.
   quote: z
     .string()
     .max(200)
-    .refine((value) => !value.includes('\n') && !value.includes('`'), 'one line, no backticks')
-    .refine((value) => !GROOM_LINE_PREFIXES.some((prefix) => value.startsWith(prefix)), 'must not start like a Grooming Decisions line')
+    .transform((value) => value.replace(/`/g, '').replace(/\s+/g, ' ').trim())
+    .pipe(z.string().refine((value) => !GROOM_LINE_PREFIXES.some((prefix) => value.startsWith(prefix)), 'must not start like a Grooming Decisions line'))
     .optional(),
 })
 export type Fact = z.infer<typeof factSchema>

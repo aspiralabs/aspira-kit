@@ -43,3 +43,34 @@ describe('writeArtifacts with an own-directory marker', () => {
     await expect(writeArtifacts(output, { 'trace/review.json': '{}\n' })).rejects.toThrow('Refusing to replace a directory without trace/review.json')
   })
 })
+
+// KIT-85: the --local session writes trace/session-usage.json into the export before the export call.
+describe('writeArtifacts carries the session usage report', () => {
+  const usage = '{"runId":"run-1","subagents":[]}\n'
+
+  it('exports into a folder that holds only the session usage report, and keeps the report', async () => {
+    const output = join(root, 'plan.review')
+    await mkdir(join(output, 'trace'), { recursive: true })
+    await writeFile(join(output, 'trace/session-usage.json'), usage)
+    await writeArtifacts(output, { 'trace/review.json': '{}\n' })
+    expect(await readFile(join(output, 'trace/session-usage.json'), 'utf8')).toBe(usage)
+    expect(await readFile(join(output, 'trace/review.json'), 'utf8')).toBe('{}\n')
+  })
+
+  it('on a rerun keeps the report in the new export, not only in trace/history', async () => {
+    const output = join(root, 'plan.review')
+    await writeArtifacts(output, { 'trace/review.json': '{"run":1}\n' })
+    await writeFile(join(output, 'trace/session-usage.json'), usage)
+    await writeArtifacts(output, { 'trace/review.json': '{"run":2}\n' })
+    expect(await readFile(join(output, 'trace/session-usage.json'), 'utf8')).toBe(usage)
+    expect(await readFile(join(output, 'trace/review.json'), 'utf8')).toBe('{"run":2}\n')
+  })
+
+  it('still refuses a folder that holds a person\'s file beside the report', async () => {
+    const output = join(root, 'plan.review')
+    await mkdir(join(output, 'trace'), { recursive: true })
+    await writeFile(join(output, 'trace/session-usage.json'), usage)
+    await writeFile(join(output, 'notes.md'), 'a person\'s notes\n')
+    await expect(writeArtifacts(output, { 'trace/review.json': '{}\n' })).rejects.toThrow('Refusing to replace a directory without trace/review.json')
+  })
+})

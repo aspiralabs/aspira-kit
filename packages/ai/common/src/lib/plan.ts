@@ -82,22 +82,45 @@ export function touchesUi(plan: { tasks: { changes: { path: string }[] }[] }): b
 }
 
 /**
+ * A model's question with the decision id it copied from a decisions file taken off (`D1 — `, `D1: `,
+ * even twice over), and that id (KIT-90): the id is how a rerun's decision finds the author's tick.
+ */
+export function carriedId(question: string): { id: string | null; question: string } {
+  let id: string | null = null
+  let rest = question.trim()
+  for (let match = rest.match(/^(D\d+)\s*(?:—|–|:|-)\s*(\S.*)$/s); match !== null; match = rest.match(/^(D\d+)\s*(?:—|–|:|-)\s*(\S.*)$/s)) {
+    id ??= match[1]!
+    rest = match[2]!.trim()
+  }
+  return { id, question: rest }
+}
+
+/**
  * Research's and planning's decisions as one list, D1, D2, ..., the same question once, with the
- * author's ticked answers applied. With `takeRecommended` (F10), every decision still open after the
+ * author's ticked answers applied. A tick is matched by the decision id the model carried from the
+ * previous decisions file, when the ticked option is one of the decision's options, else by the
+ * question (KIT-90). With `takeRecommended` (F10), every decision still open after the
  * author's ticks are applied is taken as the agent's recommended option instead of waiting on the
  * author; a tick the agent made itself is ignored by `applyAnswers`, so a rerun never records it as
  * the author's.
  */
 export function mergeDecisions(lists: readonly (readonly Decision[])[], answers: readonly Answer[] = [], takeRecommended = false): DecisionRecord[] {
   const seen = new Set<string>()
-  const merged: DecisionRecord[] = []
-  for (const decision of lists.flat()) {
-    const key = normalizeQuestion(decision.question)
-    if (seen.has(key)) continue
+  const merged: { decision: DecisionRecord; carried: string | null }[] = []
+  for (const raw of lists.flat()) {
+    const { id: carried, question } = carriedId(raw.question)
+    const key = normalizeQuestion(question)
+    if (seen.has(key) || (carried !== null && merged.some((entry) => entry.carried === carried))) continue
     seen.add(key)
-    merged.push({ ...decision, id: `D${merged.length + 1}`, decidedBy: 'open', answer: null })
+    merged.push({ decision: { ...raw, question, id: `D${merged.length + 1}`, decidedBy: 'open', answer: null }, carried })
   }
-  const applied = applyAnswers(merged, answers)
+  const option = (decision: Decision, text: string) => decision.options.find((item) => normalizeQuestion(item) === normalizeQuestion(text))
+  const applied = merged.map(({ decision, carried }) => {
+    const byId = answers.find((answer) => answer.id === carried && option(decision, answer.answer) !== undefined)
+    const [after] = applyAnswers([decision], byId === undefined ? answers : [{ ...byId, question: decision.question }])
+    // The answer as the option is written, so the rewritten decisions file shows the tick (KIT-90).
+    return after!.answer === null ? after! : { ...after!, answer: option(after!, after!.answer) ?? after!.answer }
+  })
   return takeRecommended ? applied.map((decision) => (decision.decidedBy === 'open' ? takenDecision(decision.id, decision) : decision)) : applied
 }
 

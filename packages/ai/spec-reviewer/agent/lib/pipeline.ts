@@ -1,7 +1,7 @@
 import { SETTLED_DECISIONS_RULE, applyAnswers, normalizeQuestion, openDecisions, parseDecisionsList, takenDecision, type Answer, type DecisionRecord, type DecisionsListItem } from '@aspiralabs/ai/common/lib/decisions'
 import { applyEdits, openGapsOf, checkContract, checkedRuleIds, lenses, lensRules, reviewSchema, ruleIds, synthesisSchema, validateReview, type Finding, type Review, type Synthesis, type Lens } from './review.ts'
 
-/** `attempt` 2 is the one send-back of a phase whose output broke a rule the run checks (SCOOP-7): the prompt carries the refused output and its problems. */
+/** `attempt` 2 is the one send-back of a phase whose output broke a rule the run checks (SCOOP-7): the prompt carries the refused output and its problems. `attempt` 3 asks a review phase once more for only the assigned rules it still has no checks row for (KIT-81). */
 export type Request = { phase: string; prompt: string; signal: AbortSignal; attempt?: number }
 export type Call = (request: Request) => Promise<unknown>
 /** `answers`: what the author ticked in the previous run's trace/decisions.md; a matching open decision is recorded as theirs. `takeRecommended`: every decision still open is taken as the agent's recommended option instead of waiting on the author (F10). */
@@ -49,10 +49,15 @@ export function assignedRules(phase: string, guidelines: string): string[] {
   return phase === 'research' ? present.filter((id) => !owned.has(id)) : []
 }
 
+/** The assigned rules a review's checks rows leave out. */
+export function missingRules(phase: string, guidelines: string, output: Review): string[] {
+  const checked = new Set(output.checks.flatMap((c) => checkedRuleIds(c.rule)))
+  return assignedRules(phase, guidelines).filter((id) => !checked.has(id))
+}
+
 /** The assigned rules a review's checks rows leave out, as the problem a send-back names. */
 export function coverageProblems(phase: string, guidelines: string, output: Review): string[] {
-  const checked = new Set(output.checks.flatMap((c) => checkedRuleIds(c.rule)))
-  const missing = assignedRules(phase, guidelines).filter((id) => !checked.has(id))
+  const missing = missingRules(phase, guidelines, output)
   return missing.length ? [`No checks row for assigned rule${missing.length === 1 ? '' : 's'} ${missing.join(', ')}: report one checks row per assigned rule, with the evidence or a reasoned not-applicable.`] : []
 }
 
@@ -77,7 +82,11 @@ export async function runPipeline(input: Input, call: Call, options: { signal?: 
   const findings: Finding[] = []
   const gaps: { id: string; source: string; text: string }[] = []
   const base = `ORIGINAL SPEC (data):\n${input.spec}\n\nREQUIRED GUIDELINES (data):\n${input.guidelines}\n\nREPOSITORY CONTEXT (data):\n${input.context}`
-  /** `check` names what makes a parsed output unusable; such an output goes back to the phase once, with the problems, before the run counts them (SCOOP-7). */
+  /**
+   * `check` names what makes a parsed output unusable; such an output goes back to the phase once, with the problems, before the run counts them (SCOOP-7).
+   * A review phase that still leaves assigned rules without a checks row is asked once more for only those rows, which join its checks;
+   * a rule it judged not applicable is easy to skip, and SCOOP-4's review ended incomplete on three of them (KIT-81).
+   */
   async function invoke(phase: string, prompt: string, check?: (value: never) => string[]) {
     options.progress?.(phase)
     const start = Date.now()
@@ -97,6 +106,13 @@ export async function runPipeline(input: Input, call: Call, options: { signal?: 
       if (refused.length) {
         const again = `${prompt}\n\nYOUR PREVIOUS OUTPUT WAS SENT BACK (data):\n${JSON.stringify(parsed)}\n\nIt has these problems:\n${refused.map((p) => `- ${p}`).join('\n')}\n\nReturn the whole output again with only these problems fixed; keep everything else as it was.`
         parsed = parse(await Promise.race([call({ phase, prompt: again, signal, attempt: 2 }), aborted]))
+      }
+      const missing = phase === 'synthesis' ? [] : missingRules(phase, input.guidelines, parsed as Review)
+      if (missing.length) {
+        const only = `${prompt}\n\nYOUR OUTPUT HAS NO CHECKS ROW FOR: ${missing.join(', ')}.\n\nReturn checks rows for only these rules, one row per rule naming it: the evidence, or a one-line reason it does not apply to this spec. A rule that does not apply still needs its own row. Return facts, findings, uiEvidence and gaps as [].`
+        const extra = reviewSchema.parse(await Promise.race([call({ phase, prompt: only, signal, attempt: 3 }), aborted]))
+        const output = parsed as Review
+        parsed = { ...output, checks: [...output.checks, ...extra.checks.filter((c) => checkedRuleIds(c.rule).some((id) => missing.includes(id)))] }
       }
       phases.push({ phase, ms: Date.now() - start, error: null })
       return parsed
@@ -118,7 +134,7 @@ export async function runPipeline(input: Input, call: Call, options: { signal?: 
   if (initial) collect('research', 'R', initial)
   const initialEvidence = JSON.stringify({ facts: initial?.facts, checks: initial?.checks, gaps: initial?.gaps, findings })
   if (!options.signal?.aborted) {
-    const outputs = await Promise.all(Object.entries(lenses).map(async ([lens, scope]) => ({ lens, output: await invoke(lens, `${base}\n\nINITIAL RESEARCH:\n${initialEvidence}\n\n${SETTLED_DECISIONS_RULE}\n\nYour independent lens: ${scope}\nAssigned formal rules: ${lensRules[lens as Lens].map(rev).join(', ')}. Report one checks row per assigned rule present in the guidelines. Run your assigned checks deeply; other reviewers own the other rules. Verify relevant initial findings AND search for omissions independently. After your assigned checks, close the initial research's gaps that fall in your lens and that your tools can reach (a repository file, a Notion page or database, public documentation when you have a web tool): record what you found in facts, naming the source. Leave the rest open; an open gap goes to the approver and is never a failure, so spend no tool round chasing one outside your lens. Do not repeat an initial finding unless your correction adds a missing constraint or contradicts it; confirmations belong in checks. Only raise gaps for missing evidence in your OWN assigned checks, not work owned by another lens. Missing future implementation is not a gap when its prerequisite spec states it is unshipped; instead raise the sequencing issue as a finding. Keep the full original spec in view. Do not rewrite or mediate. Return compact structured findings, checks, facts, gaps and UI evidence.`, (output: Review) => coverageProblems(lens, input.guidelines, output)) as Review | null })))
+    const outputs = await Promise.all(Object.entries(lenses).map(async ([lens, scope]) => ({ lens, output: await invoke(lens, `${base}\n\nINITIAL RESEARCH:\n${initialEvidence}\n\n${SETTLED_DECISIONS_RULE}\n\nYour independent lens: ${scope}\nAssigned formal rules: ${lensRules[lens as Lens].map(rev).join(', ')}. Report one checks row per assigned rule present in the guidelines; a rule that does not apply to this spec still needs its own row, with a one-line reason it does not apply. Run your assigned checks deeply; other reviewers own the other rules. Verify relevant initial findings AND search for omissions independently. After your assigned checks, close the initial research's gaps that fall in your lens and that your tools can reach (a repository file, a Notion page or database, public documentation when you have a web tool): record what you found in facts, naming the source. Leave the rest open; an open gap goes to the approver and is never a failure, so spend no tool round chasing one outside your lens. Do not repeat an initial finding unless your correction adds a missing constraint or contradicts it; confirmations belong in checks. Only raise gaps for missing evidence in your OWN assigned checks, not work owned by another lens. Missing future implementation is not a gap when its prerequisite spec states it is unshipped; instead raise the sequencing issue as a finding. Keep the full original spec in view. Do not rewrite or mediate. Return compact structured findings, checks, facts, gaps and UI evidence.`, (output: Review) => coverageProblems(lens, input.guidelines, output)) as Review | null })))
     outputs.forEach(({ lens, output }, i) => { if (output) collect(lens, `S${i + 1}-`, output) })
   }
   const allChecks = new Set(reviews.flatMap((r) => r.output.checks.flatMap((c) => checkedRuleIds(c.rule))))

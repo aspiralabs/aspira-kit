@@ -1,7 +1,7 @@
 ---
 name: aspira-build-feature
 description: Run the AI-DLC pipeline end to end for a Feature Board ticket, from wherever it is to a reviewed and merged PR, by stepping the official build-feature driver and running each stage it prints as a subagent of this Claude Code session. It is the one /aspira-* skill that orchestrates other skills instead of launching an agent. Use for /aspira-build-feature or requests to build a feature, run the whole AI-DLC on a ticket, or take a ticket from idea to PR.
-argument-hint: <ticket ID | Notion URL> [--cloud] [--autonomous] [--run RUNID] [--force-run] [--finish]
+argument-hint: <ticket ID | Notion URL> [--cloud] [--autonomous] [--run RUNID] [--force-run] [--finish] [--approve <step> --reason "<why>"]
 model: fable
 disable-model-invocation: true
 ---
@@ -15,8 +15,10 @@ Two modes, chosen by the invocation and kept for the whole run: by default every
 **Client harness** (an `aspira.json` with `repos`, KIT-68): start at the client root or inside one of its repos; at the root the card's Area tags pick the repo. With `statusFlow: false` the run moves no Status, sets no Dev and writes no release row, and with `pullRequest: false` it pushes no branch and opens no PR. The ticket folder and run state live at the client root, so a stopped run resumes by running the same command again. `--cloud` and `--autonomous` are refused (client runs are in session only); `--no-comment` is accepted.
 
 ```bash
-<skill-dir>/scripts/build-feature.sh local <ticket ID | Notion URL> [--cloud] [--autonomous] [--run RUNID] [--force-run]
+<skill-dir>/scripts/build-feature.sh local <ticket ID | Notion URL> [--cloud] [--autonomous] [--run RUNID] [--force-run] [--approve <step> --reason "<why>"]
 ```
+
+**Author approval** (KIT-83): `--approve spec-writer` or `--approve planner`, with `--reason "<why>"`, is the author accepting that step's output as it is now (`spec.reviewed/spec.reviewed.md` or `plan.review/plan.reviewed.md`) although its review ended incomplete or needs-author. The driver records who (the git user), when, why and the output's sha256 in `.work/<id>-<slug>/.local/author-approvals.json`, makes the move the step's ready run would have made (In Progress: Spec to In Review: Spec, In Progress: Plan to In Review: Plan) and goes on with the next step; the planner plans from an approved spec despite its review banner, and the Build Summary names the approval. It holds only while that file is unchanged. It is the human's word, like the run-start approval (KIT-20): pass `--approve` and `--reason` only when the human typed them in this invocation, with their exact words, on a new run (not with `--run` or `--finish`; with `--force-run` when a run is still in progress), and never add them, write that file or edit a review banner yourself.
 
 Pass `--cloud` and `--autonomous` exactly when the human did. The run works the ticket in its own isolated git worktree under `.worktrees/` (its own database branch, dev server and webhooks; visual verify runs `kit dev` there, and a failed teardown after the merge is a follow-up: run `kit cleanup`); once the driver names it (a `worktree` stage), run every later command, including this one, from inside it.
 

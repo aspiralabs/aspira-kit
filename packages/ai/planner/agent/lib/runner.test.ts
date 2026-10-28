@@ -3,10 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { ToolSet } from 'ai'
+import { recordAuthorApproval, sha256Of } from '@aspiralabs/ai/common/lib/author-approval'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 
 const retention = { question: 'Choose retention duration before implementing deletion?', options: ['Keep forever', 'Delete after 30 days'], recommended: 'Keep forever', reasoning: 'nothing else in the app expires', whyYours: 'storage cost is a product choice' }
-const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [] as unknown[], close: vi.fn(), areas: [] as { name: string; files: string[] }[], explorers: 0, prompts: [] as string[] }))
+const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, ruleChecks: false, refusals: [] as unknown[], close: vi.fn(), areas: [] as { name: string; files: string[] }[], explorers: 0, prompts: [] as string[] }))
 vi.mock('@aspiralabs/ai/common/lib/repository', () => ({ repository: async () => ({ files, instructions: '', packet: () => 'src/items.ts:1: existing save', packetIndex: () => 'SOURCE ALREADY READ (index)', areas: () => state.areas, gaps: [], commit: 'abc', dirty: false, tools: { read_files: {} } }), allowedPath: (path: string) => !path.includes('.env') }))
 vi.mock('@aspiralabs/ai/common/lib/mcp', () => ({ connectReadTools: async () => ({ tools: state.guidelineTool ? { notion__read_guideline: { execute: async () => ({ content: [{ type: 'text', text: JSON.stringify({ source: 'https://www.notion.so/topic', markdown: 'TEST-001 Write the failing test first.' }) }] }) } } : {}, reads: [], sources: [], close: state.close }) }))
 vi.mock('ai', async (original) => {
@@ -28,6 +29,12 @@ vi.mock('ai', async (original) => {
     if (args.tools?.submit_exploration) {
       state.explorers++
       await args.tools.submit_exploration.execute!({ facts: [`explored fact ${state.explorers}`], touches: [{ path: 'src/items.ts', operation: 'modify', symbols: ['save'], lines: '1-1', why: 'persist' }], gaps: [] }, { toolCallId: 'explore', messages: [], context: {} })
+      return {}
+    }
+    // KIT-81: the ask for still-missing rule checks submits checks only; without ruleChecks it writes none.
+    if (args.tools?.submit_checks) {
+      if (state.ruleChecks) await args.tools.submit_checks.execute!({ checks: [{ rule: 'REV-002', evidence: 'Not applicable: the plan adds no route.' }] }, { toolCallId: 'checks', messages: [], context: {} })
+      else await args.tools.submit_checks.execute!({ checks: [] }, { toolCallId: 'checks', messages: [], context: {} })
       return {}
     }
     // KIT-54: planning reads through tools and submits the plan with submit_plan.
@@ -67,7 +74,7 @@ vi.mock('ai', async (original) => {
 import { CLOUD_RESEARCH_TOOLS, RESEARCH_RULE } from '@aspiralabs/ai/common/lib/research-rule'
 import { runPlan } from './runner.ts'
 
-beforeEach(() => { Object.assign(state, { failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [], areas: [], explorers: 0, prompts: [] }); state.close.mockClear() })
+beforeEach(() => { Object.assign(state, { failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, ruleChecks: false, refusals: [], areas: [], explorers: 0, prompts: [] }); state.close.mockClear() })
 async function input() {
   const dir = await mkdtemp(join(tmpdir(), 'planner-test-'))
   const specPath = join(dir, 'spec.reviewed.md')
@@ -144,6 +151,19 @@ it('requires complete guidelines and rejects unresolved reviewed specs', async (
   await expect(runPlan(args)).rejects.toThrow('Resolve the spec review')
 })
 
+it('plans from an unresolved reviewed spec the author approved, and only that exact spec (KIT-84)', async () => {
+  const args = await input()
+  const review = join(args.repoPath, 'spec.reviewed')
+  await mkdir(review)
+  const specPath = join(review, 'spec.reviewed.md')
+  const banner = '> Review status: **incomplete**\n\n' + spec
+  await writeFile(specPath, banner)
+  await recordAuthorApproval(args.repoPath, { step: 'spec-writer', name: 'David', at: '2026-10-28T00:00:00Z', reason: 'incomplete only from KIT-81', runId: 'run-1', output: 'spec.reviewed/spec.reviewed.md', sha256: sha256Of(banner) })
+  expect((await runPlan({ ...args, specPath })).status).toBe('ready')
+  await writeFile(specPath, banner + '\nAn edit after the approval.\n')
+  await expect(runPlan({ ...args, specPath })).rejects.toThrow('Resolve the spec review')
+})
+
 it('puts planning output beside a standard spec review directory', async () => {
   const args = await input()
   const review = join(args.repoPath, 'spec.reviewed')
@@ -170,8 +190,12 @@ it('keeps product decisions explicit and blocks cancelled runs', async () => {
   expect(text).toContain('## D1 — Choose retention duration before implementing deletion?\n\n- [ ] Keep forever _(recommended: nothing else in the app expires)_\n- [ ] Delete after 30 days\n\nWhy it is yours to decide: storage cost is a product choice')
   // The author ticks an option and reruns the planner: the decision is theirs and the plan is ready.
   await writeFile(decisionsFile, text.replace('- [ ] Delete after 30 days', '- [x] Delete after 30 days'))
+  state.prompts.length = 0
   const again = await runPlan(args)
   expect(again.status).toBe('ready')
+  // KIT-89: research and planning were given the author's answer as settled input.
+  const settled = '- D1 — Choose retention duration before implementing deletion?\n  The author\'s answer: Delete after 30 days'
+  expect(state.prompts.filter((prompt) => prompt.includes(settled)).length).toBeGreaterThanOrEqual(2)
   expect(again.decisions).toEqual([{ ...retention, id: 'D1', decidedBy: 'author', answer: 'Delete after 30 days' }])
   const review = JSON.parse(await readFile(join(again.dir, 'trace/review.json'), 'utf8'))
   expect(review.decisions).toEqual([expect.objectContaining({ id: 'D1', decidedBy: 'author', answer: 'Delete after 30 days' })])
@@ -227,6 +251,20 @@ it('hands a plan that fails its checks back for a correction pass and keeps the 
   expect(prompts[2]).toContain('PLAN CHECKS:\n- Implementation P2 needs an earlier test dependency for F1')
   const trace = JSON.parse(await readFile(join(result.dir, 'trace/calls.json'), 'utf8'))
   expect(trace.calls.map((call: { phase: string }) => call.phase)).toEqual(['research', 'planning', 'repair-1'])
+})
+
+it('asks planning once for only the rules still uncovered after the correction passes; an answer without them stays incomplete (KIT-81)', async () => {
+  for (const answers of [true, false]) {
+    state.ruleChecks = answers
+    const args = await input()
+    await writeFile(args.guidelinesPath, 'REV-001 Inspect source evidence\nREV-002 Version every route')
+    const result = await runPlan(args)
+    expect({ status: result.status, problems: result.problems }).toEqual(answers ? { status: 'ready', problems: [] } : { status: 'incomplete', problems: ['Uncovered guideline: REV-002'] })
+    const trace = JSON.parse(await readFile(join(result.dir, 'trace/calls.json'), 'utf8'))
+    const asked = trace.calls.filter((call: { phase: string }) => call.phase === 'rule-checks')
+    expect(asked).toHaveLength(1)
+    expect(asked[0].prompt).toContain('no check for these required rules: REV-002.')
+  }
 })
 
 it('stops correcting when a pass does not improve the plan, after at most two passes', async () => {

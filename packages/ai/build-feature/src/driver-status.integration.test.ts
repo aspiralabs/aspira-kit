@@ -102,10 +102,12 @@ describe('T16 F5: In Review: Spec and the rows with no command', () => {
     expect({ command: commandOf(step), movesBefore, move: moveOf(after.stage) }).toEqual({ command: '/aspira-spec-writer KIT-11 --take-recommended', movesBefore: 0, move: { from: 'In Review: Spec', to: 'Ready: Spec' } })
   }, SLOW)
 
-  it('prints a Ready move, not a step, in Shortlist and In Review: Plan', async () => {
+  it('prints a Ready move, not a step, in Shortlist and in In Review: Plan on a ready plan', async () => {
     const outcomes = []
     for (const status of ['Shortlist', 'In Review: Plan']) {
       const h = await project({ status })
+      // KIT-87: In Review: Plan moves on only when the planner's last export is ready; otherwise the planner reruns.
+      if (status === 'In Review: Plan') await writeStepExport(h.folder, h.repo, 'planner', 'ready')
       const result = await h.advance(returnOn('move'), await h.start())
       outcomes.push({ status, move: moveOf(result.stage), steps: ofKind(h.stages, 'step').length })
     }

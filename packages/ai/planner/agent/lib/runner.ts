@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { generateText, stepCountIs, tool, type ModelMessage, type ToolSet } from 'ai'
 import { gateway, structuredWithTools } from '@aspiralabs/ai/common/lib/gateway'
 import { writeArtifacts } from '@aspiralabs/ai/common/lib/artifacts'
+import { approvalOf } from '@aspiralabs/ai/common/lib/author-approval'
 import { openDecisions } from '@aspiralabs/ai/common/lib/decisions'
 import { connectReadTools } from '@aspiralabs/ai/common/lib/mcp'
 import { modelTrace } from '@aspiralabs/ai/common/lib/model-trace'
@@ -50,12 +51,19 @@ export function outputDirFor(input: Pick<PlanInput, 'specPath' | 'outputDir'>): 
   return resolve(input.outputDir ?? resolve(ticketFolderFor(input.specPath), 'plan.review'))
 }
 
-/** Refuse a spec the planner cannot plan from: not a business spec, or a review still awaiting resolution. */
-export function assertPlannableSpec(spec: string): void {
+/**
+ * Refuse a spec the planner cannot plan from: not a business spec, or a review still awaiting resolution.
+ * `approved`: the author approved this exact spec through build-feature's --approve spec-writer (KIT-84),
+ * which stands in for a ready review; the banner is never edited to get past this.
+ */
+export function assertPlannableSpec(spec: string, approved = false): void {
   const invalidSpec = checkBusinessSpec(spec)
   if (invalidSpec.length) throw new Error(`Invalid business spec: ${invalidSpec.join('; ')}`)
-  if (/Review status:\s*\*\*(?:incomplete|needs-author)\*\*/i.test(spec)) throw new Error('Resolve the spec review before planning implementation')
+  if (!approved && /Review status:\s*\*\*(?:incomplete|needs-author)\*\*/i.test(spec)) throw new Error('Resolve the spec review before planning implementation, or approve it: /aspira-build-feature <ID> --approve spec-writer --reason "<why>"')
 }
+
+/** Whether the author approved this spec, as it is now, for the ticket folder it sits in (KIT-84). */
+export const specApproved = async (specPath: string, spec: string): Promise<boolean> => (await approvalOf(ticketFolderFor(specPath), 'spec-writer', spec)) !== null
 
 /** Resolve the output directory, read the spec, guidelines and repository, and refuse inputs the planner cannot plan from. */
 export async function preparePlan(input: PlanInput, signal: AbortSignal): Promise<PreparedPlan> {
@@ -65,7 +73,7 @@ export async function preparePlan(input: PlanInput, signal: AbortSignal): Promis
     if (!path || (!path.startsWith('../') && path !== '..')) throw new Error('Output directory must not contain the source spec or guidelines')
   }
   const [spec, guidelines, repo] = await Promise.all([readFile(resolve(input.specPath), 'utf8'), readFile(resolve(input.guidelinesPath), 'utf8'), repository(input.repoPath, signal)])
-  assertPlannableSpec(spec)
+  assertPlannableSpec(spec, await specApproved(input.specPath, spec))
   if (!guidelines.trim() || /TRUNCATED by the Notion API/i.test(guidelines)) throw new Error('A complete required-guidelines snapshot is required')
   const uiRequired = input.uiRequired ?? /\b(?:UI|screen|page|card|button|mobile|component|navigation)\b/i.test(spec)
   // The spec's path as commits cite it: repository-relative when the spec is inside the repository.
@@ -128,9 +136,22 @@ export function researchGapsRefusal(gaps: string[], turnsLeft: number, guideline
   return `Not accepted: you have ${turnsLeft} turns left, so read these now instead of listing them as gaps.${pages} Kit configuration is under node_modules/@aspiralabs/config/ and readable with read_files. Then submit again, keeping as gaps only what you tried and failed to read:\n${gaps.map((gap) => `- ${gap}`).join('\n')}`
 }
 
-/** The research phase's user prompt, with the spec reviewer's reusable facts (reviewFacts/renderFactsBlock) appended when there are any. */
-export function researchPrompt(context: string, instructions: string = researchInstructions, factsBlock: string = '', explorations: string = ''): string {
-  return `${context}${explorations}\n\n${instructions}${factsBlock}`
+/**
+ * The author's answers from the previous plan's trace/decisions.md, as settled input for research and
+ * planning (KIT-89, as the spec reviewer treats ## Decisions, KIT-36). The agent's own ticks are not
+ * the author's and stay out. A decision listed again keeps its id in front, so the export applies the
+ * tick by id (mergeDecisions, KIT-90).
+ */
+export function authorDecisionsSection(answers: readonly Answer[]): string {
+  const settled = answers.filter((answer) => answer.takenByAgent !== true)
+  if (!settled.length) return ''
+  const lines = settled.map((answer) => `- ${answer.id} — ${answer.question}\n  The author's answer: ${answer.answer}`)
+  return `\n\nAUTHOR DECISIONS (answered by the author in the previous plan's trace/decisions.md; settled input):\n${lines.join('\n')}\nPlan the author's answer to each, never another option, even where a recommended option says otherwise, and never raise one again as an open question under these or other words. List each in decisions with its question exactly as written here, its id in front, and the author's answer, word for word, among its options, so the plan records it as the author's.`
+}
+
+/** The research phase's user prompt, with the spec reviewer's reusable facts (reviewFacts/renderFactsBlock) appended when there are any, and the author's answered decisions. */
+export function researchPrompt(context: string, instructions: string = researchInstructions, factsBlock: string = '', explorations: string = '', answers: readonly Answer[] = []): string {
+  return `${context}${explorations}${authorDecisionsSection(answers)}\n\n${instructions}${factsBlock}`
 }
 
 /**
@@ -144,14 +165,14 @@ export function raisedDecisionsSection(research: Pick<Research, 'decisions'>): s
   return `\n\nDECISIONS RESEARCH ALREADY RAISED:\n${lines.join('\n')}\nDo not raise any of these again, under these or other words; plan the recommended option of each, and say so in the task that depends on it. Raise only a product question none of them covers.`
 }
 
-/** The planning phase's user prompt, over the submitted research. */
-export function planningPrompt(context: string, research: Research, instructions: string = planningInstructions, pages: GuidelinePage[] = []): string {
-  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}${raisedDecisionsSection(research)}\n\n${instructions}`
+/** The planning phase's user prompt, over the submitted research and the author's answered decisions. */
+export function planningPrompt(context: string, research: Research, instructions: string = planningInstructions, pages: GuidelinePage[] = [], answers: readonly Answer[] = []): string {
+  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}${raisedDecisionsSection(research)}${authorDecisionsSection(answers)}\n\n${instructions}`
 }
 
 /** The planning prompt for a correction pass: the previous plan and the checks it failed. */
-export function repairPrompt(context: string, research: Research, plan: Plan, issues: string[], instructions: string = repairInstructions, pages: GuidelinePage[] = []): string {
-  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}${raisedDecisionsSection(research)}\n\nPREVIOUS PLAN:\n${JSON.stringify(plan)}\n\nPLAN CHECKS:\n${issues.map((issue) => `- ${issue}`).join('\n')}\n\n${instructions}`
+export function repairPrompt(context: string, research: Research, plan: Plan, issues: string[], instructions: string = repairInstructions, pages: GuidelinePage[] = [], answers: readonly Answer[] = []): string {
+  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}${raisedDecisionsSection(research)}${authorDecisionsSection(answers)}\n\nPREVIOUS PLAN:\n${JSON.stringify(plan)}\n\nPLAN CHECKS:\n${issues.map((issue) => `- ${issue}`).join('\n')}\n\n${instructions}`
 }
 
 /** The rule IDs the required guidelines define. */
@@ -159,10 +180,30 @@ export function requiredRules(guidelines: string): string[] {
   return [...new Set([...guidelines.matchAll(/^(?:#{1,6}\s+|\*\*|[-*]\s+)?([A-Z]{2,10}-\d+)\b/gm)].map((match) => match[1]!))]
 }
 
-/** Required rule IDs no check names. A check may name several, as `REV-001/002`. */
+/** The rule IDs a check names. A check may name several, as `REV-001/002`. */
+const rulesOf = (check: { rule: string }): string[] => [...check.rule.matchAll(/([A-Z]{2,10})-(\d+(?:\/\d+)*)/g)].flatMap((match) => match[2]!.split('/').map((n) => `${match[1]}-${n}`))
+
+/** Required rule IDs no check names. */
 export function uncoveredRules(guidelines: string, checks: { rule: string }[]): string[] {
-  const covered = new Set(checks.flatMap((check) => [...check.rule.matchAll(/([A-Z]{2,10})-(\d+(?:\/\d+)*)/g)].flatMap((match) => match[2]!.split('/').map((n) => `${match[1]}-${n}`))))
+  const covered = new Set(checks.flatMap(rulesOf))
   return requiredRules(guidelines).filter((rule) => !covered.has(rule))
+}
+
+/** The answer to the ask for still-missing rule checks: checks only (KIT-81). */
+export const ruleChecksSchema = planSchema.pick({ checks: true })
+
+/**
+ * The last ask before a required rule counts as uncovered (KIT-81): once research and the correction
+ * passes are done, planning is asked once for only the rules no check names. A rule judged not to
+ * apply is easy to skip; SCOOP-4's spec review ended incomplete on three of them.
+ */
+export function ruleChecksPrompt(context: string, research: Research, plan: Plan, missing: string[], pages: GuidelinePage[] = []): string {
+  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}\n\nPLAN:\n${JSON.stringify(plan)}\n\nThe research and the plan have no check for these required rules: ${missing.join(', ')}. Return checks for only these rules, one per rule naming its rule ID: how the plan meets it, with evidence, or a one-line reason it does not apply to this plan. A rule that does not apply still needs its own check. Change nothing else.`
+}
+
+/** The plan with the asked-for checks added: only those that name a missing rule. */
+export function withRuleChecks(plan: Plan, checks: Plan['checks'], missing: string[]): Plan {
+  return { ...plan, checks: [...plan.checks, ...checks.filter((check) => rulesOf(check).some((rule) => missing.includes(rule)))] }
 }
 
 /** The problems a correction pass can fix: structural plan errors and required rules no check covers. */
@@ -296,7 +337,8 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   const preparation = options.signal ?? new AbortController().signal
   const prepared = await preparePlan(input, preparation)
   const { dir, spec, guidelines, repo, uiRequired } = prepared
-  // The previous plan's trace/decisions.md, with the options the author ticked, is read before the run replaces it.
+  // The previous plan's trace/decisions.md, with the options the author ticked, is read before the run replaces it:
+  // research and planning get the author's answers as settled input (KIT-89), and the export applies them.
   const answers = await readAnswers(dir)
   const mcp = await connectReadTools(process.env.MCP_READ_CONNECTIONS, preparation)
   const prepareMs = Date.now() - started
@@ -327,7 +369,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       return { area: area.name, result: exploreSchema.parse(output) }
     })))).filter((exploration) => exploration !== null)
     options.progress?.('research')
-    const prompt = researchPrompt(context, researchInstructions, renderFactsBlock(facts), explorationsSection(explorations))
+    const prompt = researchPrompt(context, researchInstructions, renderFactsBlock(facts), explorationsSection(explorations), answers)
     research = await trace.invoke({ phase: 'research', model: models.research, prompt }, async (signal, hooks) => {
       let submitted: Research | undefined
       // Until its last turn, research cannot submit checks that leave a required rule out: the
@@ -372,7 +414,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
     if (research && !options.signal?.aborted) await readLinkedGuidelines(readTools, guidelines, pages, preparation)
     if (research && !options.signal?.aborted) {
       options.progress?.('planning')
-      const prompt = planningPrompt(planningContext, research, planningInstructions, pages)
+      const prompt = planningPrompt(planningContext, research, planningInstructions, pages, answers)
       // Planning reads too (KIT-54): the repository, the guideline topics and Notion, for a fact research left out, then submits the plan.
       const planningTools: ToolSet = { ...repo.tools, ...readTools }
       const draftPlan = (phase: string, prompt: string) => trace.invoke({ phase, model: models.planning, prompt }, async (signal, hooks) => {
@@ -387,7 +429,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         if (!issues.length) break
         options.progress?.(`repair-${round}`)
         const before = plan
-        const fix = repairPrompt(planningContext, research, before, issues, repairInstructions, pages)
+        const fix = repairPrompt(planningContext, research, before, issues, repairInstructions, pages, answers)
         // A correction pass submits only what it changes (planPatchSchema), merged into the plan here.
         const patch = await trace.invoke({ phase: `repair-${round}`, model: models.planning, prompt: fix }, async (signal, hooks) => {
           const output = await structuredWithTools({ model: gateway(models.planning), system: planningSystem, prompt: `${fix}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: planPatchSchema, tools: planningTools, maxSteps: PLANNING_MAX_STEPS, maxOutputTokens: 24_000, reasoning: 'medium', submitName: 'submit_plan', abortSignal: signal, ...hooks })
@@ -396,6 +438,16 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         const revised = patch
         if (!revised || planIssues({ spec, guidelines, repo, research, plan: revised }).length >= issues.length) break
         plan = revised
+      }
+      const missing = plan ? uncoveredRules(guidelines, [...research.checks, ...plan.checks]) : []
+      if (plan && missing.length && !options.signal?.aborted) {
+        options.progress?.('rule-checks')
+        const ask = ruleChecksPrompt(planningContext, research, plan, missing, pages)
+        const answer = await trace.invoke({ phase: 'rule-checks', model: models.planning, prompt: ask }, async (signal, hooks) => {
+          const output = await structuredWithTools({ model: gateway(models.planning), system: planningSystem, prompt: `${ask}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: ruleChecksSchema, tools: planningTools, maxSteps: PLANNING_MAX_STEPS, maxOutputTokens: 6000, reasoning: 'low', submitName: 'submit_checks', abortSignal: signal, ...hooks })
+          return ruleChecksSchema.parse(output)
+        })
+        if (answer) plan = withRuleChecks(plan, answer.checks, missing)
       }
     }
     const { status, problems, openGaps, decisions } = assessPlan({ spec, guidelines, repo, research, plan, phaseErrors: trace.phases.filter((phase) => !phase.phase.startsWith('explore-')), uiRequired, reads: mcp.reads, cancelled: options.signal?.aborted === true, answers, takeRecommended: input.takeRecommended ?? false })
