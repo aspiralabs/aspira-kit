@@ -24,6 +24,18 @@ describe('T32 F28: the fix subagent stays inside the findings', () => {
     const end = await h.advance()
     expect({ end: end.stage?.stage, origin: await h.originHead(), listed: (await h.summary()).includes('src/b.ts') }).toEqual({ end: 'end', origin: before, listed: true })
   }, SLOW)
+
+  it('KIT-73: names the test files the branch already changed in the fix stage and pushes a fix that adds a case to one', async () => {
+    const suite = 'tests/integration/visibility.test.ts'
+    const { h, review } = await reviewing({ files: { [suite]: "import { a } from '../../src/a.ts'\n" } })
+    await h.report(review.stage, 'complete', { findings: high(1, 'src/a.ts:27,31') })
+    const fixStage = await h.advance()
+    const before = await h.originHead()
+    await fix(h, fixStage, ['src/a.ts', suite])
+    await h.advance()
+    const tests = (fixStage.stage?.tests ?? []) as string[]
+    expect({ named: tests.includes(suite), told: String(fixStage.stage?.instructions ?? '').includes(suite), pushed: (await h.originHead()) !== before }).toEqual({ named: true, told: true, pushed: true })
+  }, SLOW)
 })
 
 describe('T33 F30 F31: Step 10 and the release row', () => {

@@ -84,6 +84,19 @@ describe('F50: the run works the ticket in its own worktree', () => {
     })
   }, SLOW)
 
+  it('runs prisma generate after the install, before the build, in a project with a Prisma schema, and not without one (KIT-75)', async () => {
+    const prisma = await fromMain({ status: 'Ready: Spec', mainFiles: { 'pnpm-workspace.yaml': 'packages: []\n', 'prisma/schema.prisma': 'generator client {\n  provider = "prisma-client-js"\n}\n', 'package.json': JSON.stringify({ name: 'fixture', scripts: { build: 'echo built' }, dependencies: { '@prisma/client': '^6' }, devDependencies: { prisma: '^6' } }) } })
+    const custom = await fromMain({ status: 'Ready: Spec', mainFiles: { 'pnpm-lock.yaml': 'lockfileVersion: 9.0\n', 'db/app.prisma': '', 'package.json': JSON.stringify({ name: 'fixture', prisma: { schema: 'db/app.prisma' }, devDependencies: { prisma: '^6' } }) } })
+    const none = await fromMain({ status: 'Ready: Spec', mainFiles: { 'pnpm-lock.yaml': 'lockfileVersion: 9.0\n', 'package.json': JSON.stringify({ name: 'fixture', devDependencies: { prisma: '^6' } }) } })
+    const wt = (h: Project) => worktreeFor(h.main)
+    expect({ prisma: await prisma.h.pnpmCalls(), custom: await custom.h.pnpmCalls(), none: await none.h.pnpmCalls(), ran: prisma.result.stage?.ran }).toEqual({
+      prisma: [`${wt(prisma.h)} install`, `${wt(prisma.h)} exec prisma generate`, `${wt(prisma.h)} build`],
+      custom: [`${wt(custom.h)} install`, `${wt(custom.h)} exec prisma generate`],
+      none: [`${wt(none.h)} install`],
+      ran: expect.arrayContaining(['pnpm install', 'pnpm exec prisma generate', 'pnpm build']),
+    })
+  }, SLOW)
+
   it('installs in the app directory aspira.json names, not the worktree root (KIT-21)', async () => {
     const { h } = await fromMain({ status: 'Ready: Spec', aspira: { board: BOARD, repository: REPOSITORY, app: 'tools/app' }, mainFiles: { 'tools/app/pnpm-lock.yaml': 'lockfileVersion: 9.0\n', 'tools/app/package.json': JSON.stringify({ name: 'fixture' }) } })
     expect(await h.pnpmCalls()).toEqual([`${join(worktreeFor(h.main), 'tools', 'app')} install`])
@@ -105,6 +118,17 @@ describe('F50: the run works the ticket in its own worktree', () => {
     await exec('git', ['-C', reuse.main, 'worktree', 'add', '-q', '-b', 'feat/kit-11-x', worktreeFor(reuse.main), 'main'])
     const redirect = await reuse.start()
     expect({ created: isLink(worktreeFor(h.main)), reused: isLink(worktreeFor(reuse.main)), stage: redirect.stage?.stage }).toEqual({ created: true, reused: true, stage: 'worktree' })
+  }, SLOW)
+
+  it('a run started inside a reused worktree that lacks aspira.json links the main checkout\'s and goes on (KIT-78)', async () => {
+    const h = await project({ status: 'Ready: Spec', layout: 'checkout', aspiraUntracked: true })
+    const worktree = worktreeFor(h.main)
+    await exec('git', ['-C', h.main, 'worktree', 'add', '-q', '-b', 'feat/kit-11-x', worktree, 'main'])
+    h.cd(worktree)
+    await mkdir(h.folder, { recursive: true })
+    await writeFile(join(h.folder, 'spec.md'), SPEC)
+    const step = await h.advance({}, await h.start())
+    expect({ link: lstatSync(join(worktree, 'aspira.json')).isSymbolicLink(), command: commandOf(step) }).toEqual({ link: true, command: '/aspira-planner KIT-11 --take-recommended' })
   }, SLOW)
 
   it('continues from inside the worktree: the ticket folder is there and the next stage is the step', async () => {

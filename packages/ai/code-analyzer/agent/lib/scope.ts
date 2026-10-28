@@ -22,6 +22,9 @@ const statusPaths = (stdout: string): string[] =>
     return [path.includes(' -> ') ? path.split(' -> ').pop()! : path]
   })
 
+/** The kit's own folders: the ticket's pulled pages, ticket worktrees and the codebase map are never in scope, so no fix rewrites them (KIT-72). */
+const KIT_FOLDERS = /^(?:\.work|\.worktrees|\.codebase-map)\//
+
 /** The analyzed directory's path under the git root, '' at the root. */
 const prefixOf = (gitRoot: string, root: string): string => {
   const rel = relative(resolve(gitRoot), resolve(root))
@@ -64,7 +67,7 @@ export async function changedScope(executor: Executor, gitRoot: string): Promise
     if (prefix === '') return path
     return path.startsWith(`${prefix}/`) ? path.slice(prefix.length + 1) : null
   }
-  const files = [...new Set([...diff.stdout.split('\n'), ...statusPaths(status.stdout)].map((line) => line.trim()).filter(Boolean).map(under).filter((path): path is string => path !== null))].sort()
+  const files = [...new Set([...diff.stdout.split('\n'), ...statusPaths(status.stdout)].map((line) => line.trim()).filter(Boolean).filter((path) => !KIT_FOLDERS.test(path)).map(under).filter((path): path is string => path !== null))].sort()
   return { scope: { base, files }, note: null }
 }
 

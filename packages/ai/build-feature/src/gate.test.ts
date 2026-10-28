@@ -58,6 +58,28 @@ describe('gateCommandsIn: the gate commands a markdown file names', () => {
   it('finds nothing in a file that names no command', () => {
     expect(gateCommandsIn('# Project\n\nWrite good code. Use `src/` for code.\n')).toEqual([])
   })
+
+  // KIT-77: NOMNOMZZ's AGENTS.md, which NOM-43's gate read as every command it names, e2e and mobile included.
+  const nomnomzz = [
+    '**Commands** (run in `apps/web` unless noted).',
+    '',
+    '- `pnpm dev`, `pnpm lint`, `pnpm test` (vitest unit), `pnpm test:integration` (real Postgres), `pnpm test:e2e` (Playwright; slow).',
+    '- Shipping to dev needs `pnpm check`, `pnpm test` and `pnpm test:integration` (plus mobile `npm test` when mobile changed). `pnpm test:e2e` runs before a prod release, not per change (see `RELEASE.md`).',
+    '- `apps/mobile`: `npm test` (jest), `npx expo start`.',
+    '',
+  ].join('\n')
+
+  it('takes only the commands of the gate sentence, without its asides, when the file has one (KIT-77)', () => {
+    expect(gateCommandsIn(nomnomzz, 'apps/web')).toEqual(['pnpm check', 'pnpm test', 'pnpm test:integration'])
+    expect(gateCommandsIn('Gate: `pnpm check` and `pnpm test`. Lint with `pnpm lint`.\n')).toEqual(['pnpm check', 'pnpm test'])
+    expect(gateCommandsIn('Shipping to prod needs `pnpm test:e2e`. Run `pnpm test`.\n')).toEqual(['pnpm test'])
+  })
+
+  it('leaves out commands a sentence runs before a release or names for another app, without a gate sentence (KIT-77)', () => {
+    const markdown = nomnomzz.replace('Shipping to dev needs', 'Before a change run')
+    expect(gateCommandsIn(markdown, 'apps/web')).toEqual(['pnpm lint', 'pnpm test', 'pnpm test:integration', 'pnpm check'])
+    expect(gateCommandsIn('Run `pnpm test`. `pnpm test:e2e` is release-only.\n')).toEqual(['pnpm test'])
+  })
 })
 
 describe('findGate: AGENTS.md first, then the package.json fallback', () => {

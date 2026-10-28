@@ -115,6 +115,16 @@ export function gitWorktreeAdd(options: SystemOptions, path: string, branch: str
 export const gitCheckIgnore = (options: SystemOptions, path: string) => run('git', GIT_ARGS.checkIgnore(path), options)
 /** A file's contents at `rev`; non-zero when the revision or the file is not there. */
 export const gitShowFile = (options: SystemOptions, rev: string, path: string) => run('git', GIT_ARGS.show(rev, path), options)
+/** The files changed on the branch since it left the base branch (origin's base when it is known); none when neither is known. */
+export async function gitBranchFiles(options: SystemOptions, baseBranch: string): Promise<string[]> {
+  for (const base of [`origin/${baseBranch}`, baseBranch]) {
+    const known = await run('git', ['rev-parse', '--verify', '--quiet', base], options)
+    if (known.code !== 0) continue
+    const diff = await run('git', ['diff', '--name-only', `${base}...HEAD`], options)
+    if (diff.code === 0) return diff.stdout.split('\n').filter((line) => line !== '')
+  }
+  return []
+}
 /** A project command such as `pnpm install` (the worktree's install and build). */
 export const projectCommand = (options: SystemOptions, command: string, args: readonly string[]) => run(command, args, options)
 
@@ -201,6 +211,7 @@ export const system = {
   gitWorktreeAdd,
   gitCheckIgnore,
   gitShowFile,
+  gitBranchFiles,
   projectCommand,
   isolateWorktree,
   teardownWorktree,

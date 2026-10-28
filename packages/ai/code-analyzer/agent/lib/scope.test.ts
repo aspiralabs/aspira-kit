@@ -39,6 +39,12 @@ describe('changedScope', () => {
     expect(note).toBeNull()
     expect(scope).toEqual({ base: 'origin/main', files: ['src/a.ts', 'src/b.py', 'src/d.ts', 'src/e.ts', 'src/new.ts'] })
   })
+  it('KIT-72: leaves the ticket folder, ticket worktrees and the codebase map out of scope, so no fix rewrites them', async () => {
+    const ok = (stdout: string): RunResult => ({ exitCode: 0, stdout, stderr: '', timedOut: false })
+    const { executor } = scripted({ errors: [], git: { 'git status --porcelain --untracked-files=all': ok('?? .work/kit-69-x/spec.md\n?? .worktrees/FEATURE-KIT-1/a.ts\n?? .codebase-map/map.md\n?? src/f.ts\n') } })
+    const { scope } = await changedScope({ ...executor, root: '/repo' }, '/repo')
+    expect(scope?.files).toEqual(['apps/mobile/src/c.ts', 'apps/web/src/a.ts', 'apps/web/src/b.py', 'src/f.ts'])
+  })
   it('keeps the whole tree, with a note, when there is no main branch', async () => {
     const fail: RunResult = { exitCode: 128, stdout: '', stderr: '', timedOut: false }
     const { executor } = scripted({ errors: [], git: { 'git rev-parse --verify -q origin/main': fail, 'git rev-parse --verify -q main': fail } })

@@ -157,6 +157,9 @@ describe('pullDecision', () => {
     expect(pullDecision({ exists: true, recordedAt: page, localModifiedAt: '2026-10-06T00:00:00.000Z', pageEditedAt: page })).toBe('keep')
     expect(pullDecision({ exists: true, recordedAt: '2026-10-06T00:00:00.000Z', pageEditedAt: page })).toBe('keep')
   })
+  it('KIT-72: writes a local file newer than its changed page when it holds only the last pull', () => {
+    expect(pullDecision({ exists: true, recordedAt: '2026-10-01T00:00:00.000Z', localModifiedAt: '2026-10-06T00:00:00.000Z', pageEditedAt: page, unchanged: true })).toBe('write')
+  })
   it('refuses a local file newer than its changed page unless forced', () => {
     expect(pullDecision({ exists: true, recordedAt: '2026-10-01T00:00:00.000Z', localModifiedAt: '2026-10-06T00:00:00.000Z', pageEditedAt: page })).toBe('conflict')
     expect(pullDecision({ exists: true, localModifiedAt: '2026-10-06T00:00:00.000Z', pageEditedAt: page })).toBe('conflict')

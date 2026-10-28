@@ -100,13 +100,24 @@ const GATE_WORDS = /\b(check|checks|test|tests|test:\S+|lint|typecheck|type-chec
 /** Shell syntax a gate command never needs: such a line is not listed. */
 const SHELL = /[;&|<>$`\\]/
 
-/** The gate commands a markdown file names, in order: inline code and fenced lines that run a check or a test. */
-export function gateCommandsIn(markdown: string): string[] {
-  const candidates: string[] = []
-  const fenced = /```[^\n]*\n([\s\S]*?)```/g
-  for (const block of markdown.matchAll(fenced)) candidates.push(...block[1]!.split('\n'))
-  const prose = markdown.replace(fenced, '')
-  for (const span of prose.matchAll(/`([^`\n]+)`/g)) candidates.push(span[1]!)
+/**
+ * A sentence that names the per-change gate outright ("Shipping to dev needs `pnpm check` and `pnpm test`",
+ * "Gate: `pnpm test`"). When the file has one, only its commands run (KIT-77).
+ */
+const GATE_SENTENCE = /^\W*gate\b[^:`]*:|\b(?:shipping|merging|before (?:a |each |every )?(?:merge|pr|pull request|push|commit))\b[^`]*?\b(?:needs?|requires?)\b/i
+/** Words that make a gate sentence about a release, not a change ("Shipping to prod needs ..."): its commands are release-only. */
+const RELEASE_WORDS = /\b(?:prod|production|release)\b/i
+/** A sentence whose commands run before a release, not per change: they are left out of the gate (KIT-77). */
+const RELEASE_ONLY = /\b(?:before (?:a |the |each |every )?(?:prod(?:uction)? )?release|not per change|release[- ]only|prod(?:uction)? only)\b/i
+/** A directory of another app in a monorepo (`apps/mobile`), when the sentence names one. */
+const APP_DIR = /\b(?:apps|packages|services)\/[\w.-]+/g
+
+const spansIn = (text: string): string[] => [...text.matchAll(/`([^`\n]+)`/g)].map((span) => span[1]!)
+const withoutAsides = (sentence: string): string => sentence.replace(/\([^)]*\)/g, '')
+const sentencesIn = (prose: string): string[] => prose.split('\n').flatMap((line) => line.split(/(?<=[.!?])\s+/))
+
+/** The candidates that run a check or a test, in order, once each. */
+function gateCommandsOf(candidates: readonly string[]): string[] {
   const commands: string[] = []
   for (const raw of candidates) {
     const command = raw.trim().replace(/^\$\s+/, '')
@@ -115,6 +126,30 @@ export function gateCommandsIn(markdown: string): string[] {
     if (!commands.includes(command)) commands.push(command)
   }
   return commands
+}
+
+/**
+ * The gate commands a markdown file names, in order: the commands of its gate sentence, less the asides
+ * in parentheses ("(plus mobile `npm test` when mobile changed)"), when it has one; else inline code and
+ * fenced lines that run a check or a test, less those a sentence says run before a release (or ship to
+ * prod) or names for another app than `app`. NOM-43 ran `pnpm test:e2e` and the mobile `npm test` in
+ * apps/web (KIT-77).
+ */
+export function gateCommandsIn(markdown: string, app = '.'): string[] {
+  const fenced = /```[^\n]*\n([\s\S]*?)```/g
+  const prose = markdown.replace(fenced, '')
+  const sentences = sentencesIn(prose)
+  const gateSentences = sentences.map(withoutAsides).filter((sentence) => GATE_SENTENCE.test(sentence))
+  const explicit = gateCommandsOf(gateSentences.filter((sentence) => !RELEASE_WORDS.test(sentence)).flatMap(spansIn))
+  if (explicit.length > 0) return explicit
+  const ownApp = app.replace(/\/+$/, '')
+  const otherApp = (sentence: string) => ownApp !== '.' && [...sentence.matchAll(APP_DIR)].some((dir) => dir[0] !== ownApp)
+  const releaseOnly = (sentence: string) => RELEASE_ONLY.test(sentence) || (GATE_SENTENCE.test(sentence) && RELEASE_WORDS.test(sentence))
+  const excluded = new Set(gateCommandsOf(sentences.filter((sentence) => releaseOnly(sentence) || otherApp(sentence)).flatMap(spansIn)))
+  const candidates: string[] = []
+  for (const block of markdown.matchAll(fenced)) candidates.push(...block[1]!.split('\n'))
+  candidates.push(...spansIn(prose))
+  return gateCommandsOf(candidates).filter((command) => !excluded.has(command))
 }
 
 const packageSchema = z.looseObject({ scripts: z.record(z.string(), z.unknown()).optional() })
@@ -173,7 +208,7 @@ export async function findGate(repo: string, app: string, gates?: readonly Confi
   for (const file of files) {
     const text = await readFile(file, 'utf8').catch(() => null)
     if (text === null) continue
-    const commands = gateCommandsIn(text)
+    const commands = gateCommandsIn(text, app)
     if (commands.length === 0) continue
     if (dirname(file) !== repo) return { commands, cwds: commands.map(() => dirname(file)), cwd: dirname(file), source: file.slice(repo.length + 1) }
     const appScripts = scriptsIn(await readFile(join(repo, app, 'package.json'), 'utf8').catch(() => null))

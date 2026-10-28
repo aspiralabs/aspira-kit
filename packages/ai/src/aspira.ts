@@ -4,11 +4,11 @@
 // skills, the launchers and `kit next` read it. It is git-ignored (the global ignore lists it) and
 // never committed (KIT-71): `kit init` and `kit upgrade` stop tracking one an earlier kit committed
 // and restore one that a pull of that change deleted.
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import { readJson, writeJson, type Log } from './fs.js'
 import { z } from 'zod'
-import { git } from './git.js'
+import { git, mainCheckoutRoot, repositoryRoot } from './git.js'
 
 export const ASPIRA_FILE = 'aspira.json'
 
@@ -212,10 +212,28 @@ export function restoreAspira(projectRoot: string, dryRun: boolean, log: Log): b
   return true
 }
 
-/** Write or update aspira.json. A key that is not given keeps its current value. */
+/**
+ * In a linked worktree with no aspira.json, link the main checkout's at the same project path (git-ignored since KIT-71,
+ * so a worktree has none), so `kit init` there merges into it instead of writing a new file without its keys (KIT-78).
+ * A client file (it has `repos`) is never linked into a repo (KIT-68). Returns the linked file, or undefined.
+ */
+function linkMainAspira(projectRoot: string, dryRun: boolean, log: Log): string | undefined {
+  const top = repositoryRoot(projectRoot)
+  const main = mainCheckoutRoot(projectRoot)
+  if (top === undefined || main === undefined || real(top) === real(main)) return undefined
+  const source = join(real(main), relative(real(top), real(projectRoot)), ASPIRA_FILE)
+  if (!existsSync(source) || readEffectiveAspira(dirname(source)).config.repos !== undefined) return undefined
+  const path = join(projectRoot, ASPIRA_FILE)
+  log(`link   ${path} -> ${source} (the main checkout's)`)
+  if (!dryRun) symlinkSync(source, path)
+  return source
+}
+
+/** Write or update aspira.json. A key that is not given keeps its current value, and so does every key kit init does not set. */
 export function writeAspira(opts: { projectRoot: string; board?: string; releases?: string; app?: string; dryRun: boolean; log: Log }): void {
   const path = join(opts.projectRoot, ASPIRA_FILE)
-  const current = readAspira(opts.projectRoot) ?? {}
+  const linked = existsSync(path) ? undefined : linkMainAspira(opts.projectRoot, opts.dryRun, opts.log)
+  const current = (linked === undefined ? readAspira(opts.projectRoot) : readJson<Partial<AspiraConfig>>(linked)) ?? {}
   const next: Partial<AspiraConfig> = { ...current }
   if (opts.board !== undefined) {
     if (!isNotionUrl(opts.board)) throw new Error(`--board must be the Feature Board's Notion URL, got: ${opts.board}`)
