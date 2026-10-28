@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { readGroomRecord } from '@aspiralabs/ai/common/lib/groom-record'
 import { readRunStatus } from '@aspiralabs/ai/common/lib/run-status'
+import { currentApproval, type ApprovableStep } from '@aspiralabs/ai/common/lib/author-approval'
 import { commandFor, nextStep } from '@aspiralabs/ai/playbook'
 import { emptyRunState, readRunState, type RunState } from '#build-feature/run-state.ts'
 import { analyzedApps, analyzerReady, readImplementorApps } from '#build-feature/step-results.ts'
@@ -52,6 +53,15 @@ export const READY_MOVES: readonly { from: string; to: string }[] = [
   { from: 'In Review: Plan', to: 'Ready: Plan' },
 ]
 
+/**
+ * The success move of a step the author approved by hand (KIT-83: `--approve <step>`): the move the step's
+ * own ready run would have made, made only while an author approval covers the step's output as it is now.
+ */
+export const APPROVAL_MOVES: readonly { step: ApprovableStep; from: string; to: string }[] = [
+  { step: 'spec-writer', from: 'In Progress: Spec', to: 'In Review: Spec' },
+  { step: 'planner', from: 'In Progress: Plan', to: 'In Review: Plan' },
+]
+
 /** The move after the run merged the PR itself (BOARD-004 as revised 2026-10-23), on its run-start approval. */
 export const MERGE_MOVE = { from: 'In Review: Implementation', to: 'Ready: Implementation' } as const
 
@@ -65,6 +75,8 @@ export type EndRoute = { kind: 'end'; reason: 'nothing-to-do' | 'dropped' | 'unk
 export type Route =
   | StepRoute
   | { kind: 'readyMove'; from: string; to: string }
+  /** A step's success move on the author's approval of its output (KIT-83). */
+  | { kind: 'approvedMove'; step: ApprovableStep; from: string; to: string }
   /** Walk the items in order: a phase decides itself whether it has work left; a step runs unless done. */
   | { kind: 'sequence'; items: SequenceItem[]; then: EndRoute }
   | EndRoute
@@ -75,6 +87,10 @@ export type RouteFacts = {
   app: string
   /** In Review: Spec: a ready spec step export (spec.reviewed/) covers the current spec.md (A6, KIT-48). */
   specCovered: boolean
+  /** In Review: Plan: the planner's last export is ready with no open decision (KIT-87); absent, false. */
+  planCovered?: boolean
+  /** The steps whose output, as it is now, the author approved with --approve (KIT-83). */
+  approved?: readonly ApprovableStep[]
   /** The implementor's last exported status (implementation-local.json), read through readRunStatus, or null. */
   implementor: string | null
   /** The code-analyzer finished ready after the last build. */
@@ -158,19 +174,23 @@ export function routeStatus(status: string, facts: RouteFacts): Route {
     case 'Idea':
     case 'Grooming':
     case 'Ready: Idea':
-    case 'In Progress: Spec':
     case 'Ready: Spec':
-    case 'In Progress: Plan':
     case 'Ready: Plan':
       return stepCommand(named, facts)
-    case 'Shortlist':
-    case 'In Review: Plan': {
-      const move = READY_MOVES.find((candidate) => candidate.from === named)!
-      return { kind: 'readyMove', from: move.from, to: move.to }
+    case 'In Progress: Spec':
+    case 'In Progress: Plan': {
+      // A step the author approved by hand (KIT-83) makes its success move instead of running again.
+      const approved = APPROVAL_MOVES.find((move) => move.from === named && (facts.approved ?? []).includes(move.step))
+      return approved === undefined ? stepCommand(named, facts) : { kind: 'approvedMove', ...approved }
     }
+    case 'Shortlist':
+      return { kind: 'readyMove', from: 'Shortlist', to: 'Ready: Idea' }
     case 'In Review: Spec':
-      // The one spec step reruns from here on the answered spec (KIT-48); a ready export that covers spec.md moves the card on.
-      return facts.specCovered ? { kind: 'readyMove', from: 'In Review: Spec', to: 'Ready: Spec' } : stepCommand(named, facts)
+      // The one spec step reruns from here on the answered spec (KIT-48); a ready export that covers spec.md, or the author's approval, moves the card on.
+      return facts.specCovered || (facts.approved ?? []).includes('spec-writer') ? { kind: 'readyMove', from: 'In Review: Spec', to: 'Ready: Spec' } : stepCommand(named, facts)
+    case 'In Review: Plan':
+      // The planner reruns from here on the answered decisions (KIT-87), with In Progress: Plan's command (this row has none); a ready plan with no open decision, or the author's approval, moves the card on.
+      return facts.planCovered === true || (facts.approved ?? []).includes('planner') ? { kind: 'readyMove', from: 'In Review: Plan', to: 'Ready: Plan' } : stepCommand('In Progress: Plan', facts)
     case 'In Progress: Implementation': {
       if (facts.implementor !== 'ready') return stepCommand('Ready: Plan', facts)
       return {
@@ -255,8 +275,10 @@ export async function routeRunState(folder: string, facts: Pick<RouteFacts, 'id'
       },
     }
   }
-  if (has(PLAN_FILE) && lastReady('planner') !== false) return { stage: 'implement', route: stepCommand('Ready: Plan', facts) }
-  const specStopped = lastReady('spec-writer') === false
+  // A stopped step whose output the author approved (KIT-83) counts as done.
+  const approved = async (step: ApprovableStep): Promise<boolean> => (await currentApproval(folder, step)) !== null
+  if (has(PLAN_FILE) && (lastReady('planner') !== false || (await approved('planner')))) return { stage: 'implement', route: stepCommand('Ready: Plan', facts) }
+  const specStopped = lastReady('spec-writer') === false && !(await approved('spec-writer'))
   if (has(SPEC_REVIEWED) && !specStopped) return { stage: 'plan', route: stepCommand('Ready: Spec', facts) }
   const record = await readGroomRecord(folder).catch(() => undefined)
   const groomed = record !== undefined && readRunStatus(record.status)?.status === 'ready'

@@ -51,6 +51,7 @@ import { readUsageSource, type PhaseUsage } from '@aspiralabs/ai/common/lib/tele
 import { clientRootOf, readEffectiveAspira, repoForAreas, validateClientKeys, workRootFor } from '@aspiralabs/ai/common/lib/aspira-config'
 import { rebuildGroomRecord, readGroomRecord, writeGroomRecord } from '@aspiralabs/ai/common/lib/groom-record'
 import { slug } from '@aspiralabs/ai/common/lib/ticket'
+import { APPROVABLE_OUTPUTS, currentApproval, readAuthorApprovals, recordAuthorApproval, sha256Of, type ApprovableStep } from '@aspiralabs/ai/common/lib/author-approval'
 import { MODELS as REVIEWER_MODELS } from '@aspiralabs/ai/pr-reviewer/models'
 import { acceptApproval, approvalFor, invocationApproval, recordApproval } from '#build-feature/approval.ts'
 import { buildRunStatus, buildStopSchema, type BuildStop } from '#build-feature/build-status.ts'
@@ -64,10 +65,10 @@ import { BACKWARD_MOVES_SKILL_MAY_MAKE, DECISION_OWNERS, decideOverrides, findOv
 import { renderPrBody } from '#build-feature/pr-body.ts'
 import { acceptResolution, cardDifferences, resolveStage, resolveWithToken, type Resolution } from '#build-feature/resolve.ts'
 import { mergePhase, mergeRecordOf, teardownNote } from '#build-feature/merge.ts'
-import { assertNever, launcherFor, MERGE_MOVE, READY_MOVES, RESUME, routeRunState, routeStatus, STEP8_MOVE, STEPS, type EndRoute, type Mode, type PhaseName, type Route, type StepName } from '#build-feature/route.ts'
+import { APPROVAL_MOVES, assertNever, launcherFor, MERGE_MOVE, READY_MOVES, RESUME, routeRunState, routeStatus, STEP8_MOVE, STEPS, type EndRoute, type Mode, type PhaseName, type Route, type StepName } from '#build-feature/route.ts'
 import { reviewPhase } from '#build-feature/review-loop.ts'
 import { readRunState, stateDirOf, writeRunState, type Card, type Failure, type Pending, type PhaseRecord, type RunState, type Usage } from '#build-feature/run-state.ts'
-import { analyzedApps, analyzerReady, commandApp, readImplementorApps, readImplementorStatus, readSpecCoverage, readStepResult, readStepUsage, stepReportSchema, stepResultTable } from '#build-feature/step-results.ts'
+import { analyzedApps, analyzerReady, commandApp, readImplementorApps, readImplementorStatus, readPlanCoverage, readSpecCoverage, readStepResult, readStepUsage, stepReportSchema, stepResultTable } from '#build-feature/step-results.ts'
 import { RELEASE_SKIPPED, releaseRowPhase, step10Phase } from '#build-feature/step10.ts'
 import { baseBranchOf, step8Phase } from '#build-feature/step8.ts'
 import { renderBuildSummary } from '#build-feature/summary.ts'
@@ -99,6 +100,8 @@ export type DriverInput = {
   mode: Mode
   /** --autonomous (KIT-24): no human gate. Not with --cloud; a continuing call keeps what its run started with. */
   autonomous: boolean
+  /** KIT-83: --approve <step> --reason "<why>": the author accepts that step's output as it is now, typed by the human on a new invocation. */
+  approve?: { step: ApprovableStep; reason: string }
   /** --no-ticket: a run on a repo with no card. A client root has no repo to name for it, so it refuses (KIT-68, F13). */
   noTicket?: boolean
   now: string
@@ -152,7 +155,7 @@ export const PHASES: Readonly<Record<PhaseName, Phase>> = {
 // Small helpers.
 // ---------------------------------------------------------------------------------------------
 
-const invoked = (input: DriverInput) => `${RESUME(input.id, input.mode, input.autonomous)}${input.forceRun ? ' --force-run' : ''}`
+const invoked = (input: DriverInput) => `${RESUME(input.id, input.mode, input.autonomous)}${input.forceRun ? ' --force-run' : ''}${input.approve === undefined ? '' : ` --approve ${input.approve.step} --reason ${JSON.stringify(input.approve.reason)}`}`
 const summaryPath = (ctx: Ctx) => join(ctx.folder, 'build-summary.md')
 
 /** The role whose model a step's subagent runs on. */
@@ -190,7 +193,7 @@ function checkNotion(stage: Stage): void {
 }
 
 const allowedMove = (from: string, to: string) =>
-  [...READY_MOVES, STEP8_MOVE, MERGE_MOVE, ...BACKWARD_MOVES_SKILL_MAY_MAKE].some((move) => move.from === from && move.to === to)
+  [...READY_MOVES, STEP8_MOVE, MERGE_MOVE, ...APPROVAL_MOVES, ...BACKWARD_MOVES_SKILL_MAY_MAKE].some((move) => move.from === from && move.to === to)
 const isReadyMove = (from: string, to: string) => [...READY_MOVES, MERGE_MOVE].some((move) => move.from === from && move.to === to)
 
 /** A run id from the start time, unique among the ticket's runs (the fallback when the telemetry reservation cannot be made). */
@@ -288,7 +291,8 @@ async function writeSummary(ctx: Ctx, state: RunState): Promise<void> {
   const plan = await readFile(join(ctx.folder, 'plan.review/trace/plan.json'), 'utf8')
     .then((text) => JSON.parse(text) as unknown)
     .catch(() => undefined)
-  const text = await renderBuildSummary({ ticket, state, repo: ctx.input.repo, now: ctx.input.now, ...(plan === undefined ? {} : { plan }) })
+  const authorApprovals = await readAuthorApprovals(ctx.folder).catch(() => [])
+  const text = await renderBuildSummary({ ticket, state, repo: ctx.input.repo, now: ctx.input.now, authorApprovals, ...(plan === undefined ? {} : { plan }) })
   await mkdir(ctx.folder, { recursive: true })
   await writeFile(summaryPath(ctx), text)
   await mkdir(ctx.dir, { recursive: true })
@@ -583,7 +587,11 @@ async function acceptSummary(ctx: Ctx, state: RunState, pending: Pending, answer
 // Resolution, approval, overrides and routing.
 // ---------------------------------------------------------------------------------------------
 
-type ResolvePurpose = { purpose: 'start' | 'route' } | { purpose: 'premove'; move: { from: string; to: string }; expect: Pick<Card, 'status' | 'pr' | 'dev'>; phase?: string }
+type ResolvePurpose =
+  | { purpose: 'start' | 'route' }
+  | { purpose: 'premove'; move: { from: string; to: string }; expect: Pick<Card, 'status' | 'pr' | 'dev'>; phase?: string }
+  /** A step stopped the run: the card is read again first, so the Build Summary shows the Status the step left (KIT-88). */
+  | { purpose: 'stop'; message: string; reason: BuildStop; failure?: Failure }
 
 async function requestResolve(ctx: Ctx, state: RunState, purpose: ResolvePurpose): Promise<Out> {
   const board = ctx.aspira?.board ?? ''
@@ -598,6 +606,8 @@ async function requestResolve(ctx: Ctx, state: RunState, purpose: ResolvePurpose
 }
 
 async function afterResolution(ctx: Ctx, state: RunState, resolution: Resolution, purpose: ResolvePurpose): Promise<Out> {
+  // A stop that could not read the card still stops on its own message, with the card as last read.
+  if (purpose.purpose === 'stop' && resolution.kind === 'stop') return stop(ctx, state, purpose.message, { stopped: true, reason: purpose.reason, ...(purpose.failure === undefined ? {} : { failure: purpose.failure }) })
   if (resolution.kind === 'stop') return stop(ctx, state, resolution.message, { stopped: true, reason: { kind: resolution.notFound === true ? 'not-found' : 'unexpected-error' }, failure: { action: 'resolve', message: resolution.message } })
   if (resolution.kind === 'pending') return { state, stage: state.pending?.stage as Stage }
   const { card } = resolution
@@ -615,6 +625,8 @@ async function afterResolution(ctx: Ctx, state: RunState, resolution: Resolution
       }
       return printMove(ctx, resolved, purpose.move, purpose.phase)
     }
+    case 'stop':
+      return stop(ctx, resolved, purpose.message, { stopped: true, reason: purpose.reason, ...(purpose.failure === undefined ? {} : { failure: purpose.failure }) })
     default:
       return assertNever(purpose)
   }
@@ -622,6 +634,11 @@ async function afterResolution(ctx: Ctx, state: RunState, resolution: Resolution
 
 /** After the start resolution: the overrides pull, then the route. */
 async function afterStart(ctx: Ctx, state: RunState): Promise<Out> {
+  const approve = state.runs.find((run) => run.runId === ctx.runId)?.approve
+  if (approve !== undefined && !(await recordedApproval(ctx, state, approve))) {
+    const message = `--approve ${approve.step}: ${APPROVABLE_OUTPUTS[approve.step]} is not in ${ctx.folder}, so there is no ${approve.step} output to approve. Run the step first, or start the run without --approve.`
+    return stop(ctx, state, message, { stopped: true, reason: { kind: 'approval' }, failure: { action: 'approval', message } })
+  }
   const pulled = join(ctx.dir, 'pulled', ctx.runId)
   const taken = overridesStage(state, pulled)
   // statusFlow false: a groom record that still holds a blocking follow-up is read again from its page, since the author resolves it there (KIT-68, F16).
@@ -637,6 +654,21 @@ async function afterStart(ctx: Ctx, state: RunState): Promise<Out> {
     instructions: 'For each step in "pages", fetch the ticket\'s child page named as listed (read-only) and write its decisions, as markdown with the checkboxes as they are ticked now, to the path given. Then write {"nonce"} to the output file.',
   }
   return pend(ctx, state, 'overrides', () => stage, { data: { pages } })
+}
+
+/**
+ * KIT-83: record the author's approval of the step's output as it is now, once per run, in the ticket folder the
+ * run works in (after the worktree gate). Who is the run-start approval's name: the git user who typed the command.
+ * False when the output is not there.
+ */
+async function recordedApproval(ctx: Ctx, state: RunState, approve: { step: ApprovableStep; reason: string }): Promise<boolean> {
+  if ((await readAuthorApprovals(ctx.folder).catch(() => [])).some((approval) => approval.runId === ctx.runId && approval.step === approve.step)) return true
+  const output = APPROVABLE_OUTPUTS[approve.step]
+  const content = await readFile(join(ctx.folder, output), 'utf8').catch(() => null)
+  if (content === null) return false
+  const runStart = approvalFor(state, ctx.runId)
+  await recordAuthorApproval(ctx.folder, { step: approve.step, name: runStart?.name ?? 'unknown', at: ctx.input.now, reason: approve.reason, runId: ctx.runId, output, sha256: sha256Of(content) })
+  return true
 }
 
 const withRun = (state: RunState, runId: string, patch: Partial<RunState['runs'][number]>): RunState => ({ ...state, runs: state.runs.map((run) => (run.runId === runId ? { ...run, ...patch } : run)) })
@@ -832,10 +864,13 @@ async function endRoute(ctx: Ctx, state: RunState, end: EndRoute): Promise<Out> 
 async function route(ctx: Ctx, state: RunState): Promise<Out> {
   const card = state.card
   if (card === null) return requestResolve(ctx, state, { purpose: 'route' })
+  const approvals = { 'spec-writer': await currentApproval(ctx.folder, 'spec-writer'), planner: await currentApproval(ctx.folder, 'planner') }
   const facts = {
     id: ctx.input.id,
     app: ctx.aspira?.app ?? '.',
     specCovered: await readSpecCoverage(ctx.folder, state),
+    planCovered: await readPlanCoverage(ctx.folder),
+    approved: (['spec-writer', 'planner'] as const).filter((step) => approvals[step] !== null),
     implementor: await readImplementorStatus(ctx.folder),
     analyzerReady: analyzerReady(state),
     apps: await readImplementorApps(ctx.folder),
@@ -858,6 +893,7 @@ async function route(ctx: Ctx, state: RunState): Promise<Out> {
     case 'step':
       return printStep(ctx, state, next.step, next.command)
     case 'readyMove':
+    case 'approvedMove':
       return requestMove(ctx, state, { from: next.from, to: next.to }, { status: card.status, pr: card.pr, dev: card.dev })
     case 'sequence': {
       let current = state
@@ -1128,7 +1164,7 @@ async function acceptStep(ctx: Ctx, state: RunState, pending: Pending, answer: u
   // The step's own word read as one of the five (old words through F7's mapping; anything else is incomplete, F6).
   const stepStop: BuildStop = { kind: 'step', step, status: readRunStatus(result.status)?.status ?? 'incomplete' }
   if (next.queue.length > 0) return printAsk(ctx, { ...next, afterAsks: { stop: after, ...(after === null ? {} : { reason: stepStop }) } })
-  if (after !== null) return stop(ctx, next, after, { stopped: true, reason: stepStop, failure: { action: step, command, message: after } })
+  if (after !== null) return requestResolve(ctx, next, { purpose: 'stop', message: after, reason: stepStop, failure: { action: step, command, message: after } })
   return requestResolve(ctx, next, { purpose: 'route' })
 }
 
@@ -1171,7 +1207,7 @@ async function afterAsk(ctx: Ctx, next: RunState): Promise<Out> {
   const after = next.afterAsks?.stop ?? null
   const reason = next.afterAsks?.reason ?? { kind: 'unexpected-error' }
   const cleared: RunState = { ...next, afterAsks: null }
-  if (after !== null) return stop(ctx, cleared, after, { stopped: true, reason })
+  if (after !== null) return requestResolve(ctx, cleared, { purpose: 'stop', message: after, reason })
   return requestResolve(ctx, cleared, { purpose: 'route' })
 }
 
@@ -1244,7 +1280,7 @@ async function startRun(ctx: Ctx, state: RunState): Promise<Out> {
   refuseInProgress(ctx.input, state)
   const replaced = state.inProgress?.runId
   const runs = state.runs.map((run) => (run.runId === replaced ? { ...run, endedAt: now, ended: 'replaced' } : run))
-  const run = { runId: ctx.runId, command: invoked(ctx.input), startedAt: now, endedAt: null, ended: null, mode: ctx.mode, autonomous: ctx.autonomous, ...(replaced === undefined ? {} : { replaced }) }
+  const run = { runId: ctx.runId, command: invoked(ctx.input), startedAt: now, endedAt: null, ended: null, mode: ctx.mode, autonomous: ctx.autonomous, ...(replaced === undefined ? {} : { replaced }), ...(ctx.input.approve === undefined ? {} : { approve: ctx.input.approve }) }
   const opened: RunState = { ...state, runs: [...runs, run], inProgress: { runId: ctx.runId, startedAt: now }, pending: null, card: null, queue: [], afterAsks: null, failure: null }
   // The replaced run ends here, so its telemetry file is written here, from the state read (KIT-19 F13); this run attaches it.
   const started = replaced === undefined ? opened : (await writeRunTelemetry(ctx, opened, replaced, now, 'replaced')).state
@@ -1372,6 +1408,8 @@ export async function nextStage(input: DriverInput): Promise<Stage> {
     const ctx: Ctx = { ...base, runId: await reserveNewRunId(initialFolder, state, input.now), mode: input.mode, autonomous: input.autonomous, resume: RESUME(input.id, input.mode, input.autonomous) }
     return save(ctx, await startRun(ctx, state))
   }
+  // --approve is the human's own word on a new invocation (KIT-83, as KIT-20 for the run-start approval): a continuing call never carries one.
+  if (input.approve !== undefined) throw new Refusal(`--approve starts a new run: run ${RESUME(input.id, input.mode, input.autonomous)} --approve ${input.approve.step} --reason "<why>" without --run or --finish`)
   const fallback = RESUME(input.id, input.mode, input.autonomous)
   const runId = input.run ?? state.inProgress?.runId
   if (runId === undefined) throw new Refusal(`no build-feature run of ${input.id} is in progress; start one with ${fallback}`)

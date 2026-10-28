@@ -9,6 +9,7 @@
 // composed document is never redacted whole, which would also mangle its own headings, code
 // fences and Mermaid blocks.
 
+import type { AuthorApproval } from '@aspiralabs/ai/common/lib/author-approval'
 import { compareIds } from '@aspiralabs/ai/common/lib/decisions'
 import type { GroomRecord } from '@aspiralabs/ai/common/lib/groom-record'
 import { redact, tail } from '@aspiralabs/ai/common/lib/redact'
@@ -37,6 +38,8 @@ export type RenderBuildSummaryInput = {
   changedFiles?: readonly string[]
   /** When the summary is rendered (the summary stage's time), the end of the Run telemetry table; absent, the run's end or its last step's. */
   now?: string
+  /** The author approvals of step outputs recorded in the ticket folder (KIT-83), read by the driver. */
+  authorApprovals?: readonly AuthorApproval[]
   /** The folder's groom record, read by the driver; its build-may-go-on follow-ups (KIT-68) are listed under the decisions. */
   groom?: GroomRecord
 }
@@ -146,6 +149,8 @@ async function statusLines(input: RenderBuildSummaryInput, resume: string): Prom
   }
   for (const approval of state.approvals) lines.push(`Run-start approval for ${approval.runId}: ${approval.name}${approval.notionUserId === undefined ? '' : ` (${approval.notionUserId})`} at ${approval.at}, by "${approval.command}".`)
   if (state.approvals.length > 0) lines.push('')
+  for (const approval of input.authorApprovals ?? []) lines.push(`Author approval of the ${approval.step} output ${approval.output} (sha256 ${approval.sha256.slice(0, 12)}) in ${approval.runId}: ${approval.name} at ${approval.at}, because "${await redact(approval.reason, repo, { app })}".`)
+  if ((input.authorApprovals ?? []).length > 0) lines.push('')
   if (run?.end?.stopped === true) lines.push(`Resume: ${resume}`)
   return lines.length === 0 ? NONE : lines
 }

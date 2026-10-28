@@ -99,6 +99,8 @@ const runSchema = z.object({
   mode: z.enum(['local', 'cloud']).default('local'),
   /** KIT-24: `--autonomous`, in the default mode: the groomer takes every question as recommended and confirms itself, and an ask with a recommended option is answered with it. */
   autonomous: z.boolean().default(false),
+  /** KIT-83: `--approve <step> --reason "<why>"` as the human invoked it; the run records the author approval of that step's output once it is in the ticket's worktree. */
+  approve: z.object({ step: z.enum(['spec-writer', 'planner']), reason: text }).optional(),
   /** The ticket's worktree the run worked in (F50). */
   worktree: z.string().optional(),
   /** KIT-19: the run's telemetry file was written (once; a later --finish never rewrites it), where, and the file block it was attached as. */
