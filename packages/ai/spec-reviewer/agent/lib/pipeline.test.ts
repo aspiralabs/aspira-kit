@@ -165,7 +165,7 @@ describe('one send-back before a phase\'s output counts against the run (SCOOP-7
     expect(again[0]!.prompt).toContain('YOUR PREVIOUS OUTPUT WAS SENT BACK')
   })
 
-  it('sends a phase back only once: a second miss is the run problem it was before', async () => {
+  it('asks a lens that still skips a rule after its send-back once more for only that rule; a lens that never writes it leaves the run problem', async () => {
     let attempts = 0
     const call: Call = async ({ phase }) => {
       if (phase === 'synthesis') return { edits: [], dispositions: [] }
@@ -173,8 +173,29 @@ describe('one send-back before a phase\'s output counts against the run (SCOOP-7
       return covered(phase === 'research' ? ['REV-001'] : [])
     }
     const result = await runPipeline({ ...input, spec, guidelines }, call)
-    expect(attempts).toBe(2)
+    expect(attempts).toBe(3)
     expect(result.problems).toEqual(['Uncovered guideline: REV-008'])
+  })
+
+  it('takes the not-applicable row a lens writes on the targeted ask, and the run ends ready (KIT-81)', async () => {
+    const requests: { phase: string; attempt?: number; prompt: string }[] = []
+    const call: Call = async ({ phase, attempt, prompt }) => {
+      requests.push({ phase, prompt, ...(attempt === undefined ? {} : { attempt }) })
+      if (phase === 'synthesis') return { edits: [], dispositions: [] }
+      if (phase === 'research') return covered(['REV-001'])
+      // The targeted ask's answer may carry stray rows; only the missing rule's row joins the checks.
+      if (phase === 'data') return attempt === 3 ? { ...covered(['REV-008', 'REV-024']), checks: [{ rule: 'REV-008', evidence: 'Not applicable: the spec adds no data.' }, { rule: 'REV-024', evidence: 'x' }] } : covered(['REV-007'])
+      return covered([])
+    }
+    const result = await runPipeline({ ...input, spec, guidelines }, call)
+    expect({ status: result.status, problems: result.problems }).toEqual({ status: 'ready', problems: [] })
+    const asked = requests.filter((r) => r.attempt === 3)
+    expect(asked.map((r) => r.phase)).toEqual(['data'])
+    expect(asked[0]!.prompt).toContain('YOUR OUTPUT HAS NO CHECKS ROW FOR: REV-008.')
+    expect(asked[0]!.prompt).toContain('A rule that does not apply still needs its own row.')
+    expect(requests.find((r) => r.phase === 'data' && r.attempt === undefined)!.prompt).toContain('a rule that does not apply to this spec still needs its own row')
+    const data = result.reviews.find((r) => r.phase === 'data')!
+    expect(data.output.checks.map((c) => c.rule)).toEqual(['REV-007', 'REV-008'])
   })
 
   it('sends a synthesis with a duplicate carrying edits and an orphan edit back once, and takes the corrected one', async () => {
