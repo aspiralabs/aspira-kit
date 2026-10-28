@@ -6,7 +6,7 @@ import type { ToolSet } from 'ai'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 
 const retention = { question: 'Choose retention duration before implementing deletion?', options: ['Keep forever', 'Delete after 30 days'], recommended: 'Keep forever', reasoning: 'nothing else in the app expires', whyYours: 'storage cost is a product choice' }
-const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [] as unknown[], close: vi.fn(), areas: [] as { name: string; files: string[] }[], explorers: 0, prompts: [] as string[] }))
+const state = vi.hoisted(() => ({ failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, ruleChecks: false, refusals: [] as unknown[], close: vi.fn(), areas: [] as { name: string; files: string[] }[], explorers: 0, prompts: [] as string[] }))
 vi.mock('@aspiralabs/ai/common/lib/repository', () => ({ repository: async () => ({ files, instructions: '', packet: () => 'src/items.ts:1: existing save', packetIndex: () => 'SOURCE ALREADY READ (index)', areas: () => state.areas, gaps: [], commit: 'abc', dirty: false, tools: { read_files: {} } }), allowedPath: (path: string) => !path.includes('.env') }))
 vi.mock('@aspiralabs/ai/common/lib/mcp', () => ({ connectReadTools: async () => ({ tools: state.guidelineTool ? { notion__read_guideline: { execute: async () => ({ content: [{ type: 'text', text: JSON.stringify({ source: 'https://www.notion.so/topic', markdown: 'TEST-001 Write the failing test first.' }) }] }) } } : {}, reads: [], sources: [], close: state.close }) }))
 vi.mock('ai', async (original) => {
@@ -28,6 +28,12 @@ vi.mock('ai', async (original) => {
     if (args.tools?.submit_exploration) {
       state.explorers++
       await args.tools.submit_exploration.execute!({ facts: [`explored fact ${state.explorers}`], touches: [{ path: 'src/items.ts', operation: 'modify', symbols: ['save'], lines: '1-1', why: 'persist' }], gaps: [] }, { toolCallId: 'explore', messages: [], context: {} })
+      return {}
+    }
+    // KIT-81: the ask for still-missing rule checks submits checks only; without ruleChecks it writes none.
+    if (args.tools?.submit_checks) {
+      if (state.ruleChecks) await args.tools.submit_checks.execute!({ checks: [{ rule: 'REV-002', evidence: 'Not applicable: the plan adds no route.' }] }, { toolCallId: 'checks', messages: [], context: {} })
+      else await args.tools.submit_checks.execute!({ checks: [] }, { toolCallId: 'checks', messages: [], context: {} })
       return {}
     }
     // KIT-54: planning reads through tools and submits the plan with submit_plan.
@@ -67,7 +73,7 @@ vi.mock('ai', async (original) => {
 import { CLOUD_RESEARCH_TOOLS, RESEARCH_RULE } from '@aspiralabs/ai/common/lib/research-rule'
 import { runPlan } from './runner.ts'
 
-beforeEach(() => { Object.assign(state, { failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, refusals: [], areas: [], explorers: 0, prompts: [] }); state.close.mockClear() })
+beforeEach(() => { Object.assign(state, { failResearch: false, needsAuthor: false, proseResearch: false, partialChecks: false, gapResearch: false, guidelineTool: false, researchSkipsPages: false, brokenPlans: 0, uiPlan: false, ruleChecks: false, refusals: [], areas: [], explorers: 0, prompts: [] }); state.close.mockClear() })
 async function input() {
   const dir = await mkdtemp(join(tmpdir(), 'planner-test-'))
   const specPath = join(dir, 'spec.reviewed.md')
@@ -227,6 +233,20 @@ it('hands a plan that fails its checks back for a correction pass and keeps the 
   expect(prompts[2]).toContain('PLAN CHECKS:\n- Implementation P2 needs an earlier test dependency for F1')
   const trace = JSON.parse(await readFile(join(result.dir, 'trace/calls.json'), 'utf8'))
   expect(trace.calls.map((call: { phase: string }) => call.phase)).toEqual(['research', 'planning', 'repair-1'])
+})
+
+it('asks planning once for only the rules still uncovered after the correction passes; an answer without them stays incomplete (KIT-81)', async () => {
+  for (const answers of [true, false]) {
+    state.ruleChecks = answers
+    const args = await input()
+    await writeFile(args.guidelinesPath, 'REV-001 Inspect source evidence\nREV-002 Version every route')
+    const result = await runPlan(args)
+    expect({ status: result.status, problems: result.problems }).toEqual(answers ? { status: 'ready', problems: [] } : { status: 'incomplete', problems: ['Uncovered guideline: REV-002'] })
+    const trace = JSON.parse(await readFile(join(result.dir, 'trace/calls.json'), 'utf8'))
+    const asked = trace.calls.filter((call: { phase: string }) => call.phase === 'rule-checks')
+    expect(asked).toHaveLength(1)
+    expect(asked[0].prompt).toContain('no check for these required rules: REV-002.')
+  }
 })
 
 it('stops correcting when a pass does not improve the plan, after at most two passes', async () => {

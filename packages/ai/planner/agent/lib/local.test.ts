@@ -12,7 +12,7 @@ import { knowledgeConfig } from './local-knowledge.ts'
 import { runLocal, type LocalPending, type LocalResult } from './local.ts'
 import { renderDecisionsFile } from './plan.ts'
 import { planningInstructions, researchInstructions, researchSystem } from './prompts.ts'
-import { writeSnapshot } from './snapshot.test-helper.ts'
+import { SNAPSHOT_PAGES, writeSnapshot } from './snapshot.test-helper.ts'
 
 const exec = promisify(execFile)
 const PACKAGE_DIR = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
@@ -200,6 +200,36 @@ it('refuses research that leaves a required rule out, and runs the agent\'s corr
   if (done.pending) throw new Error('expected export')
   expect(done.status).toBe('ready')
   expect(JSON.parse(await readFile(join(done.dir, 'trace', 'plan.json'), 'utf8')).tasks.map((task: { id: string; dependsOn: string[] }) => [task.id, task.dependsOn])).toEqual([['P1', []], ['P2', ['P1']], ['P3', ['P2']]])
+})
+
+it('accepts research\'s second miss and asks once for only the rules still uncovered after planning (KIT-81)', async () => {
+  for (const answers of [true, false]) {
+    const f = await fixture()
+    const snapshot = join(f.dir, 'REQUIRED.md')
+    await writeSnapshot(snapshot, [...SNAPSHOT_PAGES, { id: '33333333-3333-3333-3333-333333333333', title: 'API Rules', url: 'https://www.notion.so/API-Rules-33333333333333333333333333333333', markdown: 'REV-002 Version every route' }])
+    const args = { specPath: f.specPath, repoPath: f.repo, outputDir: f.outputDir, guidelinesPath: snapshot }
+    const research = pending(await runLocal(args, { env: {} }))
+    const partial = JSON.stringify({ facts: [], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [] })
+    await writeFile(research.tasks[0]!.output, partial)
+    const refused = pending(await runLocal(args, { env: {} }))
+    expect(refused.tasks[0]).toMatchObject({ id: 'research', retry: true, error: expect.stringContaining('REV-002') })
+    await writeFile(research.tasks[0]!.output, partial)
+    const planning = pending(await runLocal(args, { env: {} }))
+    expect(planning.tasks[0]!.id).toBe('planning')
+    await writeFile(planning.tasks[0]!.output, JSON.stringify(validPlan()))
+    // The correction pass does not add the check, so the rule is still uncovered after it.
+    const repair = pending(await runLocal(args, { env: {} }))
+    await writeFile(repair.tasks[0]!.output, JSON.stringify({}))
+    const asked = pending(await runLocal(args, { env: {} }))
+    expect(asked).toMatchObject({ stage: 'planning', tasks: [{ id: 'rule-checks', schema: 'ruleChecksSchema', model: 'sonnet' }] })
+    const prompt = await readFile(asked.tasks[0]!.prompt, 'utf8')
+    expect(prompt).toContain('no check for these required rules: REV-002.')
+    expect(prompt).toContain('A rule that does not apply still needs its own check.')
+    await writeFile(asked.tasks[0]!.output, JSON.stringify({ checks: answers ? [{ rule: 'REV-002', evidence: 'Not applicable: the plan adds no route.' }] : [] }))
+    const done = await runLocal(args, { env: {} })
+    if (done.pending) throw new Error('expected export')
+    expect({ status: done.status, problems: done.problems }).toEqual(answers ? { status: 'ready', problems: [] } : { status: 'incomplete', problems: ['Uncovered guideline: REV-002'] })
+  }
 })
 
 it('sends back a correction patch that does not merge into the plan, naming why', async () => {

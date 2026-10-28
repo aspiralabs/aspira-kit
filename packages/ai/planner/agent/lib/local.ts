@@ -24,7 +24,7 @@ import { z } from 'zod'
 import { fingerprintKnowledge, KnowledgeBlocked, knowledgeConfig, knowledgeFiles, knowledgeSource, loadKnowledge, REQUIRED_NAME, verifyGuidelines, type KnowledgeConfig, type KnowledgeFile } from './local-knowledge.ts'
 import { applyPlanPatch, exploreSchema, planPatchSchema, planSchema, readAnswers, researchSchema, type Exploration, type Plan, type PlanPatch, type Research } from './plan.ts'
 import { exploreInstructions, exploreSystem } from './prompts.ts'
-import { assertPlannableSpec, assessPlan, explorationsSection, explorePrompt, withExplorations, type GuidelinePage, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, ticketFolderFor, uncoveredRules, type PreparedPlan } from './runner.ts'
+import { assertPlannableSpec, assessPlan, explorationsSection, explorePrompt, withExplorations, type GuidelinePage, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, ruleChecksPrompt, ruleChecksSchema, ticketFolderFor, uncoveredRules, withRuleChecks, type PreparedPlan } from './runner.ts'
 import { renderFactsBlock, reviewFacts, type ReviewFactsResult } from './review-facts.ts'
 
 /** The model phases of a --local run, in order. */
@@ -49,17 +49,17 @@ export type LocalInput = {
 /** Seams for tests: the agent's environment, the package the agent files are read from, and the knowledge walk's own fetch/API base (never set outside tests). */
 export type LocalDeps = { env?: Record<string, string | undefined>; packageDir?: string; fetch?: (url: string, init?: RequestInit) => Promise<Response>; api?: string }
 
-/** The model phases: research, planning, then up to REPAIR_ROUNDS correction passes. */
-export type PhaseId = `explore-${number}` | 'research' | 'planning' | `repair-${number}`
+/** The model phases: research, planning, then up to REPAIR_ROUNDS correction passes, then the ask for still-missing rule checks (KIT-81). */
+export type PhaseId = `explore-${number}` | 'research' | 'planning' | `repair-${number}` | 'rule-checks'
 
 /** A task as printed for the session: the prompt and output are file paths; `model` the session model it runs on (KIT-48). */
 export type LocalTask = { id: PhaseId; prompt: string; output: string; schema: string; model: SessionModel; effort?: Effort; reads?: string; error?: string; retry?: boolean }
 
-/** Explorers on Haiku, research and planning on Opus, the correction passes on Sonnet (KIT-48). */
-export const modelForPhase = (id: PhaseId): SessionModel => (id.startsWith('explore-') ? 'haiku' : id.startsWith('repair-') ? 'sonnet' : 'opus')
+/** Explorers on Haiku, research and planning on Opus, the correction passes and the rule-checks ask on Sonnet (KIT-48). */
+export const modelForPhase = (id: PhaseId): SessionModel => (id.startsWith('explore-') ? 'haiku' : id.startsWith('repair-') || id === 'rule-checks' ? 'sonnet' : 'opus')
 
-/** The phase's model and effort: aspira.json `models` planner.research, planner.planning or planner.repair, else modelForPhase. */
-export const taskModelForPhase = (id: PhaseId, repo: string): { model: SessionModel; effort?: Effort } => taskModel(`planner.${id.startsWith('repair-') ? 'repair' : id.startsWith('explore-') ? 'explore' : id}`, modelForPhase(id), repo)
+/** The phase's model and effort: aspira.json `models` planner.research, planner.planning or planner.repair (which also sets rule-checks), else modelForPhase. */
+export const taskModelForPhase = (id: PhaseId, repo: string): { model: SessionModel; effort?: Effort } => taskModel(`planner.${id.startsWith('repair-') || id === 'rule-checks' ? 'repair' : id.startsWith('explore-') ? 'explore' : id}`, modelForPhase(id), repo)
 
 /** A stage for the session to run. */
 export type LocalPending = { pending: true; status: 'pending'; stage: Stage; workDir: string; router: string; instructions: string; tasks: LocalTask[] }
@@ -254,12 +254,15 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     }
     const promptFile = join(work, 'prompts', `${id}.md`)
     await writeFile(promptFile, renderTaskPrompt({ id, system: id === 'research' ? prompts.researchSystem : id.startsWith('explore-') ? prompts.exploreSystem : prompts.system, prompt, output, reads: readsFile, repo: resolve(input.repoPath), knowledge: topics, schema }))
-    return { task: { id, prompt: promptFile, output, schema: id === 'research' ? 'researchSchema' : id.startsWith('explore-') ? 'exploreSchema' : id.startsWith('repair-') ? 'planPatchSchema' : 'planSchema', ...taskModelForPhase(id, resolve(input.repoPath)), ...(readsFile === null ? {} : { reads: readsFile }), ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) } }
+    return { task: { id, prompt: promptFile, output, schema: id === 'research' ? 'researchSchema' : id.startsWith('explore-') ? 'exploreSchema' : id.startsWith('repair-') ? 'planPatchSchema' : id === 'rule-checks' ? 'ruleChecksSchema' : 'planSchema', ...taskModelForPhase(id, resolve(input.repoPath)), ...(readsFile === null ? {} : { reads: readsFile }), ...(error === undefined ? {} : { error }), ...(retry === undefined ? {} : { retry }) } }
   }
 
+  // Research is sent back once for rules it left out, as the agent's last turn takes what it has; the
+  // rule-checks ask after the correction passes covers what is still missing (KIT-81).
   const coversRules = (value: Research) => {
     const missing = uncoveredRules(prepared.guidelines, value.checks)
-    return missing.length ? `Checks must name every required rule ID. Add a check for each of these, with how it applies or evidence that it does not: ${missing.join(', ')}` : undefined
+    const sentBack = (state.rejections.research ?? []).some((error) => error.startsWith('Checks must name'))
+    return missing.length && !sentBack ? `Checks must name every required rule ID. Add a check for each of these, with how it applies or evidence that it does not: ${missing.join(', ')}` : undefined
   }
   // Explorers read the spec's areas in parallel first (one task each, launched together); research then
   // starts from their findings. An area whose explorer has no output under --finish is left to research.
@@ -295,6 +298,12 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       const merged = repaired.value === undefined ? undefined : applyPlanPatch(before, repaired.value)
       if (merged === undefined || planIssues({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan: merged }).length >= issues.length) break
       plan = merged
+    }
+    const missing = plan === null ? [] : uncoveredRules(prepared.guidelines, [...research.checks, ...plan.checks])
+    if (plan !== null && missing.length) {
+      const asked = await resolvePhase('rule-checks', ruleChecksPrompt(planningContext, research, plan, missing, pages), ruleChecksSchema)
+      if (asked.task !== undefined) return { ...base, stage: 'planning', tasks: [asked.task] }
+      if (asked.value !== undefined) plan = withRuleChecks(plan, asked.value.checks, missing)
     }
   }
   return exportPlan({ input, prepared, prompts, knowledge, state, calls, research, plan, work, facts, mapReport: map.report })
@@ -333,7 +342,7 @@ async function exportPlan(args: { input: LocalInput; prepared: PreparedPlan; pro
   const answers = await readAnswers(prepared.dir)
   const { status, problems, openGaps, decisions } = assessPlan({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan, phaseErrors, uiRequired: prepared.uiRequired, reads, cancelled: false, answers, takeRecommended: input.takeRecommended ?? false })
   const totalMs = Date.now() - Date.parse(state.startedAt)
-  const phaseRows = ([...calls.map((call) => call.phase).filter((phase) => phase.startsWith('explore-')), 'research', 'planning', ...calls.map((call) => call.phase).filter((phase) => phase.startsWith('repair-'))] as PhaseId[]).map((phase) => {
+  const phaseRows = ([...calls.map((call) => call.phase).filter((phase) => phase.startsWith('explore-')), 'research', 'planning', ...calls.map((call) => call.phase).filter((phase) => phase.startsWith('repair-')), ...calls.map((call) => call.phase).filter((phase) => phase === 'rule-checks')] as PhaseId[]).map((phase) => {
     const call = calls.find((item) => item.phase === phase)
     return `| ${phase} | ${call === undefined ? 'not run' : call.error === undefined ? 'completed' : `failed: ${call.error.replaceAll('|', '/').slice(0, 200)}`} |`
   })

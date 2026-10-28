@@ -159,10 +159,30 @@ export function requiredRules(guidelines: string): string[] {
   return [...new Set([...guidelines.matchAll(/^(?:#{1,6}\s+|\*\*|[-*]\s+)?([A-Z]{2,10}-\d+)\b/gm)].map((match) => match[1]!))]
 }
 
-/** Required rule IDs no check names. A check may name several, as `REV-001/002`. */
+/** The rule IDs a check names. A check may name several, as `REV-001/002`. */
+const rulesOf = (check: { rule: string }): string[] => [...check.rule.matchAll(/([A-Z]{2,10})-(\d+(?:\/\d+)*)/g)].flatMap((match) => match[2]!.split('/').map((n) => `${match[1]}-${n}`))
+
+/** Required rule IDs no check names. */
 export function uncoveredRules(guidelines: string, checks: { rule: string }[]): string[] {
-  const covered = new Set(checks.flatMap((check) => [...check.rule.matchAll(/([A-Z]{2,10})-(\d+(?:\/\d+)*)/g)].flatMap((match) => match[2]!.split('/').map((n) => `${match[1]}-${n}`))))
+  const covered = new Set(checks.flatMap(rulesOf))
   return requiredRules(guidelines).filter((rule) => !covered.has(rule))
+}
+
+/** The answer to the ask for still-missing rule checks: checks only (KIT-81). */
+export const ruleChecksSchema = planSchema.pick({ checks: true })
+
+/**
+ * The last ask before a required rule counts as uncovered (KIT-81): once research and the correction
+ * passes are done, planning is asked once for only the rules no check names. A rule judged not to
+ * apply is easy to skip; SCOOP-4's spec review ended incomplete on three of them.
+ */
+export function ruleChecksPrompt(context: string, research: Research, plan: Plan, missing: string[], pages: GuidelinePage[] = []): string {
+  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}\n\nPLAN:\n${JSON.stringify(plan)}\n\nThe research and the plan have no check for these required rules: ${missing.join(', ')}. Return checks for only these rules, one per rule naming its rule ID: how the plan meets it, with evidence, or a one-line reason it does not apply to this plan. A rule that does not apply still needs its own check. Change nothing else.`
+}
+
+/** The plan with the asked-for checks added: only those that name a missing rule. */
+export function withRuleChecks(plan: Plan, checks: Plan['checks'], missing: string[]): Plan {
+  return { ...plan, checks: [...plan.checks, ...checks.filter((check) => rulesOf(check).some((rule) => missing.includes(rule)))] }
 }
 
 /** The problems a correction pass can fix: structural plan errors and required rules no check covers. */
@@ -396,6 +416,16 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         const revised = patch
         if (!revised || planIssues({ spec, guidelines, repo, research, plan: revised }).length >= issues.length) break
         plan = revised
+      }
+      const missing = plan ? uncoveredRules(guidelines, [...research.checks, ...plan.checks]) : []
+      if (plan && missing.length && !options.signal?.aborted) {
+        options.progress?.('rule-checks')
+        const ask = ruleChecksPrompt(planningContext, research, plan, missing, pages)
+        const answer = await trace.invoke({ phase: 'rule-checks', model: models.planning, prompt: ask }, async (signal, hooks) => {
+          const output = await structuredWithTools({ model: gateway(models.planning), system: planningSystem, prompt: `${ask}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: ruleChecksSchema, tools: planningTools, maxSteps: PLANNING_MAX_STEPS, maxOutputTokens: 6000, reasoning: 'low', submitName: 'submit_checks', abortSignal: signal, ...hooks })
+          return ruleChecksSchema.parse(output)
+        })
+        if (answer) plan = withRuleChecks(plan, answer.checks, missing)
       }
     }
     const { status, problems, openGaps, decisions } = assessPlan({ spec, guidelines, repo, research, plan, phaseErrors: trace.phases.filter((phase) => !phase.phase.startsWith('explore-')), uiRequired, reads: mcp.reads, cancelled: options.signal?.aborted === true, answers, takeRecommended: input.takeRecommended ?? false })

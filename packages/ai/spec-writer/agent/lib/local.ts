@@ -169,8 +169,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}) {
   const call: Call = async ({ phase, prompt, attempt }) => {
     // A later stage's prompt depends on the earlier stage's outputs; never write it early.
     if (tasks.some((task) => stageOf(task.phase) < stageOf(phase))) throw new Error('waiting for an earlier phase')
-    // A send-back (attempt 2) is its own task with its own files, so the refused output stays on disk.
-    const file = `${phase.replaceAll('/', '_').replaceAll(':', '-')}${attempt === 2 ? '.sent-back' : ''}`
+    // A send-back (attempt 2) and the ask for still-missing rule rows (attempt 3, KIT-81) are their own tasks with their own files, so earlier outputs stay on disk.
+    const file = `${phase.replaceAll('/', '_').replaceAll(':', '-')}${attempt === 2 ? '.sent-back' : attempt === 3 ? '.missing-rules' : ''}`
     const output = join(work, 'outputs', `${file}.json`)
     const raw = await readFile(output, 'utf8').catch(() => null)
     let error: string | undefined
