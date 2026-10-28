@@ -63,6 +63,8 @@ type Variant = {
   ignore?: string[]
   /** aspira.json only in the main checkout, git-ignored and never committed (KIT-71), instead of committed on main. */
   untrackedAspira?: boolean
+  /** A root app with prisma/schema.prisma and prisma as a dev dependency, and a hand-written lockfile (npm is faked on PATH for it). */
+  prisma?: boolean
 }
 
 type Fixture = { tmp: string; origin: string; main: string }
@@ -95,8 +97,12 @@ function fixture(variant: Variant = {}): Fixture {
   if (variant.untrackedAspira !== true) writeFileSync(join(seed, 'aspira.json'), aspira)
   if (app === 'root') {
     const dependencies = variant.brokenInstall === true ? { missing: 'file:./missing.tgz' } : {}
-    writePackage(seed, { name: 'fixture', version: '1.0.0', private: true, dependencies }, build)
-    if (variant.brokenInstall === true) {
+    writePackage(seed, { name: 'fixture', version: '1.0.0', private: true, dependencies, ...(variant.prisma === true ? { devDependencies: { prisma: '^6' } } : {}) }, build)
+    if (variant.prisma === true) {
+      mkdirSync(join(seed, 'prisma'))
+      writeFileSync(join(seed, 'prisma', 'schema.prisma'), 'generator client {\n  provider = "prisma-client-js"\n}\n')
+    }
+    if (variant.brokenInstall === true || variant.prisma === true) {
       // The lockfile npm would write before the dependency was added; npm install then fails on the missing tarball.
       writeFileSync(join(seed, 'package-lock.json'), json({ name: 'fixture', version: '1.0.0', lockfileVersion: 3, requires: true, packages: { '': { name: 'fixture', version: '1.0.0' } } }))
     } else {
@@ -180,6 +186,34 @@ describe('kit worktree: creating a ticket worktree', () => {
     expect(lineWith(result.lines, 'npm install', wt)).toBeDefined()
     expect(lineWith(result.lines, 'npm run build', wt)).toBeDefined()
     expect(existsSync(join(wt, MARKER))).toBe(true)
+  })
+
+  it('runs prisma generate in a Prisma app after the install and before the build, naming the command (KIT-75)', async () => {
+    const { tmp, main } = fixture({ prisma: true })
+    // A fake npm that records its calls: the fixture has no registry and prisma is not installed.
+    const bin = join(tmp, 'bin')
+    const calls = join(tmp, 'npm-calls')
+    mkdirSync(bin)
+    writeFileSync(join(bin, 'npm'), `#!/bin/sh\necho "$PWD $*" >> '${calls}'\n`, { mode: 0o755 })
+    const path = process.env.PATH
+    process.env.PATH = `${bin}:${path ?? ''}`
+    let result: Run
+    try {
+      result = await run(main, 'KIT-13', feature())
+    } finally {
+      process.env.PATH = path
+    }
+    const wt = handlePath(main, 'FEATURE-KIT-13')
+    expect(result.code).toBe(0)
+    expect(lineWith(result.lines, 'generate', 'npm exec prisma generate', wt)).toBeDefined()
+    expect(readFileSync(calls, 'utf8').split('\n').filter((line) => line !== '')).toEqual([`${wt} install`, `${wt} exec prisma generate`, `${wt} run build`])
+  })
+
+  it('runs no prisma generate in a project without Prisma (KIT-75)', async () => {
+    const { main } = fixture()
+    const result = await run(main, 'KIT-13', feature())
+    expect(result.code).toBe(0)
+    expect(result.out).not.toContain('prisma')
   })
 
   it('T42 places the worktree under the main checkout when run from inside another ticket worktree', async () => {

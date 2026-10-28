@@ -84,6 +84,19 @@ describe('F50: the run works the ticket in its own worktree', () => {
     })
   }, SLOW)
 
+  it('runs prisma generate after the install, before the build, in a project with a Prisma schema, and not without one (KIT-75)', async () => {
+    const prisma = await fromMain({ status: 'Ready: Spec', mainFiles: { 'pnpm-workspace.yaml': 'packages: []\n', 'prisma/schema.prisma': 'generator client {\n  provider = "prisma-client-js"\n}\n', 'package.json': JSON.stringify({ name: 'fixture', scripts: { build: 'echo built' }, dependencies: { '@prisma/client': '^6' }, devDependencies: { prisma: '^6' } }) } })
+    const custom = await fromMain({ status: 'Ready: Spec', mainFiles: { 'pnpm-lock.yaml': 'lockfileVersion: 9.0\n', 'db/app.prisma': '', 'package.json': JSON.stringify({ name: 'fixture', prisma: { schema: 'db/app.prisma' }, devDependencies: { prisma: '^6' } }) } })
+    const none = await fromMain({ status: 'Ready: Spec', mainFiles: { 'pnpm-lock.yaml': 'lockfileVersion: 9.0\n', 'package.json': JSON.stringify({ name: 'fixture', devDependencies: { prisma: '^6' } }) } })
+    const wt = (h: Project) => worktreeFor(h.main)
+    expect({ prisma: await prisma.h.pnpmCalls(), custom: await custom.h.pnpmCalls(), none: await none.h.pnpmCalls(), ran: prisma.result.stage?.ran }).toEqual({
+      prisma: [`${wt(prisma.h)} install`, `${wt(prisma.h)} exec prisma generate`, `${wt(prisma.h)} build`],
+      custom: [`${wt(custom.h)} install`, `${wt(custom.h)} exec prisma generate`],
+      none: [`${wt(none.h)} install`],
+      ran: expect.arrayContaining(['pnpm install', 'pnpm exec prisma generate', 'pnpm build']),
+    })
+  }, SLOW)
+
   it('installs in the app directory aspira.json names, not the worktree root (KIT-21)', async () => {
     const { h } = await fromMain({ status: 'Ready: Spec', aspira: { board: BOARD, repository: REPOSITORY, app: 'tools/app' }, mainFiles: { 'tools/app/pnpm-lock.yaml': 'lockfileVersion: 9.0\n', 'tools/app/package.json': JSON.stringify({ name: 'fixture' }) } })
     expect(await h.pnpmCalls()).toEqual([`${join(worktreeFor(h.main), 'tools', 'app')} install`])

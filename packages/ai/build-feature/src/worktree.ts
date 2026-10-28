@@ -16,7 +16,7 @@ import { clientRootOf, readEffectiveAspira } from '@aspiralabs/ai/common/lib/asp
 import { tail } from '@aspiralabs/ai/common/lib/redact'
 import { TICKET_TYPES, ticketBranch, ticketTypeOf, type TicketType } from '@aspiralabs/ai/common/lib/ticket-branch'
 import { stateDirOf } from '#build-feature/run-state.ts'
-import { GIT_ARGS, packageManagerOf, shown, system, type CommandResult, type System, type SystemOptions } from '#build-feature/system.ts'
+import { GIT_ARGS, packageManagerOf, shown, system, type CommandResult, type PackageManager, type System, type SystemOptions } from '#build-feature/system.ts'
 
 /** Re-exported so existing build-feature imports of this module keep compiling; the definitions now live in agent-common. */
 export { TICKET_TYPES, ticketBranch, ticketTypeOf, type TicketType }
@@ -69,26 +69,36 @@ export async function excludeWorktrees(place: Place): Promise<boolean> {
   return true
 }
 
-const packageSchema = z.looseObject({ scripts: z.record(z.string(), z.unknown()).optional() })
+const dependencies = z.record(z.string(), z.unknown()).optional()
+const packageSchema = z.looseObject({ scripts: z.record(z.string(), z.unknown()).optional(), dependencies, devDependencies: dependencies, prisma: z.looseObject({ schema: z.string().optional() }).optional() })
 
-/** The project's install and build: pnpm install && pnpm build for a pnpm workspace with a build script, else the package manager's install. */
+/** `<pm> exec prisma generate` (bun: `bun x`) when `dir` has a Prisma schema and depends on prisma or @prisma/client, else null (KIT-75). */
+function prismaGenerate(dir: string, pkg: z.infer<typeof packageSchema>, pm: PackageManager): { command: string; args: string[] } | null {
+  const declared = { ...pkg.dependencies, ...pkg.devDependencies }
+  if (!('prisma' in declared) && !('@prisma/client' in declared)) return null
+  if (!existsSync(join(dir, pkg.prisma?.schema ?? join('prisma', 'schema.prisma')))) return null
+  return { command: pm, args: pm === 'bun' ? ['x', 'prisma', 'generate'] : ['exec', 'prisma', 'generate'] }
+}
+
+/**
+ * The project's install and build: pnpm install && pnpm build for a pnpm workspace with a build script, else the package manager's
+ * install. A project with a Prisma schema also runs `prisma generate` right after the install: the generated client is not in git,
+ * so a fresh worktree's check and build fail without it (KIT-75).
+ */
 export async function installCommands(dir: string): Promise<{ command: string; args: string[] }[]> {
   const raw = await readFile(join(dir, 'package.json'), 'utf8').catch(() => null)
   if (raw === null) return []
-  let scripts: Record<string, unknown> = {}
+  let pkg: z.infer<typeof packageSchema> = {}
   try {
     const parsed = packageSchema.safeParse(JSON.parse(raw))
-    scripts = parsed.success ? (parsed.data.scripts ?? {}) : {}
+    pkg = parsed.success ? parsed.data : {}
   } catch {
-    scripts = {}
+    pkg = {}
   }
-  if (existsSync(join(dir, 'pnpm-workspace.yaml')) && typeof scripts.build === 'string') {
-    return [
-      { command: 'pnpm', args: ['install'] },
-      { command: 'pnpm', args: ['build'] },
-    ]
-  }
-  return [{ command: packageManagerOf([dir]), args: ['install'] }]
+  const workspace = existsSync(join(dir, 'pnpm-workspace.yaml')) && typeof pkg.scripts?.build === 'string'
+  const pm = workspace ? 'pnpm' : packageManagerOf([dir])
+  const generate = prismaGenerate(dir, pkg, pm)
+  return [{ command: pm, args: ['install'] }, ...(generate === null ? [] : [generate]), ...(workspace ? [{ command: 'pnpm', args: ['build'] }] : [])]
 }
 
 /** Copy the ticket's `.work/<id>-<slug>/` into the worktree, overwriting nothing and leaving the run state behind. */
