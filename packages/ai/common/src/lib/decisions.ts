@@ -43,8 +43,9 @@ export const orderedOptions = (decision: Decision): string[] => [decision.recomm
 /** Questions compare by their words, not their punctuation or case. */
 export const normalizeQuestion = (question: string): string => question.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 
-/** The recommended note after an option, as written (`_(…)_`) or as Notion hands it back (`*(…)*`). */
-export const RECOMMENDED_SUFFIX = /\s*[_*]\((?:recommended|recommended, taken by the agent): .*\)[_*]\s*$/
+/** The recommended note after an option, as written (`_(…)_`), as Notion hands it back (`*(…)*`), or as a
+ * session copies it out of Notion, plain and maybe without the reasoning (`(recommended)`, KIT-79). */
+export const RECOMMENDED_SUFFIX = /\s*[_*]?\((?:recommended|recommended, taken by the agent)(?:: .*)?\)[_*]?\s*$/
 
 /** The rule every downstream prompt quotes for a spec that carries the groomed `## Decisions`. Its carve-out keeps a
  * groomed answer from waiving a MUST guideline rule (review finding IRIS1.1). */
@@ -83,7 +84,7 @@ export function renderDecisions(decisions: readonly GroomedRecord[], options: { 
 export type Answer = { id: string; question: string; answer: string; takenByAgent?: boolean }
 
 /** The suffix that marks a ticked option as the agent's own recommended pick, not the author's tick. */
-const TAKEN_BY_AGENT_SUFFIX = /[_*]\(recommended, taken by the agent:/
+const TAKEN_BY_AGENT_SUFFIX = /[_*]?\(recommended, taken by the agent:/
 
 /** The decisions with exactly one ticked option. Two ticks under one question is no answer. */
 export function parseTickedDecisions(markdown: string): Answer[] {
