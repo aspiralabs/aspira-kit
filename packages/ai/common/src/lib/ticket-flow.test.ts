@@ -3,12 +3,12 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { BoardError, type Board, type Ticket, type TicketPage } from './board'
+import { BoardError, type BoardWithPageMarkdown, type Ticket, type TicketPage } from './board'
 import { renderGroomPage } from './decisions'
 import type { GroomDecision, GroomRecord } from './groom-record'
 import { ticketCli } from './ticket-cli'
 import { afterRun, beforeRun, boardStateDir, verifyRun, type DriverContext } from './ticket-driver'
-import { FlowRefused, finishFlow, findWorkFolders, inputFileFor, localBoardEnd, localBoardVerify, readAspira, readBoardTrace, readTicketMd, startFlow, type FlowFinish } from './ticket-flow'
+import { FlowRefused, finishFlow, findWorkFolders, inputFileFor, localBoardEnd, localBoardStep, localBoardVerify, readAspira, readBoardTrace, readTicketMd, startFlow, type FlowFinish } from './ticket-flow'
 import { TICKET_FILE, renderTicketMd, type BoardAction, type RunStatus, type Skill } from './ticket'
 import type { ReasonCode } from './run-status'
 import type { GroomRunStatus } from './groom-record.ts'
@@ -25,7 +25,7 @@ const SPEC_REVIEWED = '## Intent\n\nPeople can reach every recipe, reviewed.\n'
 /** One block of a child page: one non-empty markdown line, with who last edited it, as Notion's to_do listing reports it. */
 type FakeBlock = { id: string; text: string; lastEditedBy?: string }
 type FakePage = { page: TicketPage; markdown: string; blocks: FakeBlock[] }
-type Fake = Board & {
+type Fake = BoardWithPageMarkdown & {
   status: string
   props: Record<string, string>
   pages: Record<string, FakePage>
@@ -98,6 +98,10 @@ function fakeBoard(status: string, pages: Record<string, string> = { Spec: SPEC,
       state.calls.push(`pull ${title}`)
       const entry = state.pages[title]
       return entry === undefined ? undefined : { ...entry.page, markdown: entry.markdown }
+    },
+    async pageMarkdown(pageId) {
+      state.calls.push(`markdown ${pageId}`)
+      return { markdown: pageEntry(pageId).markdown, truncated: false }
     },
     async createPage(_page, title, markdown) {
       state.calls.push(`create ${title}`)
@@ -440,6 +444,57 @@ describe('the --local board stage (planner against a stub session)', () => {
     const again = await beforeRun(ctx, { positional: 'NOM-4' })
     if (again.kind !== 'stage') throw new Error(`expected the pulls, got ${again.kind}`)
     expect(again.stage.actions.map((action) => (action.action === 'pull' ? action.file : action.action))).toEqual([spec, reviewed])
+  })
+
+  /** The board stage with a board client, as it runs with NOTION_TOKEN set; the state stays where a first run keeps it. */
+  const withClient = (client: Fake) => ({ skill: 'planner' as const, repo, argument: { kind: 'ticket' as const, ref: 'NOM-4' }, board: BOARD, stateDir: join(repo, '.work', '.local', 'planner'), env: {}, client })
+  const stageOf = (step: Awaited<ReturnType<typeof localBoardStep>>) => {
+    if (!('stage' in step)) throw new Error('expected a board stage, got the ticket')
+    return step.stage
+  }
+
+  it('KIT-91: a Status in ticket.md left from before a hand move on the board is read from the board before the gate', async () => {
+    const client = fakeBoard('Ready: Spec')
+    const options = withClient(client)
+    await session.perform(client, stageOf(await localBoardStep(options)).actions)
+    // ticket.md still shows where the last run left the card; the card was moved back by hand.
+    const ticket = (await readTicketMd(folderOf()))!
+    await writeFile(join(folderOf(), TICKET_FILE), renderTicketMd({ ...ticket, status: 'In Review: Plan' }))
+    const sync = stageOf(await localBoardStep(options))
+    expect(sync.actions.find((action) => action.action === 'move')).toMatchObject({ from: 'Ready: Spec', to: 'In Progress: Plan' })
+    expect((await readTicketMd(folderOf()))!.status).toBe('Ready: Spec')
+    await session.perform(client, sync.actions)
+    expect('ready' in (await localBoardStep(options))).toBe(true)
+    // A later call of the same run reads ticket.md first, and the board again only when ticket.md would refuse.
+    await writeFile(join(folderOf(), TICKET_FILE), renderTicketMd({ ...(await readTicketMd(folderOf()))!, status: 'In Review: Plan' }))
+    expect('ready' in (await localBoardStep(options))).toBe(true)
+    expect((await readTicketMd(folderOf()))!.status).toBe('In Progress: Plan')
+  })
+
+  it('KIT-92: a page saved again with the content of the last pull or push is not pulled; a page edited since is', async () => {
+    const client = fakeBoard('Ready: Spec')
+    const options = withClient(client)
+    const toReady = async () => {
+      await session.perform(client, stageOf(await localBoardStep(options)).actions)
+      await session.perform(client, stageOf(await localBoardStep(options)).actions)
+      const ready = await localBoardStep(options)
+      if (!('ready' in ready)) throw new Error('expected the ticket')
+    }
+    await toReady()
+    // The run pushes its Plan through the API.
+    const exportDir = join(folderOf(), 'plan.review')
+    await mkdir(join(exportDir, 'trace'), { recursive: true })
+    await writeFile(join(exportDir, 'plan.reviewed.md'), '# Plan\n')
+    await localBoardEnd({ skill: 'planner', folder: folderOf(), runStatus: 'ready', exportDir, stateDir: options.stateDir, verifyCommand: 'planner.sh local NOM-4 --verify', push: client.pushPage, reader: client })
+    await rm(options.stateDir, { recursive: true, force: true })
+    // Every page's last-edited time moves past what ticket.md recorded (a property change, Notion settling the
+    // push's time); only Spec Reviewed changed in content.
+    for (const entry of Object.values(client.pages)) entry.page.lastEditedAt = '2030-01-01T00:00:00.000Z'
+    client.pages['Spec Reviewed']!.markdown += 'Edited on the page.\n'
+    for (const file of ['spec.md', 'spec.reviewed/spec.reviewed.md', 'plan.review/plan.reviewed.md']) await setMtime(join(folderOf(), file), '2029-01-01T00:00:00.000Z')
+    await session.perform(client, stageOf(await localBoardStep(options)).actions)
+    const sync = stageOf(await localBoardStep(options))
+    expect(sync.actions.filter((action) => action.action === 'pull').map((action) => (action as { title: string }).title)).toEqual(['Spec Reviewed'])
   })
 
   it('lists the resolve, then the pulls and the claim, refuses on the wrong Status, and ends with the push and the move', async () => {
