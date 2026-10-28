@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Board } from './board'
 import { parseNextAction, parseProgressNote } from './progress-note'
-import { GATES, renderTicketMd, type TicketRecord } from './ticket'
+import { GATES, parseTicketMd, renderTicketMd, type TicketRecord } from './ticket'
 import { ticketCli } from './ticket-cli'
 import { NO_RUN_ID_NOTICE, NO_SESSION_USAGE_NOTICE, afterRun, beforeRun, handleRunError, verifyRun, type BeforeRun, type DriverContext } from './ticket-driver'
 import { writeBoardTrace } from './ticket-flow'
@@ -170,6 +170,28 @@ describe('T14: a passing verify sets the Next action to the following Playbook s
     expect(result.verified).toBe(true)
     const action = parseNextAction(await note())
     expect(action?.run).toEqual(['/aspira-implementor KIT-2'])
+  })
+})
+
+// KIT-86 (SCOOP-4): the export ended needs-author (exit 5) and the verify step printed ready (exit 0).
+describe('the verify step reports the status the export computed', () => {
+  it('an export that ends needs-author verifies as needs-author, exit 5', async () => {
+    const before = await driveToReady(baseTicket())
+    const exportDir = join(folder, 'plan.review')
+    await mkdir(join(exportDir, 'trace'), { recursive: true })
+    await writeFile(join(exportDir, 'plan.reviewed.md'), '## Plan\n\n- [ ] F1: ship it.\n')
+    const exported = await afterRun(context, before, { status: 'needs-author', exportDir, verifyCommand: 'planner.sh local KIT-2 --verify' })
+    expect({ runStatus: exported.runStatus, exitCode: exported.exitCode }).toEqual({ runStatus: 'needs-author', exitCode: 5 })
+    // The session performs the board actions the export listed.
+    let record = parseTicketMd(await readFile(join(folder, 'ticket.md'), 'utf8'))!
+    for (const action of exported.board.actions) {
+      if (action.action === 'push') record = { ...record, pages: { ...record.pages, [action.title]: { id: 'plan-page', title: action.title, url: 'https://www.notion.so/plan-page', lastEditedAt: NOW() } } }
+      if (action.action === 'move') record = { ...record, status: action.to }
+    }
+    await writeTicket(record)
+    const verified = await verifyRun(context, {}, (f) => join(f, 'plan.review'))
+    expect({ verified: verified.verified, runStatus: verified.runStatus, exitCode: verified.exitCode }).toEqual({ verified: true, runStatus: 'needs-author', exitCode: 5 })
+    expect(parseProgressNote(await note())?.runStatus).toBe('needs-author')
   })
 })
 

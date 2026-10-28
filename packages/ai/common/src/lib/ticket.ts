@@ -442,6 +442,8 @@ export type BoardTrace = {
   actions: BoardTraceEntry[]
   verified?: boolean
   telemetry?: BoardTraceTelemetry
+  /** The run's status as the export computed it, so the verify step reports the same one (KIT-86). */
+  runStatus?: RunStatus
 }
 
 /** The report's first lines (F10): the ticket, the moves, the pages pushed, the working folder. */

@@ -1269,6 +1269,7 @@ export async function localBoardEnd(options: LocalBoardEndOptions): Promise<Loca
   actions.push(...telemetryActions(options, ticket, trace))
   const expected = move?.to ?? ticket.status
   trace.expected = expected
+  trace.runStatus = runStatus
   trace.pushing = actions.filter((action) => action.action === 'push').map((action) => (action as { title: string }).title)
   // Nothing for the session to do: the trace is complete as it stands.
   trace.verified = actions.length === 0

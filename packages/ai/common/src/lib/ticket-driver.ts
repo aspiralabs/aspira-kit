@@ -360,12 +360,13 @@ export async function verifyRun(context: DriverContext, args: DriverTicketArgs, 
   const runId = (await readLocalRun(boardStateDir(folder, context.skill)))?.runId ?? NO_RUN_ID
   if (result.ok && (await roundStateEnds(context.skill, folder, args.finish === true))) await rm(boardStateDir(folder, context.skill), { recursive: true, force: true }).catch(() => undefined)
   const ticket = await readTicketMd(folder)
-  const runStatus: RunStatus = result.ok ? 'ready' : 'incomplete'
+  // The status the export computed (its merged decisions included), never a fresh "ready": one run, one status (KIT-86).
+  const runStatus: RunStatus = result.ok ? (result.trace.runStatus ?? 'ready') : 'incomplete'
   await note(context, folder, async () => {
     if (ticket === null) return null
-    const after = result.ok ? await stepAfterBuild(context, folder, ticket) : null
+    const after = runStatus === 'ready' ? await stepAfterBuild(context, folder, ticket) : null
     const action = result.ok
-      ? (after?.action ?? nextAction({ kind: 'run', id: ticket.id, skill: context.skill, runStatus: 'ready', verified: true, liveStatus: ticket.status }))
+      ? (after?.action ?? nextAction({ kind: 'run', id: ticket.id, skill: context.skill, runStatus, verified: true, liveStatus: ticket.status }))
       : { step: 'Fix the verify problem, then run --verify again', do: [], run: [], session: '' }
     const openIssues = [...(result.problem === null ? [] : [result.problem]), ...(after?.openIssues ?? [])]
     return { id: ticket.id, title: ticket.title, skill: context.skill, runId, runStatus, status: ticket.status, expectedStatus: null, outputs: after?.outputs ?? [], completed: [], decisions: [], openIssues, nextAction: action }
