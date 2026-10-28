@@ -10,6 +10,7 @@ import { z } from 'zod'
 import { countsFromFindings } from '@aspiralabs/ai/common/lib/findings-counts'
 import { readRunStatus, type RunStatus } from '@aspiralabs/ai/common/lib/run-status'
 import type { SourceKind } from '@aspiralabs/ai/common/lib/telemetry-sources'
+import { openDecisions } from '#build-feature/decisions.ts'
 import type { StepName } from '#build-feature/route.ts'
 import { subagentUsageSchema, usageSchema, type RunState, type SubagentUsage, type Usage } from '#build-feature/run-state.ts'
 
@@ -139,6 +140,16 @@ export async function readSpecCoverage(folder: string, _state: RunState): Promis
   const review = await readJson(join(folder, 'spec.reviewed/trace/review.json'))
   const ready = review.ok && reviewStatus.safeParse(review.value).data === 'ready'
   return ready && reviewed === spec
+}
+
+/**
+ * In Review: Plan: whether the planner's last export (plan.review/trace/review.json) is ready with no decision left
+ * open in plan.json (KIT-87). A needs-author export, or an open decision, means the planner reruns on the answers.
+ */
+export async function readPlanCoverage(folder: string): Promise<boolean> {
+  const review = await readJson(join(folder, 'plan.review/trace/review.json'))
+  if (!review.ok || readRunStatus(reviewStatus.safeParse(review.value).data ?? '')?.status !== 'ready') return false
+  return (await openDecisions('planner', folder)).length === 0
 }
 
 /** The code-analyzer finished ready (or its pre-upgrade clean) after the last build. */

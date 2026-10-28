@@ -75,7 +75,7 @@ export const PLAYBOOK_STEPS: { title: string; body: string }[] = [
       '```',
       'Needs Ready: Spec. The skill sets Dev, moves the card to In Progress: Plan, pulls `spec.reviewed/spec.reviewed.md` from the Spec Reviewed page and plans from it. Output: `plan.review/plan.reviewed.md`, `run-analysis.md`, `trace/`. On success it puts the plan on the ticket as **Plan** and moves the card to In Review: Plan. Read `trace/review.json`:',
       '- `ready`: read the plan, then move the card to Ready: Plan by hand. The one exception: an /aspira-build-feature run makes this move itself, on its recorded run-start approval.',
-      '- `needs-author`: answer the decisions it lists in the plan, then rerun; the card is In Review: Plan, so move it back to In Progress: Plan first (BOARD-007).',
+      '- `needs-author`: answer the decisions it lists (tick them in `plan.review/trace/decisions.md`), then run the same command again: from In Review: Plan the planner plans with the answers and makes no move (KIT-87). Repeat until it says `ready`.',
       '- `incomplete`: read `problems` in the same file; most are missing evidence. The card stays In Progress: Plan; rerun once. If it stays incomplete, that is a kit bug: log it on Kit agent gaps.',
     ].join('\n'),
   },

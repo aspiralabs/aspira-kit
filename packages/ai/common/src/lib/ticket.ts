@@ -107,7 +107,8 @@ export const GATES: Record<Skill, Gate> = {
     inputByStatus: { 'In Review: Spec': ['spec.reviewed/spec.reviewed.md', 'spec.md'] },
     moveOn: ['ready', 'needs-author'],
   },
-  planner: { accepts: ['Ready: Spec'], inProgress: 'In Progress: Plan', success: 'In Review: Plan', pushes: [{ title: 'Plan', file: 'plan.review/plan.reviewed.md', pushOn: ['ready', 'needs-author'] }], input: 'spec.reviewed/spec.reviewed.md', moveOn: ['ready', 'needs-author'] },
+  // From In Review: Plan the planner reruns on the author's answered decisions (KIT-87), with no move, as the spec step does from In Review: Spec.
+  planner: { accepts: ['Ready: Spec', 'In Review: Plan'], inProgress: 'In Progress: Plan', success: 'In Review: Plan', startFrom: ['Ready: Spec'], pushes: [{ title: 'Plan', file: 'plan.review/plan.reviewed.md', pushOn: ['ready', 'needs-author'] }], input: 'spec.reviewed/spec.reviewed.md', moveOn: ['ready', 'needs-author'] },
   implementor: {
     accepts: ['Ready: Plan'],
     inProgress: 'In Progress: Implementation',

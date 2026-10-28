@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { ToolSet } from 'ai'
+import { recordAuthorApproval, sha256Of } from '@aspiralabs/ai/common/lib/author-approval'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 
 const retention = { question: 'Choose retention duration before implementing deletion?', options: ['Keep forever', 'Delete after 30 days'], recommended: 'Keep forever', reasoning: 'nothing else in the app expires', whyYours: 'storage cost is a product choice' }
@@ -148,6 +149,19 @@ it('requires complete guidelines and rejects unresolved reviewed specs', async (
   await writeFile(args.guidelinesPath, 'Rules')
   await writeFile(args.specPath, '> Review status: **needs-author**\n\n' + spec)
   await expect(runPlan(args)).rejects.toThrow('Resolve the spec review')
+})
+
+it('plans from an unresolved reviewed spec the author approved, and only that exact spec (KIT-84)', async () => {
+  const args = await input()
+  const review = join(args.repoPath, 'spec.reviewed')
+  await mkdir(review)
+  const specPath = join(review, 'spec.reviewed.md')
+  const banner = '> Review status: **incomplete**\n\n' + spec
+  await writeFile(specPath, banner)
+  await recordAuthorApproval(args.repoPath, { step: 'spec-writer', name: 'David', at: '2026-10-28T00:00:00Z', reason: 'incomplete only from KIT-81', runId: 'run-1', output: 'spec.reviewed/spec.reviewed.md', sha256: sha256Of(banner) })
+  expect((await runPlan({ ...args, specPath })).status).toBe('ready')
+  await writeFile(specPath, banner + '\nAn edit after the approval.\n')
+  await expect(runPlan({ ...args, specPath })).rejects.toThrow('Resolve the spec review')
 })
 
 it('puts planning output beside a standard spec review directory', async () => {

@@ -24,7 +24,7 @@ import { z } from 'zod'
 import { fingerprintKnowledge, KnowledgeBlocked, knowledgeConfig, knowledgeFiles, knowledgeSource, loadKnowledge, REQUIRED_NAME, verifyGuidelines, type KnowledgeConfig, type KnowledgeFile } from './local-knowledge.ts'
 import { applyPlanPatch, exploreSchema, planPatchSchema, planSchema, readAnswers, researchSchema, type Exploration, type Plan, type PlanPatch, type Research } from './plan.ts'
 import { exploreInstructions, exploreSystem } from './prompts.ts'
-import { assertPlannableSpec, assessPlan, explorationsSection, explorePrompt, withExplorations, type GuidelinePage, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, ruleChecksPrompt, ruleChecksSchema, ticketFolderFor, uncoveredRules, withRuleChecks, type PreparedPlan } from './runner.ts'
+import { assertPlannableSpec, specApproved, assessPlan, explorationsSection, explorePrompt, withExplorations, type GuidelinePage, outputDirFor, planContext, planIssues, planningPrompt, planReportFiles, preparePlan, REPAIR_ROUNDS, repairPrompt, researchPrompt, ruleChecksPrompt, ruleChecksSchema, ticketFolderFor, uncoveredRules, withRuleChecks, type PreparedPlan } from './runner.ts'
 import { renderFactsBlock, reviewFacts, type ReviewFactsResult } from './review-facts.ts'
 
 /** The model phases of a --local run, in order. */
@@ -162,7 +162,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   const script = 'planner.sh'
 
   // Refuse a spec the agent would refuse before fetching anything.
-  assertPlannableSpec(await readFile(resolve(input.specPath), 'utf8'))
+  const spec = await readFile(resolve(input.specPath), 'utf8')
+  assertPlannableSpec(spec, await specApproved(input.specPath, spec))
   await mkdir(join(work, 'prompts'), { recursive: true })
   const instructionsPath = join(packageDir, 'agent', 'instructions.md')
   const router = join(work, 'prompts', 'router.md')
