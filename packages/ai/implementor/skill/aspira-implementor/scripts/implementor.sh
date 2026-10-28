@@ -51,7 +51,7 @@ project_root() {
       dir=$next
     done
   done
-  die "no Aspira project here (no aspira.json at or above $PWD)"
+  die "no Aspira project here (no aspira.json at or above $PWD); run kit init --board <Feature Board URL> in the main checkout (aspira.json is git-ignored, so a fresh clone has none)"
 }
 # Which NAME runs, in this order: IMPLEMENTOR_AGENT_DIR (kit development only; the report says so), then
 # the global @aspiralabs/ai on PATH (`kit package-dir`). A project's own node_modules copy and $ASPIRA_KIT are never consulted.

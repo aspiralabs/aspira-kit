@@ -1351,6 +1351,8 @@ export async function nextStage(input: DriverInput): Promise<Stage> {
   const initialFolder = await workFolder(input.repo, input.id)
   // F50: outside the ticket's worktree while it exists, the session is sent there first.
   const place = await locate(input.repo, input.env)
+  // aspira.json is git-ignored (KIT-71): a run started inside a worktree that lacks it gets the main checkout's before it is read (KIT-78).
+  if (place !== null && place.top !== place.main) linkAspira(place.main, place.top)
   if (place !== null && insideWorktree(place, input.id) === null) {
     const worktree = existingWorktree(place, input.id)
     // A run still open in this folder (a start whose isolation failed, so it stopped here) goes on here; one that moved is told to continue in the worktree.

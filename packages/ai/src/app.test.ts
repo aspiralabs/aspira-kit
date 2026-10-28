@@ -3,7 +3,7 @@
 // root puts the package steps in the app and the Claude-facing files at the root, with every path
 // inside them pointing into the app; doctor, next and the launchers read the app from aspira.json.
 import { spawnSync } from 'node:child_process'
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -335,6 +335,32 @@ describe('kit init --stack next --app apps/web at the repository root', () => {
     expect(checkAspira(root)).toEqual({ ok: true })
     writeFileSync(join(root, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/mobile' }))
     expect(checkAspira(root).reason).toBe('aspira.json "app" is apps/mobile, but apps/mobile/package.json does not exist')
+  })
+
+  it('kit init --board --releases keeps app and every hand-added key (KIT-78)', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kit-aspira-keep-')))
+    const kept = { board: BOARD, app: 'apps/web', gates: { check: ['pnpm check'] }, dev: { command: 'pnpm dev' }, database: { provider: 'neon', projectId: 'p', parentBranch: 'main', envVars: ['DATABASE_URL'] } }
+    writeFileSync(join(root, 'aspira.json'), JSON.stringify(kept))
+    const releases = 'https://www.notion.so/a9e768e6e79643118781b4e393d4a4a6'
+    writeAspira({ projectRoot: root, board: BOARD, releases, dryRun: false, log: () => {} })
+    expect(JSON.parse(readFileSync(join(root, 'aspira.json'), 'utf8'))).toEqual({ ...kept, releases })
+  })
+
+  it('kit init in a worktree with no aspira.json links the main checkout\'s and merges into it, keeping its keys (KIT-78)', () => {
+    const main = realpathSync(mkdtempSync(join(tmpdir(), 'kit-aspira-wt-')))
+    git(main, 'init', '-q', '-b', 'main')
+    writeFileSync(join(main, 'README.md'), 'x\n')
+    git(main, 'add', '.')
+    git(main, 'commit', '-qm', 'init')
+    writeFileSync(join(main, 'aspira.json'), JSON.stringify({ board: BOARD, app: 'apps/web', gates: { check: ['pnpm check'] } }))
+    const worktree = join(main, '.worktrees', 'BUG-NOM-43')
+    expect(git(main, 'worktree', 'add', '-q', '-b', 'fix/nom-43', worktree).status).toBe(0)
+    const releases = 'https://www.notion.so/a9e768e6e79643118781b4e393d4a4a6'
+    writeAspira({ projectRoot: worktree, board: BOARD, releases, dryRun: false, log: () => {} })
+    expect({
+      link: lstatSync(join(worktree, 'aspira.json')).isSymbolicLink(),
+      main: JSON.parse(readFileSync(join(main, 'aspira.json'), 'utf8')) as unknown,
+    }).toEqual({ link: true, main: { board: BOARD, app: 'apps/web', gates: { check: ['pnpm check'] }, releases } })
   })
 })
 

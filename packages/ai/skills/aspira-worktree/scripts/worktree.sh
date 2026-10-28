@@ -9,7 +9,7 @@ die() { echo "aspira-$NAME: $*" >&2; exit 1; }
 # a project): the nearest aspira.json at or above it.
 dir=$PWD
 while [ ! -f "$dir/aspira.json" ]; do
-  [ "$dir" != / ] || die "no Aspira project here (no aspira.json at or above $PWD)"
+  [ "$dir" != / ] || die "no Aspira project here (no aspira.json at or above $PWD); run kit init --board <Feature Board URL> in the main checkout (aspira.json is git-ignored, so a fresh clone has none)"
   dir=$(dirname "$dir")
 done
 # Only the global kit (pnpm add -g @aspiralabs/ai) on PATH runs; a project's own node_modules copy is never used.

@@ -161,6 +161,17 @@ describe.each(LAUNCHERS)('$name .kit-version vs. the global kit (T40, T41, F5, F
     expect(result.stdout).not.toContain('kit init')
   })
 
+  it('in a git repo with no aspira.json the message names kit init --board as the fix (KIT-78)', async () => {
+    const world = await makeWorld(launcher, { heal: false, skillVersion: AI_VERSION })
+    root = world.root
+    await rm(join(world.project, 'aspira.json'))
+    const result = runLauncher(world, launcher)
+    expect(result.status).not.toBe(0)
+    expect(result.stdout).toContain('no Aspira project here')
+    expect(result.stdout).toContain('run kit init --board <Feature Board URL>')
+    expect(await ran(world.agentDir)).toBe(false)
+  })
+
   it('a pin equal to the global kit version runs the global agent', async () => {
     const world = await makeWorld(launcher, { heal: false, skillVersion: AI_VERSION })
     root = world.root

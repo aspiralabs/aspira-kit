@@ -107,6 +107,17 @@ describe('F50: the run works the ticket in its own worktree', () => {
     expect({ created: isLink(worktreeFor(h.main)), reused: isLink(worktreeFor(reuse.main)), stage: redirect.stage?.stage }).toEqual({ created: true, reused: true, stage: 'worktree' })
   }, SLOW)
 
+  it('a run started inside a reused worktree that lacks aspira.json links the main checkout\'s and goes on (KIT-78)', async () => {
+    const h = await project({ status: 'Ready: Spec', layout: 'checkout', aspiraUntracked: true })
+    const worktree = worktreeFor(h.main)
+    await exec('git', ['-C', h.main, 'worktree', 'add', '-q', '-b', 'feat/kit-11-x', worktree, 'main'])
+    h.cd(worktree)
+    await mkdir(h.folder, { recursive: true })
+    await writeFile(join(h.folder, 'spec.md'), SPEC)
+    const step = await h.advance({}, await h.start())
+    expect({ link: lstatSync(join(worktree, 'aspira.json')).isSymbolicLink(), command: commandOf(step) }).toEqual({ link: true, command: '/aspira-planner KIT-11 --take-recommended' })
+  }, SLOW)
+
   it('continues from inside the worktree: the ticket folder is there and the next stage is the step', async () => {
     const { h, result } = await fromMain({ status: 'Ready: Spec' })
     const mainState = JSON.parse(await readFile(join(h.stateDir, 'state.json'), 'utf8')) as { inProgress: unknown; runs: { ended: string | null }[] }
