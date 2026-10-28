@@ -459,14 +459,14 @@ describe('the --local board stage (planner against a stub session)', () => {
     await session.perform(client, stageOf(await localBoardStep(options)).actions)
     // ticket.md still shows where the last run left the card; the card was moved back by hand.
     const ticket = (await readTicketMd(folderOf()))!
-    await writeFile(join(folderOf(), TICKET_FILE), renderTicketMd({ ...ticket, status: 'In Review: Plan' }))
+    await writeFile(join(folderOf(), TICKET_FILE), renderTicketMd({ ...ticket, status: 'Ready: Plan' }))
     const sync = stageOf(await localBoardStep(options))
     expect(sync.actions.find((action) => action.action === 'move')).toMatchObject({ from: 'Ready: Spec', to: 'In Progress: Plan' })
     expect((await readTicketMd(folderOf()))!.status).toBe('Ready: Spec')
     await session.perform(client, sync.actions)
     expect('ready' in (await localBoardStep(options))).toBe(true)
     // A later call of the same run reads ticket.md first, and the board again only when ticket.md would refuse.
-    await writeFile(join(folderOf(), TICKET_FILE), renderTicketMd({ ...(await readTicketMd(folderOf()))!, status: 'In Review: Plan' }))
+    await writeFile(join(folderOf(), TICKET_FILE), renderTicketMd({ ...(await readTicketMd(folderOf()))!, status: 'Ready: Plan' }))
     expect('ready' in (await localBoardStep(options))).toBe(true)
     expect((await readTicketMd(folderOf()))!.status).toBe('In Progress: Plan')
   })
