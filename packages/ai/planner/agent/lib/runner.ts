@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { generateText, stepCountIs, tool, type ModelMessage, type ToolSet } from 'ai'
 import { gateway, structuredWithTools } from '@aspiralabs/ai/common/lib/gateway'
 import { writeArtifacts } from '@aspiralabs/ai/common/lib/artifacts'
+import { approvalOf } from '@aspiralabs/ai/common/lib/author-approval'
 import { openDecisions } from '@aspiralabs/ai/common/lib/decisions'
 import { connectReadTools } from '@aspiralabs/ai/common/lib/mcp'
 import { modelTrace } from '@aspiralabs/ai/common/lib/model-trace'
@@ -50,12 +51,19 @@ export function outputDirFor(input: Pick<PlanInput, 'specPath' | 'outputDir'>): 
   return resolve(input.outputDir ?? resolve(ticketFolderFor(input.specPath), 'plan.review'))
 }
 
-/** Refuse a spec the planner cannot plan from: not a business spec, or a review still awaiting resolution. */
-export function assertPlannableSpec(spec: string): void {
+/**
+ * Refuse a spec the planner cannot plan from: not a business spec, or a review still awaiting resolution.
+ * `approved`: the author approved this exact spec through build-feature's --approve spec-writer (KIT-84),
+ * which stands in for a ready review; the banner is never edited to get past this.
+ */
+export function assertPlannableSpec(spec: string, approved = false): void {
   const invalidSpec = checkBusinessSpec(spec)
   if (invalidSpec.length) throw new Error(`Invalid business spec: ${invalidSpec.join('; ')}`)
-  if (/Review status:\s*\*\*(?:incomplete|needs-author)\*\*/i.test(spec)) throw new Error('Resolve the spec review before planning implementation')
+  if (!approved && /Review status:\s*\*\*(?:incomplete|needs-author)\*\*/i.test(spec)) throw new Error('Resolve the spec review before planning implementation, or approve it: /aspira-build-feature <ID> --approve spec-writer --reason "<why>"')
 }
+
+/** Whether the author approved this spec, as it is now, for the ticket folder it sits in (KIT-84). */
+export const specApproved = async (specPath: string, spec: string): Promise<boolean> => (await approvalOf(ticketFolderFor(specPath), 'spec-writer', spec)) !== null
 
 /** Resolve the output directory, read the spec, guidelines and repository, and refuse inputs the planner cannot plan from. */
 export async function preparePlan(input: PlanInput, signal: AbortSignal): Promise<PreparedPlan> {
@@ -65,7 +73,7 @@ export async function preparePlan(input: PlanInput, signal: AbortSignal): Promis
     if (!path || (!path.startsWith('../') && path !== '..')) throw new Error('Output directory must not contain the source spec or guidelines')
   }
   const [spec, guidelines, repo] = await Promise.all([readFile(resolve(input.specPath), 'utf8'), readFile(resolve(input.guidelinesPath), 'utf8'), repository(input.repoPath, signal)])
-  assertPlannableSpec(spec)
+  assertPlannableSpec(spec, await specApproved(input.specPath, spec))
   if (!guidelines.trim() || /TRUNCATED by the Notion API/i.test(guidelines)) throw new Error('A complete required-guidelines snapshot is required')
   const uiRequired = input.uiRequired ?? /\b(?:UI|screen|page|card|button|mobile|component|navigation)\b/i.test(spec)
   // The spec's path as commits cite it: repository-relative when the spec is inside the repository.
