@@ -1287,7 +1287,7 @@ describe('the groomer --local board stage (against a stub session)', () => {
   }
 
   /** The stub session: performs each listed action on the fake board with what a Notion MCP session would do, and keeps ticket.md in step. */
-  async function perform(client: Fake, actions: BoardAction[]): Promise<void> {
+  async function perform(client: Fake, actions: BoardAction[], options: { skipSamePull?: boolean } = {}): Promise<void> {
     const ticketFile = join(folderOf(), TICKET_FILE)
     const editTicket = async (change: (ticket: NonNullable<Awaited<ReturnType<typeof readTicketMd>>>) => void) => {
       const ticket = (await readTicketMd(folderOf()))!
@@ -1304,6 +1304,8 @@ describe('the groomer --local board stage (against a stub session)', () => {
         const page = await client.pullPage(PAGE, field(action, 'title')!)
         const file = field(action, 'file')!
         await mkdir(join(file, '..'), { recursive: true })
+        // A session that finds the page equal to its local copy may write nothing.
+        if (options.skipSamePull === true && (await readFile(file, 'utf8').catch(() => null)) === page!.markdown) continue
         await writeFile(file, page!.markdown)
       } else if (kind === 'mark') {
         const text = field(action, 'text') ?? /Run: \S+ local in progress/.exec(field(action, 'note') ?? '')?.[0]
@@ -1469,6 +1471,37 @@ describe('the groomer --local board stage (against a stub session)', () => {
       traced: next.trace.actions.filter((action) => action.action === 'pull' && action.detail.includes('start of round 2')).length,
       askedOnce: (await beforeRun(ctxOf('groomer'), { positional: 'NOM-4' })).kind,
     }).toEqual({ kinds: [`pull ${GD}`, 'mark'], ticked: true, traced: 1, askedOnce: 'ticket' })
+  })
+
+  it('the first pull of Grooming Decisions is done once fetched, even when it matches the copy already in the folder (KIT-82)', async () => {
+    const client = fakeBoard('Grooming', {})
+    seedGroomPage(client, renderedPage(groomRecord([Q1])))
+    const first = await beforeRun(ctxOf('groomer'), { positional: 'NOM-4' })
+    if (first.kind !== 'stage') throw new Error(`expected the resolve stage, got ${first.kind}`)
+    await perform(client, first.stage.actions)
+    await mkdir(join(decisionsPath(folderOf()), '..'), { recursive: true })
+    await writeFile(decisionsPath(folderOf()), (await client.pullPage(PAGE, GD))!.markdown)
+    await utimes(decisionsPath(folderOf()), new Date('2026-10-01T00:00:00Z'), new Date('2026-10-01T00:00:00Z'))
+    const sync = await beforeRun(ctxOf('groomer'), { positional: 'NOM-4' })
+    if (sync.kind !== 'stage') throw new Error(`expected the sync stage, got ${sync.kind}`)
+    await perform(client, sync.stage.actions, { skipSamePull: true })
+    expect((await beforeRun(ctxOf('groomer'), { positional: 'NOM-4' })).kind).toBe('ticket')
+  })
+
+  it('the round pull is done once the page is fetched, even when it matches the last round\'s copy (KIT-82)', async () => {
+    const client = fakeBoard('Grooming', {})
+    seedGroomPage(client, renderedPage(groomRecord([Q1])))
+    const ready = await localReady(client)
+    await localRound(client, groomRecord([Q1]), 1)
+    const first = await afterRun(ctxOf('groomer'), ready, { status: 'needs-author', exportDir: exportOf(), verifyCommand, round: 1 })
+    await perform(client, first.board.actions)
+    expect((await verifyRun(ctxOf('groomer'), { positional: 'NOM-4' }, exportOf)).verified).toBe(true)
+    // No ticks between the rounds: the page is what the last round rendered, so the copy is fetched unchanged.
+    await writeFile(decisionsPath(folderOf()), (await client.pullPage(PAGE, GD))!.markdown)
+    const again = await beforeRun(ctxOf('groomer'), { positional: 'NOM-4' })
+    if (again.kind !== 'stage') throw new Error(`expected the round-2 board stage, got ${again.kind}`)
+    await perform(client, again.stage.actions, { skipSamePull: true })
+    expect((await beforeRun(ctxOf('groomer'), { positional: 'NOM-4' })).kind).toBe('ticket')
   })
 
   it('the spec writer\'s verify still checks only that the pushed row exists', async () => {

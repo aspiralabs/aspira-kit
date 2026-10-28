@@ -7,7 +7,7 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { z } from 'zod'
 import { readEffectiveAspira } from './aspira-config.ts'
@@ -1092,8 +1092,10 @@ export async function localBoardStep(options: LocalBoardOptions): Promise<{ stag
     state.roundPullBefore = {}
     for (const item of plan) {
       if (item.decision !== 'write' || !(row.pulls ?? []).some((pull) => pull.title === item.title)) continue
-      // The copy is pulled once its file changes, whatever the clock says: the last round rendered it moments ago.
-      state.roundPullBefore[item.file] = (await modifiedAt(item.file)) ?? ''
+      // The copy is pulled once its file is back: it is removed here, so a pull whose content matches
+      // the copy the last round rendered (no ticks since) still shows as done, with no marker added by hand.
+      await rm(item.file, { force: true })
+      state.roundPullBefore[item.file] = ''
       state.trace?.actions.push(entry('pull', `${item.title} -> ${item.file} (pulled over the local copy at the start of round ${nextRound}) by the session`, ticket.status, ticket.status))
     }
     await saveState(options.stateDir, state)
@@ -1142,7 +1144,11 @@ export async function localBoardStep(options: LocalBoardOptions): Promise<{ stag
   const actions = [...pulls, ...mark, ...claim]
   const expected = gate.startMove?.to ?? ticket.status
   if (actions.length > 0) {
-    if (state.syncAskedAt === null) state.syncAskedAt = new Date().toISOString()
+    if (state.syncAskedAt === null) {
+      state.syncAskedAt = new Date().toISOString()
+      // The gate row's own pulls replace the copy anyway: removing it now makes a fetch equal to the old copy count as done.
+      for (const item of pending) if (item.decision === 'write' && (row.pulls ?? []).some((pull) => pull.title === item.title)) await rm(item.file, { force: true })
+    }
     await saveState(options.stateDir, state)
     return { stage: stageOf(folder, actions, expected, 'Perform each action with the Notion MCP (notion-fetch for a pull, notion-update-page for a move or a property), update ticket.md as each "then" says, then call local again.') }
   }
