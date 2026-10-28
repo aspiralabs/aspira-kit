@@ -133,6 +133,11 @@ describe('the round schema (T15)', () => {
     expect(factSchema.safeParse(literal).success).toBe(false)
   })
 
+  it('normalizes a fact quote with backticks or line breaks instead of refusing it (KIT-82)', () => {
+    const parsed = factSchema.safeParse({ path: 'src/cart.ts', line: 3, quote: 'call `createInvite`\n  with   a userId' })
+    expect(parsed.success && parsed.data.quote).toBe('call createInvite with a userId')
+  })
+
   it('refuses a record with two decisions under one id', () => {
     expect(groomRecordSchema.safeParse({ ...groomed, decisions: [q1, { ...q2, id: 'Q1' }] }).success).toBe(false)
   })
