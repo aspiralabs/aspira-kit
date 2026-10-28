@@ -237,8 +237,13 @@ it('reads the option the author ticked in trace/decisions.md on the rerun and re
 
   await writeFile(decisionsFile, (await readFile(decisionsFile, 'utf8')).replace('- [ ] Expire after 30 days', '- [x] Expire after 30 days'))
   const again = pending(await runLocal(args, { env: {} }))
+  // KIT-89: research and planning get the author's answer as settled input, not only the export.
+  const settled = '- D1 — Keep saved items forever?\n  The author\'s answer: Expire after 30 days'
+  expect(await readFile(again.tasks[0]!.prompt, 'utf8')).toContain(settled)
   await writeFile(again.tasks[0]!.output, JSON.stringify({ facts: [], checks: [{ rule: 'REV-001', evidence: 'src/items.ts:1' }], gaps: [], decisions: [retention] }))
-  await writeFile(pending(await runLocal(args, { env: {} })).tasks[0]!.output, JSON.stringify(validPlan()))
+  const replanning = pending(await runLocal(args, { env: {} }))
+  expect(await readFile(replanning.tasks[0]!.prompt, 'utf8')).toContain(settled)
+  await writeFile(replanning.tasks[0]!.output, JSON.stringify(validPlan()))
   const second = await runLocal(args, { env: {} })
   if (second.pending) throw new Error('expected export')
   expect(second.status).toBe('ready')

@@ -209,6 +209,8 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
   // The spec reviewer's own facts, reused in the session's research prompt when they still describe this spec and commit (F33-F35).
   const facts = await reviewFacts({ folder: ticketFolderFor(input.specPath), repoPath: input.repoPath, repo: { commit: prepared.repo.commit, dirty: prepared.repo.dirty } })
   // The run packet is rewritten before every step print (KIT-48), so the fingerprint a resumed call checks leaves it out.
+  // The author's ticks in the previous plan's trace/decisions.md: settled input for research and planning (KIT-89).
+  const answers = await readAnswers(prepared.dir)
   const fingerprint = createHash('sha256').update(JSON.stringify([prepared.spec, planContext(prepared), prepared.uiRequired])).digest('hex')
 
   await mkdir(join(work, 'outputs'), { recursive: true })
@@ -271,7 +273,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     else if (explored.value !== undefined) explorations.push({ area: area.name, result: explored.value })
   }
   if (exploring.length) return { ...base, stage: 'explore', tasks: exploring }
-  const researched = await resolvePhase('research', researchPrompt(context, prompts.researchInstructions, renderFactsBlock(facts), explorationsSection(explorations)), researchSchema, coversRules)
+  const researched = await resolvePhase('research', researchPrompt(context, prompts.researchInstructions, renderFactsBlock(facts), explorationsSection(explorations), answers), researchSchema, coversRules)
   if (researched.task !== undefined) return { ...base, stage: 'research', tasks: [researched.task] }
   const research: Research | null = researched.value === undefined ? null : withExplorations(researched.value, explorations)
   // Planning and repair get the packet's index instead of the packet: research's facts and touches carry it.
@@ -281,7 +283,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
     // The agent hands planning the guideline pages research read; here research reads the
     // knowledge folder's topic pages, so planning gets all of them.
     const pages: GuidelinePage[] = await Promise.all(topics.map(async (file) => ({ source: file, markdown: await readFile(file, 'utf8') })))
-    const planned = await resolvePhase('planning', planningPrompt(planningContext, research, prompts.planningInstructions, pages), planSchema)
+    const planned = await resolvePhase('planning', planningPrompt(planningContext, research, prompts.planningInstructions, pages, answers), planSchema)
     if (planned.task !== undefined) return { ...base, stage: 'planning', tasks: [planned.task] }
     plan = planned.value ?? null
     // The agent's correction passes: the same rounds, kept only while each one improves the plan.
@@ -290,7 +292,7 @@ export async function runLocal(input: LocalInput, deps: LocalDeps = {}): Promise
       if (!issues.length) break
       // A correction pass answers with a patch of only what it changes (planPatchSchema), merged into the plan here.
       const before: Plan = plan
-      const repaired = await resolvePhase(`repair-${round}`, repairPrompt(planningContext, research, plan, issues, prompts.repairInstructions, pages), planPatchSchema, (patch) => mergeProblem(before, patch))
+      const repaired = await resolvePhase(`repair-${round}`, repairPrompt(planningContext, research, plan, issues, prompts.repairInstructions, pages, answers), planPatchSchema, (patch) => mergeProblem(before, patch))
       if (repaired.task !== undefined) return { ...base, stage: 'planning', tasks: [repaired.task] }
       const merged = repaired.value === undefined ? undefined : applyPlanPatch(before, repaired.value)
       if (merged === undefined || planIssues({ spec: prepared.spec, guidelines: prepared.guidelines, repo: prepared.repo, research, plan: merged }).length >= issues.length) break

@@ -128,9 +128,22 @@ export function researchGapsRefusal(gaps: string[], turnsLeft: number, guideline
   return `Not accepted: you have ${turnsLeft} turns left, so read these now instead of listing them as gaps.${pages} Kit configuration is under node_modules/@aspiralabs/config/ and readable with read_files. Then submit again, keeping as gaps only what you tried and failed to read:\n${gaps.map((gap) => `- ${gap}`).join('\n')}`
 }
 
-/** The research phase's user prompt, with the spec reviewer's reusable facts (reviewFacts/renderFactsBlock) appended when there are any. */
-export function researchPrompt(context: string, instructions: string = researchInstructions, factsBlock: string = '', explorations: string = ''): string {
-  return `${context}${explorations}\n\n${instructions}${factsBlock}`
+/**
+ * The author's answers from the previous plan's trace/decisions.md, as settled input for research and
+ * planning (KIT-89, as the spec reviewer treats ## Decisions, KIT-36). The agent's own ticks are not
+ * the author's and stay out. A decision listed again keeps its id in front, so the export applies the
+ * tick by id (mergeDecisions, KIT-90).
+ */
+export function authorDecisionsSection(answers: readonly Answer[]): string {
+  const settled = answers.filter((answer) => answer.takenByAgent !== true)
+  if (!settled.length) return ''
+  const lines = settled.map((answer) => `- ${answer.id} — ${answer.question}\n  The author's answer: ${answer.answer}`)
+  return `\n\nAUTHOR DECISIONS (answered by the author in the previous plan's trace/decisions.md; settled input):\n${lines.join('\n')}\nPlan the author's answer to each, never another option, even where a recommended option says otherwise, and never raise one again as an open question under these or other words. List each in decisions with its question exactly as written here, its id in front, and the author's answer, word for word, among its options, so the plan records it as the author's.`
+}
+
+/** The research phase's user prompt, with the spec reviewer's reusable facts (reviewFacts/renderFactsBlock) appended when there are any, and the author's answered decisions. */
+export function researchPrompt(context: string, instructions: string = researchInstructions, factsBlock: string = '', explorations: string = '', answers: readonly Answer[] = []): string {
+  return `${context}${explorations}${authorDecisionsSection(answers)}\n\n${instructions}${factsBlock}`
 }
 
 /**
@@ -144,14 +157,14 @@ export function raisedDecisionsSection(research: Pick<Research, 'decisions'>): s
   return `\n\nDECISIONS RESEARCH ALREADY RAISED:\n${lines.join('\n')}\nDo not raise any of these again, under these or other words; plan the recommended option of each, and say so in the task that depends on it. Raise only a product question none of them covers.`
 }
 
-/** The planning phase's user prompt, over the submitted research. */
-export function planningPrompt(context: string, research: Research, instructions: string = planningInstructions, pages: GuidelinePage[] = []): string {
-  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}${raisedDecisionsSection(research)}\n\n${instructions}`
+/** The planning phase's user prompt, over the submitted research and the author's answered decisions. */
+export function planningPrompt(context: string, research: Research, instructions: string = planningInstructions, pages: GuidelinePage[] = [], answers: readonly Answer[] = []): string {
+  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}${raisedDecisionsSection(research)}${authorDecisionsSection(answers)}\n\n${instructions}`
 }
 
 /** The planning prompt for a correction pass: the previous plan and the checks it failed. */
-export function repairPrompt(context: string, research: Research, plan: Plan, issues: string[], instructions: string = repairInstructions, pages: GuidelinePage[] = []): string {
-  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}${raisedDecisionsSection(research)}\n\nPREVIOUS PLAN:\n${JSON.stringify(plan)}\n\nPLAN CHECKS:\n${issues.map((issue) => `- ${issue}`).join('\n')}\n\n${instructions}`
+export function repairPrompt(context: string, research: Research, plan: Plan, issues: string[], instructions: string = repairInstructions, pages: GuidelinePage[] = [], answers: readonly Answer[] = []): string {
+  return `${context}\n\nRESEARCH:\n${JSON.stringify(research)}${guidelinePagesSection(pages)}${raisedDecisionsSection(research)}${authorDecisionsSection(answers)}\n\nPREVIOUS PLAN:\n${JSON.stringify(plan)}\n\nPLAN CHECKS:\n${issues.map((issue) => `- ${issue}`).join('\n')}\n\n${instructions}`
 }
 
 /** The rule IDs the required guidelines define. */
@@ -296,7 +309,8 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
   const preparation = options.signal ?? new AbortController().signal
   const prepared = await preparePlan(input, preparation)
   const { dir, spec, guidelines, repo, uiRequired } = prepared
-  // The previous plan's trace/decisions.md, with the options the author ticked, is read before the run replaces it.
+  // The previous plan's trace/decisions.md, with the options the author ticked, is read before the run replaces it:
+  // research and planning get the author's answers as settled input (KIT-89), and the export applies them.
   const answers = await readAnswers(dir)
   const mcp = await connectReadTools(process.env.MCP_READ_CONNECTIONS, preparation)
   const prepareMs = Date.now() - started
@@ -327,7 +341,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
       return { area: area.name, result: exploreSchema.parse(output) }
     })))).filter((exploration) => exploration !== null)
     options.progress?.('research')
-    const prompt = researchPrompt(context, researchInstructions, renderFactsBlock(facts), explorationsSection(explorations))
+    const prompt = researchPrompt(context, researchInstructions, renderFactsBlock(facts), explorationsSection(explorations), answers)
     research = await trace.invoke({ phase: 'research', model: models.research, prompt }, async (signal, hooks) => {
       let submitted: Research | undefined
       // Until its last turn, research cannot submit checks that leave a required rule out: the
@@ -372,7 +386,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
     if (research && !options.signal?.aborted) await readLinkedGuidelines(readTools, guidelines, pages, preparation)
     if (research && !options.signal?.aborted) {
       options.progress?.('planning')
-      const prompt = planningPrompt(planningContext, research, planningInstructions, pages)
+      const prompt = planningPrompt(planningContext, research, planningInstructions, pages, answers)
       // Planning reads too (KIT-54): the repository, the guideline topics and Notion, for a fact research left out, then submits the plan.
       const planningTools: ToolSet = { ...repo.tools, ...readTools }
       const draftPlan = (phase: string, prompt: string) => trace.invoke({ phase, model: models.planning, prompt }, async (signal, hooks) => {
@@ -387,7 +401,7 @@ export async function runPlan(input: PlanInput, options: { signal?: AbortSignal;
         if (!issues.length) break
         options.progress?.(`repair-${round}`)
         const before = plan
-        const fix = repairPrompt(planningContext, research, before, issues, repairInstructions, pages)
+        const fix = repairPrompt(planningContext, research, before, issues, repairInstructions, pages, answers)
         // A correction pass submits only what it changes (planPatchSchema), merged into the plan here.
         const patch = await trace.invoke({ phase: `repair-${round}`, model: models.planning, prompt: fix }, async (signal, hooks) => {
           const output = await structuredWithTools({ model: gateway(models.planning), system: planningSystem, prompt: `${fix}\n\n${CLOUD_RESEARCH_TOOLS}`, schema: planPatchSchema, tools: planningTools, maxSteps: PLANNING_MAX_STEPS, maxOutputTokens: 24_000, reasoning: 'medium', submitName: 'submit_plan', abortSignal: signal, ...hooks })
