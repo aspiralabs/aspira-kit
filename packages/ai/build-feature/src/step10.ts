@@ -18,7 +18,6 @@
 //   which becomes the release notes. A log without the section gets no section and a note. Without `releases` the
 //   row is skipped and the end of the run says so.
 
-import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, normalize } from 'node:path'
@@ -29,7 +28,7 @@ import { slug } from '@aspiralabs/ai/common/lib/ticket'
 import type { Phase, PhaseContext, PhaseResult } from '#build-feature/driver.ts'
 import type { Pending, RunState } from '#build-feature/run-state.ts'
 import { baseBranchOf, isExcludedPath, pushGuarded } from '#build-feature/step8.ts'
-import { GIT_ARGS, parseStatus, shown, system, type CommandResult, type System, type SystemOptions } from '#build-feature/system.ts'
+import { GIT_ARGS, parseStatus, shown, system, type System, type SystemOptions } from '#build-feature/system.ts'
 
 /** The Status Steps 9 and 10 run in. */
 const IN_REVIEW = 'In Review: Implementation'
@@ -50,17 +49,6 @@ const withRecord = (state: RunState, patch: Partial<Step10Record>): RunState => 
 
 const optionsOf = (context: PhaseContext): SystemOptions => ({ cwd: context.repo, env: context.env })
 
-/** A read-only git query in the checkout (argument array, never a shell string). */
-function gitRead(args: readonly string[], options: SystemOptions): Promise<CommandResult> {
-  return new Promise((resolve) => {
-    execFile('git', [...args], { cwd: options.cwd, env: options.env, maxBuffer: 32 * 1024 * 1024 }, (error, stdout, stderr) => {
-      if (error === null) return resolve({ code: 0, stdout, stderr })
-      const code = (error as NodeJS.ErrnoException & { code?: unknown }).code
-      resolve({ code: typeof code === 'number' ? code : 1, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') || error.message })
-    })
-  })
-}
-
 const stopped = (state: RunState, message: string, action: string, command?: string): PhaseResult => ({ kind: 'stop', state, message, failure: { action, message, ...(command === undefined ? {} : { command }) } })
 
 // ---------------------------------------------------------------------------------------------
@@ -68,17 +56,6 @@ const stopped = (state: RunState, message: string, action: string, command?: str
 // ---------------------------------------------------------------------------------------------
 
 const changesetConfigSchema = z.looseObject({ fixed: z.array(z.array(z.string())).default([]) })
-
-/** The files changed on the branch since it left the base branch (origin's base when it is known). */
-async function branchFiles(options: SystemOptions, baseBranch: string): Promise<string[]> {
-  for (const base of [`origin/${baseBranch}`, baseBranch]) {
-    const known = await gitRead(['rev-parse', '--verify', '--quiet', base], options)
-    if (known.code !== 0) continue
-    const diff = await gitRead(['diff', '--name-only', `${base}...HEAD`], options)
-    if (diff.code === 0) return diff.stdout.split('\n').filter((line) => line !== '')
-  }
-  return []
-}
 
 /** The name in the nearest package.json above a file, or null when none is found below the repository root. */
 async function packageOf(repo: string, file: string): Promise<string | null> {
@@ -167,7 +144,7 @@ async function step10Accept(context: PhaseContext, state: RunState, pending: Pen
   const parsed = step10Answer.safeParse(answer)
   if (!parsed.success) return stopped(state, `the Step 10 answer at ${pending.output} is not what the stage asked for: ${parsed.error.issues.map((issue) => `${issue.path.join('.') || 'answer'}: ${issue.message}`).join('; ')}`, 'step10')
   const options = optionsOf(context)
-  const packages = await changedFixedPackages(context.repo, await branchFiles(options, baseBranchOf(context.aspira)))
+  const packages = await changedFixedPackages(context.repo, await sys.gitBranchFiles(options, baseBranchOf(context.aspira)))
   const changeset = packages.length === 0 ? null : changesetPath(context.id, context.card.title)
   if (changeset !== null) {
     await mkdir(dirname(join(context.repo, changeset)), { recursive: true })
