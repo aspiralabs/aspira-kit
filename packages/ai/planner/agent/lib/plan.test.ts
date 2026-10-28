@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { decisionSchema, mergeDecisions, planSchema, problemSeverity, renderChecks, renderPlan, researchSchema, touchesUi, validatePlan } from './plan.ts'
+import { parseTickedDecisions } from '@aspiralabs/ai/common/lib/decisions'
+import { decisionSchema, mergeDecisions, planSchema, problemSeverity, renderChecks, renderDecisionsFile, renderPlan, researchSchema, touchesUi, validatePlan } from './plan.ts'
 import { files, spec, validPlan } from './fixtures.test-helper.ts'
 
 it('accepts concrete test-first tasks and renders separate unit/integration checklists', () => {
@@ -120,6 +121,26 @@ describe('decisions', () => {
     expect(merged.map((d) => [d.id, d.question, d.decidedBy])).toEqual([['D1', 'Keep saved items forever?', 'open'], ['D2', 'Which list is mine?', 'open']])
     const answered = mergeDecisions([[retention]], [{ id: 'D1', question: 'Keep saved items forever?', answer: 'Expire after 30 days' }])
     expect(answered[0]).toMatchObject({ decidedBy: 'author', answer: 'Expire after 30 days' })
+  })
+
+  // KIT-90 (SCOOP-4): research copied "D1 — " into the question, the heading became "D1 — D1 — …" and the tick was dropped.
+  it('applies the tick to a question that carries its id prefix, strips the prefix, and keeps the tick in the rewritten decisions file', () => {
+    const previous = renderDecisionsFile('needs-author', mergeDecisions([[retention]]))
+    const ticked = previous.replace('- [ ] Expire after 30 days', '- [x] Expire after 30 days')
+    const merged = mergeDecisions([[{ ...retention, question: 'D1 — Keep saved items forever?' }], [{ ...retention, question: 'D1 — D1 — Keep saved items forever?' }]], parseTickedDecisions(ticked))
+    expect(merged).toHaveLength(1)
+    expect(merged[0]).toMatchObject({ id: 'D1', question: 'Keep saved items forever?', decidedBy: 'author', answer: 'Expire after 30 days' })
+    const rewritten = renderDecisionsFile('ready', merged)
+    expect(rewritten).toContain('## D1 — Keep saved items forever?')
+    expect(rewritten).toContain('- [x] Expire after 30 days')
+    // The rewritten file's tick is read back as the author's on the next rerun.
+    expect(mergeDecisions([[retention]], parseTickedDecisions(rewritten))[0]).toMatchObject({ decidedBy: 'author', answer: 'Expire after 30 days' })
+  })
+
+  it('applies the tick by the carried id when the question was reworded, and only to a decision that offers the ticked option', () => {
+    const answers = [{ id: 'D1', question: 'Keep saved items forever?', answer: 'Expire after 30 days' }]
+    expect(mergeDecisions([[{ ...retention, question: 'D1: How long are saved items kept?' }]], answers)[0]).toMatchObject({ question: 'How long are saved items kept?', decidedBy: 'author', answer: 'Expire after 30 days' })
+    expect(mergeDecisions([[{ ...retention, question: 'D1 — Which list is mine?', options: ['Mine', 'Shared'], recommended: 'Mine' }]], answers)[0]).toMatchObject({ decidedBy: 'open', answer: null })
   })
 
   it('renders each decision in the plan with a checkbox per option, recommended first, and the count of open ones', () => {
