@@ -33,19 +33,20 @@ export function pageIdFrom(input: string): string | undefined {
 
 /**
  * Child pages as the markdown endpoint renders them: `<page url="…">title</page>` for
- * pages nested under this one, and `<mention-page url="…"/>` for pages linked inline,
- * which carry no title (the caller looks it up). Databases are skipped. One entry per id.
+ * pages nested under this one, and `<mention-page url="…">title</mention-page>` for pages
+ * linked inline. The older self-closing `<mention-page url="…"/>` carries no title (the
+ * caller looks it up). Databases are skipped. One entry per id.
  */
 export function childPagesOf(markdown: string): ChildPage[] {
   const out: ChildPage[] = []
   const seen = new Set<string>()
-  const re = /<page url="([^"]+)">([^<]*)<\/page>|<mention-page url="([^"]+)"\s*\/>/g
+  const re = /<page url="([^"]+)">([^<]*)<\/page>|<mention-page url="([^"]+)"\s*(?:\/>|>([^<]*)<\/mention-page>)/g
   for (const m of markdown.matchAll(re)) {
     const url = m[1] ?? m[3] ?? ''
     const id = pageIdFrom(url)
     if (id === undefined || seen.has(id)) continue
     seen.add(id)
-    out.push({ id, title: (m[2] ?? '').trim(), url })
+    out.push({ id, title: (m[2] ?? m[4] ?? '').trim(), url })
   }
   return out
 }
@@ -75,7 +76,8 @@ export function fileFor(title: string, used?: Set<string>): string {
 
 /**
  * Page tags become markdown links: a local file for a page that was fetched, the Notion
- * URL otherwise. Mentions carry no title, so `titles` supplies one for fetched pages.
+ * URL otherwise. A mention takes its title from `titles` (fetched pages), then its own
+ * text, then its URL: the self-closing form carries no text.
  */
 export function rewriteLinks(markdown: string, local: Map<string, string>, titles: Map<string, string> = new Map()): string {
   return markdown
@@ -84,10 +86,10 @@ export function rewriteLinks(markdown: string, local: Map<string, string>, title
       const target = id === undefined ? url : (local.get(id) ?? url)
       return `[${title.trim()}](${target})`
     })
-    .replace(/<mention-page url="([^"]+)"\s*\/>/g, (_m, url: string) => {
+    .replace(/<mention-page url="([^"]+)"\s*(?:\/>|>([^<]*)<\/mention-page>)/g, (_m, url: string, text: string | undefined) => {
       const id = pageIdFrom(url)
       const target = id === undefined ? url : (local.get(id) ?? url)
-      const title = (id === undefined ? undefined : titles.get(id)) ?? url
+      const title = (id === undefined ? undefined : titles.get(id)) ?? (text?.trim() || url)
       return `[${title}](${target})`
     })
 }

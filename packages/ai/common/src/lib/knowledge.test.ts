@@ -59,6 +59,14 @@ Some text.
     const md = `<mention-page url="https://app.notion.com/p/3e73e59b22588149ad19dc1b7ac97ac4"/>\n<mention-page url="https://app.notion.com/p/3e73e59b22588149ad19dc1b7ac97ac4"/>\n<mention-database url="https://app.notion.com/p/bc25fc5cf5464f2593c7a0b663d6f859">Slop</mention-database>`
     expect(childPagesOf(md)).toEqual([{ id: '3e73e59b-2258-8149-ad19-dc1b7ac97ac4', title: '', url: 'https://app.notion.com/p/3e73e59b22588149ad19dc1b7ac97ac4' }])
   })
+
+  it('treats paired mention-page tags as titled children, as Notion-Version 2026-03-11 renders them', () => {
+    const md = `<td><mention-page url="https://app.notion.com/p/3e83e59b225881caa641db4f121662da">Review Verification</mention-page>, <mention-page url="https://app.notion.com/p/3e73e59b22588149ad19dc1b7ac97ac4"/></td>`
+    expect(childPagesOf(md)).toEqual([
+      { id: '3e83e59b-2258-81ca-a641-db4f121662da', title: 'Review Verification', url: 'https://app.notion.com/p/3e83e59b225881caa641db4f121662da' },
+      { id: '3e73e59b-2258-8149-ad19-dc1b7ac97ac4', title: '', url: 'https://app.notion.com/p/3e73e59b22588149ad19dc1b7ac97ac4' },
+    ])
+  })
 })
 
 describe('fileFor', () => {
@@ -90,6 +98,15 @@ describe('rewriteLinks with mentions', () => {
     const titles = new Map([['3e73e59b-2258-8149-ad19-dc1b7ac97ac4', 'React / TypeScript Rules']])
     expect(rewriteLinks(md, local, titles)).toBe(
       `[React / TypeScript Rules](${KNOWLEDGE_PATH}/react-typescript-rules.md) then [https://app.notion.com/p/b62da71dab204ffb8450675c6dfc0bf7](https://app.notion.com/p/b62da71dab204ffb8450675c6dfc0bf7)`,
+    )
+  })
+
+  it('rewrites paired mentions too, falling back to their own text when the page was not fetched', () => {
+    const md = `<mention-page url="https://app.notion.com/p/3e73e59b22588149ad19dc1b7ac97ac4">Old title</mention-page> then <mention-page url="https://app.notion.com/p/b62da71dab204ffb8450675c6dfc0bf7">Elsewhere</mention-page>`
+    const local = new Map([['3e73e59b-2258-8149-ad19-dc1b7ac97ac4', `${KNOWLEDGE_PATH}/react-typescript-rules.md`]])
+    const titles = new Map([['3e73e59b-2258-8149-ad19-dc1b7ac97ac4', 'React / TypeScript Rules']])
+    expect(rewriteLinks(md, local, titles)).toBe(
+      `[React / TypeScript Rules](${KNOWLEDGE_PATH}/react-typescript-rules.md) then [Elsewhere](https://app.notion.com/p/b62da71dab204ffb8450675c6dfc0bf7)`,
     )
   })
 })
